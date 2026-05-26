@@ -175,6 +175,96 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	}
 }
 
+// TestWarmuper_WaitForInFlightKeysThenRun pins the barrier's contract: fn runs only
+// after every in-flight key has finished, and the method does not return early while a
+// worker is still inside warmupKey.
+func TestWarmuper_WaitForInFlightKeysThenRun(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	ctx := context.Background()
+	w := NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	w.Start()
+
+	w.WarmKey([]byte{0x01, 0x02, 0x03, 0x04}, 0)
+	<-entered // the worker is inside Branch, holding its in-flight key
+
+	var fnRanAfterKey atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		w.WaitForInFlightKeysThenRun(func() {
+			fnRanAfterKey.Store(w.keysProcessed.Load() == 1)
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("WaitForInFlightKeysThenRun returned before the in-flight key completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.Zero(t, w.keysProcessed.Load(), "key must still be in flight before release")
+
+	close(release) // let the in-flight key finish
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitForInFlightKeysThenRun did not return after release")
+	}
+	require.True(t, fnRanAfterKey.Load(), "fn must run only after the in-flight key completed")
+	require.EqualValues(t, 1, w.keysProcessed.Load())
+
+	require.NoError(t, w.Wait())
+}
+
+// TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel pins that a cancelled context can not
+// strand the method: it returns promptly via a ctx.Done arm and still runs fn.
+func TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	w := NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	w.Start()
+
+	w.WarmKey([]byte{0x01, 0x02, 0x03, 0x04}, 0)
+	<-entered // worker parked inside Branch, before it can reach any barrier
+
+	cancel()
+
+	var fnRan atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		w.WaitForInFlightKeysThenRun(func() { fnRan.Store(true) })
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitForInFlightKeysThenRun hung after ctx cancel")
+	}
+	require.True(t, fnRan.Load(), "fn must still run on the ctx-cancel path")
+
+	close(release) // unblock the worker so it observes ctx.Done and exits
+	w.CloseAndWait()
+}
+
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
 

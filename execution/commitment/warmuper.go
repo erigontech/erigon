@@ -81,6 +81,12 @@ type Warmuper struct {
 type warmupWorkItem struct {
 	hashedKey  []byte
 	startDepth int
+	barrier    *warmupBarrier // non-nil ⇒ barrier marker, not a real key
+}
+
+type warmupBarrier struct {
+	reached chan struct{} // worker signals it has finished its in-flight key
+	resume  chan struct{} // closed to release all parked workers
 }
 
 // NewWarmuper creates a new Warmuper instance.
@@ -180,6 +186,15 @@ func (w *Warmuper) Start() {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
 				default:
+				}
+
+				if item.barrier != nil {
+					item.barrier.reached <- struct{}{}
+					select {
+					case <-item.barrier.resume:
+					case <-w.ctx.Done():
+					}
+					continue
 				}
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
@@ -317,6 +332,49 @@ func (w *Warmuper) DrainPending() {
 			return
 		}
 	}
+}
+
+// WaitForInFlightKeysThenRun drops queued warmups, waits until every worker has
+// finished its in-flight key (parking them at a barrier), runs fn at that safe
+// point — when no worker still references a previously submitted key slice — then
+// releases the workers. Used to reset the shared key arena between batches.
+//
+// Contract: call only from the single HashSort producer goroutine (the same one
+// that calls WarmKey). NOT safe to call concurrently with Close()/CloseAndWait(),
+// which close w.work — a send on a closed channel would panic. ctx cancellation
+// is safe (it does not close w.work).
+func (w *Warmuper) WaitForInFlightKeysThenRun(fn func()) {
+	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
+		fn()
+		return
+	}
+	w.DrainPending() // drop queued keys (fn has already processed them)
+	b := &warmupBarrier{
+		reached: make(chan struct{}, w.numWorkers),
+		resume:  make(chan struct{}),
+	}
+	sent := 0
+	for range w.numWorkers {
+		select {
+		case w.work <- warmupWorkItem{barrier: b}:
+			sent++
+		case <-w.ctx.Done():
+			close(b.resume)
+			fn()
+			return
+		}
+	}
+	for range sent {
+		select {
+		case <-b.reached:
+		case <-w.ctx.Done():
+			close(b.resume)
+			fn()
+			return
+		}
+	}
+	fn()            // SAFE POINT: all workers parked
+	close(b.resume) // release; workers resume the range loop and pick up the next batch
 }
 
 // CloseAndWait cancel and waits for all warmup work

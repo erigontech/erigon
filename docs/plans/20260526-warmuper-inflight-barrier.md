@@ -246,21 +246,21 @@ Untouched (already safe): final-batch path (arena not reused before the deferred
 - Modify: `execution/commitment/warmuper.go`
 - Modify: `execution/commitment/commitment_test.go`
 
-- [ ] add `warmupBarrier` type and the `barrier *warmupBarrier` field on `warmupWorkItem`.
-- [ ] add the barrier branch to the worker loop in `Start` (reached → select resume/ctx → continue).
-- [ ] add `WaitForInFlightKeysThenRun(fn func())` (drop queued, enqueue N markers, await N reached,
+- [x] add `warmupBarrier` type and the `barrier *warmupBarrier` field on `warmupWorkItem`.
+- [x] add the barrier branch to the worker loop in `Start` (reached → select resume/ctx → continue).
+- [x] add `WaitForInFlightKeysThenRun(fn func())` (drop queued, enqueue N markers, await N reached,
       run fn at safe point, close resume) with ctx-cancel handling in every select.
-- [ ] write `TestWarmuper_WaitForInFlightKeysThenRun` (contract): NumWorkers 1, gated `Branch`
+- [x] write `TestWarmuper_WaitForInFlightKeysThenRun` (contract): NumWorkers 1, gated `Branch`
       signals `entered` then blocks; `WarmKey`; wait `entered`; call the method in a goroutine;
       assert it has NOT returned while the worker is in `Branch`; release gate; assert `fn` ran
       only AFTER the in-flight key completed (atomic flag) and the method returns.
-- [ ] write a **deterministic** ctx-cancel case: with the gated ctx holding a worker inside
+- [x] write a **deterministic** ctx-cancel case: with the gated ctx holding a worker inside
       `Branch` (so it has NOT yet reached the barrier), cancel the context, then call the method;
       assert it returns promptly via the `<-w.ctx.Done()` arm of the marker-send/await loop and
       that `fn` still runs (no hang, no leak). Do NOT assert on the worker-side `<-resume` vs
       `<-ctx.Done()` interleaving — that race is benign and not deterministically reachable; the
       method always closes `resume` on every early return, so no worker is stranded.
-- [ ] run tests - contract test must pass before Task 3.
+- [x] run tests - contract test must pass before Task 3.
 
 ### Task 3: Wire HashSort batch boundaries (TDD green)
 
