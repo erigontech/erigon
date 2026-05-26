@@ -10,7 +10,7 @@ import (
 
 type aggDirtyFilesRoTx struct {
 	agg     *Aggregator
-	visible *aggregatorVisible // pinned generation; protects captured dirty files from reclamation
+	visible *aggregatorVisible
 	domain  []*domainDirtyFilesRoTx
 	ii      [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
 }
