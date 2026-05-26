@@ -482,8 +482,8 @@ func manifestFileNames(m *ChainTomlV2) map[string]struct{} {
 	if m == nil {
 		return out
 	}
-	for name := range m.Blocks {
-		out[name] = struct{}{}
+	for _, b := range m.Blocks {
+		out[b.Name] = struct{}{}
 	}
 	for name := range m.Meta {
 		out[name] = struct{}{}

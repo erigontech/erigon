@@ -160,9 +160,11 @@ func writeV2WithAuthorityUCANHash(t *testing.T, dir string, name string, ucanHas
 				}},
 			},
 		},
-		Blocks: map[string]string{
-			"v1.0-000000-000500-headers.seg": "aabbccdd00000000000000000000000000000000",
-		},
+		Blocks: []downloader.BlockFileEntry{{
+			Name:  "v1.0-000000-000500-headers.seg",
+			Range: [2]uint64{0, 500},
+			Hash:  "aabbccdd00000000000000000000000000000000",
+		}},
 	}
 	path := filepath.Join(dir, name)
 	data, err := toml.Marshal(&v2)

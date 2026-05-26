@@ -30,10 +30,10 @@ func TestFilterForkManifestPostCutOnly_NilAndZeroCutAreNoOps(t *testing.T) {
 
 	// cutBlock=0 → leave the manifest alone (root-chain default).
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019999-020000-headers.seg": "deadbeef",
 			"v1.0-020001-020002-headers.seg": "feedface",
-		},
+		}),
 	}
 	FilterForkManifestPostCutOnly(m, 0, nil)
 	require.Len(t, m.Blocks, 2, "cutBlock=0 disables the filter")
@@ -44,20 +44,24 @@ func TestFilterForkManifestPostCutOnly_DropsPreCutBlockFiles(t *testing.T) {
 	// step strings: 019998 → block 19,998,000. cutBlock matches
 	// that scale.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019998-019999-headers.seg": "aaaa", // PreCut (blocks 19998000-19999000)
 			"v1.0-019999-020000-headers.seg": "bbbb", // PreCut (to == cutBlock)
 			"v1.0-020000-020001-headers.seg": "cccc", // Straddle (from == cutBlock)
 			"v1.0-020001-020002-headers.seg": "dddd", // PostCut (from > cutBlock)
 			"v1.0-020100-020200-headers.seg": "eeee", // PostCut
-		},
+		}),
 	}
 	FilterForkManifestPostCutOnly(m, 20_000_000, nil)
 
+	gotHashes := map[string]string{}
+	for _, b := range m.Blocks {
+		gotHashes[b.Name] = b.Hash
+	}
 	require.Equal(t, map[string]string{
 		"v1.0-020001-020002-headers.seg": "dddd",
 		"v1.0-020100-020200-headers.seg": "eeee",
-	}, m.Blocks, "only entries strictly post-cut survive (straddle is dropped)")
+	}, gotHashes, "only entries strictly post-cut survive (straddle is dropped)")
 }
 
 func TestFilterForkManifestPostCutOnly_KeepsNonRangeChainWideFiles(t *testing.T) {
@@ -148,15 +152,19 @@ func TestFilterForkManifestPostCutOnly_DropsUnparseableNamesFromRangedBuckets(t 
 	// Bucket-aware rule applies: Blocks is a ranged bucket → drop;
 	// Meta + Salt (asserted below) accept any name by categorisation.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"random-garbage":                 "aaaa", // unparseable → drop from ranged bucket
 			"v1.0-020001-020002-headers.seg": "bbbb", // post-cut → keep
-		},
+		}),
 	}
 	FilterForkManifestPostCutOnly(m, 20_000_000, nil)
+	gotHashes := map[string]string{}
+	for _, b := range m.Blocks {
+		gotHashes[b.Name] = b.Hash
+	}
 	require.Equal(t, map[string]string{
 		"v1.0-020001-020002-headers.seg": "bbbb",
-	}, m.Blocks, "unparseable names are dropped from ranged buckets")
+	}, gotHashes, "unparseable names are dropped from ranged buckets")
 }
 
 func TestFilterForkManifestPostCutOnly_KeepsMetaAndSaltUnconditionally(t *testing.T) {
@@ -188,9 +196,9 @@ func TestFilterForkManifestPostCutOnly_PreservesIdentityAndUcanFields(t *testing
 		Forks: []ForkActivation{
 			{Name: "shanghai", Time: 1681338455},
 		},
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019999-020000-headers.seg": "aaaa", // pre-cut → dropped
-		},
+		}),
 	}
 	FilterForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.Equal(t, ChainTomlV2Version, m.Version)

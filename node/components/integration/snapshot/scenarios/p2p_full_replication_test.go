@@ -350,8 +350,8 @@ func TestP2P_Swarm_FullReplication(t *testing.T) {
 	type kindHashes map[string][20]byte
 	flatten := func(m *dl.ChainTomlV2) kindHashes {
 		out := kindHashes{}
-		for name, hash := range m.Blocks {
-			out[name] = parseHash20(t, hash)
+		for _, b := range m.Blocks {
+			out[b.Name] = parseHash20(t, b.Hash)
 		}
 		for name, hash := range m.Meta {
 			out[name] = parseHash20(t, hash)

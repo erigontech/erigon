@@ -55,8 +55,8 @@ func parseChainTomlAuto(tomlBytes []byte) (map[string]string, error) {
 // anchors are dropped — see parseChainTomlAuto for the rationale.
 func flattenV2Manifest(m *ChainTomlV2) map[string]string {
 	out := make(map[string]string, len(m.Blocks)+len(m.Meta)+len(m.Salt)+len(m.Caplin))
-	for k, v := range m.Blocks {
-		out[k] = v
+	for _, b := range m.Blocks {
+		out[b.Name] = b.Hash
 	}
 	for k, v := range m.Meta {
 		out[k] = v

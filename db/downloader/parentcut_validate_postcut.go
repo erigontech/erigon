@@ -91,8 +91,8 @@ func ValidateForkManifestPostCutOnly(manifest *ChainTomlV2, cutBlock uint64, ste
 		}
 	}
 
-	for _, name := range sortedKeys(manifest.Blocks) {
-		if err := checkRanged(name); err != nil {
+	for _, b := range sortedBlocks(manifest.Blocks) {
+		if err := checkRanged(b.Name); err != nil {
 			return err
 		}
 	}
@@ -114,6 +114,16 @@ func ValidateForkManifestPostCutOnly(manifest *ChainTomlV2, cutBlock uint64, ste
 	}
 	// Meta + Salt: chain-wide artefacts; accept by bucket categorisation.
 	return nil
+}
+
+func sortedBlocks(b []BlockFileEntry) []BlockFileEntry {
+	if len(b) == 0 {
+		return nil
+	}
+	out := make([]BlockFileEntry, len(b))
+	copy(out, b)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 func sortedKeys(m map[string]string) []string {

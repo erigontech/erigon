@@ -606,11 +606,11 @@ func TestChainTomlV2ToItems_Flatten(t *testing.T) {
 
 	m := &ChainTomlV2{
 		Version: 2,
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.1-000000-001000-headers.seg": "01",
 			"v1.1-000000-001000-bodies.seg":  "02",
 			"empty.seg":                      "", // skipped
-		},
+		}),
 		Meta:   map[string]string{"erigondb.toml": "ff"},
 		Salt:   map[string]string{"salt-state.txt": "aa"},
 		Caplin: []CaplinFileEntry{{Name: "caplin/x.seg", Hash: "c1"}, {Name: "caplin/empty.seg", Hash: ""}},

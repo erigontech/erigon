@@ -73,25 +73,31 @@ func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifes
 
 	if len(m.Blocks) > 0 {
 		out.Blocks = make([]*snapshot.FileEntry, 0, len(m.Blocks))
-		for name, hashStr := range m.Blocks {
-			hash, ok := decodeHash(hashStr)
+		for _, b := range m.Blocks {
+			hash, ok := decodeHash(b.Hash)
 			if !ok {
 				continue
 			}
-			// V2 Blocks is a flat map name→hash with no per-entry
-			// step range field. Parse the range from the filename so
-			// the orchestrator's gap-fill can compare coverage — an
-			// entry with zero FromStep/ToStep is treated as trivially
-			// covered (IsComplete(0, 0) is true) and would be dropped.
-			from, to := parseBlockFileRange(name)
+			// Range comes from the typed entry when populated; legacy
+			// parsing fills it from the filename, so a zero range here
+			// means the filename did not parse — fall back so the
+			// orchestrator's gap-fill comparison still sees coverage.
+			from, to := b.Range[0], b.Range[1]
+			if from == 0 && to == 0 {
+				from, to = parseBlockFileRange(b.Name)
+			}
+			trust := snapshot.TrustNone
+			if b.Trust != "" {
+				if t, err := snapshot.ParseTrustLevel(b.Trust); err == nil {
+					trust = t
+				}
+			}
 			out.Blocks = append(out.Blocks, &snapshot.FileEntry{
-				Name:        name,
+				Name:        b.Name,
 				TorrentHash: hash,
 				FromStep:    from,
 				ToStep:      to,
-				// V2 blocks don't carry per-file trust; they're deterministic.
-				// The orchestrator promotes to TrustVerified on DownloadComplete.
-				Trust: snapshot.TrustNone,
+				Trust:       trust,
 			})
 		}
 	}

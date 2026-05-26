@@ -58,13 +58,14 @@ func TestRollingV2Publisher_ForkCutFilter_DropsPreCutBlockEntries(t *testing.T) 
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
 
-	require.NotContains(t, manifest.Blocks, "v1.0-019998-019999-headers.seg",
+	names := blockNames(manifest.Blocks)
+	require.NotContains(t, names, "v1.0-019998-019999-headers.seg",
 		"pre-cut block file must not appear in fork manifest")
-	require.NotContains(t, manifest.Blocks, "v1.0-019999-020000-headers.seg",
+	require.NotContains(t, names, "v1.0-019999-020000-headers.seg",
 		"pre-cut block file (to == cutBlock) must not appear in fork manifest")
-	require.Contains(t, manifest.Blocks, "v1.0-020001-020002-headers.seg",
+	require.Contains(t, names, "v1.0-020001-020002-headers.seg",
 		"post-cut block file must appear in fork manifest")
-	require.Contains(t, manifest.Blocks, "v1.0-020100-020200-headers.seg",
+	require.Contains(t, names, "v1.0-020100-020200-headers.seg",
 		"post-cut block file must appear in fork manifest")
 
 	// Inventory is preserved — the filter only mutates the manifest

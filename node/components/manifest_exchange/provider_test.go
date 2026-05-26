@@ -392,11 +392,16 @@ func TestCanonicalValidatorFilters(t *testing.T) {
 	// with canonical".
 	e.p.SetCanonicalValidator(func(_ []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
 		require.NotNil(t, adv)
+		var picked []downloader.BlockFileEntry
+		for _, b := range adv.Blocks {
+			if b.Name == "v1.0-000000-000500-headers.seg" {
+				picked = []downloader.BlockFileEntry{b}
+				break
+			}
+		}
 		return &downloader.ChainTomlV2{
 			Version: downloader.ChainTomlV2Version,
-			Blocks: map[string]string{
-				"v1.0-000000-000500-headers.seg": adv.Blocks["v1.0-000000-000500-headers.seg"],
-			},
+			Blocks:  picked,
 		}
 	})
 

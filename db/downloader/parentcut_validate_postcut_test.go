@@ -39,9 +39,9 @@ func TestValidateForkManifestPostCutOnly_NilAndZeroCutAreNoOps(t *testing.T) {
 
 	// cutBlock=0 → no fork rules apply; manifest passes regardless.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019999-020000-headers.seg": "aaaa",
-		},
+		}),
 	}
 	require.NoError(t, ValidateForkManifestPostCutOnly(m, 0, nil),
 		"cutBlock=0 disables the validator (non-fork manifest)")
@@ -51,10 +51,10 @@ func TestValidateForkManifestPostCutOnly_AcceptsCleanPostCutManifest(t *testing.
 	// Honest fork-publisher emission: post-cut block files + chain-
 	// wide salt + meta. No pre-cut, no straddle, no unparseable.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-020001-020002-headers.seg": "aaaa",
 			"v1.0-020100-020200-headers.seg": "bbbb",
-		},
+		}),
 		Salt: map[string]string{
 			"salt-blocks.txt": "cccc",
 			"salt-state.txt":  "dddd",
@@ -68,10 +68,10 @@ func TestValidateForkManifestPostCutOnly_AcceptsCleanPostCutManifest(t *testing.
 
 func TestValidateForkManifestPostCutOnly_RejectsPreCutBlockFile(t *testing.T) {
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-020001-020002-headers.seg": "aaaa", // post-cut
 			"v1.0-019998-019999-headers.seg": "bbbb", // pre-cut
-		},
+		}),
 	}
 	err := ValidateForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.Error(t, err)
@@ -84,9 +84,9 @@ func TestValidateForkManifestPostCutOnly_RejectsPreCutBlockFile(t *testing.T) {
 func TestValidateForkManifestPostCutOnly_RejectsStraddleBlockFile(t *testing.T) {
 	// from == cutBlock → spans (Straddle).
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-020000-020001-headers.seg": "aaaa",
-		},
+		}),
 	}
 	err := ValidateForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.Error(t, err)
@@ -149,9 +149,9 @@ func TestValidateForkManifestPostCutOnly_RejectsUnparseableName(t *testing.T) {
 	// unparseable filenames. The consumer must reject suspicious input
 	// even when the producer-side filter is conservative-keeping.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"random-garbage": "aaaa",
-		},
+		}),
 	}
 	err := ValidateForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.Error(t, err)
@@ -164,10 +164,10 @@ func TestValidateForkManifestPostCutOnly_DeterministicFirstReject(t *testing.T) 
 	// alphabetically-first one (sorted key iteration). Pin the
 	// determinism so failure messages stay stable across runs.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019999-020000-headers.seg": "zzzz", // pre-cut, sorts later
 			"v1.0-019997-019998-headers.seg": "aaaa", // pre-cut, sorts first
-		},
+		}),
 	}
 	err := ValidateForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.Error(t, err)
@@ -181,11 +181,11 @@ func TestValidateForkManifestPostCutOnly_PreservesProducerEmittedManifestOK(t *t
 	// the same trust rule. If this ever fails, producer + consumer
 	// have drifted apart.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019998-019999-headers.seg": "aaaa", // pre-cut → filtered out
 			"v1.0-020000-020001-headers.seg": "bbbb", // straddle → filtered out
 			"v1.0-020001-020002-headers.seg": "cccc", // post-cut → kept
-		},
+		}),
 		Salt: map[string]string{
 			"salt-blocks.txt": "dddd",
 		},
@@ -228,9 +228,9 @@ func TestValidateForkManifestPostCutOnly_ErrorIsUnwrappable(t *testing.T) {
 	// will gate fork-manifest acceptance) check against. errors.Is
 	// must match.
 	m := &ChainTomlV2{
-		Blocks: map[string]string{
+		Blocks: blocksFromMap(map[string]string{
 			"v1.0-019998-019999-headers.seg": "aaaa", // pre-cut
-		},
+		}),
 	}
 	err := ValidateForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.True(t, errors.Is(err, ErrForkManifestContainsForbiddenEntry),

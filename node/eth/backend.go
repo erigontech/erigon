@@ -883,12 +883,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				for _, it := range validItems {
 					validSet[it.Name] = it.Hash
 				}
-				for name, h := range adv.Blocks {
-					if vh, ok := validSet[name]; ok && vh == h {
-						if out.Blocks == nil {
-							out.Blocks = map[string]string{}
-						}
-						out.Blocks[name] = h
+				for _, b := range adv.Blocks {
+					if vh, ok := validSet[b.Name]; ok && vh == b.Hash {
+						out.Blocks = append(out.Blocks, b)
 					}
 				}
 				for name, h := range adv.Meta {

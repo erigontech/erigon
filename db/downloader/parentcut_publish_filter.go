@@ -82,11 +82,13 @@ func FilterForkManifestPostCutOnly(manifest *ChainTomlV2, cutBlock uint64, stepT
 		return entry.Classification == CopyPostCut
 	}
 
-	for name := range manifest.Blocks {
-		if !keepRanged(name) {
-			delete(manifest.Blocks, name)
+	keptBlocks := manifest.Blocks[:0]
+	for _, b := range manifest.Blocks {
+		if keepRanged(b.Name) {
+			keptBlocks = append(keptBlocks, b)
 		}
 	}
+	manifest.Blocks = keptBlocks
 
 	kept := manifest.Caplin[:0]
 	for _, f := range manifest.Caplin {

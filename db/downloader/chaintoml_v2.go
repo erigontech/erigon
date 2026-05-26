@@ -91,8 +91,13 @@ type ChainTomlV2 struct {
 	// (chain.v2.<enr-fp>.<seq>.ucan), so it needs no manifest field.
 	AuthorityUCANHash string `toml:"authority_ucan_hash,omitempty"`
 
-	// Block snapshot files — deterministic, all nodes produce identical files.
-	Blocks map[string]string `toml:"blocks,omitempty"`
+	// Block snapshot files — deterministic, all nodes produce identical
+	// files. Typed list of BlockFileEntry (name + range + hash + trust +
+	// optional proof_root). The wire form is `[[blocks]]` array-of-tables;
+	// the parser also accepts the legacy `[blocks]` flat map (name → hash)
+	// for back-compat and normalises it into typed entries with the range
+	// derived from the filename.
+	Blocks []BlockFileEntry `toml:"blocks,omitempty"`
 
 	// Chain-config metadata files (erigondb.toml). Single flat map.
 	Meta map[string]string `toml:"meta,omitempty"`
@@ -157,6 +162,25 @@ type DomainFileEntry struct {
 	// file's last record is mid-block. Consumers MUST NOT treat such
 	// files as a valid snapshot-tip state.
 	IsPartialBlock bool `toml:"is_partial_block,omitempty"`
+}
+
+// BlockFileEntry is a single block snapshot file (.seg or .idx).
+// Mirrors DomainFileEntry's shape so block files carry the same
+// (Name, Range, Hash, Trust, ProofRoot) surface as domain primaries.
+// Range is [from, to) in block units; ProofRoot is currently always
+// empty for blocks (no anchor recorded today) but reserved so a
+// future history-proof commitment can attach without another schema
+// rev.
+type BlockFileEntry struct {
+	Name string `toml:"name"`
+	// Range is the [from, to) block range this file covers. Derived
+	// from the filename for legacy entries.
+	Range [2]uint64 `toml:"range,omitempty"`
+	Hash  string    `toml:"hash"`
+	Trust string    `toml:"trust,omitempty"`
+	// ProofRoot is hex-encoded; empty for the canonical block files
+	// today. Reserved for a future history-proof commitment.
+	ProofRoot string `toml:"proof_root,omitempty"`
 }
 
 // CaplinFileEntry is a single caplin beacon-archive file. Same shape as
@@ -346,19 +370,32 @@ func chainConfigForkFieldNames(cfg *chain.Config) (heightName, timeName map[uint
 func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 	manifest := &ChainTomlV2{
 		Version: ChainTomlV2Version,
-		Blocks:  make(map[string]string),
 		Meta:    make(map[string]string),
 		Salt:    make(map[string]string),
 		Domains: make(map[string]*DomainManifest),
 	}
 
-	// Block files, including their .idx accessors — both are flat
-	// name→hash entries in the Blocks map.
+	// Block files, including their .idx accessors — emitted as typed
+	// BlockFileEntry. The range is derived from the file's block-unit
+	// FromBlock/ToBlock fields; trust comes from the inventory record.
 	for _, f := range inv.BlockFiles() {
-		if f.TorrentHash != [20]byte{} {
-			manifest.Blocks[f.Name] = fmt.Sprintf("%x", f.TorrentHash)
+		if f.TorrentHash == [20]byte{} {
+			continue
 		}
+		entry := BlockFileEntry{
+			Name:  f.Name,
+			Range: [2]uint64{f.FromBlock, f.ToBlock},
+			Hash:  fmt.Sprintf("%x", f.TorrentHash),
+			Trust: f.Trust.String(),
+		}
+		if !f.Anchors.IsZero() {
+			entry.ProofRoot = fmt.Sprintf("%x", f.Anchors.Root)
+		}
+		manifest.Blocks = append(manifest.Blocks, entry)
 	}
+	sort.Slice(manifest.Blocks, func(i, j int) bool {
+		return manifest.Blocks[i].Name < manifest.Blocks[j].Name
+	})
 
 	// Meta files (chain config).
 	for _, f := range inv.MetaFiles() {
@@ -506,16 +543,52 @@ func MarshalV2(manifest *ChainTomlV2) ([]byte, error) {
 // ParseV2 parses V2 chain.toml bytes into the structured representation.
 // Returns an error if the version field is not 2.
 //
+// Accepts both the legacy `[blocks]` flat-map and the typed `[[blocks]]`
+// array-of-tables form. Legacy entries are normalised into typed
+// BlockFileEntry with the range derived from the filename and no
+// trust/proof_root populated.
+//
 // Tolerates older publishers that didn't emit per-file Kind by defaulting
 // empty Kind to KindKVName — the original V2 only carried kv files in
 // the domains section.
 func ParseV2(data []byte) (*ChainTomlV2, error) {
-	var manifest ChainTomlV2
-	if err := toml.Unmarshal(data, &manifest); err != nil {
+	// Intermediate shape: Blocks captured as `any` so go-toml accepts
+	// either a flat table (legacy map[string]any) or an array of tables
+	// ([]any). normalizeBlocks reshapes either into the typed slice.
+	type rawTomlV2 struct {
+		Version           int                        `toml:"version"`
+		GenesisFork       string                     `toml:"genesis-fork,omitempty"`
+		Forks             []ForkActivation           `toml:"forks,omitempty"`
+		Parent            *ParentSection             `toml:"parent,omitempty"`
+		AuthorityUCANHash string                     `toml:"authority_ucan_hash,omitempty"`
+		Blocks            any                        `toml:"blocks,omitempty"`
+		Meta              map[string]string          `toml:"meta,omitempty"`
+		Salt              map[string]string          `toml:"salt,omitempty"`
+		Domains           map[string]*DomainManifest `toml:"domains,omitempty"`
+		Caplin            []CaplinFileEntry          `toml:"caplin,omitempty"`
+	}
+	var raw rawTomlV2
+	if err := toml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parsing chain.toml V2: %w", err)
 	}
-	if manifest.Version != ChainTomlV2Version {
-		return nil, fmt.Errorf("expected chain.toml version %d, got %d", ChainTomlV2Version, manifest.Version)
+	if raw.Version != ChainTomlV2Version {
+		return nil, fmt.Errorf("expected chain.toml version %d, got %d", ChainTomlV2Version, raw.Version)
+	}
+	blocks, err := normalizeBlocks(raw.Blocks)
+	if err != nil {
+		return nil, fmt.Errorf("parsing chain.toml V2 blocks: %w", err)
+	}
+	manifest := &ChainTomlV2{
+		Version:           raw.Version,
+		GenesisFork:       raw.GenesisFork,
+		Forks:             raw.Forks,
+		Parent:            raw.Parent,
+		AuthorityUCANHash: raw.AuthorityUCANHash,
+		Blocks:            blocks,
+		Meta:              raw.Meta,
+		Salt:              raw.Salt,
+		Domains:           raw.Domains,
+		Caplin:            raw.Caplin,
 	}
 	for _, dm := range manifest.Domains {
 		if dm == nil {
@@ -527,7 +600,106 @@ func ParseV2(data []byte) (*ChainTomlV2, error) {
 			}
 		}
 	}
-	return &manifest, nil
+	return manifest, nil
+}
+
+// normalizeBlocks converts the raw `blocks` field (as parsed by
+// go-toml/v2 into an untyped value) into the canonical typed slice.
+//
+// Accepts:
+//   - nil → empty slice
+//   - map[string]any (legacy `[blocks]` form) → typed entries with Name
+//   - Hash + Range derived from filename
+//   - []any (typed `[[blocks]]` form) → entries populated from table
+//     fields
+//
+// Output is sorted by Name for deterministic comparison.
+func normalizeBlocks(raw any) ([]BlockFileEntry, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	switch v := raw.(type) {
+	case map[string]any:
+		names := make([]string, 0, len(v))
+		for name := range v {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		out := make([]BlockFileEntry, 0, len(names))
+		for _, name := range names {
+			hashStr, ok := v[name].(string)
+			if !ok {
+				return nil, fmt.Errorf("legacy blocks entry %q: hash not a string", name)
+			}
+			entry := BlockFileEntry{Name: name, Hash: hashStr}
+			if _, from, to, ok := snaptype.ParseRange(name); ok {
+				entry.Range = [2]uint64{from, to}
+			}
+			out = append(out, entry)
+		}
+		return out, nil
+	case []any:
+		out := make([]BlockFileEntry, 0, len(v))
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("typed blocks entry: not a table (got %T)", item)
+			}
+			entry := BlockFileEntry{}
+			if s, ok := m["name"].(string); ok {
+				entry.Name = s
+			}
+			if s, ok := m["hash"].(string); ok {
+				entry.Hash = s
+			}
+			if s, ok := m["trust"].(string); ok {
+				entry.Trust = s
+			}
+			if s, ok := m["proof_root"].(string); ok {
+				entry.ProofRoot = s
+			}
+			if rng, ok := m["range"].([]any); ok && len(rng) == 2 {
+				if from, ok := tomlToUint64(rng[0]); ok {
+					entry.Range[0] = from
+				}
+				if to, ok := tomlToUint64(rng[1]); ok {
+					entry.Range[1] = to
+				}
+			}
+			out = append(out, entry)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		return out, nil
+	default:
+		return nil, fmt.Errorf("blocks field: unexpected type %T", raw)
+	}
+}
+
+// tomlToUint64 converts a TOML-decoded numeric value to uint64. go-toml/v2
+// decodes TOML integers as int64 by default; we tolerate float64 (in
+// case a producer emits a scientific-notation literal) and uint64 (some
+// decoders).
+func tomlToUint64(v any) (uint64, bool) {
+	switch n := v.(type) {
+	case int64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case uint64:
+		return n, true
+	case int:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case float64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	}
+	return 0, false
 }
 
 // DetectVersion reads the version field from chain.toml bytes without full parsing.
@@ -723,10 +895,15 @@ func FindPartialBlockCommitmentsWithoutCoverage(m *ChainTomlV2) []PartialBlockWi
 	}
 	type blockRange struct{ from, to uint64 }
 	var ranges []blockRange
-	for name := range m.Blocks {
-		_, from, to, ok := snaptype.ParseRange(name)
-		if !ok {
-			continue
+	for _, b := range m.Blocks {
+		from, to := b.Range[0], b.Range[1]
+		if from == 0 && to == 0 {
+			// Legacy entry without explicit range; derive from name.
+			_, f, t, ok := snaptype.ParseRange(b.Name)
+			if !ok {
+				continue
+			}
+			from, to = f, t
 		}
 		ranges = append(ranges, blockRange{from: from, to: to})
 	}
@@ -800,9 +977,9 @@ func ChainTomlV2ToItems(m *ChainTomlV2) snapcfg.PreverifiedItems {
 		return nil
 	}
 	var out snapcfg.PreverifiedItems
-	for name, hash := range m.Blocks {
-		if hash != "" {
-			out = append(out, preverified.Item{Name: name, Hash: hash})
+	for _, b := range m.Blocks {
+		if b.Hash != "" {
+			out = append(out, preverified.Item{Name: b.Name, Hash: b.Hash})
 		}
 	}
 	for name, hash := range m.Meta {

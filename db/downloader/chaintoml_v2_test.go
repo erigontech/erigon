@@ -102,7 +102,7 @@ func TestGenerateV2FromInventory(t *testing.T) {
 
 	require.Equal(t, ChainTomlV2Version, manifest.Version)
 	require.Len(t, manifest.Blocks, 1)
-	require.Contains(t, manifest.Blocks, "v1.0-000000-000500-headers.seg")
+	require.Contains(t, blockNames(manifest.Blocks), "v1.0-000000-000500-headers.seg")
 
 	// Domain: only canonical files included.
 	acc := manifest.Domains["accounts"]
@@ -146,9 +146,10 @@ func TestGenerateV2_AdvertisesAccessors(t *testing.T) {
 
 	manifest := GenerateV2(inv)
 
-	// Block .idx rides in the flat Blocks map alongside the .seg.
-	require.Contains(t, manifest.Blocks, "v1.0-000000-000500-headers.seg")
-	require.Contains(t, manifest.Blocks, "v1.0-000000-000500-headers.idx")
+	// Block .idx rides in the Blocks list alongside the .seg.
+	names := blockNames(manifest.Blocks)
+	require.Contains(t, names, "v1.0-000000-000500-headers.seg")
+	require.Contains(t, names, "v1.0-000000-000500-headers.idx")
 
 	acc := manifest.Domains["accounts"]
 	require.NotNil(t, acc)
@@ -173,7 +174,7 @@ func TestGenerateV2_AdvertisesAccessors(t *testing.T) {
 	parsed, err := ParseV2(data)
 	require.NoError(t, err)
 	require.Len(t, parsed.Domains["accounts"].Files, 4)
-	require.Contains(t, parsed.Blocks, "v1.0-000000-000500-headers.idx")
+	require.Contains(t, blockNames(parsed.Blocks), "v1.0-000000-000500-headers.idx")
 }
 
 func TestV2MarshalRoundTrip(t *testing.T) {
@@ -548,7 +549,7 @@ func TestFindPartialBlockCommitmentsWithoutCoverage(t *testing.T) {
 	makeManifest := func(commitFile DomainFileEntry, blockFiles map[string]string) *ChainTomlV2 {
 		m := &ChainTomlV2{
 			Version: ChainTomlV2Version,
-			Blocks:  blockFiles,
+			Blocks:  blocksFromMap(blockFiles),
 			Domains: map[string]*DomainManifest{
 				"commitment": {Files: []DomainFileEntry{commitFile}},
 			},
@@ -609,9 +610,9 @@ func TestApplyV2Manifest(t *testing.T) {
 		Root: publisherRoot, AtBlock: 25049601, AtTxNum: 99, IsPartialBlock: true,
 	})))
 	manifestWithCoverage := GenerateV2(publisher)
-	manifestWithCoverage.Blocks = map[string]string{
+	manifestWithCoverage.Blocks = blocksFromMap(map[string]string{
 		"v1.1-025040-025050-headers.seg": "h",
-	}
+	})
 
 	t.Run("partial_with_coverage_applies", func(t *testing.T) {
 		consumer := snapshotinv.NewInventory()
@@ -697,9 +698,9 @@ func TestGenerateV2_PreverifiedAccessorsSurvive(t *testing.T) {
 			}
 		}
 	}
-	for name := range manifest.Blocks {
-		if isAccessor(name) {
-			manifestAccessors[name] = true
+	for _, b := range manifest.Blocks {
+		if isAccessor(b.Name) {
+			manifestAccessors[b.Name] = true
 		}
 	}
 
@@ -893,4 +894,112 @@ func TestParentSection_ValidParentTrustRootsOmittedWhenEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, parsed.Parent)
 	require.Empty(t, parsed.Parent.ValidParentTrustRoots)
+}
+
+// TestParseV2_AcceptsLegacyBlocksMap pins the back-compat path: an
+// older publisher that emits the flat `[blocks]` form parses cleanly
+// into the typed BlockFileEntry slice, with the per-entry block range
+// derived from the filename.
+func TestParseV2_AcceptsLegacyBlocksMap(t *testing.T) {
+	legacy := []byte(`version = 2
+
+[blocks]
+"v1.0-000000-000500-headers.seg" = "0100000000000000000000000000000000000000"
+"v1.0-000500-001000-headers.seg" = "0200000000000000000000000000000000000000"
+`)
+	parsed, err := ParseV2(legacy)
+	require.NoError(t, err)
+	require.Len(t, parsed.Blocks, 2)
+
+	require.Equal(t, "v1.0-000000-000500-headers.seg", parsed.Blocks[0].Name)
+	require.Equal(t, "0100000000000000000000000000000000000000", parsed.Blocks[0].Hash)
+	// snaptype.ParseRange applies the *1000 step→block convention
+	// to block-file step strings: 000000-000500 → [0, 500_000).
+	require.Equal(t, [2]uint64{0, 500_000}, parsed.Blocks[0].Range,
+		"legacy entries must have their range derived from the filename")
+	require.Empty(t, parsed.Blocks[0].Trust, "legacy form carries no trust field")
+	require.Empty(t, parsed.Blocks[0].ProofRoot)
+
+	require.Equal(t, "v1.0-000500-001000-headers.seg", parsed.Blocks[1].Name)
+	require.Equal(t, [2]uint64{500_000, 1_000_000}, parsed.Blocks[1].Range)
+}
+
+// TestParseV2_AcceptsTypedBlocksList pins the canonical new form:
+// `[[blocks]]` array-of-tables with per-entry name + range + hash +
+// trust + proof_root.
+func TestParseV2_AcceptsTypedBlocksList(t *testing.T) {
+	typed := []byte(`version = 2
+
+[[blocks]]
+name = "v1.0-000000-000500-headers.seg"
+range = [0, 500]
+hash = "0100000000000000000000000000000000000000"
+trust = "verified"
+
+[[blocks]]
+name = "v1.0-000500-001000-headers.seg"
+range = [500, 1000]
+hash = "0200000000000000000000000000000000000000"
+trust = "consensus"
+proof_root = "deadbeef"
+`)
+	parsed, err := ParseV2(typed)
+	require.NoError(t, err)
+	require.Len(t, parsed.Blocks, 2)
+
+	require.Equal(t, BlockFileEntry{
+		Name:  "v1.0-000000-000500-headers.seg",
+		Range: [2]uint64{0, 500},
+		Hash:  "0100000000000000000000000000000000000000",
+		Trust: "verified",
+	}, parsed.Blocks[0])
+
+	require.Equal(t, BlockFileEntry{
+		Name:      "v1.0-000500-001000-headers.seg",
+		Range:     [2]uint64{500, 1000},
+		Hash:      "0200000000000000000000000000000000000000",
+		Trust:     "consensus",
+		ProofRoot: "deadbeef",
+	}, parsed.Blocks[1])
+}
+
+// TestMarshalV2_EmitsTypedBlocks confirms the writer side: the new
+// publisher always emits the `[[blocks]]` array-of-tables form,
+// regardless of whether the input came from a legacy fixture (round
+// trip via blocksFromMap) or a freshly-built inventory.
+func TestMarshalV2_EmitsTypedBlocks(t *testing.T) {
+	m := &ChainTomlV2{
+		Version: 2,
+		Blocks: blocksFromMap(map[string]string{
+			"v1.0-000000-000500-headers.seg": "0100000000000000000000000000000000000000",
+		}),
+	}
+	data, err := MarshalV2(m)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "[[blocks]]",
+		"writer must emit typed array-of-tables form")
+	require.NotContains(t, string(data), "[blocks]\n",
+		"writer must NOT emit the legacy flat-map form")
+}
+
+// TestRoundTrip_TypedBlocks confirms that a typed manifest survives
+// Marshal → Parse without drift on Range / Trust / ProofRoot.
+func TestRoundTrip_TypedBlocks(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Blocks: []BlockFileEntry{
+			{
+				Name:      "v1.0-000000-000500-headers.seg",
+				Range:     [2]uint64{0, 500},
+				Hash:      "0100000000000000000000000000000000000000",
+				Trust:     "verified",
+				ProofRoot: "abcd",
+			},
+		},
+	}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.Equal(t, original.Blocks, parsed.Blocks)
 }
