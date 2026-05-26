@@ -25,7 +25,9 @@ import (
 	"math/bits"
 	"math/rand"
 	"sort"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -46,6 +48,131 @@ func (n *noopPatriciaContext) TxNum() uint64                            { return
 
 func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
+}
+
+// gatedPatriciaContext is a mock PatriciaContext for warmup tests with a
+// controllable in-flight window. When sleep>0 and descend is set, Branch sleeps and
+// returns a blob that makes warmupKey descend on nibble 0, so a worker keeps re-reading
+// its arena-backed hashedKey for many levels — staying in-flight across batch
+// boundaries. When entered/release are set, Branch signals entered then blocks on
+// release for deterministic single-worker ordering.
+type gatedPatriciaContext struct {
+	sleep   time.Duration
+	descend bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if g.entered != nil {
+		g.entered <- struct{}{}
+	}
+	if g.release != nil {
+		<-g.release
+	}
+	if g.sleep > 0 {
+		time.Sleep(g.sleep)
+	}
+	if g.descend {
+		// 2-byte touch map + bitmap 0x0001 (child nibble 0 present) + fieldBits 0x00 (no
+		// extension): warmupKey advances depth++ while the next nibble is 0, re-reading
+		// hashedKey at every level.
+		return []byte{0, 0, 0, 1, 0, 0}, 0, nil
+	}
+	return []byte{0, 0, 0, 0}, 0, nil
+}
+
+func (g *gatedPatriciaContext) PutBranch(prefix, data, prevData []byte) error { return nil }
+func (g *gatedPatriciaContext) Account(plainKey []byte) (*Update, error)      { return nil, nil }
+func (g *gatedPatriciaContext) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
+func (g *gatedPatriciaContext) TxNum() uint64                                 { return 0 }
+
+// slowCtxFactory makes the first worker a slow straggler (sleeps per Branch and descends
+// deep, holding one low-offset key across many batch resets) while the rest run fast, so
+// the producer's arena reset + next-batch writes race the straggler's in-flight reads —
+// the documented bug. A uniform delay would not race: every worker would lag equally and
+// no two would touch the same arena offset concurrently.
+func slowCtxFactory(stall time.Duration) TrieContextFactory {
+	var n atomic.Int32
+	return func() (PatriciaContext, func()) {
+		if n.Add(1) == 1 {
+			return &gatedPatriciaContext{sleep: stall, descend: true}, nil
+		}
+		return &gatedPatriciaContext{}, nil
+	}
+}
+
+// gatedCtxFactory returns a factory whose contexts signal entered then block on
+// release inside Branch, for deterministic single-worker ordering tests.
+func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
+	return func() (PatriciaContext, func()) {
+		return &gatedPatriciaContext{entered: entered, release: release}, nil
+	}
+}
+
+// genNibbleKeys produces n unique keys of keyLen bytes where every byte is a valid
+// nibble (0x00-0x0F). The trailing nibbles encode the index so keys are distinct,
+// and the fixed code never corrupts them (the race detector, not a panic, is the signal).
+func genNibbleKeys(n, keyLen int) [][]byte {
+	keys := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		k := make([]byte, keyLen)
+		v := i
+		for j := keyLen - 1; j >= 0; j-- {
+			k[j] = byte(v & 0x0F)
+			v >>= 4
+		}
+		keys[i] = k
+	}
+	return keys
+}
+
+// TestHashSort_WarmupArenaNoRace reproduces the latent data race on the shared key
+// arena: at a batch boundary HashSort resets t.byteArena while async warmup workers
+// are still reading key slices that alias it. Keys are valid nibbles, so on current
+// code the symptom is the -race report on t.byteArena (and, once EncodeKeyV2 is the
+// warmup encoder, the nibble panic). After the in-flight barrier fix it must be clean.
+func TestHashSort_WarmupArenaNoRace(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 20_000 // two batches: one in-loop arena reset mid-stream plus the final batch
+	const keyLen = 64
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+			require.EqualValues(t, numKeys, ut.Size())
+
+			ctx := context.Background()
+			warmuper := NewWarmuper(ctx, WarmupConfig{
+				Enabled: true,
+				// The straggler must keep reading its arena-backed key across the whole
+				// producer run (which the -race detector slows ~10x); a per-level stall
+				// this large keeps one worker in-flight while the arena is reset+rewritten.
+				CtxFactory: slowCtxFactory(2 * time.Millisecond),
+				NumWorkers: 4,
+				MaxDepth:   64,
+				LogPrefix:  "test",
+			})
+			warmuper.Start()
+
+			visited := 0
+			err := ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+				visited++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, numKeys, visited)
+			require.NoError(t, warmuper.Wait())
+		})
+	}
 }
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
