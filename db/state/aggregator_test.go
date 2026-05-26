@@ -632,6 +632,66 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	}
 }
 
+// TestCommitmentMergeInputsReferenced covers the resolved-inputs predicate that gates merge
+// transformer creation. With the write flag off, this predicate alone decides whether the merge
+// expands referenced inputs (creating the transformer) or takes the plain fast path (no transformer).
+func TestCommitmentMergeInputsReferenced(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	fi := func(fromStep, toStep uint64, v version.Version) *FilesItem {
+		return &FilesItem{startTxNum: fromStep * stepSize, endTxNum: toStep * stepSize, version: v}
+	}
+	cases := []struct {
+		name   string
+		inputs []*FilesItem
+		want   bool
+	}{
+		{"v2.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_0)}, true},
+		{"v1.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V1_0)}, true},
+		{"v2.1 is always plain", []*FilesItem{fi(0, 2, version.V2_1)}, false},
+		{"v2.0 below threshold is plain", []*FilesItem{fi(0, 1, version.V2_0)}, false},
+		{"hypothetical v2.2 is plain", []*FilesItem{fi(0, 2, version.Version{Major: 2, Minor: 2})}, false},
+		{"empty inputs", nil, false},
+		{"nil entries skipped", []*FilesItem{nil}, false},
+		{"any referenced input wins", []*FilesItem{fi(0, 2, version.V2_1), fi(2, 4, version.V2_0)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, commitmentMergeInputsReferenced(tc.inputs, stepSize))
+		})
+	}
+}
+
+// TestCommitmentVisibleFilesReferenced covers the planning-time over-approximation that gates the
+// range-alignment hold. It reads the per-file version through the visible-files layer and must
+// report referencing independently of the live write flag (set off here on purpose).
+func TestCommitmentVisibleFilesReferenced(t *testing.T) {
+	check := func(t *testing.T, ranges []testFileRange, want bool) {
+		t.Helper()
+		stepSize := uint64(10)
+		_, agg := testDbAndAggregatorv3(t, stepSize)
+		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+		dirs := agg.Dirs()
+		generateAccountsFile(t, dirs, ranges)
+		generateStorageFile(t, dirs, ranges)
+		generateCodeFile(t, dirs, ranges)
+		generateCommitmentFile(t, dirs, ranges)
+		require.NoError(t, agg.OpenFolder())
+
+		aggTx := agg.BeginFilesRo()
+		got := aggTx.commitmentVisibleFilesReferenced()
+		aggTx.Close()
+		require.Equal(t, want, got)
+	}
+
+	t.Run("at-threshold v1.0 file is referenced with flag off", func(t *testing.T) {
+		check(t, []testFileRange{{0, 2}}, true)
+	})
+	t.Run("below-threshold file is plain", func(t *testing.T) {
+		check(t, []testFileRange{{0, 1}}, false)
+	})
+}
+
 func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {
 	t.Helper()
 	stepSize := uint64(10)

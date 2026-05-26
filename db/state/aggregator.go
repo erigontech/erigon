@@ -1839,8 +1839,11 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	r := &Ranges{}
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
-	if commitmentUseReferencedBranches {
+	// Account/storage must stay range-aligned with commitment whenever referencing is active — the
+	// write flag is on, or a referenced (pre-v2.1) input needs expansion (over-approximated across
+	// all visible commitment files, since merge inputs aren't resolved yet).
+	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches || at.commitmentVisibleFilesReferenced()
+	if commitmentMergeReferencing {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
 		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange(stepSize)
@@ -1859,7 +1862,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
 	}
 
-	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
+	if commitmentMergeReferencing && r.domain[kv.CommitmentDomain].values.needMerge {
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
@@ -1929,7 +1932,11 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	t := time.Now()
 
 	at.a.logger.Debug("[snapshots] merge state " + r.String())
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+	// Gate on referencing, not just the write flag, so the transformer expands referenced (pre-v2.1)
+	// inputs even with the flag off — gating only on the flag copies input short keys verbatim into
+	// the merged file and produces stale offsets.
+	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches ||
+		commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain], at.StepSize())
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1943,13 +1950,13 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 
 		id := id
 		kid := kv.Domain(id)
-		if commitmentUseReferencedBranches && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+		if commitmentMergeReferencing && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 			accStorageMerged.Add(1)
 		}
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
+			if commitmentMergeReferencing && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
 				accStorageMerged.Wait()
 
 				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
@@ -1962,7 +1969,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, at.a.ps)
-			if commitmentUseReferencedBranches {
+			if commitmentMergeReferencing {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
 				}

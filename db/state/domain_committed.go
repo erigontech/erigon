@@ -53,6 +53,33 @@ func commitmentBranchReferenced(fileVersion version.Version, stepSize, from, to 
 	return fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
 }
 
+// commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
+// Used at merge-range planning, before inputs are resolved, so it over-approximates across all
+// visible commitment files.
+func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
+	stepSize := at.StepSize()
+	for _, f := range at.d[kv.CommitmentDomain].files {
+		if commitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
+			return true
+		}
+	}
+	return false
+}
+
+// commitmentMergeInputsReferenced reports whether any resolved commitment merge input is
+// referenced and therefore needs key expansion during the merge.
+func commitmentMergeInputsReferenced(inputs []*FilesItem, stepSize uint64) bool {
+	for _, f := range inputs {
+		if f == nil {
+			continue
+		}
+		if commitmentBranchReferenced(f.version, stepSize, f.startTxNum, f.endTxNum) {
+			return true
+		}
+	}
+	return false
+}
+
 // commitmentFileVersionByRange returns the parsed version of the visible commitment file
 // covering from..to, plus the metric bucket index for that file. A missing file yields the
 // zero version (treated as referenced) to preserve the historical deref behavior.

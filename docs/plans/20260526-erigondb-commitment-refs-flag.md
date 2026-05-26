@@ -260,13 +260,13 @@ independent of the write flag.
 - Modify: `db/state/aggregator.go` (`findMergeRange` `:1830-1884`, `mergeFiles` `:1920-1955`)
 - Modify: `db/state/aggregator_test.go`
 
-- [ ] introduce a predicate "the commitment merge has referenced inputs" — any input commitment `FilesItem` with `version.Less(version.Version{2,1})` AND its range ≥ threshold (uses Task 5 per-file version, reachable via `visibleFile.src.version`)
-- [ ] note the predicate is evaluated against different file sets at the two points: at `:1832`/`:1851` the candidate merge range is not finalized yet, so scan **all visible commitment files** (`at.d[kv.CommitmentDomain].files`) — the safe over-approximation (errs toward keeping the alignment hold); at `:1935`/`:1941` use the resolved merge inputs
-- [ ] gate the range-alignment hold (`:1832`) and commitment range coordination (`:1851`) on that predicate (referenced inputs need account/storage aligned for expansion), not on the write flag
-- [ ] gate `accStorageMerged.Add/Wait` (`:1935-1942`) and `vt` creation (`:1941`) on "referenced inputs present", so the transformer always runs when expansion is needed — even with the write flag off
-- [ ] when there are no referenced inputs (all v2.1 plain) and the flag is off, keep `vt == nil` (no-op) — the existing fast path
-- [ ] write tests (assert **scheduling only** — transformer creation + account/storage wait ordering — not output bytes; byte-level readback correctness is Task 9): a scheduled merge with v2.0 referenced inputs + flag off still creates the transformer and waits for account/storage; with all-plain inputs + flag off creates no transformer
-- [ ] run tests — must pass before next task
+- [x] introduce a predicate "the commitment merge has referenced inputs" — any input commitment `FilesItem` with `version.Less(version.V2_1)` AND its range ≥ threshold (uses Task 5 per-file version) — `commitmentMergeInputsReferenced` (resolved inputs) + `commitmentVisibleFilesReferenced` (visible files), both in `domain_committed.go`, reusing the Task-7 `commitmentBranchReferenced` per-file predicate
+- [x] note the predicate is evaluated against different file sets at the two points: at `:1832`/`:1851` the candidate merge range is not finalized yet, so scan **all visible commitment files** (`commitmentVisibleFilesReferenced` over `at.d[kv.CommitmentDomain].files`) — the safe over-approximation; at `:1935`/`:1941` use the resolved merge inputs (`commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain], …)`)
+- [x] gate the range-alignment hold (`:1832`) and commitment range coordination (`:1851`) on that predicate, not on the write flag — local renamed `commitmentUseReferencedBranches → commitmentMergeReferencing := flag || commitmentVisibleFilesReferenced()` (`||flag` preserves old flag-on behavior; the referenced-inputs term fixes the flag-off corruption path)
+- [x] gate `accStorageMerged.Add/Wait` (`:1935-1942`) and `vt` creation (`:1941`) on "referenced inputs present", so the transformer always runs when expansion is needed — even with the write flag off — `commitmentMergeReferencing := flag || commitmentMergeInputsReferenced(...)` drives Add/Wait/Done/vt symmetrically
+- [x] when there are no referenced inputs (all v2.1 plain) and the flag is off, keep `vt == nil` (no-op) — the existing fast path (predicate false ⇒ `commitmentMergeReferencing` false ⇒ no transformer)
+- [x] write tests (assert **scheduling only** — not output bytes): `aggregator_test.go::TestCommitmentMergeInputsReferenced` (resolved-inputs gate: v2.0/v1.0 ≥threshold→referenced, v2.1→plain, <threshold→plain, v2.2→plain, nil/empty) and `TestCommitmentVisibleFilesReferenced` (planning over-approximation through the visible-files layer with flag off); heavyweight `TestAggregator_RebuildCommitmentBasedOnFiles`/`TestAggregator_SqueezeCommitment` exercise the real merge scheduling end-to-end
+- [x] run tests — must pass before next task
 
 ### Task 9: Merge transformer body — always expand input, conditionally re-shorten output
 
