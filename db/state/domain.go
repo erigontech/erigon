@@ -135,8 +135,21 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
 
+// kvWriteVersion is the version stamped onto a newly written .kv file. For the
+// commitment domain it is flag-derived (v2.0 referenced, v2.1 plain) and decoupled
+// from DataKV.Current; every other domain writes at Current.
+func (d *Domain) kvWriteVersion() version.Version {
+	if d.Name == kv.CommitmentDomain {
+		if d.ReferencesInCommitmentBranches {
+			return version.V2_0
+		}
+		return version.V2_1
+	}
+	return d.FileVersion.DataKV.Current
+}
+
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.FileVersion.DataKV.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.FileVersion.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))

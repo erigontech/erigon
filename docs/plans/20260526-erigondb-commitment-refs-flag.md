@@ -229,11 +229,11 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
 - Modify: `db/state/domain.go` (`kvNewFilePath`/`:138-139` — commitment write version)
 - Modify: `db/state/domain_test.go` / `db/state/dirty_files_test.go`
 
-- [ ] set commitment `DataKV.current = v2.1` in `versions.yaml` (keep `min: v1.0`); minor bump, not major (per decision); regenerate the `.go` via `make gen`
-- [ ] introduce a commitment-kv **write version** selector decoupled from `Current`: `v2.0` when `ReferencesInCommitmentBranches` is on, `v2.1` when off; use it in the `.kv` filename path for the commitment domain only (other domains keep `Current`)
-- [ ] verify `MustSupport`/scan accepts v2.0 *and* v2.1 commitment files (range `[v1.0, v2.1]`)
-- [ ] write tests: refs-on writes v2.0 filename, refs-off writes v2.1 filename; both v2.0 and v2.1 files pass `MustSupport`; a v2.2 (hypothetical) is rejected
-- [ ] run tests — must pass before next task
+- [x] set commitment `DataKV.current = v2.1` in `versions.yaml` (keep `min: v1.0`); minor bump, not major (per decision); regenerated the `.go` via `make versions-gen`
+- [x] introduce a commitment-kv **write version** selector decoupled from `Current`: `v2.0` when `ReferencesInCommitmentBranches` is on, `v2.1` when off — `Domain.kvWriteVersion` (`domain.go`), used by `kvNewFilePath` for the commitment domain only (other domains keep `DataKV.Current`)
+- [x] verify `MustSupport`/scan accepts v2.0 *and* v2.1 commitment files (range `[v1.0, v2.1]`) — covered by `TestCommitmentKvVersionAcceptance`
+- [x] write tests: refs-on writes v2.0 filename, refs-off writes v2.1 filename; both v2.0 and v2.1 files pass `MustSupport`; a v2.2 (hypothetical) is rejected — `domain_test.go::TestCommitmentKvWriteVersion`, `TestNonCommitmentKvWriteVersionUsesCurrent`, `TestCommitmentKvVersionAcceptance`
+- [x] run tests — must pass before next task
 
 ### Task 7: Version-aware read/deref (decouple read from the live flag)
 
