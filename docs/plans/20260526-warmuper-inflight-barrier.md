@@ -267,12 +267,12 @@ Untouched (already safe): final-batch path (arena not reused before the deferred
 **Files:**
 - Modify: `execution/commitment/commitment.go`
 
-- [ ] re-confirm the two batch-boundary line ranges (ModeDirect, ModeUpdate); replace
-      `DrainPending()` + `batchSlab[:0]` + `byteArena[:0]` with the
+- [x] re-confirm the two batch-boundary line ranges (ModeDirect ~1846-1850, ModeUpdate
+      ~1915-1919); replaced `DrainPending()` + `batchSlab[:0]` + `byteArena[:0]` with the
       `WaitForInFlightKeysThenRun`/`else` block shown in Technical Details.
-- [ ] leave the final-batch path, post-HashSort `DrainPending`, and nil-warmuper caller untouched.
-- [ ] run `TestHashSort_WarmupArenaNoRace` `-race -count=20` — must now be GREEN (both modes).
-- [ ] run the full commitment package tests `-race` - must pass before next task.
+- [x] left the final-batch path, post-HashSort `DrainPending`, and nil-warmuper caller untouched.
+- [x] ran `TestHashSort_WarmupArenaNoRace` `-race -count=20` — now GREEN (both modes), 9.4s.
+- [x] ran the full commitment package tests `-race` - pass (15.5s).
 
 ### Task 4: Verify acceptance criteria
 

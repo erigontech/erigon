@@ -1844,10 +1844,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				if warmuper != nil {
-					warmuper.DrainPending()
+					warmuper.WaitForInFlightKeysThenRun(func() {
+						t.batchSlab = t.batchSlab[:0]
+						t.byteArena = t.byteArena[:0]
+					})
+				} else {
+					t.batchSlab = t.batchSlab[:0]
+					t.byteArena = t.byteArena[:0]
 				}
-				t.batchSlab = t.batchSlab[:0]
-				t.byteArena = t.byteArena[:0]
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1913,10 +1917,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				if warmuper != nil {
-					warmuper.DrainPending()
+					warmuper.WaitForInFlightKeysThenRun(func() {
+						t.batchSlab = t.batchSlab[:0]
+						t.byteArena = t.byteArena[:0]
+					})
+				} else {
+					t.batchSlab = t.batchSlab[:0]
+					t.byteArena = t.byteArena[:0]
 				}
-				t.batchSlab = t.batchSlab[:0]
-				t.byteArena = t.byteArena[:0]
 			}
 			return true
 		})
