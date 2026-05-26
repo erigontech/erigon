@@ -44,12 +44,12 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 	return (to-from)/stepSize >= minStepsForReferencing
 }
 
-// commitmentBranchReferenced reports whether a commitment file written at fileVersion over
+// CommitmentBranchReferenced reports whether a commitment file written at fileVersion over
 // range from..to carries shortened key references that must be expanded on read. It is a
 // property of the file itself (version + range), independent of the live write flag: files
 // below v2.1 in the referenced regime carry references once the range reaches the threshold;
 // v2.1 files are always plain.
-func commitmentBranchReferenced(fileVersion version.Version, stepSize, from, to uint64) bool {
+func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to uint64) bool {
 	return fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
 }
 
@@ -59,7 +59,7 @@ func commitmentBranchReferenced(fileVersion version.Version, stepSize, from, to 
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
 	stepSize := at.StepSize()
 	for _, f := range at.d[kv.CommitmentDomain].files {
-		if commitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
+		if CommitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
 	}
@@ -73,7 +73,7 @@ func commitmentMergeInputsReferenced(inputs []*FilesItem, stepSize uint64) bool 
 		if f == nil {
 			continue
 		}
-		if commitmentBranchReferenced(f.version, stepSize, f.startTxNum, f.endTxNum) {
+		if CommitmentBranchReferenced(f.version, stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
 	}
@@ -108,7 +108,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	}
 
 	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
-	if !commitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
+	if !CommitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
 		return branch, nil // input file was written plain (v2.1) or below the referencing threshold
 	}
 
@@ -363,7 +363,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		// Expand the input's short keys to plain whenever the input file was written referenced
 		// (its own version+range), independent of the live flag — otherwise a referenced input
 		// merged with the flag off would copy stale offsets into the merged file.
-		inputReferenced := commitmentBranchReferenced(dt.fileVersionByRange(keyFromTxNum, keyEndTxNum), dt.d.stepSize, keyFromTxNum, keyEndTxNum)
+		inputReferenced := CommitmentBranchReferenced(dt.fileVersionByRange(keyFromTxNum, keyEndTxNum), dt.d.stepSize, keyFromTxNum, keyEndTxNum)
 		if !inputReferenced && !reshorten {
 			return valBuf, nil
 		}

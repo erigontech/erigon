@@ -289,11 +289,18 @@ independent of the write flag.
 - Modify: `db/integrity/commitment_integrity.go` (`:514`, `:1266`, `:1864`, `:1961`)
 - Modify: corresponding integrity test(s) if present
 
-- [ ] update the integrity logic so it expects references only in files that are actually
+- [x] update the integrity logic so it expects references only in files that are actually
       referenced (version < v2.1 AND range ≥ threshold); a v2.1 file must not be flagged for
-      lacking references
-- [ ] write/extend tests covering a mixed v2.0/v2.1 datadir passing integrity
-- [ ] run tests — must pass before next task
+      lacking references — added `Version()` to the `kv.VisibleFile` interface, exported
+      `state.CommitmentBranchReferenced`, and routed the three integrity decision sites
+      (`checkCommitmentKvDeref` skip, `checkStateCorrespondenceBase`/`checkHashVerification`
+      `isReferencing`) through `commitmentFileReferencing(file, stepSize)`
+- [x] write/extend tests covering a mixed v2.0/v2.1 datadir passing integrity —
+      `commitment_version_test.go::TestCommitmentFileReferencing` (decision predicate) +
+      `commitment_version_integration_test.go::TestCheckStateVerify_VersionRegimes`
+      (real v2.0-referenced and v2.1-plain ≥threshold merged datadirs each pass `CheckStateVerify`;
+      the plain case also exercises the version-aware `CheckCommitmentKvDeref` skip)
+- [x] run tests — must pass before next task
 
 ### Task 11: Correctness/integration coverage for the lazy transition
 

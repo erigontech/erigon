@@ -506,18 +506,26 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
+// commitmentFileReferencing reports whether a commitment file carries shortened key
+// references that must be expanded — a property of the file's own version and range
+// (version < v2.1 AND range >= threshold), independent of the live write flag.
+func commitmentFileReferencing(file state.VisibleFile, stepSize uint64) bool {
+	return state.CommitmentBranchReferenced(file.Version(), stepSize, file.StartRootNum(), file.EndRootNum())
+}
+
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum) {
+	if !commitmentFileReferencing(file, stepSize) {
 		logger.Info(
-			"[integrity] CommitmentKvDeref skipped, file not above min steps",
+			"[integrity] CommitmentKvDeref skipped, file is plain (v2.1) or not above min steps",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
 			"steps", (endTxNum-startTxNum)/stepSize,
+			"version", file.Version().String(),
 		)
 		return derefCounts{}, nil
 	}
@@ -1263,7 +1271,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	expectedAccounts := uint64(accDecomp.Count()) / 2
 	expectedStorages := uint64(stoDecomp.Count()) / 2
 
-	isReferencing := state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum)
+	isReferencing := commitmentFileReferencing(file, stepSize)
 
 	// Track unique keys found in commitment branches via ETL collectors (disk-spilling dedup).
 	accCollector := etl.NewCollector("[integrity] StateVerify acc", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
@@ -1860,8 +1868,8 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
-	// Always open domain readers for dereferencing (commitment files may contain
-	// reference keys regardless of ValuesPlainKeyReferencingThresholdReached result)
+	// Always open domain readers: this walk handles both referenced (offset) and plain
+	// keys, so it works regardless of the file's version regime.
 	_, nextAccReader, nextAccClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
 	if err != nil {
 		return err
@@ -1955,10 +1963,8 @@ var valMapPool = sync.Pool{New: func() any { return make(map[string][]byte, 8) }
 func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, numWorkers int, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
-	startTxNum := file.StartRootNum()
-	endTxNum := file.EndRootNum()
 
-	isReferencing := state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum)
+	isReferencing := commitmentFileReferencing(file, stepSize)
 
 	logger.Info("[integrity] StateVerify hash verification starting",
 		"kv", fileName, "workers", numWorkers, "referencing", isReferencing)

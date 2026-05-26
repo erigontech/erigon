@@ -49,7 +49,7 @@ func TestCommitmentBranchReferenced(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := commitmentBranchReferenced(tc.fileVersion, stepSize, tc.from, tc.to)
+			got := CommitmentBranchReferenced(tc.fileVersion, stepSize, tc.from, tc.to)
 			require.Equal(t, tc.want, got)
 		})
 	}
