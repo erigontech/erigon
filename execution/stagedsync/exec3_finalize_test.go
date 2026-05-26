@@ -965,34 +965,29 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 }
 
 // TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
-// fix for the parallel-exec lost-coinbase-fee race. finalize credits the
-// coinbase tip as an implicit write the worker never made (it ran with
-// shouldDelayFeeCalc=true). That write must be stamped at the worker's
-// incarnation + 1: a later tx that speculatively read the coinbase BEFORE
-// this finalize ran recorded the worker's incarnation, and the bumped
-// version makes the MapRead version check fail so that tx is invalidated
-// and re-executed against the post-fee balance. Reusing the worker's
-// incarnation makes the stale read indistinguishable from a fresh one and
-// silently drops the fee.
+// fix for the parallel-exec lost-coinbase-fee race. The apply-loop tip
+// credit (calcFees) writes coinbase BalancePath BEFORE validate runs.
+// Under the post-#21387 architecture calcFees stamps at the worker's own
+// incarnation (not incarnation+1 as in the pre-#21017 code); invalidation
+// of a stale dependent read flows through the value-tiebreaker at validate
+// time (versionmap.go's StorageRead-with-Done-entry branch). A reader that
+// recorded the pre-tip baseline via stateReader sees the versionMap now
+// holds the post-tip value, and validate marks the read invalid so the
+// dependent tx re-executes against the post-fee balance.
 func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	t.Parallel()
 	s := simpleTransferScenario()
 
-	writes := s.runFinalizeTxSimple(t, nil)
+	writes := s.runFinalizeTx(t, nil)
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
-	require.NotNil(t, coinbaseWrite, "finalize should produce a coinbase BalancePath write")
+	require.NotNil(t, coinbaseWrite, "calcFees should produce a coinbase BalancePath write")
 
-	// The producer tx executed at incarnation 0; its implicit fee write
-	// must carry incarnation 1 — a distinct version from the worker's.
 	require.Equal(t, 0, coinbaseWrite.Version.TxIndex)
-	require.Equal(t, 1, coinbaseWrite.Version.Incarnation,
-		"finalize coinbase fee write must be stamped at worker incarnation + 1")
+	require.Equal(t, 0, coinbaseWrite.Version.Incarnation,
+		"calcFees stamps coinbase write at worker incarnation (no +1 bump under post-#21387 architecture)")
 
-	// Reflect the producer tx in a versionMap: the worker's pre-fee
-	// coinbase write at (0,0), then finalize's fee write at (0,1).
+	// Reflect calcFees in the versionMap.
 	vm := state.NewVersionMap(nil)
-	vm.Write(s.coinbase, state.BalancePath, accounts.NilKey,
-		state.Version{TxIndex: 0, Incarnation: 0}, uint256.Int{}, true)
 	vm.FlushVersionedWrites(state.VersionedWrites{coinbaseWrite}, true, "")
 
 	checkVersion := func(readV, writeV state.Version) state.VersionValidity {
@@ -1003,45 +998,48 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	}
 
 	// validateCoinbaseRead validates a dependent tx (txIndex 1) whose only
-	// recorded read is the coinbase balance, read at the given incarnation.
-	validateCoinbaseRead := func(readAtIncarnation int) state.VersionValidity {
+	// recorded read is the coinbase balance.
+	validateCoinbaseRead := func(source state.ReadSource, readVal uint256.Int) state.VersionValidity {
 		io := state.NewVersionedIO(2)
 		rs := state.ReadSet{}
 		rs.Set(state.VersionedRead{
 			Address: s.coinbase,
 			Path:    state.BalancePath,
-			Source:  state.MapRead,
-			Version: state.Version{TxIndex: 0, Incarnation: readAtIncarnation},
+			Source:  source,
+			Version: state.Version{TxIndex: 0, Incarnation: 0},
+			Val:     readVal,
 		})
 		io.RecordReads(state.Version{TxIndex: 1}, rs)
 		return vm.ValidateVersion(1, io, checkVersion, false, "")
 	}
 
-	// Early-read timing — the dependent read the coinbase before finalize
-	// ran, recording the worker's version (0,0). It must be invalidated.
-	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(0),
-		"a tx that read the coinbase before the fee finalize must fail validation")
+	// Stale timing — the dependent worker read the coinbase via stateReader
+	// before tx 0's calcFees ran, recording the pre-tip baseline (zero).
+	// Validate's value-tiebreaker catches the mismatch.
+	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(state.StorageRead, uint256.Int{}),
+		"a stale read of pre-tip baseline (via stateReader) must be invalidated by validate's value-tiebreaker")
 
-	// Late-read timing — the dependent read after finalize, recording the
-	// fee write's version (0,1). It must stay valid.
-	assert.Equal(t, state.VersionValid, validateCoinbaseRead(1),
-		"a tx that read the coinbase after the fee finalize must stay valid")
+	// Late timing — the dependent worker read after calcFees, recording the
+	// post-tip value at the worker's version (MapRead). Validate passes.
+	coinbaseVal := coinbaseWrite.Val.(uint256.Int)
+	assert.Equal(t, state.VersionValid, validateCoinbaseRead(state.MapRead, coinbaseVal),
+		"a fresh read of post-tip value at the same version must stay valid")
 }
 
-// TestFinalizeTxSimple_BurntFeeWriteBumpsIncarnation verifies the burnt
-// contract's implicit FeeBurnt write gets the same incarnation+1 stamp as
-// the coinbase tip write.
-func TestFinalizeTxSimple_BurntFeeWriteBumpsIncarnation(t *testing.T) {
+// TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation verifies the
+// burnt contract's implicit FeeBurnt write is stamped at the worker's own
+// incarnation (same as coinbase under the post-#21387 architecture).
+func TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation(t *testing.T) {
 	t.Parallel()
 	s := londonTransferScenario()
 
-	writes := s.runFinalizeTxSimple(t, nil)
+	writes := s.runFinalizeTx(t, nil)
 	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
-	require.NotNil(t, burntWrite, "finalize should produce a burnt contract BalancePath write")
+	require.NotNil(t, burntWrite, "calcFees should produce a burnt contract BalancePath write")
 
 	assert.Equal(t, 0, burntWrite.Version.TxIndex)
-	assert.Equal(t, 1, burntWrite.Version.Incarnation,
-		"finalize burnt-fee write must be stamped at worker incarnation + 1")
+	assert.Equal(t, 0, burntWrite.Version.Incarnation,
+		"calcFees stamps burnt write at worker incarnation (no +1 bump under post-#21387 architecture)")
 }
 
 // TestResolveStorageWrites_IBSvsSimple compares the storage write sets
