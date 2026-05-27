@@ -851,18 +851,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	return sd.mem.Flush(ctx, tx)
 }
 
-// ClearBranchCache empties the aggregator-scope commitment BranchCache.
-// Use after operations that mutate commitment state outside the normal
-// sd.Flush callback path — notably SetHead unwind, which truncates
-// commitment domain history but does not re-write all the keys whose
-// cached values are now stale. Without this call, the next FCU sees
-// the pre-unwind KeyCommitmentState and trips ErrBehindCommitment.
-func (sd *SharedDomains) ClearBranchCache() {
-	if sd.branchCache != nil {
-		sd.branchCache.Clear()
-	}
-}
-
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	if tx == nil {

@@ -222,11 +222,6 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 	if err != nil {
 		return err
 	}
-	// Reuse the cached tester for the (fork, preAllocHash) group but reset the
-	// aggregator-scope branchCache so commitment-trie entries from the prior
-	// test don't leak into this test's genesis→block-1 boundary. Cheaper than
-	// evicting the whole tester (which would rebuild the genesis + node).
-	tester.ResetBranchCache()
 	return extr.execute(ctx, tester, test)
 }
 

@@ -2977,17 +2977,6 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootPresent = true
 }
 
-// ClearBranchCache drops every entry in the attached BranchCache. Use on
-// unwind or fork-validation paths where the cached branches diverge from
-// the canonical store. No-op when no cache is attached or when this is a
-// mounted subtrie (the root trie owns the clear, mounts share the same
-// cache pointer).
-func (hph *HexPatriciaHashed) ClearBranchCache() {
-	if hph.branchCache != nil && !hph.mounted {
-		hph.branchCache.Clear()
-	}
-}
-
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }

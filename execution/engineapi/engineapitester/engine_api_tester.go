@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -401,34 +400,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		ChainDB:              ethBackend.ChainKV(),
 		cleanup:              cleanup,
 	}, nil
-}
-
-// ResetBranchCache drops the aggregator's in-memory branchCache. The cache is
-// aggregator-scoped and survives a tx rollback, so a tester reused across
-// independent EEST cases would otherwise serve commitment-trie entries
-// populated by the previous test's pre-state — producing a `wrong trie root
-// of block 1` on the next test's genesis→block-1 boundary. Same mechanism the
-// rawdbreset.ResetExec path uses after wiping the commitment table (#21138);
-// here the trigger is "moving to a new test" instead of "wiping the table".
-// Safe to call at any time the tester is between tests; no-op if no
-// aggregator-backed db is attached.
-func (eat EngineApiTester) ResetBranchCache() {
-	if eat.ChainDB == nil {
-		return
-	}
-	hasAgg, ok := eat.ChainDB.(dbstate.HasAgg)
-	if !ok {
-		return
-	}
-	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
-	if !ok {
-		return
-	}
-	aggTx := agg.BeginFilesRo()
-	if bc := aggTx.BranchCache(); bc != nil {
-		bc.Clear()
-	}
-	aggTx.Close()
 }
 
 type EngineApiTesterInitArgs struct {
