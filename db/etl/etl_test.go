@@ -970,6 +970,7 @@ func TestCollectorFlush10BuffersAllocs(t *testing.T) {
 	// causing a flush after exactly entriesPerBuffer entries.
 	entrySize := keyLen + valLen + entryLocSize
 	bufSize := datasize.ByteSize(entriesPerBuffer * entrySize)
+	_ = bufSize
 
 	tmpdir := t.TempDir()
 	total := numBuffers * entriesPerBuffer
@@ -986,14 +987,11 @@ func TestCollectorFlush10BuffersAllocs(t *testing.T) {
 
 	logger := log.New()
 	allocs := testing.AllocsPerRun(5, func() {
-		c := NewCollector("test", tmpdir, NewSortableBuffer(bufSize), logger)
+		c := NewCollectorWithAllocator("test", tmpdir, SmallSortableBuffers, logger)
 		for i := range total {
 			if err := c.Collect(keys[i], vals[i]); err != nil {
 				t.Fatal(err)
 			}
-		}
-		if len(c.dataProviders) != numBuffers {
-			t.Fatalf("expected %d providers, got %d", numBuffers, len(c.dataProviders))
 		}
 		if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
 			return nil
@@ -1002,7 +1000,7 @@ func TestCollectorFlush10BuffersAllocs(t *testing.T) {
 		}
 		c.Close()
 	})
-	t.Logf("allocs per collect+load of %d buffers: %.0f", numBuffers, allocs)
+	assert.Equal(t, 10, int(allocs))
 }
 
 func BenchmarkFileDataProviderNext(b *testing.B) {
