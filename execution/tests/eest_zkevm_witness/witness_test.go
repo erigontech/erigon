@@ -73,27 +73,17 @@ func TestExecutionSpecWitness(t *testing.T) {
 	// Run the full corpus serially. The harness spins up fresh MDBX/state
 	// machinery per file, and we want the CI signal to reflect the fixture
 	// itself rather than parallel memory pressure.
-	// All 93 fixtures fail on State node ordering and/or Codes ordering mismatches
-	// (tracked by #20442). Headers field was fixed by including the parent header
-	// and sorting ascending (#20534), but no fixture passes yet because every one
-	// also has State/Codes issues. The three remaining root causes are:
-	//   1. State MPT nodes emitted in wrong order (~60% ordering-only, ~40% extra nodes)
-	//   2. Bytecodes emitted in wrong order (nearly 100% ordering-only)
-	//   3. 8 multi-block BLOCKHASH fixtures still have Headers range mismatches
-	bt.Fails(".", "witness State/Codes ordering mismatch (#20442, #20534): state nodes and bytecodes emitted in wrong order")
 
-	// Fixtures come from the lazy-download cache, not the tests submodule, so the
-	// shared Walk's "did you clone the tests submodule?" message is misleading
-	// here. Pre-check the dir and emit an actionable skip instead. Mirror Walk's
-	// own guard (missing OR not-a-directory) so we intercept every case it would,
-	// including a stat error other than IsNotExist (which would otherwise hit a
-	// nil-deref inside Walk). The err!=nil short-circuit keeps info from being
-	// dereferenced when nil.
+	// Fail (rather than the shared Walk's silent skip) when the fixture cache is
+	// missing: a skipped suite is indistinguishable from a passing one and would
+	// hide a broken `make test-fixtures-zkevm` step in CI behind a green check.
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		t.Skipf("missing fixtures at %s; run `make test-fixtures-zkevm`", dir)
+		t.Fatalf("missing fixtures at %s; run `make test-fixtures-zkevm`", dir)
 	}
 
+	var walked int
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
+		walked++ // NoParallel above keeps this serial
 		// Amsterdam fixtures require experimental block access list support.
 		test.ExperimentalBAL = true
 
@@ -173,6 +163,7 @@ func TestExecutionSpecWitness(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	t.Logf("walked %d fixtures (check `make test-fixtures-zkevm`)", walked, minFixtures)
 }
 
 // compareWitness performs exact ordered comparison of witness arrays.
