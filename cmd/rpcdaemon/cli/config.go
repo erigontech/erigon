@@ -639,6 +639,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			logger.Error("Failed to read remote chain config", "err", err)
 			rootCancel()
+			return
 		}
 		if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
 			rootCancel()
