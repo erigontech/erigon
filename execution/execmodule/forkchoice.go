@@ -114,16 +114,15 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
-	// done is closed when the goroutine fully returns — after all defers
-	// (shared-state cleanup, semaphore release) have run. When we receive
-	// a non-Busy result, we wait on done so the caller can safely acquire
-	// the semaphore for a follow-up operation like AssembleBlock.
-	done := make(chan struct{})
 
 	// Spawn the actual forkchoice work using the module's background context so
-	// it is not cancelled when the caller's context times out.
+	// it is not cancelled when the caller's context times out. We return as soon
+	// as the result lands on outcomeCh — for a merge-extending fork at tip the
+	// result is sent before flush/commit, so the consensus client is not blocked
+	// on the EL commit. The forkchoice goroutine releases the semaphore only after
+	// all cleanup defers have run, so any follow-up op (AssembleBlock, next FCU)
+	// that acquires the semaphore observes fully-settled state.
 	go func() {
-		defer close(done)
 		if err := e.updateForkChoice(e.bacgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
@@ -131,7 +130,6 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 
 	select {
 	case outcome := <-outcomeCh:
-		<-done
 		return outcome.result, outcome.err
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
