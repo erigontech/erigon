@@ -100,10 +100,10 @@ Key design decisions:
 
 **Files:** (none — git/worktree setup)
 
-- [ ] `git -C /Users/awskii/org/wrk/erigon fetch origin`
-- [ ] create worktree: `git -C /Users/awskii/org/wrk/erigon worktree add -b awskii/eest-zkevm-witness ../erigon-eest-zkevm origin/main`
-- [ ] confirm clean tree on `awskii/eest-zkevm-witness` based at `origin/main`
-- [ ] all subsequent file paths below are relative to the new worktree root
+- [x] `git -C /Users/awskii/org/wrk/erigon fetch origin`
+- [x] create worktree: `git -C /Users/awskii/org/wrk/erigon worktree add -b awskii/eest-zkevm-witness ../erigon-eest-zkevm origin/main`
+- [x] confirm clean tree on `awskii/eest-zkevm-witness` based at `origin/main`
+- [x] all subsequent file paths below are relative to the new worktree root
 
 ### Task 2: Verify the v0.4.0 fixture witness schema (BLOCKING — do before runner/parser)
 
