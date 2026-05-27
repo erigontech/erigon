@@ -140,6 +140,7 @@ func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	if !gointerfaces.EnsureVersion(back.version, versionReply) {
 		back.log.Error("incompatible interface versions", "client", back.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		panic(9)
 		return false
 	}
 	back.log.Info("interfaces compatible", "client", back.version.String(),

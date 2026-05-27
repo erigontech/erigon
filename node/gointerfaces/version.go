@@ -66,6 +66,7 @@ func EnsureVersionCompatibility(client VersionClient, expected Version, logger l
 	if !EnsureVersion(expected, versionReply) {
 		logger.Error("incompatible interface versions", "client", expected.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		panic(1)
 		return false
 	}
 	logger.Info("interfaces compatible", "client", expected.String(),

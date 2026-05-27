@@ -144,6 +144,7 @@ func (db *DB) EnsureVersionCompatibility() bool {
 	if !gointerfaces.EnsureVersion(db.opts.version, versionReply) {
 		db.log.Error("incompatible interface versions", "client", db.opts.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		panic(1)
 		return false
 	}
 	db.log.Info("interfaces compatible", "client", db.opts.version.String(),
