@@ -63,7 +63,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
 * `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
 * `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the txpool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external txpool.
-* `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the sentry API. The sentry API is used for communication between the txpool and the sentry.
+* `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the txpool and the Sentry.
 * `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the txpool API (default: use value of `--private.api.addr`). The txpool API is used for communication between the txpool and other Erigon components.
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
 * `--pprof.addr 0.0.0.0`: This flag sets the address for the pprof HTTP server (default: `127.0.0.1`). The pprof server is used for profiling and debugging Erigon. By setting this flag to `0.0.0.0`, the pprof server is made accessible from outside the local machine.

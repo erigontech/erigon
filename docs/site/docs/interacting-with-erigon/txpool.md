@@ -25,7 +25,7 @@ The txpool namespace must be explicitly enabled using the `--http.api` flag when
 ### External vs internal mode
 
 * **Internal Mode**: Transaction pool runs within the main Erigon process (default configuration)
-* **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external sentry service and provides better resource isolation
+* **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external Sentry service and provides better resource isolation
 
 ### Usage in development and testing
 

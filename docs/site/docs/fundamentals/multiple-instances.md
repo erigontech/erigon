@@ -59,7 +59,7 @@ For containerized deployments, the docker-compose configuration shows how servic
 
 The compose file demonstrates the port allocation strategy:
 
-* **9090-9094**: Internal gRPC services (execution, sentry, consensus, downloader, txpool)
+* **9090-9094**: Internal gRPC services (execution, Sentry, consensus, downloader, txpool)
 * **8545, 8551**: External HTTP APIs
 * **30303, 42069**: P2P networking ports
 
