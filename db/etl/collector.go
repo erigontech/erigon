@@ -95,7 +95,7 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 	}
-	if !c.buf.CheckFlushSize() {
+	if !c.buf.CheckFlushSize() { // Flush before Put - to prevent large re-alloc when buffer almost full
 		return c.flushBuffer(false)
 	}
 	c.buf.Put(k, v)
