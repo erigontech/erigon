@@ -1818,8 +1818,7 @@ func (t *Trie) GetNode(path []byte) Node {
 }
 
 // HasExpandedChild reports whether branch node n has at least one child that is an
-// expanded node rather than a bare hash, meaning some key below n was independently
-// resolved into the trie. Returns false for non-branch nodes.
+// expanded (non-hash) node. Returns false for non-branch nodes.
 func HasExpandedChild(n Node) bool {
 	expanded := func(c Node) bool {
 		switch c.(type) {

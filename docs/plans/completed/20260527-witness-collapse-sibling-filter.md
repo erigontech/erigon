@@ -207,8 +207,14 @@ assertion.
 
 **The rule.** A collapse-sibling node is **redundant (safe to drop)** iff the node it resolves
 to at its `siblingPath` in the witness trie is a **branch node** (`*FullNode` or `*DuoNode`,
-i.e. ≥2 children). It is **load-bearing (must keep)** in every other case — when the path
-resolves to a `*ShortNode` (leaf or extension), an `*AccountNode`, or a `ValueNode`.
+i.e. ≥2 children) **whose children are all bare hashes** (`trie.HasExpandedChild` returns
+false). It is **load-bearing (must keep)** in every other case — when the path resolves to a
+`*ShortNode` (leaf or extension), an `*AccountNode`, or a `ValueNode`, **or when the branch has
+an expanded child**: a key below it was independently resolved in the same block, so the
+verifier must descend through the branch to reach that accessed leaf, and dropping the branch
+leaves an unresolved `HashNode` on the path (verifier panic). The expanded-child guard was added
+after the initial branch-only rule was found to over-drop; `TestExecutionWitnessCollapseSiblingAccessedSubtree`
+pins it.
 
 **Why this is exactly the right line — tied to how the verifier re-roots.** The stateless
 verifier's `Finalize` (debug_execution_witness.go ~L1703-1802) applies the block's deletes via
@@ -257,6 +263,8 @@ post-condition that catches any over-drop.
 - ✅ Account-trie 2→1 collapse onto a branch subtree — `TestExecutionWitnessCollapseSiblingAccount`.
 - ✅ Storage-trie 2→1 collapse onto a branch subtree — `TestExecutionWitnessCollapseSiblingStorage`.
 - ✅ Load-bearing counter-case (surviving sibling is a `ShortNode` leaf) — kept; Task 4 pins it.
+- ✅ Branch survivor with an independently-accessed descendant (expanded child) — kept;
+  `TestExecutionWitnessCollapseSiblingAccessedSubtree`.
 - ✅ No-collapse block — tracer never fires, `siblingPaths` empty, strict no-op.
 
 **Out of proven scope (conservative behavior = keep).**
