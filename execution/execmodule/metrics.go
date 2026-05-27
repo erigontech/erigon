@@ -47,11 +47,3 @@ func UpdateForkChoiceDepth(depth uint64) {
 func UpdateForkChoicePruneDuration(start time.Time) {
 	updateForkChoicePruneDuration.ObserveDuration(start)
 }
-
-func ValidateChainDuration(start time.Time) {
-	validateChainDuration.ObserveDuration(start)
-}
-
-func InsertBlocksDuration(start time.Time) {
-	insertBlocksDuration.ObserveDuration(start)
-}

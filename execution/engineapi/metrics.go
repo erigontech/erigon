@@ -17,8 +17,6 @@
 package engineapi
 
 import (
-	"time"
-
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
@@ -26,11 +24,3 @@ var (
 	engineNewPayloadDuration        = metrics.NewSummary(`engine_new_payload{type="execution_duration"}`)
 	engineForkchoiceUpdatedDuration = metrics.NewSummary(`engine_forkchoice_updated{type="execution_duration"}`)
 )
-
-func EngineNewPayloadDuration(start time.Time) {
-	engineNewPayloadDuration.ObserveDuration(start)
-}
-
-func EngineForkchoiceUpdatedDuration(start time.Time) {
-	engineForkchoiceUpdatedDuration.ObserveDuration(start)
-}
