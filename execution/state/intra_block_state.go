@@ -1888,6 +1888,22 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			}
 		}
 	}
+	// Same fix for BalancePath: a prior tx may have written the address's
+	// Balance (e.g. coinbase tip credit) at a version the account-record
+	// source/version does not reflect. Without this, the synthetic BalancePath
+	// read below is stamped with the account-record version (or default
+	// UnknownVersion when entering via the else-if-deleted-stateObject
+	// branch at line 1842), and a subsequent path-920 dep check sees the
+	// versionMap entry at a different version → ErrDependency panic → the
+	// worker spins in a non-converging dep-abort retry loop ("too many
+	// incarnations"). Mirrors the IncarnationPath treatment above.
+	balSource, balVersion := source, version
+	if sdb.versionMap != nil {
+		if res := sdb.versionMap.Read(addr, BalancePath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			balSource = MapRead
+			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+		}
+	}
 	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
 	// Recover it here so that CreateAccount in the next tx computes newInc = prevInc+1 correctly.
 	if sdb.versionMap == nil && previous == nil {
@@ -1931,7 +1947,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
+	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, balSource, balVersion, newObj.Balance())
 	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, incSource, incVersion, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)

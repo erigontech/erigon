@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 	ptracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -212,13 +213,13 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
-			var gasPrice uint256.Int
+			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
+				*gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
 			} else {
 				// This means gasFeeCap == 0, gasTipCap == 0
 				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = &gasPrice, &gasPrice
+				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -1141,7 +1142,18 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// Get a new instance of the EVM.
-	baseFee := header.BaseFee
+	var blockOverrides *ethapi.BlockOverrides
+	if traceConfig != nil {
+		blockOverrides = traceConfig.BlockOverrides
+	}
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	blockCtx.GasLimit = math.MaxUint64
+	blockCtx.MaxGasLimit = true
+	if err := blockOverrides.Override(&blockCtx); err != nil {
+		return nil, err
+	}
+
+	baseFee := &blockCtx.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1150,26 +1162,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := protocol.NewEVMTxContext(msg)
 
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
-
 	var precompiles vm.PrecompiledContracts
-	if traceConfig != nil {
-		if traceConfig.BlockOverrides != nil {
-			if err := traceConfig.BlockOverrides.Override(&blockCtx); err != nil {
-				return nil, err
-			}
-		}
-		if traceConfig.StateOverrides != nil {
-			rules := blockCtx.Rules(chainConfig)
-			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
-				return nil, err
-			}
+	if traceConfig != nil && traceConfig.StateOverrides != nil {
+		rules := blockCtx.Rules(chainConfig)
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+			return nil, err
 		}
 	}
 
