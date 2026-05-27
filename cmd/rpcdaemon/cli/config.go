@@ -371,6 +371,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	remoteBridgeClient := remoteproto.NewBridgeBackendClient(conn)
 	remoteHeimdallClient := remoteproto.NewHeimdallBackendClient(conn)
 	remoteKvClient := remoteproto.NewKVClient(conn)
+	panic(remotedbserver.KvServiceAPIVersion)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
