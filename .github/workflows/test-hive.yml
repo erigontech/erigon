@@ -150,6 +150,13 @@ jobs:
           # built locally above, instead of cloning erigon inside the builder.
           sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=hive/erigon|" clients/erigon/Dockerfile
           sed -i "s|^ARG tag=main-latest$|ARG tag=cilocal|" clients/erigon/Dockerfile
+          # Fail fast if the sed didn't apply (upstream Dockerfile ARGs changed),
+          # otherwise hive would silently use the remote erigontech/erigon image.
+          if ! grep -q "^ARG baseimage=hive/erigon$" clients/erigon/Dockerfile \
+             || ! grep -q "^ARG tag=cilocal$" clients/erigon/Dockerfile; then
+            echo "ERROR: failed to repoint hive's erigon client Dockerfile at hive/erigon:cilocal"
+            exit 1
+          fi
           # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
           # erigon process inside hive picks it up. Append as the last layer
           # so it doesn't invalidate earlier build caches.
