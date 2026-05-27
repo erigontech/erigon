@@ -18,6 +18,7 @@ package snapshot
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -302,6 +303,65 @@ func TestSetTorrentHash_AllBuckets(t *testing.T) {
 	check(inv.MetaFiles(), "erigondb.toml")
 	check(inv.SaltFiles(), "salt-blocks.txt")
 	check(inv.SaltFiles(), "salt-state.txt")
+}
+
+// TestReplaceContent_ResetsStateAndStampsHash is the cutover regression
+// guard. After ReplaceContent the entry must hold the new torrent hash,
+// have LifecycleState reset to Downloaded (forcing the lifecycle driver
+// to re-emit Indexed → Advertisable), have Advertisable cleared, and
+// a ChangeSet must fire so downstream consumers know the bytes changed.
+func TestReplaceContent_ResetsStateAndStampsHash(t *testing.T) {
+	inv := NewInventory()
+	require.NoError(t, inv.AddFile(&FileEntry{
+		Domain:       DomainAccounts,
+		Kind:         KindKV,
+		Name:         "v1.0-accounts.0-1024.kv",
+		FromStep:     0,
+		ToStep:       1024,
+		TorrentHash:  [20]byte{0x11},
+		Local:        true,
+		Advertisable: true,
+		Trust:        TrustVerified,
+	}))
+
+	// Pre-conditions: at Advertisable, hash is the minority hash.
+	state, ok := inv.LifecycleState("v1.0-accounts.0-1024.kv")
+	require.True(t, ok)
+	require.Equal(t, LifecycleAdvertisable, state)
+
+	sub, unsubscribe := inv.Subscribe()
+	defer unsubscribe()
+
+	canonHash := [20]byte{0xCC}
+	require.True(t, ReplaceContent(inv, "v1.0-accounts.0-1024.kv", canonHash),
+		"ReplaceContent must find and update the entry")
+
+	// Post-conditions: hash swapped, state reset, Advertisable cleared.
+	state, ok = inv.LifecycleState("v1.0-accounts.0-1024.kv")
+	require.True(t, ok)
+	require.Equal(t, LifecycleDownloaded, state,
+		"State must reset to Downloaded so the driver re-evaluates")
+
+	files := inv.LocalFiles(DomainAccounts)
+	require.Len(t, files, 1)
+	require.Equal(t, canonHash, files[0].TorrentHash)
+	require.True(t, files[0].Seeding, "Seeding must be set after ReplaceContent")
+	require.False(t, files[0].Advertisable,
+		"Advertisable must clear so downstream consumers re-evaluate")
+
+	// ChangeSet must fire so subscribers see the swap.
+	select {
+	case cs := <-sub:
+		require.Contains(t, cs.Files, "v1.0-accounts.0-1024.kv")
+	case <-time.After(time.Second):
+		t.Fatal("ReplaceContent must publish a ChangeSet")
+	}
+}
+
+func TestReplaceContent_MissingEntryReturnsFalse(t *testing.T) {
+	inv := NewInventory()
+	require.False(t, ReplaceContent(inv, "v1.0-nope.0-1024.kv", [20]byte{}),
+		"ReplaceContent on an unknown name is a no-op returning false")
 }
 
 // TestInventory_DrainClearsAllCategoriesPreservesPointerAndSubscribers

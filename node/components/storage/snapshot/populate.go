@@ -187,3 +187,55 @@ func SetTorrentHash(inv *Inventory, name string, hash [20]byte) {
 		return
 	}
 }
+
+// ReplaceContent records that an inventory entry's bytes on disk have
+// changed — the canonical-adoption cutover swap renamed a new file
+// over the live one. It atomically updates the torrent hash, marks
+// the entry seedable, and resets LifecycleState to Downloaded so the
+// lifecycle driver re-emits the Indexed → Advertisable transitions
+// downstream consumers subscribe to. ChangeSet fires once per call
+// (after the lock releases).
+//
+// Returns true if an entry was found and updated. The signal-on-
+// change semantics let cutover callers react to "this file's bytes
+// just changed" without polling every entry. Per the canonical-layer
+// revision spec §5.4 step (3).
+func ReplaceContent(inv *Inventory, name string, hash [20]byte) bool {
+	inv.mu.Lock()
+	found := false
+	apply := func(e *FileEntry) {
+		e.TorrentHash = hash
+		e.Seeding = true
+		// Reset to Downloaded so the lifecycle driver re-promotes the
+		// entry through Indexed → Advertisable, re-firing ChangeSet
+		// events that downstream consumers (manifest_exchange caches,
+		// segment caches) subscribe to.
+		applyStateToFlags(e, LifecycleDownloaded)
+		inv.recordTimingTransitionLocked(name, LifecycleDownloaded, inv.now())
+		found = true
+	}
+	if e := findByName(inv.blocks, name); e != nil {
+		apply(e)
+	} else {
+		for _, entries := range inv.domains {
+			if e := findByName(entries, name); e != nil {
+				apply(e)
+				break
+			}
+		}
+		if !found {
+			if e := findByName(inv.caplin, name); e != nil {
+				apply(e)
+			} else if e := findByName(inv.meta, name); e != nil {
+				apply(e)
+			} else if e := findByName(inv.salt, name); e != nil {
+				apply(e)
+			}
+		}
+	}
+	inv.mu.Unlock()
+	if found {
+		inv.notify(ChangeSet{Files: []string{name}})
+	}
+	return found
+}

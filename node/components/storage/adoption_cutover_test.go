@@ -116,7 +116,16 @@ func TestCutoverStagedBatch_SwapsLiveFile(t *testing.T) {
 	defer agg.Close()
 
 	inv := snapshot.NewInventory()
-	require.NoError(t, inv.AddFile(&snapshot.FileEntry{Name: segName, Local: true}))
+	// Seed the entry at LifecycleAdvertisable to mirror the production
+	// starting point: the minority node held this file as validated and
+	// advertisable. The cutover must reset that so downstream consumers
+	// re-evaluate.
+	require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+		Name:         segName,
+		Local:        true,
+		Advertisable: true,
+		Trust:        snapshot.TrustVerified,
+	}))
 
 	p := &Provider{Aggregator: agg, AllSnapshots: snaps, Inventory: inv, logger: logger}
 
@@ -141,4 +150,8 @@ func TestCutoverStagedBatch_SwapsLiveFile(t *testing.T) {
 	e, ok := inv.GetByName(segName)
 	require.True(t, ok)
 	require.Equal(t, canonHash, e.TorrentHash, "inventory must be re-stamped with the canonical hash")
+	require.Equal(t, snapshot.LifecycleDownloaded, e.State,
+		"cutover must reset LifecycleState to Downloaded so the driver re-emits Indexed → Advertisable")
+	require.False(t, e.Advertisable,
+		"Advertisable flag must clear so downstream consumers see the file as needing re-evaluation")
 }

@@ -395,10 +395,14 @@ func (p *Provider) cutoverStagedBatch(batch *dlcomp.StagedBatch, dl *dlcomp.Prov
 	}
 
 	// Post-barrier: re-point inventory + downloader at the canonical
-	// content and re-advertise. A republish failure does not undo the
-	// completed swap — log and continue.
+	// content and re-advertise. ReplaceContent atomically updates each
+	// entry's hash AND resets LifecycleState to Downloaded so the
+	// lifecycle driver re-emits Indexed → Advertisable transitions —
+	// the signal downstream consumers (manifest_exchange caches,
+	// segment caches) need to detect the swap. A republish failure
+	// does not undo the completed swap — log and continue.
 	for _, s := range swaps {
-		snapshot.SetTorrentHash(p.Inventory, s.name, s.hash)
+		snapshot.ReplaceContent(p.Inventory, s.name, s.hash)
 		if dl != nil && dl.Downloader != nil {
 			dl.Downloader.DropTorrentByName(s.name)
 			_ = dir.RemoveFile(s.dst + ".torrent")
