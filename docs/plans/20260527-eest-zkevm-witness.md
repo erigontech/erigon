@@ -132,12 +132,12 @@ Key design decisions:
 - Modify: `Makefile`
 - Modify: `tools/test-groups`
 
-- [ ] add `eest_zkevm` key to `test-fixtures.json` (url/sha256/size from Context — only after Task 2 confirms the values)
-- [ ] add `test-fixtures-zkevm` Makefile target: `tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm` (mirror the `test-fixtures-eest` target's style + help comment)
-- [ ] **CRITICAL ordering:** insert `("execution-eest-zkevm", {"./execution/tests/eest_zkevm_witness/..."})` in `tools/test-groups` GROUPS **before** the `execution-tests` entry. `partition()` claims packages greedily in `OrderedDict` order, and `execution-tests` owns `./execution/tests/...` (a parent of the new package) — if placed after, the new group resolves EMPTY and the suite silently runs inside `execution-tests`
-- [ ] verify partitioning: `./tools/test-groups packages execution-eest-zkevm` prints the new package, AND `./tools/test-groups packages execution-tests` does NOT contain it
-- [ ] verify `tools/test-groups names` lists `execution-eest-zkevm`, and `make test-fixtures-zkevm` downloads+extracts to `test-fixtures-cache/eest_zkevm/`
-- [ ] verify `make test-group TEST_GROUP=execution-eest-zkevm` resolves the new package path (will be empty until Task 6)
+- [x] add `eest_zkevm` key to `test-fixtures.json` (url/sha256/size from Context — only after Task 2 confirms the values)
+- [x] add `test-fixtures-zkevm` Makefile target: `tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm` (mirror the `test-fixtures-eest` target's style + help comment)
+- [x] **CRITICAL ordering:** insert `("execution-eest-zkevm", {"./execution/tests/eest_zkevm_witness/..."})` in `tools/test-groups` GROUPS **before** the `execution-tests` entry. `partition()` claims packages greedily in `OrderedDict` order, and `execution-tests` owns `./execution/tests/...` (a parent of the new package) — if placed after, the new group resolves EMPTY and the suite silently runs inside `execution-tests`
+- [x] verify partitioning: `./tools/test-groups packages execution-eest-zkevm` prints the new package, AND `./tools/test-groups packages execution-tests` does NOT contain it — confirmed via synthetic package list: zkevm group claims `./execution/tests/eest_zkevm_witness/...`, `execution-tests` does not
+- [x] verify `tools/test-groups names` lists `execution-eest-zkevm`, and `make test-fixtures-zkevm` downloads+extracts to `test-fixtures-cache/eest_zkevm/` — names lists it; download sha256-verified ok, extracted to `test-fixtures-cache/eest_zkevm/fixtures/blockchain_tests/` (2871 JSON files, both subtrees)
+- [x] verify `make test-group TEST_GROUP=execution-eest-zkevm` resolves the new package path (will be empty until Task 6) — `go list ./... | tools/test-groups packages execution-eest-zkevm` resolves empty (exit 0), as expected pre-Task 6
 
 ### Task 4: Add `BlockTest.RunWithTester` seam
 
