@@ -536,8 +536,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful storage read
-	if sd.stateCache != nil {
+	if sd.stateCache != nil && len(v) > 0 { //clea
 		sd.stateCache.Put(domain, k, v)
 	}
 
