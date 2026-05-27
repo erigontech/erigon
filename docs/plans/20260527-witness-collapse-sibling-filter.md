@@ -186,19 +186,92 @@ assertion.
 **Files:**
 - Modify: `docs/plans/20260527-witness-collapse-sibling-filter.md` (record the decision here)
 
-- [ ] Using the RED fixtures + reading the stateless re-root path
+- [x] Using the RED fixtures + reading the stateless re-root path
       (`witnessStateless.Finalize` → `Delete`/`DeleteSubtree` → `Hash`, ~L1703-1802), write
-      down the exact rule for "redundant sibling = safe to drop." Candidate: *the sibling's
-      parent branch retains ≥2 live children after the block's deletes (no structural
-      collapse), so the parent's inline 32-byte hash is sufficient and the leaf is never
-      descended into.*
-- [ ] State explicitly which collapse shapes the rule is **proven** against
+      down the exact rule for "redundant sibling = safe to drop." Candidate (from initial
+      discovery): *the sibling's parent branch retains ≥2 live children after the block's
+      deletes (no structural collapse).* **This candidate was wrong** — it described the
+      no-collapse case (the tracer never even fires there). The correct, code-grounded rule is
+      below (DECISION).
+- [x] State explicitly which collapse shapes the rule is **proven** against
       (account 2→1, storage 2→1) and which are **out of proven scope** (cascading/multi-level
       collapse, 3→2 branch shrink that is not a collapse). Document cascading collapse as a
       known limitation if not covered by a test, with the conservative behavior (keep the
-      sibling when unsure — safety over minimality).
-- [ ] Confirm the rule is computable from `witnessTrie` + `siblingPaths` alone (no extra
-      re-execution).
+      sibling when unsure — safety over minimality). → see DECISION §"Proven scope".
+- [x] Confirm the rule is computable from `witnessTrie` + `siblingPaths` alone (no extra
+      re-execution). → see DECISION §"Computability".
+
+---
+
+#### DECISION — redundancy criterion (proven against account 2→1 and storage 2→1)
+
+**The rule.** A collapse-sibling node is **redundant (safe to drop)** iff the node it resolves
+to at its `siblingPath` in the witness trie is a **branch node** (`*FullNode` or `*DuoNode`,
+i.e. ≥2 children). It is **load-bearing (must keep)** in every other case — when the path
+resolves to a `*ShortNode` (leaf or extension), an `*AccountNode`, or a `ValueNode`.
+
+**Why this is exactly the right line — tied to how the verifier re-roots.** The stateless
+verifier's `Finalize` (debug_execution_witness.go ~L1703-1802) applies the block's deletes via
+`s.t.Delete` / `s.t.DeleteSubtree` and then calls `s.t.Hash()`. Those deletes run the standard
+MPT collapse in `execution/commitment/trie/trie.go`: when a `FullNode`/`DuoNode` drops to a
+single remaining child, the trie calls `convertToShortNode(child, pos)` (trie.go:1056). That
+function inspects the surviving child **only** through one type assertion:
+
+```go
+if short, ok := child.(*ShortNode); ok {
+    // merge: prepend the collapse nibble to short.Key — READS the ShortNode preimage
+    return NewShortNode(append([]byte{pos}, short.Key...), short.Val)
+}
+// child is a branch (FullNode/DuoNode) or a HashNode: wrapped by reference, NEVER inspected
+return NewShortNode([]byte{pos}, child)
+```
+
+- Surviving sibling is a **branch**: after `RLPDecode` a dropped subtree-root appears as a bare
+  `HashNode`; a kept one appears as a `FullNode`/`DuoNode`. Neither is a `*ShortNode`, so
+  `convertToShortNode` takes the second return and folds the **32-byte hash inline** without
+  ever reading the subtree's contents. Its preimage is therefore never needed → **droppable**.
+- Surviving sibling is a **ShortNode** (leaf or extension): `convertToShortNode` merges by
+  reading `short.Key`/`short.Val`, so the preimage **must** be present → **keep**. A bare
+  `HashNode` here would make the verifier fail/panic — exactly the over-filter the guardrail
+  catches.
+
+This matches the Task 1 probe ground truth: the subtree-root node is removable (account `[5]`,
+storage `[6]`), while a plain 2-leaf collapse's surviving leaf is **not** removable.
+
+**Mapping `siblingPath` → node.** `siblingPath` is built in HPH as
+`currentKey[:depth] + survivingNibble + survivingCell.hashedExtension`
+(hex_patricia_hashed.go:2394 / :2418). A leaf survivor carries a full-depth `hashedExtension`,
+so its path reaches terminal depth and resolves to a `ShortNode`/`AccountNode`/`ValueNode`. A
+branch survivor's path stops at the branch depth and resolves to a `FullNode`/`DuoNode`. So
+path length corroborates the type, but the **node type is the criterion** — do not key off
+length. The node is guaranteed present in `witnessTrie` because STEP 2 force-touches it via
+`TouchHashedKey(siblingPath)` before `RLPEncode`.
+
+**Computability.** Decidable from `witnessTrie` + `siblingPaths` alone, **no extra
+re-execution**: for each `siblingPath`, descend the witness trie along the nibble path, read the
+concrete node type at that path, and drop its keccak hash iff it is a `*FullNode`/`*DuoNode`.
+The verify guardrail (already running on the filtered `result.State`) remains a pure
+post-condition that catches any over-drop.
+
+**Proven scope.**
+- ✅ Account-trie 2→1 collapse onto a branch subtree — `TestExecutionWitnessCollapseSiblingAccount`.
+- ✅ Storage-trie 2→1 collapse onto a branch subtree — `TestExecutionWitnessCollapseSiblingStorage`.
+- ✅ Load-bearing counter-case (surviving sibling is a `ShortNode` leaf) — kept; Task 4 pins it.
+- ✅ No-collapse block — tracer never fires, `siblingPaths` empty, strict no-op.
+
+**Out of proven scope (conservative behavior = keep).**
+- **Cascading / multi-level collapse:** `detectCascadingCollapseAtRow` (hex_patricia_hashed.go:2412)
+  also emits sibling paths for collapses propagated upward by `fold()`. The branch-vs-ShortNode
+  rule is applied **per sibling path** and is inherently conservative — a cascading survivor
+  that is a `ShortNode` is automatically kept — but this shape is **not** yet covered by a test,
+  so it is a documented known limitation. Safety over minimality holds: an over-drop is still
+  caught by verify, and the rule only drops unambiguous branch nodes.
+- **Extension-node survivor:** a `ShortNode` whose `Val` is a branch (not a leaf) is treated as
+  **load-bearing** (the rule only drops `FullNode`/`DuoNode`), which is correct — `convertToShortNode`
+  merges its key.
+- **3→2 branch shrink (not a collapse):** the tracer fires only when `afterMap` has exactly one
+  remaining child (`bits.OnesCount16 == 1`, hex_patricia_hashed.go:2207); a 3→2 shrink keeps a
+  `DuoNode` and emits **no** sibling path, so it never reaches the filter. Not applicable.
 
 ### Task 3: Implement the collapse-sibling filter in buildWitnessTrie
 
