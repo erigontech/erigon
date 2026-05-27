@@ -18,9 +18,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,17 +35,107 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-type mockBlobSnapshots struct {
-	frozenSlot uint64
-	sidecars   []*cltypes.BlobSidecar
+type frozenBlobSnapshotReader struct {
+	frozenBlobsExclusive uint64
+	sidecars             []*cltypes.BlobSidecar
+	err                  error
 }
 
-func (m mockBlobSnapshots) FrozenBlobs() uint64 { return m.frozenSlot }
-func (m mockBlobSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error) {
-	return m.sidecars, nil
+func (r frozenBlobSnapshotReader) FrozenBlobs() uint64 { return r.frozenBlobsExclusive }
+func (r frozenBlobSnapshotReader) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.sidecars, nil
 }
 
-func TestGetBlobsFrozenSlot(t *testing.T) {
+type blobsTestFixture struct {
+	handler       *ApiHandler
+	slot          uint64
+	versionedHash common.Hash
+}
+
+func TestGetBlobsFromFrozenSnapshots(t *testing.T) {
+	f := setupBlobsTest(t)
+
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
+		frozenBlobsExclusive: f.slot + 1,
+		sidecars: []*cltypes.BlobSidecar{
+			{Index: 0, Blob: cltypes.Blob{1}},
+			{Index: 1, Blob: cltypes.Blob{2}},
+		},
+	}
+
+	out := getBeaconBlobs(t, f)
+
+	require.Len(t, out.Data, 1)
+	require.True(t, strings.HasPrefix(out.Data[0], "0x02"))
+}
+
+func TestGetBlobsEmptyWhenFrozenSidecarsMissing(t *testing.T) {
+	f := setupBlobsTest(t)
+
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{frozenBlobsExclusive: f.slot + 1}
+
+	out := getBeaconBlobs(t, f)
+
+	require.Empty(t, out.Data)
+}
+
+func TestGetBlobsErrorsWhenFrozenSnapshotReadFails(t *testing.T) {
+	f := setupBlobsTest(t)
+
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
+		frozenBlobsExclusive: f.slot + 1,
+		err:                  errors.New("snapshot read failed"),
+	}
+
+	statusCode := getBeaconBlobsStatus(t, f)
+
+	require.Equal(t, http.StatusInternalServerError, statusCode)
+}
+
+type beaconBlobsResponse struct {
+	Data []string `json:"data"`
+}
+
+func getBeaconBlobs(t *testing.T, f blobsTestFixture) beaconBlobsResponse {
+	t.Helper()
+
+	server := httptest.NewServer(f.handler.mux)
+	defer server.Close()
+
+	resp := requestBeaconBlobs(t, server.URL, f)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out beaconBlobsResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	return out
+}
+
+func getBeaconBlobsStatus(t *testing.T, f blobsTestFixture) int {
+	t.Helper()
+
+	server := httptest.NewServer(f.handler.mux)
+	defer server.Close()
+
+	resp := requestBeaconBlobs(t, server.URL, f)
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+func requestBeaconBlobs(t *testing.T, baseURL string, f blobsTestFixture) *http.Response {
+	t.Helper()
+
+	resp, err := http.Get(baseURL + "/eth/v1/beacon/blobs/" + strconv.FormatUint(f.slot, 10) + "?versioned_hashes=" + f.versionedHash.Hex())
+	require.NoError(t, err)
+	return resp
+}
+
+func setupBlobsTest(t *testing.T) blobsTestFixture {
+	t.Helper()
+
 	db, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	block := blocks[0]
 	slot := block.Block.Slot
@@ -54,6 +146,8 @@ func TestGetBlobsFrozenSlot(t *testing.T) {
 	block.Block.Body.BlobKzgCommitments.Append(&commitments[1])
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
+	versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(commitments[1]))
+	require.NoError(t, err)
 
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -62,28 +156,9 @@ func TestGetBlobsFrozenSlot(t *testing.T) {
 	require.NoError(t, beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, blockRoot))
 	require.NoError(t, tx.Commit())
 
-	handler.caplinSnapshots = mockBlobSnapshots{
-		frozenSlot: slot,
-		sidecars: []*cltypes.BlobSidecar{
-			{Index: 0, Blob: cltypes.Blob{1}},
-			{Index: 1, Blob: cltypes.Blob{2}},
-		},
+	return blobsTestFixture{
+		handler:       handler,
+		slot:          slot,
+		versionedHash: versionedHash,
 	}
-
-	vHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(commitments[1]))
-	require.NoError(t, err)
-
-	server := httptest.NewServer(handler.mux)
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/eth/v1/beacon/blobs/" + strconv.FormatUint(slot, 10) + "?versioned_hashes=" + vHash.Hex())
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var out struct {
-		Data []string `json:"data"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
-	require.Len(t, out.Data, 1)
 }
