@@ -109,7 +109,7 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 		return
 	}
 
-	// if Cache is full: on low-hit-ratio nuke, keep
+	// if Cache is full: on low-hit-ratio nuke, on high-hit-ratio keep
 	if c.currentSize.Load()+entrySize > int64(c.capacityB) {
 		hits := c.hits.Load()
 		total := hits + c.misses.Load()
