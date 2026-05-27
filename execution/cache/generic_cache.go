@@ -114,7 +114,11 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 		hits := c.hits.Load()
 		total := hits + c.misses.Load()
 		// low-hit-ratio: nuke, high-hit-ratio: ignore key
-		if total >= nukeMinSamples && hits*100/total < nukeHitRateThreshold {
+		if total < nukeMinSamples {
+			return
+		}
+		hitRate := hits * 100 / total
+		if hitRate < nukeHitRateThreshold {
 			c.Clear()
 			c.hits.Store(0)
 			c.misses.Store(0)
