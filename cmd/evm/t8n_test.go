@@ -104,7 +104,6 @@ func (args *t8nOutput) get() (out []string) {
 }
 
 func TestT8n(t *testing.T) {
-	t.Skip("unstable")
 	tt := new(testT8n)
 	tt.TestCmd = cmdtest.NewTestCmd(t, tt)
 	for i, tc := range []struct {
@@ -254,7 +253,6 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
-	t.Skip("todo: https://github.com/erigontech/erigon/issues/16150")
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
