@@ -104,6 +104,12 @@ func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) {
 		if expected == nil {
 			continue
 		}
+		// Invalid blocks carry a witness (the stateless-verifier input) but are
+		// rejected during import and have no canonical number; RunWithTester
+		// already asserted their rejection, so there is nothing to query here.
+		if test.BlockExpectsException(i) {
+			continue
+		}
 		blockNum, ok := test.BlockNumberForBlock(i)
 		if !ok {
 			t.Fatalf("block index %d has a witness but no parseable block number", i)

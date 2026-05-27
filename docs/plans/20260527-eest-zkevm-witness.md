@@ -193,12 +193,14 @@ Key design decisions:
 
 **Files:** (none — verification)
 
-- [ ] `make test-fixtures-zkevm`
-- [ ] `make lint` — run repeatedly until clean (non-deterministic)
-- [ ] `make erigon integration`
-- [ ] `go test ./execution/tests/eest_zkevm_witness/...` (full corpus, no `-short`)
-- [ ] record actual pass/fail counts; for each failing fixture, record name + failure reason under ⚠️ for user triage (do NOT mute)
-- [ ] report results to the user
+- [x] `make test-fixtures-zkevm` — cached + sha256-verified (`f1d6dbec741e`), 2871 JSON files
+- [x] `make lint` — clean (0 issues), re-run after the runner fix below
+- [x] `make erigon integration` — both binaries built green
+- [x] `go test ./execution/tests/eest_zkevm_witness/...` (full corpus, no `-short`, `-timeout 0`) — ran in ~1083s, serial, fresh MDBX per fixture
+- [x] record actual pass/fail counts; for each failing fixture, record name + failure reason under ⚠️ for user triage (do NOT mute) — see "## Task 8 results" below
+- [x] report results to the user — see final summary
+
+➕ **Runner correctness fix made during this run (not a mute):** the first run produced 972 false failures (`block index N has a witness but no parseable block number`). Root cause: invalid-block fixtures (`expectException`) carry an `executionWitness` (the stateless-verifier *input*) but no canonical `blocknumber`, since the block is rejected on import. `debug_executionWitness` cannot be queried for a non-canonical/rejected block, so comparing it is a category error. Verified across the corpus: 22257 witness-blocks have a `blocknumber`; 972 have none, and **all 972 also carry `expectException`** (0 with neither). `BlockTest.RunWithTester` already asserts those blocks are correctly rejected, so validity coverage is unchanged. Fix: capture `expectException` per block (`WitnessBlockTest.BlockExpectsException`) and skip the witness query for those blocks (the `BlockNumberForBlock` `t.Fatalf` is kept as a genuine safety net for the now-empty "valid block, unparseable number" case). Files: `execution/tests/testutil/witness_block_test_util.go`, `execution/tests/eest_zkevm_witness/witness_test.go`.
 
 ### Task 9: Verify acceptance criteria
 
@@ -215,6 +217,34 @@ Key design decisions:
 - [ ] note any new pattern in `CLAUDE.md` only if genuinely new (likely none — reuses existing machinery)
 - [ ] move this plan to `docs/plans/completed/`
 - [ ] commit message convention: package prefix, e.g. `execution/tests: add zkevm execution-witness suite (zkevm@v0.4.0)`
+
+## Task 8 results (full corpus run — 2026-05-27)
+
+**Headline counts** (post runner-fix run, `/tmp/zkevm_witness_run2.log`):
+
+- Subtests: **15425 PASS / 7107 FAIL** (22532 total).
+- Distinct fixture files with ≥1 failing subtest: **356 of 2871**.
+- Suite is **RED by design** — failures are surfaced, not muted (no `t.Skip`/`Fails`/build-tags/env gates anywhere). Triage is a human decision per CLAUDE.md.
+- Wall time: ~1083s locally (non-`-race`, serial, fresh MDBX per fixture). Relevant to the Task-7 `-race`/60m risk note.
+
+**Failure breakdown by reason** (subtest counts):
+
+| Reason | Count | Nature |
+|---|---|---|
+| `state witness mismatch` | 6825 | Erigon returns a **smaller** state-node set than EEST |
+| `codes witness mismatch` | 1176 | code-set differs |
+| `ExecutionWitness(...) stateless block execution failed` | 54 | `sender not an eoa` — EIP-7702 delegated-EOA sender during stateless re-exec |
+| `headers witness mismatch` | 50 | Erigon returns **fewer** ancestor headers than EEST |
+| `state root mismatch after stateless execution` | 2 | stateless re-exec diverges (EIP-7702 delegation clearing) |
+
+⚠️ **Dominant, systematic finding — witness under-population.** In **all 6825** state-witness mismatches Erigon returns *fewer* trie nodes than EEST expects — never more (mean ≈ 13 fewer; deltas span −1…−76). Codes and headers show the same one-directional shortfall. This is not per-EIP noise and not a comparison-harness artifact (multiset compare is content-correct and order-independent): `debug_executionWitness` builds a **strictly smaller** witness than EEST's canonical stateless witness across nearly every feature (`eip7702`, `eip4844`, `eip6780`, `eip1052`, `eip7928`, `eip8025`, `eip8037`, `eip7708`, …). Most likely a single root cause in the witness builder's node/code/header inclusion policy rather than many independent gaps. **For human triage** (do NOT mute): decide whether Erigon's witness builder must include the additional nodes EEST's stateless verifier requires, or whether EEST's completeness definition differs.
+
+⚠️ **EIP-7702 stateless re-exec failures (56 subtests).** `debug_executionWitness`'s stateless re-execution rejects delegated-EOA senders (`sender not an eoa`) and hits 2 post-exec state-root mismatches. Representative fixtures:
+- `for_amsterdam/prague/eip7702_set_code_tx/set_code_txs_2/pointer_normal.json`
+- `for_amsterdam/prague/eip7702_set_code_tx/set_code_txs_2/call_to_precompile_in_pointer_context.json`
+- `for_amsterdam/prague/eip7702_set_code_tx/set_code_txs/delegation_clearing.json` (state-root mismatch)
+
+**Top failing feature dirs** (distinct files): `eip7702_set_code_tx` (58), `eip4844_blobs/excess_blob_gas` (11), `eip6780_selfdestruct` (13), `eip8025_optional_proofs/*` (37 across subdirs), `eip1052_extcodehash` (7), `eip7928_block_level_access_lists` (8). Full per-dir tally is in the run log.
 
 ## Post-Completion
 

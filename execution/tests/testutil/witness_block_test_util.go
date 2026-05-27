@@ -38,10 +38,12 @@ type WitnessBlockTest struct {
 	BlockTest
 	witnesses    []*ExpectedWitness
 	blockNumbers []string
+	exceptions   []string
 }
 
 type witnessBlockJSON struct {
 	BlockNumber      string           `json:"blocknumber"`
+	ExpectException  string           `json:"expectException"`
 	ExecutionWitness *ExpectedWitness `json:"executionWitness"`
 }
 
@@ -61,9 +63,11 @@ func (wbt *WitnessBlockTest) UnmarshalJSON(in []byte) error {
 	}
 	wbt.witnesses = make([]*ExpectedWitness, len(wj.Blocks))
 	wbt.blockNumbers = make([]string, len(wj.Blocks))
+	wbt.exceptions = make([]string, len(wj.Blocks))
 	for i, b := range wj.Blocks {
 		wbt.witnesses[i] = b.ExecutionWitness
 		wbt.blockNumbers[i] = b.BlockNumber
+		wbt.exceptions[i] = b.ExpectException
 	}
 	return nil
 }
@@ -84,6 +88,17 @@ func (wbt *WitnessBlockTest) BlockNumberForBlock(i int) (uint64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// BlockExpectsException reports whether block index i is a fixture block that
+// is expected to be rejected during import. Such blocks carry an
+// executionWitness (the stateless-verifier input) but no canonical block
+// number, so debug_executionWitness cannot be queried for them.
+func (wbt *WitnessBlockTest) BlockExpectsException(i int) bool {
+	if i < 0 || i >= len(wbt.exceptions) {
+		return false
+	}
+	return wbt.exceptions[i] != ""
 }
 
 // ExpectedWitnessForBlock returns the expected witness for block index i, or
