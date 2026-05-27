@@ -135,7 +135,7 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 		panic(fmt.Sprintf("etl: sortableBuffer size %d exceeds MaxInt32", bufferOptimalSize.Bytes()))
 	}
 	return &sortableBuffer{
-		optimalSize: int(bufferOptimalSize.Bytes()),
+		optimalSize: int(bufferOptimalSize.Bytes()) - (10 * 1024), // reserve some space for last key
 	}
 }
 
