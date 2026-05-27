@@ -849,13 +849,14 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		const blockRange = 30 // ~1 hour
 		const alpha = 2.0 / (blockRange + 1)
 
-		if e.avgMgasSec == 0 || e.avgMgasSec == math.Inf(1) {
-			e.avgMgasSec = mgasPerSec
-		}
-		e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-		// if mgasPerSec or avgMgasPerSec are 0, Inf or -Inf, do not log it but dont return either
-		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && e.avgMgasSec > 0 && e.avgMgasSec != math.Inf(1) {
-			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+		// Gas-weighted EWMA: accumulate gas and time separately.
+		// Near-empty blocks contribute tiny values to both, so they barely move the ratio.
+		e.accumGasMgas = alpha*gasUsedMgas + (1-alpha)*e.accumGasMgas
+		e.accumTimeSec = alpha*totalTime.Seconds() + (1-alpha)*e.accumTimeSec
+		avgMgasSec := e.accumGasMgas / e.accumTimeSec
+		// if mgasPerSec or avgMgasSec are 0, Inf or -Inf, do not log it but dont return either
+		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && avgMgasSec > 0 && avgMgasSec != math.Inf(1) {
+			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", avgMgasSec))
 		}
 	}
 
