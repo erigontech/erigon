@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func stepRebase(cliCtx *cli.Context) error {
@@ -184,6 +185,16 @@ func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor u
 			return nil
 		}
 		matches := re.FindStringSubmatch(path)
+		// Skip v4.0+ files: those encode raw exclusive txnums in the
+		// filename, not step indices. A step-size rebase shouldn't
+		// touch the txnum representation — re-step a v4.0 file by
+		// scaling its numbers would corrupt the meaning. Leave them
+		// alone; step rebase only applies to legacy step-indexed
+		// names. See .claude/plans/20260526-statefile-naming-cleanup.md.
+		major, _, _ := strings.Cut(matches[1], ".")
+		if majorNum, perr := strconv.ParseUint(major, 10, 64); perr == nil && majorNum >= version.TxNumNamingPivot.Major {
+			return nil
+		}
 		from, err := strconv.ParseUint(matches[3], 10, 64)
 		if err != nil {
 			return err

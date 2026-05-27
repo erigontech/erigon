@@ -179,6 +179,17 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			return res, false, false
 		}
 
+		// Version-dispatched coordinate interpretation for state files:
+		//   - v < TxNumNamingPivot (legacy): from/to encode STEP indices
+		//     with exclusive upper bound. Returned as-is.
+		//   - v >= TxNumNamingPivot (v4.0+): from/to encode raw exclusive
+		//     TXNUMS. Returned as-is — the parser doesn't know stepSize
+		//     so it cannot divide; callers that need step coordinates
+		//     dispatch on res.Version themselves (helpers in
+		//     E3SnapSchema.Parse and storage.snapshot do this).
+		// Either way the raw numbers are returned; the semantic
+		// interpretation is the caller's responsibility based on
+		// res.Version. See .claude/plans/20260526-statefile-naming-cleanup.md.
 		res.From, res.To, res.TypeString = uint64(from), uint64(to), typeString
 		res.Type, ok = ParseFileType(typeString)
 		if ok {

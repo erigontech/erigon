@@ -2356,9 +2356,16 @@ func (d *Downloader) getExistingSnapshotTorrent(name string, infoHash metainfo.H
 	}
 	t, ok = d.torrentClient.Torrent(infoHash)
 	if ok {
-		// This is *really* unlikely. You would have to get the name wrong somehow, or generate a
-		// SHA1 collision.
-		err = fmt.Errorf("snapshot exists with a different name: %q", t.Name())
+		// Two legitimate non-error sources of a same-infohash-different-name
+		// collision: (1) a SHA1 collision (cryptographically infeasible),
+		// (2) a state-file naming-convention bump that produces the same
+		// bytes under a renamed file (e.g. v1.0-accounts.0-1.kv ↔
+		// v4.0-accounts.0-1000.kv per the v4.0 cutover — see
+		// .claude/plans/20260526-statefile-naming-cleanup.md). Either
+		// way the bytes are already loaded under the existing name;
+		// surfacing both names lets the operator decide whether to rename
+		// the legacy file on disk or accept the duplication.
+		err = fmt.Errorf("snapshot exists with a different name: existing=%q requested=%q (possible naming-convention drift — see statefile-naming-cleanup plan)", t.Name(), name)
 	}
 	return
 }

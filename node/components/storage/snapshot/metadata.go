@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // ValidateMetadata is the Tier-0 per-file invariant check, applied
@@ -124,9 +125,28 @@ func PopulateFromName(entry *FileEntry) bool {
 
 	// State files (have a Domain, derived from typeString):
 	// populate the STEP axis. snaptype's parser yields step units
-	// directly for these.
+	// directly for legacy versions (v < TxNumNamingPivot); v4.0+
+	// files encode raw txnums in the filename which need a stepSize
+	// to convert into step indices.
+	//
+	// PopulateFromName doesn't carry a stepSize and the storage layer
+	// doesn't have one in scope here — for v4.0+ state files leave
+	// FromStep/ToStep at zero (the same "axis unknown" sentinel block
+	// files use until a commitment binding maps them). Callers that
+	// produce v4.0+ files and need accurate FromStep/ToStep use
+	// PopulateFromNameWithStepSize. Today no production path produces
+	// v4.0 state files (per
+	// .claude/plans/20260526-statefile-naming-cleanup.md the v4.0
+	// machinery is dormant pending fork/unwind activation), so the
+	// zero-axis fallback is observable only when fork/unwind tooling
+	// switches over.
 	if entry.Domain != "" {
 		if entry.FromStep == 0 && entry.ToStep == 0 && info.To > 0 {
+			if info.Version.GreaterOrEqual(version.TxNumNamingPivot) {
+				// v4.0+: raw txnums, can't safely fill step axis without
+				// stepSize. Leave at zero.
+				return populated
+			}
 			entry.FromStep = info.From
 			entry.ToStep = info.To
 			populated = true
@@ -139,6 +159,65 @@ func PopulateFromName(entry *FileEntry) bool {
 	// block units (multiplied ×1000 internally) for these.
 	// FromStep/ToStep stay zero — explicitly "step unknown" until a
 	// commitment binding establishes it.
+	if info.To > 0 && entry.FromBlock == 0 && entry.ToBlock == 0 {
+		entry.FromBlock = info.From
+		entry.ToBlock = info.To
+		populated = true
+	}
+	return populated
+}
+
+// PopulateFromNameWithStepSize is the v4.0-aware variant of
+// PopulateFromName. For v >= TxNumNamingPivot state files it divides
+// the filename's raw txnum range by stepSize to derive FromStep/ToStep
+// (the file's natural unit is then the step). Legacy files take the
+// same path as PopulateFromName.
+//
+// Callers that handle v4.0 state files (fork/unwind tooling once
+// activated) must use this entry point. PopulateFromName remains the
+// legacy-only path and leaves FromStep/ToStep at zero for v4.0+ files
+// so the misclassification can't happen silently.
+//
+// stepSize == 0 is rejected with `populated = false` — without
+// stepSize the v4.0 dispatch can't proceed.
+func PopulateFromNameWithStepSize(entry *FileEntry, stepSize uint64) bool {
+	if entry == nil || entry.Name == "" {
+		return false
+	}
+	info, _, _ := snaptype.ParseFileName("", entry.Name)
+	populated := false
+
+	if entry.Kind == "" {
+		if k, ok := InferKind(entry.Name); ok {
+			entry.Kind = k
+			populated = true
+		}
+	}
+	if entry.Domain == "" {
+		if domain := domainFromTypeString(info.TypeString); domain != "" {
+			entry.Domain = domain
+			populated = true
+		}
+	}
+
+	if entry.Domain != "" {
+		if entry.FromStep == 0 && entry.ToStep == 0 && info.To > 0 {
+			from, to := info.From, info.To
+			if info.Version.GreaterOrEqual(version.TxNumNamingPivot) {
+				if stepSize == 0 {
+					// Can't divide by zero — leave the axis unset.
+					return populated
+				}
+				from /= stepSize
+				to /= stepSize
+			}
+			entry.FromStep = from
+			entry.ToStep = to
+			populated = true
+		}
+		return populated
+	}
+
 	if info.To > 0 && entry.FromBlock == 0 && entry.ToBlock == 0 {
 		entry.FromBlock = info.From
 		entry.ToBlock = info.To
