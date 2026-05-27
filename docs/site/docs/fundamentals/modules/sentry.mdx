@@ -20,7 +20,7 @@ Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of ot
 
 The ETH core interacts with the Ethereum p2p network through the Sentry component. Sentry provides a simple interface to the core, with functions to download data, receive notifications about gossip messages, upload data on request from peers, and broadcast gossip messages either to a selected set of peers or to all peers.
 
-## Running with an external Sentry or multiple Sentries
+## Running with an external sentry or multiple sentries
 
 It is possible to have multiple Sentry to increase connectivity to the network or to obscure the location of the core computer. In this case it is necessary to define address and port of each Sentry that should be connected to the Core.
 
@@ -65,7 +65,7 @@ Where `value` is comma separated sentry addresses `<host>:<port>,<host>:<port>`.
 
 For other information regarding Sentry functionality, configuration, and usage, please refer to the embedded file you can find in your compiled Erigon folder at `./cmd/sentry/README.md`.
 
-### Command Line Options
+### Command line options
 
 To display available options for Sentry digit:
 
@@ -75,7 +75,7 @@ To display available options for Sentry digit:
 
 The `--help` flag listing is reproduced below for your convenience.
 
-```
+```text
 Run p2p sentry
 
 Usage:

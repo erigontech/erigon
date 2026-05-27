@@ -26,7 +26,7 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 * `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
-### PeerDAS Data Column Retention
+### PeerDAS data column retention
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
@@ -34,7 +34,7 @@ For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sideca
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
-## Beacon API Configuration
+## Beacon API configuration
 
 When Caplin is running, it exposes a Beacon API that external tools can query. The following flags control the Beacon API server:
 

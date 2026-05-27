@@ -15,26 +15,26 @@ The debug namespace must be explicitly enabled using the `--http.api=debug` flag
 The `debug` namespace is intended for debugging and development purposes, not for production use.
 :::
 
-#### Security and Access Control
+#### Security and access control
 
 * Debug methods are considered private and should not be exposed on public RPC endpoints;
 * These methods can consume significant resources and should be used carefully in production environments;
 * Access should be restricted to trusted operators and developers only.
 
-#### Performance Considerations
+#### Performance considerations
 
 * Tracing methods (`debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceTransaction`, `debug_traceCall`, `debug_traceCallMany`) support streaming for large results to reduce memory usage
 * The `AccountRangeMaxResults` constant limits account range queries to 8192 results, or 256 when storage is included;
 * Memory and GC control methods allow fine-tuning of node performance.
 * Some methods like `debug_accountRange` have compatibility layers for both Geth and legacy Erigon parameter formats `debug_api`
 
-#### Integration with Erigon Architecture
+#### Integration with Erigon architecture
 
 * Debug methods leverage Erigon's temporal database for historical state access;
 * The implementation uses `kv.TemporalRoDB` for efficient historical queries;
 * Tracing functionality integrates with Erigon's execution engine and EVM implementation.
 
-#### Usage in Development and Testing
+#### Usage in development and testing
 
 * These methods are essential for debugging transaction execution issues;
 * Storage range methods help analyze contract state changes;

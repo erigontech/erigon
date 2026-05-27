@@ -10,30 +10,30 @@ The `txpool` namespace provides methods for inspecting and managing the transact
 
 The txpool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
 
-### Transaction Pool Architecture
+### Transaction pool architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
 * Transaction pool methods communicate via gRPC with the txpool service when running in external mode
 
-### Implementation Details
+### Implementation details
 
 * The `TxPoolAPIImpl` uses a `proto_txpool.TxpoolClient` to communicate with the transaction pool service
 * All transactions are decoded from RLP format and converted to `ethapi.RPCTransaction` objects for JSON-RPC responses
 * The implementation handles transaction categorization based on the `TxnType` field from the pool service
 
-### External vs Internal Mode
+### External vs internal mode
 
 * **Internal Mode**: Transaction pool runs within the main Erigon process (default configuration)
 * **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external sentry service and provides better resource isolation
 
-### Usage in Development and Testing
+### Usage in development and testing
 
 * These methods are commonly used for monitoring transaction submission and pool state
 * The `txpool_status` method provides quick insight into pool health and congestion
 * Transaction pool content methods help debug why transactions may not be getting mined
 
-### Configuration and Limits
+### Configuration and limits
 
 * Transaction pool limits can be configured via flags like `--txpool.globalslots`, `--txpool.globalbasefeeslots`, and `--txpool.globalqueue`
 * The pool supports various transaction types including blob transactions with separate limits

@@ -11,18 +11,18 @@ sidebar_position: 3
 **Information**: The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 :::
 
-## 1. Prerequisites Check
+## 1. Prerequisites check
 
 1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired sync mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
 
-## 2. Configure and Launch Erigon
+## 2. Configure and launch Erigon
 
 Follow these steps to configure and launch the All-in-One Client with the Heimdall endpoint.
 
-### **A. Create the Configuration File**
+### **A. Create the configuration file**
 
 Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
 
@@ -58,11 +58,11 @@ services:
 ⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
 :::
 
-### **B. Launch the Node and Monitor Progress**
+### **B. Launch the node and monitor progress**
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```
+```text
 docker compose up
 ```
 

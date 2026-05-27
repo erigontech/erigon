@@ -31,7 +31,7 @@ Flags are passed directly to the `erigon` binary at startup. Each flag starts wi
 
 Flags can be combined freely, providing a high degree of customization. Here's a breakdown of the most important flags:
 
-### General Options
+### General options
 
 These flags cover the general behavior and configuration of the Erigon client.
 
@@ -62,7 +62,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--persist.receipts, --experiment.persist.receipts.v2`: Downloads historical receipts.
   * Default: `true` for minimal and full nodes, `false` for archive nodes
 
-### Database and Caching
+### Database and caching
 
 These flags control database performance and memory usage.
 
@@ -87,7 +87,7 @@ These flags control database performance and memory usage.
 * `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting in `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `"Inf"` to leave the domain merge unbounded.
   * Default: unset (the value from `erigondb.toml` is used)
 
-### Pruning and Snapshots
+### Pruning and snapshots
 
 Flags for managing how old chain data is handled and stored.
 
@@ -108,7 +108,7 @@ Flags for managing how old chain data is handled and stored.
 * `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
 
-### Transaction Pool (TxPool)
+### Transaction pool (TxPool)
 
 Options for configuring the transaction pool.
 
@@ -140,7 +140,7 @@ Options for configuring the transaction pool.
 * `--txpool.gossip.disable`: Disables P2P gossip of transactions.
   * Default: `false`
 
-### Network and Peers
+### Network and peers
 
 These flags manage network connectivity, peer discovery, and traffic control.
 
@@ -276,7 +276,7 @@ Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP 
 * `--mcp.port value`: The MCP server listening port.
   * Default: `8553`
 
-### Logging and Profiling
+### Logging and profiling
 
 Flags for controlling logging and performance profiling.
 
@@ -315,7 +315,7 @@ Flags for controlling logging and performance profiling.
 * `--metrics.port value`: The metrics HTTP server listening port.
   * Default: `6061`
 
-### Consensus and Forks
+### Consensus and forks
 
 Flags related to consensus mechanisms and network forks.
 
@@ -363,7 +363,7 @@ Flags for configuring the Sentry component.
 
 Here is the rewritten and merged Downloader section, combining the two original sections and ensuring consistent formatting:
 
-### Downloader and Synchronization
+### Downloader and synchronization
 
 These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
 
@@ -400,7 +400,7 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
 
-### Fork Choice Update (FCU)
+### Fork choice update (FCU)
 
 Flags for configuring Fork Choice Update behavior.
 
@@ -411,7 +411,7 @@ Flags for configuring Fork Choice Update behavior.
 * `--fcu.background.commit`: Enables background flush and commit after FCU.
   * Default: `false`
 
-### Caplin (Consensus Layer)
+### Caplin (consensus layer)
 
 Flags for configuring the Caplin consensus layer.
 
@@ -460,7 +460,7 @@ Flags for configuring the Caplin consensus layer.
 * `--caplin.use-engine-api`: Uses the Engine API for internal Caplin.
   * Default: `false`
 
-### Shutter Network Encrypted Transactions
+### Shutter Network encrypted transactions
 
 Flags for configuring the Shutter Network encrypted transactions mempool.
 
@@ -520,7 +520,7 @@ http = true
 
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
-### Core Environment Variables
+### Core environment variables
 
 **Database and Performance:**
 
@@ -541,7 +541,7 @@ Erigon supports configuration through environment variables, primarily for exper
 * `EXEC3_WORKERS` - Sets number of execution workers
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
-### Memory and Debugging Variables
+### Memory and debugging variables
 
 **Memory Management:**
 
@@ -555,15 +555,15 @@ Erigon supports configuration through environment variables, primarily for exper
 * `TRACE_BLOCKS` - Comma-separated list of block numbers to trace
 * `TRACE_INSTRUCTIONS` - Enables instruction-level tracing
 
-### Docker Environment Variables
+### Docker environment variables
 
 When running Erigon in Docker, you can configure user permissions and data directories:
 
-* `DOCKER_UID` - The UID of the docker user
-* `DOCKER_GID` - The GID of the docker user
+* `DOCKER_UID` - The UID of the Docker user
+* `DOCKER_GID` - The GID of the Docker user
 * `XDG_DATA_HOME` - The data directory mounted to containers
 
-### Usage Examples
+### Usage examples
 
 **Basic Performance Tuning:**
 

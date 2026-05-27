@@ -36,7 +36,7 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | ------ | ---- | ------- |
 | Amoy\* | amoy | 80002   |
 
-### Gnosis Chain Testnets
+### Gnosis Chain testnets
 
 | Chain  | Tag    | ChainId |
 | ------ | ------ | ------- |

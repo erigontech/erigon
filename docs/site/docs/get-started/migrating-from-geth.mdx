@@ -9,7 +9,7 @@ import TabItem from '@theme/TabItem';
 
 # Migrating from Geth
 
-### Migration Paths: Choosing Your Erigon Setup
+### Migration paths: Choosing your Erigon setup
 
 When moving from another Execution Layer (EL) such as Geth, Nethermind, Reth or Besu to Erigon, node runners have a primary choice regarding their Consensus Layer (CL) setup:
 
@@ -18,7 +18,7 @@ When moving from another Execution Layer (EL) such as Geth, Nethermind, Reth or 
 
 The recommended approach involves running and syncing an **Erigon node alongside your existing Execution Layer (EL) client (like Geth)**. This allows for full functional verification, thorough testing, and a transition with **zero downtime**. Since Erigon requires **less disk space** than most clients, running both in parallel is practical for the duration of the migration.
 
-#### Choosing Your Migration Strategy
+#### Choosing your migration strategy
 
 * [Option 1](#option-1-sync-erigon-alongside-geth-and-its-cl): If you run a critical process and have enough disk space, syncing Erigon alongside Geth or any other EL is the recommended choice, and is essential for validators and RPC providers.
   * If disk space is limited and downtime is not an option, consider syncing Erigon on a separate machine.
@@ -30,7 +30,7 @@ The recommended approach involves running and syncing an **Erigon node alongside
 | Public RPC Providers                                            | [Option 1](#option-1-sync-erigon-alongside-geth-and-its-cl): Sync Alongside Geth or any EL                   | Guarantees zero service interruption for users.      |
 | Home Users / Standard Node Runners with no critical utilization | [Option 2](#option-2-remove-old-el-and-sync-erigon-downtime-accepted): Remove Geth or any EL and Sync Erigon | The fastest method if downtime is accepted.          |
 
-### Option 1: Sync Erigon Alongside Geth and its CL
+### Option 1: Sync Erigon alongside Geth and its CL
 
 You can choose whether to migrate to Erigon + Caplin (the simplest setup) or continue using your existing CL.
 
@@ -80,7 +80,7 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 </TabItem>
 </Tabs>
 
-### Option 2: Remove Old EL and Sync Erigon (Downtime Accepted)
+### Option 2: Remove old EL and sync Erigon (downtime accepted)
 
 This is the simplest option as it requires no configuration adjustments. However, the node will be down until Erigon finishes syncing.
 

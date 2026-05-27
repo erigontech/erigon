@@ -6,13 +6,13 @@ sidebar_position: 18
 
 # Docker Compose
 
-#### Understanding File Permissions
+#### Understanding file permissions
 
 When Erigon runs inside a Docker container and creates files (like its data directory), those files need to be accessible to your local user account on your host machine.
 
 The potential issue is that Docker often creates these files with a default User ID (UID) of `1000`. If this doesn't match your host machine's UID, you may run into permission issues when trying to access, modify, or delete the data directory from your host machine.
 
-#### The Solution: Using Your Host UID
+#### The solution: Using your host UID
 
 To prevent these problems, you can run the Docker container using your local operating system's User ID (UID).
 
@@ -24,7 +24,7 @@ If you are encountering permission issues, you can find your user ID using this 
 id -u
 ```
 
-#### Example Run
+#### Example run
 
 To use a specific UID, like `1205`, and mount a host data directory (`/erigon-data`) into the container, use the `--user` flag:
 
@@ -40,13 +40,13 @@ docker run \
 
 In this example, the Erigon process inside the container will run as user `1205` and the contents of the host directory `/erigon-data` will be written and owned by user `1205` on your host OS.
 
-### Environment Variables
+### Environment variables
 
 There is a `.env.example` file in the root of the repo.
 
 Copy
 
-```
+```text
 * DOCKER_UID - The UID of the docker user
 
 * DOCKER_GID - The GID of the docker user
@@ -60,7 +60,7 @@ A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory cr
 
 #### Check: Permissions
 
-In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
+In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in Docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
 
 If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -104,4 +104,4 @@ sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${E
 
 `makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
 
-If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+If your Docker installation requires the Docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running Docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).

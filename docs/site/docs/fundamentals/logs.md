@@ -12,16 +12,16 @@ Erigon features a sophisticated logging framework that offers detailed visibilit
 The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.
 
 :::tip
-Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
+Erigon offers a `--metrics` flag for using Prometheus/Grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
 :::
 
-## Logging Framework Architecture
+## Logging framework architecture
 
-### Core Logging System
+### Core logging system
 
 Erigon implements a custom logging framework that supports structured logging with key-value pairs and multiple output handlers.
 
-### Configuration Options
+### Configuration options
 
 Erigon provides extensive logging configuration through command-line flags. Key configuration options include:
 
@@ -44,7 +44,7 @@ The logging system defines six distinct log levels in hierarchical order:
 
 The log level is set by using the `--verbosity` flag, for example:
 
-```
+```text
 ./build/bin/erigon --verbosity=1
 ```
 
@@ -52,9 +52,9 @@ The log level is set by using the `--verbosity` flag, for example:
 
 The core Logger interface provides methods for each log level and supports contextual logging.
 
-## Staged Synchronization Architecture
+## Staged synchronization architecture
 
-### Stage Definitions
+### Stage definitions
 
 Erigon's synchronization process is organized into sequential stages, each handling specific aspects of blockchain data processing.
 
@@ -69,13 +69,13 @@ The primary synchronization stages include:
 * **TxLookup**: Generates transaction lookup indices. This indexing is essential for quickly finding transaction by its hash, significantly improving the performance of transaction-related RPC calls.
 * **Finish**: The finalization stage of the sync process. This is the point where the node sends out notifications to subscribers about the new blockchain head, ensuring other components and external applications are instantly aware of the latest block.
 
-### Stage Progress Tracking
+### Stage progress tracking
 
 Each stage maintains progress information in the database, allowing for resumable synchronization.
 
-## Log Message Structure
+## Log message structure
 
-### Structured Logging Format
+### Structured logging format
 
 All log messages follow a consistent structured format with key-value pairs for machine parsing and human readability.
 
@@ -86,7 +86,7 @@ All log messages follow a consistent structured format with key-value pairs for 
 * Message (msg)
 * Contextual key-value pairs
 
-### Prefix System
+### Prefix system
 
 The sync engine uses a sophisticated prefix system to identify stage context.
 

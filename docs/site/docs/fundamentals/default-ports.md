@@ -28,7 +28,7 @@ To ensure proper P2P functionality for both the Execution and Consensus layers u
 * Regularly audit your firewall rules to ensure they are aligned with your infrastructure needs;
 * Use monitoring tools like Prometheus or Grafana to track P2P communication metrics.
 
-## Command-Line Switches for Network and Port Configuration
+## Command-line switches for network and port configuration
 
 Here is a comprehensive list of port-related options:
 
@@ -71,7 +71,7 @@ The embedded MCP server is enabled by default. To disable it, pass `--mcp.disabl
 
 * `--diagnostics.endpoint.port [value]`: Diagnostics HTTP server listening port (default: `6062`)
 
-## Shutter Network Default Ports
+## Shutter Network default ports
 
 The default peering port for Shutter is `23102` (TCP), to change it use `--shutter.p2p.listen.port <value>`.
 

@@ -12,13 +12,13 @@ For API usage refer to the below official resources:
 
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 
-### Implementation Details
+### Implementation details
 
 * The web3 namespace is implemented in `Web3APIImpl` which extends `BaseAPI` and uses the `ethBackend` for client version information
 * The `web3_sha3` method uses Erigon's crypto library implementation of Keccak-256, which is the same hashing algorithm used throughout Ethereum
 * Both methods are lightweight utility functions that don't require complex blockchain state access
 
-### Usage Considerations
+### Usage considerations
 
 * `web3_clientVersion` is often used by applications to identify the Ethereum client type and version for compatibility checks
 * `web3_sha3` provides the same Keccak-256 hashing that's used for Ethereum addresses, transaction hashes, and other cryptographic operations in the protocol

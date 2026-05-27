@@ -15,13 +15,13 @@ For API usage refer to the below official resources:
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 * [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
-#### Default Erigon Behavior (Caplin)
+#### Default Erigon behavior (Caplin)
 
 By default, Erigon runs its own embedded consensus layer client, Caplin. For optimized performance, Caplin bypasses the Engine API and uses direct internal calls to communicate with Erigon's execution layer.
 
 You can optionally force Caplin to use the Engine API interface by setting the `--caplin.use-engine-api` flag. When this flag is active, Caplin connects via the same [JWT](../fundamentals/jwt)-authenticated HTTP endpoint used by external CL clients.
 
-#### Engine API Functionality
+#### Engine API functionality
 
 When in use (with external CL clients), the Engine API provides essential methods for Proof-of-Stake operations:
 
@@ -31,7 +31,7 @@ When in use (with external CL clients), the Engine API provides essential method
 * Payload Bodies: `engine_getPayloadBodiesByHashV1` and `engine_getPayloadBodiesByRangeV1` fetch historical data.
 * Blob Retrieval: `engine_getBlobsV1/V2/V3` retrieves blobs by versioned hash, with V3 adding support for PeerDAS data columns.
 
-#### Configuration and Security
+#### Configuration and security
 
 For security, the Engine API listens on port 8551 by default and requires JWT authentication.
 

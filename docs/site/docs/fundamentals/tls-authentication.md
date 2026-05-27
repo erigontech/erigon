@@ -34,7 +34,7 @@ Make sure you have [openssl](https://openssl-library.org/source/) installed.
 
 Normally, the "client side" (in our case, the RPCdaemon) will check that the server's host name matches the "Common Name" attribute of the "server" certificate. At this time, this check is disabled and will be re-enabled when the instructions above on how to correctly generate Common Name certificates are updated. For example, if you are running the Erigon instance in the Google Cloud, you will need to specify the internal IP in the `-private.api.addr` option. You will also need to open the firewall on the port you use to connect to the Erigon instances.
 
-## 1. Generating the key pair for the Certificate Authority (CA)
+## 1. Generating the key pair for the certificate authority (CA)
 
 Generate the CA key pair using Elliptic Curve (as opposed to RSA). The generated CA key will be in the `CA-key.pem` file.
 

@@ -15,7 +15,7 @@ Erigon is mainly operated through the command line. The commands may vary based 
 <TabItem value="pre-built-binaries" label="Pre-Built Binaries">
 Open your terminal and simply start Erigon with the command:
 
-```
+```text
 erigon [options]
 ```
 </TabItem>
@@ -28,7 +28,7 @@ erigon [options]
 <TabItem value="built-from-source" label="Built from Source">
 Open your terminal and move to the directory where you installed Erigon
 
-```
+```text
 cd erigon
 ```
 
@@ -83,7 +83,7 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
  --torrent.download.rate=512mb
 ```
 
-### Flags of Interest
+### Flags of interest
 
 *   Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, use the flag:
 
@@ -110,7 +110,7 @@ Once your node is running, there are two ways to confirm it is making progress a
 
 Erigon's logs are organized by [staged sync](logs#staged-synchronization-architecture). Every log line emitted by the sync engine is prefixed with the current stage and its position in the pipeline. For example:
 
-```
+```text
 INFO[02-20|15:00:00.123] [4/8 Bodies] Downloading block bodies   block=18234567 ...
 ```
 
@@ -145,7 +145,7 @@ make help
 
 This command will display a list of convenience commands available in the Makefile, along with their descriptions.
 
-```
+```text
  go-version:                        print and verify go version
  validate_docker_build_args:        ensure docker build args are valid
  docker:                            validate, update submodules and build with docker

@@ -14,7 +14,7 @@ To use an external Consensus Layer (CL) it is necessary to add to Erigon the fla
 
 Once you have Erigon and a CL client up and running, you can proceed to set up a Validator Client (VC). The VC is responsible for managing your keys and signing valid blocks.
 
-## Getting Started with a Validator Client
+## Getting started with a validator client
 
 To set up a VC, follow the instructions provided in the official documentation, such as:
 

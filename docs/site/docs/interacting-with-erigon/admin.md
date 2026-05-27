@@ -10,13 +10,13 @@ The `admin` namespace provides administrative methods for managing the Erigon no
 
 The admin namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. For security reasons, it's recommended not to include `admin` in the API list for public RPC endpoints.
 
-### Security Considerations
+### Security considerations
 
 * The admin namespace provides administrative functions that should not be exposed on public RPC endpoints
 * When configuring public RPC access, explicitly exclude `admin` from the `--http.api` flag to prevent unauthorized access
 * These methods can affect node connectivity and should only be used by trusted operators
 
-### Usage in Testing and Development
+### Usage in testing and development
 
 * Admin methods are commonly used in automated testing environments for peer management
 * The docker-compose configuration for automated testing includes the admin namespace in the API list for testing purposes
@@ -28,7 +28,7 @@ The admin namespace must be explicitly enabled using the `--http.api` flag when 
 * All admin methods are available on both HTTP and WebSocket connections
 * Some admin methods may require the node to be running with specific network configurations
 
-### Integration with P2P Network
+### Integration with P2P network
 
 * Admin methods interact directly with Erigon's P2P networking layer
 * Peer management operations may take time to complete as they involve network operations

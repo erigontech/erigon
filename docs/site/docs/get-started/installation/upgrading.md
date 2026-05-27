@@ -9,13 +9,13 @@ sidebar_position: 1
 
 Updating to the latest version of Erigon gives you access to the latest features and ensures optimal performance and stability.
 
-## General Recommendations Before Upgrade
+## General recommendations before upgrade
 
 * **Read Release Notes**: Carefully review the [Release Notes](https://github.com/erigontech/erigon/releases) for breaking changes and new features relevant to your setup.
 * **Terminate your Erigon**: End your current Erigon session by pressing `CTRL+C`.
 * **Backup**: Always back up your `datadir` before performing major upgrades.
 
-## Managing your Data
+## Managing your data
 
 Erigon 3.1 introduces a new snapshot format while continuing to support the old one. This means that new releases are fully compatible with your existing data. However, users who want the latest data files and data-specific fixes can perform an **optional** manual data upgrade:
 
@@ -24,7 +24,7 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 3. To initiate the data upgrade, use the following command: `./build/bin/erigon snapshots reset --datadir /your/datadir`.
 4. Run Erigon, it will reuse existing data and sync only newer snapshots.
 
-### Snapshots Upgrade Options
+### Snapshots upgrade options
 
 * `erigon update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
 * `erigon snapshots reset --datadir /your/datadir`: this command removes all old snapshots that have had performance improvements.
@@ -49,7 +49,7 @@ While this dual-versioning system may seem complex, it is a deliberate design ch
 
 </details>
 
-### Snapshots Downgrade Options
+### Snapshots downgrade options
 
 If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should follow these instructions for downgrading:
 
@@ -62,7 +62,7 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 3. `git checkout v3.0.x` to checkout to preferred `3.0` version. For example now latest: `git checkout v3.0.15`
 4. Run your old version of Erigon.
 
-## Upgrading your Erigon Installation
+## Upgrading your Erigon installation
 
 Follow the below instructions depending on your installation method:
 
@@ -70,7 +70,7 @@ Follow the below instructions depending on your installation method:
 * [Docker](#docker)
 * [Compiled source code](#compiled-from-source)
 
-### Pre-built Binaries (only Linux and MacOS)
+### Pre-built binaries (only Linux and macOS)
 
 Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#install-prebuilt) and reinstall it, no other operation needed.
 

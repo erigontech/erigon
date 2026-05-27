@@ -10,23 +10,23 @@ Erigon provides gRPC APIs that allow users to access blockchain data and service
 
 The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like txpool, downloader, and sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
 
-### Performance Considerations
+### Performance considerations
 
 * gRPC APIs provide better performance than JSON-RPC for high-throughput applications
 * Direct database access via KV interface offers the fastest data retrieval
 * Shared memory access (when running locally) provides optimal performance
 
-### Data Format and Buckets
+### Data format and buckets
 
 Database bucket names and their formats are documented in `db/kv/tables.go`. Understanding these structures is essential for effective use of the KV interface.
 
-### Network Access
+### Network access
 
 * gRPC services can be accessed over the network when properly configured
 * TLS encryption is recommended for production deployments
 * Rate limiting can be configured via `--private.api.ratelimit` flag
 
-### Integration Libraries
+### Integration libraries
 
 Erigon provides Go, Rust, and C++ implementations of the RoKV (read-only key-value) interface for easy integration with applications.
 
@@ -113,7 +113,7 @@ The TxPool interface provides access to transaction pool operations and status i
 
 ***
 
-## **Downloader Interface**
+## **Downloader interface**
 
 The Downloader interface provides access to snapshot downloading and torrent management functionality.
 
@@ -128,11 +128,11 @@ The Downloader interface provides access to snapshot downloading and torrent man
 
 ***
 
-## Polygon Bridge Backend gRPC API
+## Polygon bridge backend gRPC API
 
 These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism and are only active when running Erigon with Polygon network configuration. The services provide essential functionality for bridge event processing and validator management required by the Polygon network architecture.
 
-### Bridge Backend Methods
+### Bridge backend methods
 
 **Version Method:**
 
@@ -146,18 +146,18 @@ These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism 
 
 * `BorEvents(BorEventsRequest)` - Retrieves bridge events for a specific block.
 
-### Bridge Backend Implementation
+### Bridge backend implementation
 
 The server implementation is found in `polygon/bridge/server.go` where the `BackendServer` struct implements the `BridgeBackendServer` interface:
 
 * The `BorTxnLookup` method implementation shows how it handles transaction lookups.
 * The `BorEvents` method retrieves bridge events for a given block.
 
-## Heimdall Backend gRPC API
+## Heimdall backend gRPC API
 
 The Heimdall Backend service provides APIs for validator and consensus-related functionality.
 
-### Heimdall Backend Methods
+### Heimdall backend methods
 
 **Version Method:**
 
@@ -167,7 +167,7 @@ The Heimdall Backend service provides APIs for validator and consensus-related f
 
 * `Producers(BorProducersRequest)` - Retrieves validator/producer information for a specific block.
 
-## Service Integration
+## Service integration
 
 Both services are integrated into the main Ethereum backend when Bor consensus is configured. In the main backend initialization, you can see how these services are set up.
 
@@ -175,7 +175,7 @@ The Bridge and Heimdall services are created with their respective RPC servers.
 
 ***
 
-## Configuration and Security
+## Configuration and security
 
 ### TLS Configuration
 
@@ -186,7 +186,7 @@ Erigon supports TLS encryption for gRPC connections using certificate files:
 ```
 
 
-### Health Checks
+### Health checks
 
 gRPC health checks can be enabled to monitor service availability:
 
@@ -194,7 +194,7 @@ gRPC health checks can be enabled to monitor service availability:
 ./build/bin/rpcdaemon --grpc --grpc.healthcheck
 ```
 
-### Connection Examples
+### Connection examples
 
 **Go Client Example**
 

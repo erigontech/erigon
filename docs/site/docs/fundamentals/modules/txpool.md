@@ -68,7 +68,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
 * `--pprof.addr 0.0.0.0`: This flag sets the address for the pprof HTTP server (default: `127.0.0.1`). The pprof server is used for profiling and debugging Erigon. By setting this flag to `0.0.0.0`, the pprof server is made accessible from outside the local machine.
 
-## Command Line Options
+## Command line options
 
 To display available options for Txpool digit:
 
@@ -78,7 +78,7 @@ To display available options for Txpool digit:
 
 The `--help` flag listing is reproduced below for your convenience.
 
-```
+```text
 ./build/bin/txpool --help
 Launch external Transaction Pool instance - same as built-into Erigon, but as independent Process
 

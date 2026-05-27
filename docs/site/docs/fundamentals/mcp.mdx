@@ -17,7 +17,7 @@ Erigon ships a full MCP server implementation. Once connected, an AI assistant g
 MCP is a read-only interface: the server exposes query tools only. No write operations (sending transactions, changing state) are available.
 :::
 
-## Two Server Variants
+## Two server variants
 
 Erigon provides two ways to run the MCP server:
 
@@ -77,7 +77,7 @@ opening the port. If you are running multiple Erigon instances on the same machi
 | `--sse.addr` | `127.0.0.1:8553` | SSE listen address (when `--transport sse`) |
 | `--log.dir` | — | Path to Erigon log directory (enables log analysis tools) |
 
-## Connection Modes (standalone)
+## Connection modes (standalone)
 
 The standalone `mcp` binary supports three connection modes, tried in priority order:
 
@@ -96,7 +96,7 @@ Forwards tool calls to a running Erigon node's HTTP JSON-RPC endpoint. Works wit
 ./build/bin/mcp --port 8545 --log.dir /data/erigon/logs
 ```
 
-### 2. Direct Datadir Access
+### 2. Direct datadir access
 
 Opens Erigon's MDBX database directly — similar to an external `rpcdaemon`. Requires either a running Erigon instance with the gRPC private API, or read-only local disk access.
 
@@ -116,9 +116,9 @@ When started without flags, the binary probes `localhost:8545`, `8546`, and `854
 ./build/bin/mcp
 ```
 
-## Use Cases
+## Use cases
 
-### Interactive Blockchain Analysis
+### Interactive blockchain analysis
 
 Connect your AI assistant to a running Erigon node and ask natural-language questions about on-chain data without writing a single line of code.
 
@@ -134,7 +134,7 @@ Connect your AI assistant to a running Erigon node and ask natural-language ques
 >
 > The assistant calls `eth_getBlockByNumber` and `eth_getBlockReceipts`, sorts by gas used, and returns the top offenders with links to the relevant hashes.
 
-### Node Debugging and Monitoring
+### Node debugging and monitoring
 
 When something looks wrong with your node, ask the assistant to sift through logs and metrics for you.
 
@@ -146,7 +146,7 @@ When something looks wrong with your node, ask the assistant to sift through log
 >
 > Using the `torrent_status` prompt and `logs_stats`, the assistant analyses download throughput, stall events, and peer connectivity in a single conversational turn.
 
-## Setting Up with Claude Desktop
+## Setting up with Claude Desktop
 
 Add the following to your Claude Desktop configuration file (`~/.config/claude-desktop/config.json` on Linux/macOS, `%APPDATA%\claude-desktop\config.json` on Windows):
 
@@ -194,7 +194,7 @@ The embedded MCP server starts by default on `127.0.0.1:8553`. To use a differen
 
 After saving, restart Claude Desktop. The Erigon tools will appear in the tool panel under **erigon**.
 
-## Setting Up with Claude Code
+## Setting up with Claude Code
 
 [Claude Code](https://claude.ai/code) is Anthropic's CLI coding agent. Register the Erigon MCP server with a single command — no config file editing required.
 
@@ -224,7 +224,7 @@ To remove the server:
 claude mcp remove erigon
 ```
 
-## Setting Up with OpenAI Codex
+## Setting up with OpenAI Codex
 
 [OpenAI Codex CLI](https://github.com/openai/codex) supports MCP servers via `~/.codex/config.yaml`. Add the `mcp_servers` key to your existing config file:
 
@@ -255,7 +255,7 @@ Save the file and start a new Codex session. The Erigon tools are loaded automat
 The embedded SSE mode (`http://127.0.0.1:8553/sse`) works out of the box as long as Erigon is running. No separate binary is needed.
 :::
 
-## Available Tools
+## Available tools
 
 The MCP server exposes over 40 tools grouped by namespace:
 
@@ -271,7 +271,7 @@ Standard JSON-RPC methods exposed as MCP tools: `eth_blockNumber`, `eth_getBlock
 
 `ots_getInternalOperations`, `ots_searchTransactionsBefore`, `ots_searchTransactionsAfter`, `ots_getBlockDetails`, `ots_traceTransaction`, `ots_getTransactionError`, `ots_getContractCreator`, and more.
 
-### Log Analysis (`logs_*`)
+### Log analysis (`logs_*`)
 
 `logs_tail`, `logs_head`, `logs_grep`, `logs_stats` — require `--log.dir` or `--datadir` to locate Erigon log files.
 
@@ -279,7 +279,7 @@ Standard JSON-RPC methods exposed as MCP tools: `eth_blockNumber`, `eth_getBlock
 
 `metrics_list`, `metrics_get` — available in **embedded mode only**. In standalone mode these return a descriptive message.
 
-## Resources and Prompts
+## Resources and prompts
 
 In addition to tools, the MCP server exposes structured **resources** and **prompts**:
 

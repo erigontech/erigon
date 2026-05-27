@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # Contributing
 
-## Erigon Client Code
+## Erigon client code
 
 The Erigon node software is developed in the [erigontech/erigon](https://github.com/erigontech/erigon) repository. Code contributions follow the standard GitHub fork-and-PR workflow.
 
