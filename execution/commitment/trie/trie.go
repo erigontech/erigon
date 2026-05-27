@@ -1817,6 +1817,31 @@ func (t *Trie) GetNode(path []byte) Node {
 	return getNode(t.RootNode, path, 0)
 }
 
+// HasExpandedChild reports whether branch node n has at least one child that is an
+// expanded node rather than a bare hash, meaning some key below n was independently
+// resolved into the trie. Returns false for non-branch nodes.
+func HasExpandedChild(n Node) bool {
+	expanded := func(c Node) bool {
+		switch c.(type) {
+		case nil, *HashNode:
+			return false
+		default:
+			return true
+		}
+	}
+	switch b := n.(type) {
+	case *FullNode:
+		for _, c := range b.Children {
+			if expanded(c) {
+				return true
+			}
+		}
+	case *DuoNode:
+		return expanded(b.child1) || expanded(b.child2)
+	}
+	return false
+}
+
 // NodeHash returns the keccak256 of the node's RLP, the identity RLPEncode assigns it.
 func (t *Trie) NodeHash(n Node) (common.Hash, error) {
 	h := newHasher(t.valueNodesRLPEncoded)

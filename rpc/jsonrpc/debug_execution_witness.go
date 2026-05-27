@@ -992,10 +992,10 @@ func buildWitnessTrie(
 	return encodedNodes, nil
 }
 
-// filterRedundantCollapseSiblings drops collapse-sibling nodes that resolve to a
-// branch (*FullNode/*DuoNode), whose preimage the verifier never reads because it
-// folds the sibling inline by hash on re-root; the root (index 0) and slice order
-// are preserved.
+// filterRedundantCollapseSiblings drops collapse-sibling branch nodes whose subtree
+// is unexpanded, which the verifier folds inline by hash without reading the
+// preimage. A branch with an expanded child is load-bearing (a key below it was
+// accessed) and is kept; the root and slice order are preserved.
 func filterRedundantCollapseSiblings(witnessTrie *trie.Trie, siblingPaths [][]byte, encoded []hexutil.Bytes) ([]hexutil.Bytes, error) {
 	if len(siblingPaths) == 0 || len(encoded) == 0 {
 		return encoded, nil
@@ -1006,6 +1006,9 @@ func filterRedundantCollapseSiblings(witnessTrie *trie.Trie, siblingPaths [][]by
 		switch node.(type) {
 		case *trie.FullNode, *trie.DuoNode:
 		default:
+			continue
+		}
+		if trie.HasExpandedChild(node) {
 			continue
 		}
 		h, err := witnessTrie.NodeHash(node)

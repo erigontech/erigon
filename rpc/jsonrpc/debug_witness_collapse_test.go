@@ -330,6 +330,61 @@ func TestExecutionWitnessCollapseSiblingStorage(t *testing.T) {
 	require.Equal(t, 7, len(result.State), "storage collapse minimal witness node count")
 }
 
+// TestExecutionWitnessCollapseSiblingAccessedSubtree is the over-filter regression
+// case: a 2→1 collapse onto a 2-account subtree where the block ALSO sends value to
+// one of the subtree members. The collapse still records the subtree-root branch as
+// a sibling path, but that branch is now load-bearing — the verifier must descend
+// through it to reach the accessed member's leaf. The filter must KEEP it; dropping
+// it by the branch-node structural criterion alone corrupts the witness.
+func TestExecutionWitnessCollapseSiblingAccessedSubtree(t *testing.T) {
+	bank := crypto.PubkeyToAddress(witnessTestKey.PublicKey)
+	bankNib := hashedNibbles(bank.Bytes(), 1)[0]
+	del, sib1, sib2 := findSubtreeSiblingAddresses(t, map[byte]struct{}{bankNib: {}})
+
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			bank: {Balance: big.NewInt(1_000_000_000_000_000)},
+			del:  {Code: selfdestructCode, Nonce: 1, Balance: big.NewInt(0)},
+			sib1: {Balance: big.NewInt(111)},
+			sib2: {Balance: big.NewInt(222)},
+		},
+	}
+	m, api := newWitnessTester(t, gspec)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(bank)
+		b.AddTx(signedCall(t, 0, del, nil))
+		txn, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: 1, To: &sib1, GasLimit: 100000, Value: *uint256.NewInt(7)},
+			GasPrice: *uint256.NewInt(1),
+		}, *types.LatestSignerForChainID(nil), witnessTestKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	bn := rpc.BlockNumber(1)
+	result, err := api.ExecutionWitness(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err, "block must verify statelessly: the accessed subtree branch must be kept")
+
+	encoded := make([][]byte, len(result.State))
+	for i, n := range result.State {
+		encoded[i] = n
+	}
+	decoded, err := trie.RLPDecode(encoded)
+	require.NoError(t, err)
+	sib1Node := decoded.GetNode(hashedNibbles(sib1.Bytes(), 64))
+	switch sib1Node.(type) {
+	case *trie.ShortNode, *trie.AccountNode:
+	default:
+		t.Fatalf("accessed subtree member must be reachable, got %T (filter over-dropped the load-bearing subtree branch)", sib1Node)
+	}
+
+	require.Empty(t, probeRedundantNodes(t, m, result, chainPack.Blocks[0]),
+		"witness must be minimal")
+}
+
 // TestExecutionWitnessNoCollapseUnchanged exercises a block that triggers no
 // collapse (a plain value transfer). The collapse-sibling filter must be a strict
 // no-op here, so the witness is already minimal both before and after the change.
