@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -139,6 +140,33 @@ func findSubtreeSiblingHashes(t *testing.T) (del, sib1, sib2 common.Hash) {
 	}
 	t.Fatalf("could not find storage slot to delete sharing prefix %x", prefix3)
 	return common.Hash{}, common.Hash{}, common.Hash{}
+}
+
+// findLeafSiblingAddresses brute-forces two addresses whose hashed keys share the
+// first nibble and diverge at the second, forming a 2-leaf branch at depth 1. With
+// no third account under that nibble, deleting one leaf collapses the branch onto
+// the other, which a standard verifier must read to promote — load-bearing, NOT
+// redundant. Addresses start above the precompile range so calls run their own code.
+func findLeafSiblingAddresses(t *testing.T, avoidFirst map[byte]struct{}) (del, sib common.Address) {
+	t.Helper()
+	const base = uint64(1) << 20
+	seen := map[byte][]common.Address{}
+	for c := base; c < base+10_000_000; c++ {
+		var a common.Address
+		binary.BigEndian.PutUint64(a[12:], c)
+		nib := hashedNibbles(a.Bytes(), 2)
+		if _, bad := avoidFirst[nib[0]]; bad {
+			continue
+		}
+		for _, prev := range seen[nib[0]] {
+			if hashedNibbles(prev.Bytes(), 2)[1] != nib[1] {
+				return prev, a
+			}
+		}
+		seen[nib[0]] = append(seen[nib[0]], a)
+	}
+	t.Fatalf("could not find 2-leaf sibling pair")
+	return common.Address{}, common.Address{}
 }
 
 // selfdestructCode: PUSH1 0x00; SELFDESTRUCT (beneficiary = address 0).
@@ -335,4 +363,55 @@ func TestExecutionWitnessNoCollapseUnchanged(t *testing.T) {
 
 	require.Empty(t, probeRedundantNodes(t, m, result, chainPack.Blocks[0]),
 		"a no-collapse witness is already minimal; the filter must not change it")
+}
+
+// TestExecutionWitnessCollapseSiblingLoadBearing is the over-filter counter-case:
+// a genuine 2-leaf 2→1 collapse whose surviving sibling is a ShortNode leaf, not a
+// branch subtree. The standard verifier must read that leaf's preimage to promote it
+// on collapse, so the filter must KEEP it. The test asserts the specific surviving
+// sibling resolves to a concrete leaf node present in the witness (not a bare
+// HashNode) — a degenerate "drop everything matching a sibling path" filter would
+// drop it and fail here.
+func TestExecutionWitnessCollapseSiblingLoadBearing(t *testing.T) {
+	bank := crypto.PubkeyToAddress(witnessTestKey.PublicKey)
+	bankNib := hashedNibbles(bank.Bytes(), 1)[0]
+	del, sib := findLeafSiblingAddresses(t, map[byte]struct{}{bankNib: {}})
+
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			bank: {Balance: big.NewInt(1_000_000_000_000_000)},
+			del:  {Code: selfdestructCode, Nonce: 1, Balance: big.NewInt(0)},
+			sib:  {Balance: big.NewInt(111)},
+		},
+	}
+	m, api := newWitnessTester(t, gspec)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(bank)
+		b.AddTx(signedCall(t, 0, del, nil))
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	bn := rpc.BlockNumber(1)
+	result, err := api.ExecutionWitness(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err, "load-bearing sibling must verify: dropping it would fail verification")
+
+	encoded := make([][]byte, len(result.State))
+	for i, n := range result.State {
+		encoded[i] = n
+	}
+	decoded, err := trie.RLPDecode(encoded)
+	require.NoError(t, err)
+
+	sibNode := decoded.GetNode(hashedNibbles(sib.Bytes(), 64))
+	switch sibNode.(type) {
+	case *trie.ShortNode, *trie.AccountNode:
+	default:
+		t.Fatalf("surviving sibling must be kept as a resolved leaf, got %T (filter over-dropped a load-bearing node)", sibNode)
+	}
+
+	require.Empty(t, probeRedundantNodes(t, m, result, chainPack.Blocks[0]),
+		"load-bearing collapse witness must be minimal: the kept sibling is needed, nothing else is redundant")
+	require.Equal(t, 5, len(result.State), "load-bearing collapse witness node count")
 }

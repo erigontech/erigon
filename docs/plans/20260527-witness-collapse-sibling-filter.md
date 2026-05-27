@@ -298,11 +298,23 @@ post-condition that catches any over-drop.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_api_test.go`
 
-- [ ] Construct/identify a case where the surviving sibling **is** load-bearing (genuine 2→1
+- [x] Construct/identify a case where the surviving sibling **is** load-bearing (genuine 2→1
       collapse whose promotion needs the preimage). Assert the **specific** sibling hash is
       **present** in `state` (exact multiset, not just "verify passed") and verify passes.
       This makes a degenerate "drop nothing" or "drop everything" filter fail.
-- [ ] Run all witness tests — green.
+      → `TestExecutionWitnessCollapseSiblingLoadBearing` + helper `findLeafSiblingAddresses`
+      (two addresses sharing nibble 0, diverging at nibble 1 → an isolated 2-leaf depth-1
+      branch; deleting one collapses onto a `ShortNode` leaf survivor). "Specific sibling
+      present" is asserted structurally: `trie.RLPDecode(result.State)` then
+      `GetNode(hashedNibbles(sib,64))` must resolve to a concrete `*ShortNode`/`*AccountNode`,
+      **not** a bare `HashNode` — a `HashNode` is exactly what a dropped (over-filtered) sibling
+      decodes to, since the sibling only appears in the witness via the collapse touch. A naive
+      `NodeHash`-Contains match is unreliable (`RLPEncode` emits the wrapping `ShortNode` leaf
+      while `GetNode` at full depth returns the inner `AccountNode`), so the type-resolution
+      check is used instead. Exact count pinned at 5; `probeRedundantNodes` empty (the kept
+      sibling is load-bearing, nothing else redundant). Verify guardrail on (no `NO_VERIFY`).
+- [x] Run all witness tests — green. Account (5), storage (7), no-collapse, load-bearing (5)
+      all PASS; `make lint` clean (0 issues).
 
 ### Task 5: Refactor and verify acceptance criteria
 
