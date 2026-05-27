@@ -982,6 +982,46 @@ func TestMarshalV2_EmitsTypedBlocks(t *testing.T) {
 		"writer must NOT emit the legacy flat-map form")
 }
 
+// TestChainTomlV2ToCanonicalItems_FiltersPendingReplacement pins the
+// canonical-promotion surface: entries flagged PendingReplacement
+// (jagged-step files from a fork-from non-aligned cut) must NOT
+// reach CanonicalView.Observe, so quorum doesn't lock onto a
+// transitional shape.
+func TestChainTomlV2ToCanonicalItems_FiltersPendingReplacement(t *testing.T) {
+	t.Parallel()
+	m := &ChainTomlV2{
+		Version: ChainTomlV2Version,
+		Blocks: []BlockFileEntry{
+			{Name: "v1.0-000000-000500-headers.seg", Hash: "a1"},
+			{Name: "v1.0-000500-000713-headers.seg", Hash: "a2", PendingReplacement: true},
+		},
+		Domains: map[string]*DomainManifest{
+			"accounts": {Files: []DomainFileEntry{
+				{Name: "v1.0-accounts.0-2048.kv", Hash: "b1"},
+				{Name: "v1.0-accounts.2048-2192.kv", Hash: "b2", PendingReplacement: true},
+			}},
+		},
+		Meta: map[string]string{"erigondb.toml": "c1"},
+	}
+
+	all := ChainTomlV2ToItems(m)
+	require.Len(t, all, 5,
+		"ChainTomlV2ToItems includes every entry — download planning needs the bytes regardless of PendingReplacement")
+
+	canon := ChainTomlV2ToCanonicalItems(m)
+	canonNames := make(map[string]string, len(canon))
+	for _, it := range canon {
+		canonNames[it.Name] = it.Hash
+	}
+	require.Contains(t, canonNames, "v1.0-000000-000500-headers.seg")
+	require.Contains(t, canonNames, "v1.0-accounts.0-2048.kv")
+	require.Contains(t, canonNames, "erigondb.toml")
+	require.NotContains(t, canonNames, "v1.0-000500-000713-headers.seg",
+		"PendingReplacement block entry must not reach the canonical-promotion surface")
+	require.NotContains(t, canonNames, "v1.0-accounts.2048-2192.kv",
+		"PendingReplacement domain entry must not reach the canonical-promotion surface")
+}
+
 // TestRoundTrip_TypedBlocks confirms that a typed manifest survives
 // Marshal → Parse without drift on Range / Trust / ProofRoot.
 func TestRoundTrip_TypedBlocks(t *testing.T) {

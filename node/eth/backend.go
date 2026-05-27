@@ -871,7 +871,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				var canon snapcfg.PreverifiedItems
 				if canonicalView != nil {
 					if len(issuer) > 0 {
-						canonicalView.Observe(issuer, advItems, time.Now())
+						// Quorum accumulates only on non-transitional entries —
+						// jagged-step files from a fork-from non-aligned cut
+						// (PendingReplacement=true) must not lock the swarm
+						// onto a shape that a subsequent retire will supersede.
+						canonicalView.Observe(issuer, downloader.ChainTomlV2ToCanonicalItems(adv), time.Now())
 					}
 					canon = canonicalView.Canonical()
 				} else {

@@ -162,15 +162,25 @@ type DomainFileEntry struct {
 	// file's last record is mid-block. Consumers MUST NOT treat such
 	// files as a valid snapshot-tip state.
 	IsPartialBlock bool `toml:"is_partial_block,omitempty"`
+
+	// PendingReplacement is true when this file is at an irregular step
+	// boundary produced by a fork-from non-aligned cut: the fork's first
+	// retire writes a jagged-step file as a transitional anchor, but
+	// the next retire produces an aligned-step file that supersedes it.
+	// Canonical-view promotion must skip pending-replacement entries —
+	// they don't accumulate toward quorum so the swarm can't lock onto
+	// a transitional shape. Consumers still fetch them (the fork needs
+	// the bytes); only the canonical-promotion path filters them out.
+	PendingReplacement bool `toml:"pending_replacement,omitempty"`
 }
 
 // BlockFileEntry is a single block snapshot file (.seg or .idx).
 // Mirrors DomainFileEntry's shape so block files carry the same
-// (Name, Range, Hash, Trust, ProofRoot) surface as domain primaries.
-// Range is [from, to) in block units; ProofRoot is currently always
-// empty for blocks (no anchor recorded today) but reserved so a
-// future history-proof commitment can attach without another schema
-// rev.
+// (Name, Range, Hash, Trust, ProofRoot, PendingReplacement) surface
+// as domain primaries. Range is [from, to) in block units; ProofRoot
+// is currently always empty for blocks (no anchor recorded today)
+// but reserved so a future history-proof commitment can attach
+// without another schema rev.
 type BlockFileEntry struct {
 	Name string `toml:"name"`
 	// Range is the [from, to) block range this file covers. Derived
@@ -181,6 +191,12 @@ type BlockFileEntry struct {
 	// ProofRoot is hex-encoded; empty for the canonical block files
 	// today. Reserved for a future history-proof commitment.
 	ProofRoot string `toml:"proof_root,omitempty"`
+	// PendingReplacement is true when this block file is at an
+	// irregular boundary produced by a fork-from non-aligned cut.
+	// Mirrors the DomainFileEntry.PendingReplacement semantics: a
+	// future retire produces an aligned-boundary file that
+	// supersedes it; canonical-view promotion skips it.
+	PendingReplacement bool `toml:"pending_replacement,omitempty"`
 }
 
 // CaplinFileEntry is a single caplin beacon-archive file. Same shape as
@@ -970,17 +986,43 @@ func (dm *DomainManifest) FilesAtTrust(minTrust snapshotinv.TrustLevel) []Domain
 // individual (Name, Hash) pairs). Entries with empty hash are
 // skipped — they're not advertisable in any meaningful sense.
 //
+// PendingReplacement entries ARE included — they need to be fetched
+// (the fork follower needs the bytes), so the download-planning
+// surface sees them. Use ChainTomlV2ToCanonicalItems for the
+// canonical-promotion surface that filters them out.
+//
 // Output is NOT sorted — callers that need determinism (e.g.,
 // hashing the flattened set for fingerprinting) should sort.
 func ChainTomlV2ToItems(m *ChainTomlV2) snapcfg.PreverifiedItems {
+	return chainTomlV2ToItems(m, false)
+}
+
+// ChainTomlV2ToCanonicalItems is the canonical-promotion variant of
+// ChainTomlV2ToItems — it excludes entries flagged
+// PendingReplacement=true (jagged-step files produced by a fork-from
+// non-aligned cut). Quorum should not accumulate on transitional
+// shapes; only the aligned-step files that replace them count toward
+// canonical promotion.
+//
+// Meta / Salt entries are untyped flat maps with no
+// PendingReplacement bit, so they pass through unchanged.
+func ChainTomlV2ToCanonicalItems(m *ChainTomlV2) snapcfg.PreverifiedItems {
+	return chainTomlV2ToItems(m, true)
+}
+
+func chainTomlV2ToItems(m *ChainTomlV2, dropPendingReplacement bool) snapcfg.PreverifiedItems {
 	if m == nil {
 		return nil
 	}
 	var out snapcfg.PreverifiedItems
 	for _, b := range m.Blocks {
-		if b.Hash != "" {
-			out = append(out, preverified.Item{Name: b.Name, Hash: b.Hash})
+		if b.Hash == "" {
+			continue
 		}
+		if dropPendingReplacement && b.PendingReplacement {
+			continue
+		}
+		out = append(out, preverified.Item{Name: b.Name, Hash: b.Hash})
 	}
 	for name, hash := range m.Meta {
 		if hash != "" {
@@ -1002,9 +1044,13 @@ func ChainTomlV2ToItems(m *ChainTomlV2) snapcfg.PreverifiedItems {
 			continue
 		}
 		for _, f := range dm.Files {
-			if f.Hash != "" {
-				out = append(out, preverified.Item{Name: f.Name, Hash: f.Hash})
+			if f.Hash == "" {
+				continue
 			}
+			if dropPendingReplacement && f.PendingReplacement {
+				continue
+			}
+			out = append(out, preverified.Item{Name: f.Name, Hash: f.Hash})
 		}
 	}
 	return out
