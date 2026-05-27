@@ -156,11 +156,11 @@ Key design decisions:
 **Files:**
 - Create: `execution/tests/testutil/witness_block_test_util.go`
 
-- [ ] define `WitnessBlockTest` embedding `BlockTest` plus a parallel struct capturing per-block `executionWitness` (field names per Task 2)
-- [ ] implement `UnmarshalJSON` that calls `BlockTest.UnmarshalJSON` then unmarshals the witness data
-- [ ] define `ExpectedWitness` struct matching the confirmed fixture schema
-- [ ] add accessors `NumBlocks() int` and `ExpectedWitnessForBlock(i int) *ExpectedWitness` (nil when block has no witness / out of range)
-- [ ] confirm it compiles: `go build ./execution/tests/testutil/...`
+- [x] define `WitnessBlockTest` embedding `BlockTest` plus a parallel struct capturing per-block `executionWitness` (field names per Task 2)
+- [x] implement `UnmarshalJSON` that calls `BlockTest.UnmarshalJSON` then unmarshals the witness data
+- [x] define `ExpectedWitness` struct matching the confirmed fixture schema (`State`/`Codes`/`Headers` as `[]hexutil.Bytes`, no `keys`)
+- [x] add accessors `NumBlocks() int` and `ExpectedWitnessForBlock(i int) *ExpectedWitness` (nil when block has no witness / out of range)
+- [x] confirm it compiles: `go build ./execution/tests/testutil/...` (also `go vet` + targeted `golangci-lint`: 0 issues)
 
 ### Task 6: Implement the strict witness runner
 
