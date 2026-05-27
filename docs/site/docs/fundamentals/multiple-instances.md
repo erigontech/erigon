@@ -59,7 +59,7 @@ For containerized deployments, the docker-compose configuration shows how servic
 
 The compose file demonstrates the port allocation strategy:
 
-* **9090-9094**: Internal gRPC services (execution, Sentry, consensus, downloader, txpool)
+* **9090-9094**: Internal gRPC services (execution, Sentry, consensus, Downloader, TxPool)
 * **8545, 8551**: External HTTP APIs
 * **30303, 42069**: P2P networking ports
 
@@ -96,7 +96,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
 | Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
-| RPCDaemon | 8545         | TCP      | HTTP/WebSocket (Private) |
+| RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
 ### 4. Service separation
@@ -185,7 +185,7 @@ What can be done:
 
 Erigon will utilize all available RAM, but this memory will not be directly owned by Erigon's process. Instead, the operating system (OS) will manage this memory. The OS will keep the frequently accessed parts of the database (DB) in RAM. If the OS needs to allocate RAM for other programs or for a second instance of Erigon, it will handle the memory management accordingly. This mechanism is known as PageCache.
 
-Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPCDaemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPCDaemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
+Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPC Daemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPC Daemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
 
 ```go
 	// These are set to prevent disk and page size churn which can be excessive

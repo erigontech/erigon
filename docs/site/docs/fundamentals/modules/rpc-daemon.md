@@ -7,7 +7,7 @@ sidebar_position: 1
 
 # RPC Daemon
 
-The RPC daemon is a core component of Erigon that implements the [RPC Service](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
+The RPC Daemon is a core component of Erigon that implements the [RPC Service](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
 
 ### RPC deployment modes
 
@@ -32,7 +32,7 @@ To interact with the **RPC Service** visit the dedicated page [Interacting with 
 
 ## Command line options
 
-When running RPC daemon in Local or Remote deployment mode, use this command to display available options:
+When running RPC Daemon in Local or Remote deployment mode, use this command to display available options:
 
 ```bash
 ./build/bin/rpcdaemon --help

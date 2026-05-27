@@ -529,7 +529,7 @@ The location of your Erigon data directory (`datadir`) is the most crucial facto
 
 | **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
+| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC Daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
 | Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Performance is reduced as the native Windows drives are mounted using DrvFS (a slower network file system). This affects MDBX database access, and complicates filesystem operations that expect unix-like behaviour. Setting [`automount.options=metadata`](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#automount-options) in `/etc/wsl.conf` in your distribution is recommended, but not required. Note that Docker on Windows is also affected. |
 
 **RPC Daemon Configuration**
@@ -542,7 +542,7 @@ The choice of data location directly impacts how you must configure the RPC daem
 | Data on Mounted Windows Partition             | The `rpcdaemon` must be configured as a remote DB even when running on the same machine. |
 
 :::warning
-⚠️ Warning: The remote DB RPC daemon is an experimental feature, is not recommended, and is extremely slow. Always aim to use the embedded RPC daemon by keeping your data on the native Linux filesystem.
+⚠️ Warning: The remote DB RPC Daemon is an experimental feature, is not recommended, and is extremely slow. Always aim to use the embedded RPC Daemon by keeping your data on the native Linux filesystem.
 :::
 
 **Networking Notes**

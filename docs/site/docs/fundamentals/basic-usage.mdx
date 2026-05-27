@@ -67,7 +67,7 @@ The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship em
 
 ## Example of configuration
 
-To run Erigon with RPCDaemon, TxPool, and other components in a single process is the simplest way to get started. For better performance and load management, you might consider distributing these components across multiple machines.
+To run Erigon with RPC Daemon, TxPool, and other components in a single process is the simplest way to get started. For better performance and load management, you might consider distributing these components across multiple machines.
 
 ```sh
 ./build/bin/erigon --datadir=/desired/path/to/datadir \
@@ -120,7 +120,7 @@ The full ordered stage list is in [Logs → Stage Definitions](logs#stage-defini
 
 ### 2. Query the JSON-RPC
 
-If the RPC daemon is enabled (default port `8545`), the standard `eth_syncing` method tells you whether the node is still catching up and how far behind it is:
+If the RPC Daemon is enabled (default port `8545`), the standard `eth_syncing` method tells you whether the node is still catching up and how far behind it is:
 
 ```bash
 curl -s -X POST -H "Content-Type: application/json" \

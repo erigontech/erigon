@@ -4,17 +4,17 @@ description: "txpool_ namespace: inspect pending and queued transactions in the 
 sidebar_position: 8
 ---
 
-# txpool
+# TxPool
 
 The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending, queued, and base fee transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
 
-The txpool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
+The TxPool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
 
 ### Transaction pool architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
-* Transaction pool methods communicate via gRPC with the txpool service when running in external mode
+* Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
 
 ### Implementation details
 
