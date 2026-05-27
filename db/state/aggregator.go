@@ -818,12 +818,23 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	ok, err := a.readyForCollation(ctx, step)
+	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()))
+		lastStepInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		var lastCollatableStepInDB kv.Step
+		if lastStepInDB > 0 {
+			lastCollatableStepInDB = lastStepInDB - 1
+		}
+		a.logger.Debug("[snapshots] holding state collation at reorg depth",
+			"step", step,
+			"lastBlockInStep", lastBlockInStep,
+			"lastBlockInDB", lastBlockInDB,
+			"lastTxInDB", lastTxInDB,
+			"reorgBlockDepth", a.reorgBlockDepth,
+			"lastCollatableStepInDB", lastCollatableStepInDB)
 		return errStepNotReady
 	}
 	var (
@@ -964,50 +975,25 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bool, err error) {
+func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	if a.reorgBlockDepth == 0 {
-		return true, nil
+		return 0, 0, 0, true, nil
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
-
-	var lastBlockInStep, lastBlockInDB, lstTxNum uint64
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		var found bool
-		lastBlockInStep, found, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
 			return err
 		}
-		if !found {
+		if !ok {
 			lastBlockInStep = 0
 		}
-		lastBlockInDB, _, err = rawdbv3.TxNums.Last(tx)
-		if err != nil {
-			return err
-		}
-		lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
-		if len(lst) >= 8 {
-			lstTxNum = binary.BigEndian.Uint64(lst)
-		}
-		return nil
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
+		return err
 	})
-	if err != nil {
-		return false, err
-	}
-	if lastBlockInDB > lastBlockInStep+a.reorgBlockDepth {
-		return true, nil
-	}
-	var lastCollatableStepInDB kv.Step
-	if lstTxNum+1 >= a.StepSize() {
-		lastCollatableStepInDB = kv.Step((lstTxNum+1)/a.StepSize() - 1)
-	}
-	a.logger.Debug("[snapshots] holding state collation at reorg depth",
-		"step", step,
-		"lastBlockInStep", lastBlockInStep,
-		"lastBlockInDB", lastBlockInDB,
-		"reorgBlockDepth", a.reorgBlockDepth,
-		"lastCollatableStepInDB", lastCollatableStepInDB)
-	return false, nil
+	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
+	return
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
