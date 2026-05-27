@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -260,6 +261,89 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
+}
+
+// Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also
+// exercises forward execution: state lags the chain tip (executed to block 10,
+// chain extends to 15). The first FCU repairs the canonical/TxNums index and
+// signals TooFarAway; the second FCU then drives execution forward 10 -> 15.
+// The committed state at block 10 stays in the domain tables (the base for
+// forward execution) — only the index tables are truncated.
+func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 15)
+
+	// Execute only the first 10 blocks: state/commitBlock/execProgress at 10.
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:10]))
+	// Insert headers/bodies for 11..15 so the forkchoice walk-back can traverse
+	// them, but do not UFC — they are neither canonical nor executed yet.
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[10:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+
+	const truncateTo uint64 = 5
+	var commitBlock uint64
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(v), 16)
+		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
+		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		return nil
+	}))
+	require.Equal(t, uint64(10), commitBlock)
+
+	tip := chainPack.Blocks[len(chainPack.Blocks)-1].Header()
+
+	// First FCU to the tip (block 15). Index is repaired (canonical + TxNums
+	// extended to 15) and, since the domain was behind, we get TooFarAway.
+	res, err := updateForkChoice(ctx, m.ExecModule, tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "first FCU should repair index and signal domain-ahead")
+	var execProgAfter1 uint64
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(15), lastBlock, "TxNums must be re-extended to the tip")
+		execProgAfter1, err = stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		return nil
+	}))
+	require.Equal(t, commitBlock, execProgAfter1, "execution should not have advanced yet (state still at commitBlock)")
+
+	// Second FCU to the same tip: domain is no longer ahead (TxNums caught up),
+	// so execution is driven forward from commitBlock to the tip.
+	res2, err := updateForkChoice(ctx, m.ExecModule, tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res2.Status, "second FCU should execute forward to the tip")
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(15), execProg, "execution must have advanced to the tip")
 		return nil
 	}))
 }
