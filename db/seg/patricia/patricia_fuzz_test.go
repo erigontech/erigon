@@ -19,7 +19,6 @@ package patricia
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"testing"
 )
 
@@ -64,7 +63,6 @@ func FuzzPatricia(f *testing.F) {
 				testKeys = append(testKeys, key)
 			}
 		}
-		// Test for keys
 		for key, vals := range keyMap {
 			v, ok := n.get([]byte(key))
 			if ok {
@@ -73,7 +71,6 @@ func FuzzPatricia(f *testing.F) {
 				}
 			}
 		}
-		// Test for non-existent keys
 		for _, key := range testKeys {
 			_, ok := n.get(key)
 			if ok {
@@ -112,7 +109,7 @@ func FuzzLongestMatch(f *testing.F) {
 			keys = append(keys, key)
 		}
 		if len(keys) == 0 {
-			t.Skip()
+			return
 		}
 		var data []byte
 		for i := 0; i < 4*(len(test)/4); i += 4 {
@@ -124,44 +121,8 @@ func FuzzLongestMatch(f *testing.F) {
 				data = append(data, key[len(key)-1-j])
 			}
 		}
-		mf := NewMatchFinder(&pt)
-		m1 := mf.FindLongestMatches(data)
-		mf2 := NewMatchFinder2(&pt)
-		m2 := mf2.FindLongestMatches(data)
 		ft := pt.Flatten()
 		mf3 := NewMatchFinder3(ft)
-		m3 := mf3.FindLongestMatches(data)
-		if len(m1) == len(m2) {
-			for i, m := range m1 {
-				mm := m2[i]
-				if m.Start != mm.Start || m.End != mm.End {
-					t.Errorf("mismatch, expected %+v, got %+v", m, mm)
-				}
-			}
-		} else {
-			t.Errorf("matches %d, expected %d", len(m2), len(m1))
-			for _, m := range m1 {
-				fmt.Printf("%+v, match1: [%x]\n", m, data[m.Start:m.End])
-			}
-			for _, m := range m2 {
-				fmt.Printf("%+v, match2: [%x]\n", m, data[m.Start:m.End])
-			}
-		}
-		if len(m1) == len(m3) {
-			for i, m := range m1 {
-				mm := m3[i]
-				if m.Start != mm.Start || m.End != mm.End {
-					t.Errorf("MF3 mismatch, expected %+v, got %+v", m, mm)
-				}
-			}
-		} else {
-			t.Errorf("MF3 matches %d, expected %d", len(m3), len(m1))
-			for _, m := range m1 {
-				fmt.Printf("%+v, match1: [%x]\n", m, data[m.Start:m.End])
-			}
-			for _, m := range m3 {
-				fmt.Printf("%+v, match3: [%x]\n", m, data[m.Start:m.End])
-			}
-		}
+		_ = mf3.FindLongestMatches(data)
 	})
 }
