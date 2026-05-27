@@ -59,6 +59,7 @@ Start:
 	if !gointerfaces.EnsureVersion(s.version, versionReply) {
 		s.log.Error("incompatible interface versions", "client", s.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		panic(1)
 		return false
 	}
 	s.log.Info("interfaces compatible", "client", s.version.String(),
