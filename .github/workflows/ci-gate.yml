@@ -175,12 +175,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo '${{ toJSON(needs) }}' > needs.json
           failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
           if [ -n "$failed" ]; then
-            echo "The following jobs failed or were cancelled:"
+            echo "The following gate jobs failed or were cancelled:"
             echo "$failed"
+            jobs=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate) || true
+            # The leaf that fast-cancelled the run is the true root cause; other failed steps may be collateral from that cancellation.
+            root=$(echo "$jobs" | jq -r '.jobs[] | select(any(.steps[]?; .name == "Cancel workflow run on failure" and .conclusion == "success")) | "::error title=Merge-queue root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
+            if [ -z "$root" ]; then
+              root=$(echo "$jobs" | jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | "::error title=Merge-queue root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
+            fi
+            echo "Root-cause job(s):"
+            echo "$root"
             exit 1
           fi
           echo "All required jobs passed or were skipped."
