@@ -135,6 +135,24 @@ func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (common.Hash, error) {
 	return blockRoot, nil
 }
 
+func ReadCanonicalHead(tx kv.Tx) (uint64, common.Hash, error) {
+	cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	defer cursor.Close()
+	k, v, err := cursor.Last()
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	if k == nil {
+		return 0, common.Hash{}, nil
+	}
+	var root common.Hash
+	copy(root[:], v)
+	return base_encoding.Decode64FromBytes4(k), root, nil
+}
+
 func WriteLastBeaconSnapshot(tx kv.RwTx, slot uint64) error {
 	return tx.Put(kv.LastBeaconSnapshot, []byte(kv.LastBeaconSnapshotKey), base_encoding.Encode64ToBytes4(slot))
 }
