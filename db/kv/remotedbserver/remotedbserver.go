@@ -114,6 +114,8 @@ func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, b
 // Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	dbSchemaVersion := &kv.DBSchemaVersion
+	fmt.Printf("a: %s, %s\n", dbSchemaVersion.String(), KvServiceAPIVersion.String())
+	panic(dbSchemaVersion)
 	if KvServiceAPIVersion.Major > dbSchemaVersion.Major {
 		return KvServiceAPIVersion, nil
 	}
