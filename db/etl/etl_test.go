@@ -960,50 +960,6 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	}
 }
 
-func TestCollectorFlush10BuffersAllocs(t *testing.T) {
-	const keyLen = 32
-	const valLen = 64
-	const numBuffers = 10
-	const entriesPerBuffer = 100
-
-	// bufSize is chosen so optimalSize == entriesPerBuffer * entrySize,
-	// causing a flush after exactly entriesPerBuffer entries.
-	entrySize := keyLen + valLen + entryLocSize
-	bufSize := datasize.ByteSize(entriesPerBuffer * entrySize)
-	_ = bufSize
-
-	tmpdir := t.TempDir()
-	total := numBuffers * entriesPerBuffer
-	keys := make([][]byte, total)
-	vals := make([][]byte, total)
-	for i := range total {
-		k := make([]byte, keyLen)
-		binary.BigEndian.PutUint64(k, uint64(i)*6364136223846793005)
-		keys[i] = k
-		v := make([]byte, valLen)
-		binary.BigEndian.PutUint64(v, uint64(i))
-		vals[i] = v
-	}
-
-	logger := log.New()
-	allocs := testing.AllocsPerRun(5, func() {
-		c := NewCollectorWithAllocator("test", tmpdir, SmallSortableBuffers, logger)
-		for i := range total {
-			if err := c.Collect(keys[i], vals[i]); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
-			return nil
-		}, TransformArgs{}); err != nil {
-			t.Fatal(err)
-		}
-		c.Close()
-	})
-	_ = allocs
-	//assert.Equal(t, 10, int(allocs))
-}
-
 func BenchmarkFileDataProviderNext(b *testing.B) {
 	const keySize = 32
 	for _, valSize := range []int{32, 128, 1024} {
