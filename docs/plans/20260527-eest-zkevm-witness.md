@@ -144,12 +144,12 @@ Key design decisions:
 **Files:**
 - Modify: `execution/tests/testutil/block_test_util.go`
 
-- [ ] add `func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error)` containing the current body of `Run`, returning `(m, nil)` on success and `(nil, err)` on each error path
-- [ ] reduce `Run` to `_, err := bt.RunWithTester(t); return err`
-- [ ] one-line doc note that the returned tester's lifetime is bound to `t` and callers MUST NOT `Close` it
-- [ ] leave `RunCLI` (the parallel non-`*testing.T` copy at ~line 262) deliberately UNTOUCHED — out of scope; the witness runner only needs the `*testing.T` path
-- [ ] confirm no behavior change for existing callers (`go build ./execution/tests/...`)
-- [ ] run existing block-test package compile/vet to confirm the refactor is inert: `go vet ./execution/tests/testutil/...`
+- [x] add `func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error)` containing the current body of `Run`, returning `(m, nil)` on success and `(nil, err)` on each error path
+- [x] reduce `Run` to `_, err := bt.RunWithTester(t); return err`
+- [x] one-line doc note that the returned tester's lifetime is bound to `t` and callers MUST NOT `Close` it
+- [x] leave `RunCLI` (the parallel non-`*testing.T` copy at ~line 262) deliberately UNTOUCHED — out of scope; the witness runner only needs the `*testing.T` path
+- [x] confirm no behavior change for existing callers (`go build ./execution/tests/...`)
+- [x] run existing block-test package compile/vet to confirm the refactor is inert: `go vet ./execution/tests/testutil/...`
 
 ### Task 5: Add `WitnessBlockTest` parser
 

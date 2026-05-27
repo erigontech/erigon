@@ -212,9 +212,16 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
+	_, err := bt.RunWithTester(t)
+	return err
+}
+
+// RunWithTester runs the block test and returns the ExecModuleTester it built.
+// The returned tester's lifetime is bound to t (via t.Cleanup); callers MUST NOT Close it.
+func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error) {
 	config, ok := testforks.Forks[bt.json.Network]
 	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
+		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{
@@ -229,33 +236,36 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+		return nil, fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
 	}
 	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+		return nil, fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
 	validBlocks, err := bt.insertBlocks(m)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if common.Hash(bt.json.BestBlock) != cmlast {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
+		return nil, fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
 	newDB := state.New(m.NewStateReader(tx))
 	if err := bt.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %w", err)
+		return nil, fmt.Errorf("post state validation failed: %w", err)
 	}
 
-	return bt.validateImportedHeaders(tx, validBlocks, m)
+	if err := bt.validateImportedHeaders(tx, validBlocks, m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
