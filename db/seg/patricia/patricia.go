@@ -390,7 +390,6 @@ type MatchFinder2 struct {
 	sa         []int32
 	lcp        []int32
 	inv        []int32
-	saisBuf    []int32
 	headLen    int
 	tailLen    int
 	side       int // 0, 1, or 2 (if side is not determined yet)
@@ -584,7 +583,7 @@ func (mf2 *MatchFinder2) FindLongestMatches(data []byte) []Match {
 	} else {
 		mf2.sa = mf2.sa[:n]
 	}
-	if err := sais.Sais(data, mf2.sa, &mf2.saisBuf); err != nil {
+	if err := sais.Sais(data, mf2.sa); err != nil {
 		panic(err)
 	}
 	if cap(mf2.inv) < n {

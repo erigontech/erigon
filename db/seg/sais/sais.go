@@ -9,16 +9,22 @@
 
 package sais
 
-import "bytes"
+import (
+	"bytes"
+	"sync"
+)
 
 // copy of stdlib `index/suffixarray` SA-IS implementation
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
 // also for Erigon - it's important to keep control on files reproducibility
 
-// Sais computes the suffix array of data into sa, using *buf as reusable scratch space.
-// buf is grown as needed. Callers should preserve *buf across calls to amortize allocations:
-// without it, recurse_32 allocates ~len(data)/4 ints on every call.
-func Sais(data []byte, sa []int32, buf *[]int32) error {
+var bufPool = sync.Pool{New: func() any {
+	b := make([]int32, 512)
+	return &b
+}}
+
+// Sais computes the suffix array of data into sa.
+func Sais(data []byte, sa []int32) error {
 	n := len(data)
 	if n != len(sa) {
 		panic("sais: len(data) != len(sa)")
@@ -31,11 +37,9 @@ func Sais(data []byte, sa []int32, buf *[]int32) error {
 	}
 	clear(sa)
 
-	// Pre-size buf to n/2 so recurse_32's "len(tmp) < numLMS" check never triggers.
-	// numLMS is at most n/2, so a buf of n/2 ints is sufficient for all recursion levels.
-	needed := max(512, n/2)
-	*buf = growslice32(*buf, needed)
-	sais_8_32(data, 256, sa, *buf)
+	bufp := bufPool.Get().(*[]int32)
+	sais_8_32(data, 256, sa, *bufp)
+	bufPool.Put(bufp)
 	return nil
 }
 
@@ -432,11 +436,4 @@ func induceS_8_32(text []byte, sa, freq, bucket []int32) {
 		b--
 		sa[b] = int32(k)
 	}
-}
-
-func growslice32(b []int32, wantLength int) []int32 {
-	if cap(b) >= wantLength {
-		return b[:wantLength]
-	}
-	return make([]int32, wantLength, max(wantLength, 2*cap(b)))
 }
