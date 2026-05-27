@@ -281,11 +281,7 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 	a.d[domain].ReferencesInCommitmentBranches = v
 }
 
-// applyReferencesInCommitmentBranches threads the resolved erigondb.toml flag into the global
-// statecfg.Schema (so rebuild paths and the next Configure pick it up) and, once domains are
-// configured, into the live commitment domain. Writes are skipped when the value is unchanged:
-// the flag is fixed per-datadir, so the live field the merge goroutines read is mutated only at
-// the first resolution (before any merge is spawned), never concurrently with a running merge.
+// applyReferencesInCommitmentBranches threads the resolved flag into statecfg.Schema and the live commitment domain.
 func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
 	if statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches != refs {
 		statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches = refs
@@ -1844,9 +1840,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	r := &Ranges{}
-	// Account/storage must stay range-aligned with commitment whenever referencing is active — the
-	// write flag is on, or a referenced (pre-v2.1) input needs expansion (over-approximated across
-	// all visible commitment files, since merge inputs aren't resolved yet).
+	// Account/storage must stay range-aligned with commitment whenever referencing is active.
 	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches || at.commitmentVisibleFilesReferenced()
 	if commitmentMergeReferencing {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
@@ -1937,9 +1931,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	t := time.Now()
 
 	at.a.logger.Debug("[snapshots] merge state " + r.String())
-	// Gate on referencing, not just the write flag, so the transformer expands referenced (pre-v2.1)
-	// inputs even with the flag off — gating only on the flag copies input short keys verbatim into
-	// the merged file and produces stale offsets.
+	// Gate on referencing, not the write flag: referenced inputs must be expanded even with the flag off, else stale offsets leak into the merged file.
 	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches ||
 		commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain], at.StepSize())
 

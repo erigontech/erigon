@@ -38,8 +38,7 @@ const DefaultStepsInFrozenFile = LegacyStepsInFrozenFile * 4 // 256
 // this value can be used to restore it.
 const UnboundedDomainMerge uint64 = math.MaxUint64
 
-// DefaultReferencesInCommitmentBranches is the in-memory default for the commitment
-// "references in branches" regime when erigondb.toml does not specify it.
+// DefaultReferencesInCommitmentBranches is the default when erigondb.toml omits it.
 const DefaultReferencesInCommitmentBranches = true
 
 const EnableHistoryV4InTest = true

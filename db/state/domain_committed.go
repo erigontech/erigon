@@ -44,18 +44,13 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 	return (to-from)/stepSize >= minStepsForReferencing
 }
 
-// CommitmentBranchReferenced reports whether a commitment file written at fileVersion over
-// range from..to carries shortened key references that must be expanded on read. It is a
-// property of the file itself (version + range), independent of the live write flag: files
-// below v2.1 in the referenced regime carry references once the range reaches the threshold;
-// v2.1 files are always plain.
+// CommitmentBranchReferenced reports whether a commitment file at fileVersion over from..to carries
+// shortened key references — a property of the file (version+range), independent of the live write flag.
 func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to uint64) bool {
 	return fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
 }
 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
-// Used at merge-range planning, before inputs are resolved, so it over-approximates across all
-// visible commitment files.
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
 	stepSize := at.StepSize()
 	for _, f := range at.d[kv.CommitmentDomain].files {
@@ -66,8 +61,7 @@ func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
 	return false
 }
 
-// commitmentMergeInputsReferenced reports whether any resolved commitment merge input is
-// referenced and therefore needs key expansion during the merge.
+// commitmentMergeInputsReferenced reports whether any commitment merge input is referenced.
 func commitmentMergeInputsReferenced(inputs []*FilesItem, stepSize uint64) bool {
 	for _, f := range inputs {
 		if f == nil {
@@ -80,9 +74,8 @@ func commitmentMergeInputsReferenced(inputs []*FilesItem, stepSize uint64) bool 
 	return false
 }
 
-// commitmentFileVersionByRange returns the parsed version of the visible commitment file
-// covering from..to, plus the metric bucket index for that file. A missing file yields the
-// zero version (treated as referenced) to preserve the historical deref behavior.
+// commitmentFileVersionByRange returns the version of the commitment file covering from..to
+// (zero if missing, treated as referenced) and its metric bucket index.
 func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version.Version, int) {
 	for i, f := range at.d[kv.CommitmentDomain].files {
 		if f.startTxNum == from && f.endTxNum == to {
@@ -249,9 +242,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return 0, false
 }
 
-// fileVersionByRange returns the parsed version of the visible file covering from..to.
-// A missing file yields the zero version, which the referencing predicate treats as
-// referenced — preserving the historical expand-on-merge behavior.
+// fileVersionByRange returns the version of the visible file covering from..to (zero if missing, treated as referenced).
 func (dt *DomainRoTx) fileVersionByRange(from, to uint64) version.Version {
 	for _, f := range dt.files {
 		if f.startTxNum == from && f.endTxNum == to {

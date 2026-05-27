@@ -135,9 +135,7 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
 
-// kvWriteVersion is the version stamped onto a newly written .kv file. For the
-// commitment domain it is flag-derived (v2.0 referenced, v2.1 plain) and decoupled
-// from DataKV.Current; every other domain writes at Current.
+// kvWriteVersion is the version stamped on a new .kv file: flag-derived (v2.0/v2.1) for commitment, DataKV.Current otherwise.
 func (d *Domain) kvWriteVersion() version.Version {
 	if d.Name == kv.CommitmentDomain {
 		if d.ReferencesInCommitmentBranches {

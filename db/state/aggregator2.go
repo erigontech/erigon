@@ -126,8 +126,7 @@ func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	return opts
 }
 
-// WithErigonDBSettings assigns pre-resolved DB settings (stepSize, stepsInFrozenFile,
-// references_in_commitment_branches).
+// WithErigonDBSettings assigns pre-resolved DB settings.
 func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint:gocritic
 	opts.stepSize = s.StepSize
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
