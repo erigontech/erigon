@@ -62,7 +62,7 @@ commitment:
             current: v2.1
             min: v1.0
         kvi:
-            current: v2.0
+            current: v2.1
             min: v1.0
     hist:
         v:
