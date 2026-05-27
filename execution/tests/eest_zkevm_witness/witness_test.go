@@ -163,7 +163,7 @@ func TestExecutionSpecWitness(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	t.Logf("walked %d fixtures (check `make test-fixtures-zkevm`)", walked, minFixtures)
+	t.Logf("walked %d fixtures (check `make test-fixtures-zkevm`)", walked)
 }
 
 // compareWitness performs exact ordered comparison of witness arrays.
