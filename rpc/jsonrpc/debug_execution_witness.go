@@ -985,7 +985,49 @@ func buildWitnessTrie(
 	for _, node := range allNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
 	}
+	encodedNodes, err = filterRedundantCollapseSiblings(witnessTrie, siblingPaths, encodedNodes)
+	if err != nil {
+		return nil, err
+	}
 	return encodedNodes, nil
+}
+
+// filterRedundantCollapseSiblings drops collapse-sibling nodes that resolve to a
+// branch (*FullNode/*DuoNode), whose preimage the verifier never reads because it
+// folds the sibling inline by hash on re-root; the root (index 0) and slice order
+// are preserved.
+func filterRedundantCollapseSiblings(witnessTrie *trie.Trie, siblingPaths [][]byte, encoded []hexutil.Bytes) ([]hexutil.Bytes, error) {
+	if len(siblingPaths) == 0 || len(encoded) == 0 {
+		return encoded, nil
+	}
+	drop := make(map[common.Hash]struct{})
+	for _, path := range siblingPaths {
+		node := witnessTrie.GetNode(path)
+		switch node.(type) {
+		case *trie.FullNode, *trie.DuoNode:
+		default:
+			continue
+		}
+		h, err := witnessTrie.NodeHash(node)
+		if err != nil {
+			return nil, fmt.Errorf("hashing collapse-sibling node: %w", err)
+		}
+		drop[h] = struct{}{}
+	}
+	delete(drop, crypto.Keccak256Hash(encoded[0]))
+	if len(drop) == 0 {
+		return encoded, nil
+	}
+	out := make([]hexutil.Bytes, 0, len(encoded))
+	for i, node := range encoded {
+		if i != 0 {
+			if _, dropped := drop[crypto.Keccak256Hash(node)]; dropped {
+				continue
+			}
+		}
+		out = append(out, node)
+	}
+	return out, nil
 }
 
 // resolveWitnessBlock resolves the target block from blockNrOrHash and computes

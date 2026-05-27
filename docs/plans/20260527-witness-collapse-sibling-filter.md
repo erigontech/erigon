@@ -278,16 +278,20 @@ post-condition that catches any over-drop.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] Add a helper (one-line docstring) that, given `witnessTrie`, `siblingPaths`, and the
+- [x] Add a helper (one-line docstring) that, given `witnessTrie`, `siblingPaths`, and the
       encoded node slice, returns the reduced slice. Map each sibling path → node → keccak
       hash; apply the Task-2 criterion to build a **drop-set of hashes**.
-- [ ] Rebuild `encodedNodes` in original DFS order skipping dropped hashes; **never drop
-      index 0**; assert the root hash survives. No map-iteration ordering.
-- [ ] Wire it into `buildWitnessTrie` before returning; leave `verifyWitnessStateless`
+      → `filterRedundantCollapseSiblings` (debug_execution_witness.go); node→hash via new
+      `(*trie.Trie).NodeHash` so the dedup key matches `RLPEncode`.
+- [x] Rebuild `encodedNodes` in original DFS order skipping dropped hashes; **never drop
+      index 0**; assert the root hash survives. No map-iteration ordering. → drop-set excludes
+      `keccak(encoded[0])`; output rebuilt by iterating `encoded` in order.
+- [x] Wire it into `buildWitnessTrie` before returning; leave `verifyWitnessStateless`
       untouched so it validates the filtered `result.State`. A verify failure is a hard error
       — no silent fallback to the unfiltered set.
-- [ ] Run Task 1 collapse tests — confirm GREEN (minimal set, verify passes).
-- [ ] Run `TestExecutionWitnessNoCollapseUnchanged` — still a no-op.
+- [x] Run Task 1 collapse tests — confirm GREEN (minimal set, verify passes). Account 6→5,
+      storage 8→7; `probeRedundantNodes` now empty for both.
+- [x] Run `TestExecutionWitnessNoCollapseUnchanged` — still a no-op.
 
 ### Task 4: Over-filtering counter-test (load-bearing sibling retained)
 

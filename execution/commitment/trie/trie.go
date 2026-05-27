@@ -1817,6 +1817,17 @@ func (t *Trie) GetNode(path []byte) Node {
 	return getNode(t.RootNode, path, 0)
 }
 
+// NodeHash returns the keccak256 of the node's RLP, the identity RLPEncode assigns it.
+func (t *Trie) NodeHash(n Node) (common.Hash, error) {
+	h := newHasher(t.valueNodesRLPEncoded)
+	defer returnHasherToPool(h)
+	nodeRLP, err := h.hashChildren(n, 0)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return crypto.Keccak256Hash(nodeRLP), nil
+}
+
 func getNode(n Node, path []byte, pos int) Node {
 	if n == nil {
 		return nil
