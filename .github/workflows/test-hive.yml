@@ -87,13 +87,13 @@ jobs:
       - name: Checkout Erigon
         uses: actions/checkout@v6
         with:
-          path: erigon-src
+          path: erigon-full
 
       - name: Read pinned versions
         id: hive-version
         run: |
-          echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
-          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+          echo "ref=$(jq -r .hive_ref erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v6
@@ -135,7 +135,7 @@ jobs:
       - name: Build erigon image from local source
         uses: docker/build-push-action@v6
         with:
-          context: erigon-src
+          context: erigon-full
           load: true
           tags: hive/erigon:cilocal
           cache-from: type=gha,scope=hive-erigon-build
