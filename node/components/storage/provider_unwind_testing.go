@@ -17,6 +17,10 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -53,6 +57,70 @@ type UnwindTestDeps struct {
 	SnapDir string
 
 	Logger log.Logger
+}
+
+// BuildInventoryFromSnapDirForTest scans snapDir + its standard
+// subdirs (domain/, history/, idx/, accessor/, caplin/) for state-
+// domain and block snapshot files, and returns a fresh Inventory
+// populated with one entry per discovered primary file. Mirrors the
+// production lifecycle driver's discoverNewFiles path but as a
+// one-shot snapshot for tests.
+//
+// Used by tests that exercise Provider.Unwind's snapshot-trim sub-op
+// — without a populated Inventory, snapshot-trim has nothing to
+// iterate and the over-step files stay on disk, leaving the
+// commitment anchor verification failing on the over-step file's
+// internal blockNum.
+//
+// Empty snapDir / missing subdirs are silent — the caller's
+// fixture may have produced fewer dirs than the standard layout.
+func BuildInventoryFromSnapDirForTest(snapDir string) *snapshot.Inventory {
+	inv := snapshot.NewInventory()
+	if snapDir == "" {
+		return inv
+	}
+	type scanDir struct{ path, prefix string }
+	dirs := []scanDir{
+		{snapDir, ""},
+		{filepath.Join(snapDir, "domain"), "domain"},
+		{filepath.Join(snapDir, "history"), "history"},
+		{filepath.Join(snapDir, "idx"), "idx"},
+		{filepath.Join(snapDir, "accessor"), "accessor"},
+		{filepath.Join(snapDir, "caplin"), "caplin"},
+	}
+	for _, sd := range dirs {
+		entries, err := os.ReadDir(sd.path)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			switch ext {
+			case ".kv", ".seg", ".v", ".ef":
+				// Primary files only. Index/accessor files (.idx,
+				// .kvi, .bt, etc.) are tracked indirectly via
+				// Dependencies — snapshot-trim removes them
+				// alongside the primary.
+			default:
+				continue
+			}
+			name := e.Name()
+			if sd.prefix != "" {
+				name = sd.prefix + "/" + e.Name()
+			}
+			entry := &snapshot.FileEntry{
+				Name:         name,
+				Local:        true,
+				Advertisable: true,
+			}
+			snapshot.PopulateFromName(entry)
+			_ = inv.AddFile(entry)
+		}
+	}
+	return inv
 }
 
 // NewProviderForUnwindTest builds a Provider with exactly the fields

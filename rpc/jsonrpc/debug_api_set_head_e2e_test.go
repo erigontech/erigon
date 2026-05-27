@@ -327,6 +327,13 @@ func TestSetHead_E2E_ModeB_RoutesToProviderUnwind(t *testing.T) {
 	head := canonicalHead(t, m)
 	require.Equal(t, uint64(16), head, "test fixture must run all 16 blocks")
 
+	// Populate the admin-unwind Inventory from the aggregator's
+	// on-disk state files now that execution has produced them. Without
+	// this, snapshot-trim's iteration is empty and over-step files
+	// stay on disk, leaving the commitment anchor verification stuck
+	// on the over-step file's internal blockNum.
+	m.RescanAdminUnwindInventory(t)
+
 	// Find a target block whose lastTxNum lands on a step boundary —
 	// the precondition WipeWritableShadowPast enforces. Per-block txn
 	// counts depend on system txns + 1 user txn per block, so probe
@@ -383,3 +390,35 @@ func TestSetHead_E2E_ModeB_RoutesToProviderUnwind(t *testing.T) {
 	require.Contains(t, setHeadErr.Error(), "commitment-anchor",
 		"snapshot-trim (no Inventory) is a no-op and DB-reset succeeds on this fixture; the controlled failure point is sub-op #3 ensureCommitmentAtBlock")
 }
+
+// Scenario 3's success-path E2E remains a known follow-up. Closing
+// it requires resolving the aggregator-RoTx-refresh constraint: mode
+// B runs in a single transaction; snapshot-trim removes files from
+// disk + Inventory, but the open tx's aggregator catalog still
+// serves the deleted files via their surviving mmap (POSIX inode
+// kept alive until handles close). LatestBlockNumWithCommitment
+// then reads the over-step file's internal blockNum, fails the
+// anchor verify, and surfaces the same controlled error this
+// focused test pins — even with the Inventory now populated by
+// RescanAdminUnwindInventory.
+//
+// Two reasonable paths forward (each substantial):
+//
+//  1. Split mode B across two transactions: tx A wipes the shadow +
+//     verifies anchor; tx B runs after Aggregator.OpenFolder() to
+//     trim files and republish. Atomicity becomes a journaled
+//     two-step. This contradicts the design doc's "single MDBX
+//     transaction" line, so the design needs revisiting.
+//
+//  2. Recompute the commitment at toBlock via integrity.RecomputeCommitmentAtBlock
+//     (just landed in db/integrity) and write it into the writable
+//     shadow as an explicit override. ensureCommitmentAtBlock then
+//     reads the just-written entry, anchor verify passes, the
+//     over-step file's stale entry is no longer load-bearing. Trim
+//     can happen post-commit.
+//
+// Path 2 is the lighter-touch closure and uses the recompute
+// primitive RecomputeCommitmentAtBlock that landed for fork-from. It's
+// the natural next step; landing it requires opening a SharedDomains
+// against the in-tx aggregator state without mutating the parent's
+// commitment domain — needs careful design of the writer target.

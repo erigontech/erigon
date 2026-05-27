@@ -75,6 +75,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/components/storage"
+	snapshotpkg "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -127,6 +128,13 @@ type ExecModuleTester struct {
 	ForkValidator  *execmodule.ForkValidator
 	ExecModule     *execmodule.ExecModule
 	StateCache     *execmodule.Cache
+
+	// adminUnwindInventory is the *snapshot.Inventory pointer the
+	// admin-unwind Provider observes. Populated lazily — empty at
+	// construction time, repopulated by RescanAdminUnwindInventory()
+	// after blocks execute and the aggregator writes files.
+	adminUnwindInventory *snapshotpkg.Inventory
+	adminUnwindSnapDir   string
 
 	// AdminUnwindProvider is the storage.Provider wired as the
 	// admin-unwind Unwinder when WithAdminUnwindWired() is set. nil
@@ -757,11 +765,20 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	var unwinder execmodule.Unwinder
 	if opt.adminUnwindWired {
 		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		// Snapshot files the test aggregator builds during execution
+		// are real on-disk artefacts, but the Inventory is empty at
+		// tester-construction time (blocks haven't executed yet).
+		// RescanAdminUnwindInventory() (called by the test after
+		// InsertChain) populates the shared *snapshotpkg.Inventory by
+		// scanning the snap dir; the Provider observes the same pointer.
+		mock.adminUnwindInventory = snapshotpkg.NewInventory()
+		mock.adminUnwindSnapDir = dirs.Snap
 		mock.AdminUnwindProvider = storage.NewProviderForUnwindTest(storage.UnwindTestDeps{
 			ChainDB:     mock.DB,
 			BlockReader: br,
 			Aggregator:  agg,
 			ChainConfig: mock.ChainConfig,
+			Inventory:   mock.adminUnwindInventory,
 			SnapDir:     dirs.Snap,
 			Logger:      logger,
 		})
@@ -999,6 +1016,26 @@ func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 //
 // Test helper only. Production diffset retention is managed by the
 // execution-component prune lifecycle.
+// RescanAdminUnwindInventory rescans the snap dir and adds every
+// state-domain and block snapshot primary file to the Inventory the
+// admin-unwind Provider observes. Required between block execution
+// (which produces files) and SetHead (which iterates the Inventory
+// for snapshot-trim) — without it, mode B's snapshot-trim sub-op
+// remains a no-op even when over-step files exist on disk.
+//
+// No-op when WithAdminUnwindWired() was not set. Safe to call
+// multiple times: AddFile is idempotent for already-tracked names.
+func (emt *ExecModuleTester) RescanAdminUnwindInventory(tb testing.TB) {
+	tb.Helper()
+	if emt.adminUnwindInventory == nil {
+		return
+	}
+	freshly := storage.BuildInventoryFromSnapDirForTest(emt.adminUnwindSnapDir)
+	for _, f := range freshly.AllLocalFiles() {
+		_ = emt.adminUnwindInventory.AddFile(f)
+	}
+}
+
 func (emt *ExecModuleTester) TruncateChangeSetsBelow(tb testing.TB, blockNum uint64) {
 	tb.Helper()
 	rwTx, err := emt.DB.BeginRw(emt.Ctx)
