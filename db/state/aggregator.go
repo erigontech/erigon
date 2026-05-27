@@ -1001,7 +1001,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bo
 	if lstTxNum+1 >= a.StepSize() {
 		lastCollatableStepInDB = kv.Step((lstTxNum+1)/a.StepSize() - 1)
 	}
-	a.logger.Info("[snapshots] holding state collation at reorg depth",
+	a.logger.Debug("[snapshots] holding state collation at reorg depth",
 		"step", step,
 		"lastBlockInStep", lastBlockInStep,
 		"lastBlockInDB", lastBlockInDB,

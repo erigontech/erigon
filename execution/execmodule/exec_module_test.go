@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -176,6 +177,85 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(t.Context(), m.ExecModule, longerFork2.Blocks)
 	require.NoError(t, err)
+}
+
+// Regression for PR #21415: when state's commitBlock is ahead of TxNums.Last
+// (e.g. after a snapshot/state misalignment + chaindata wipe), an FCU to a
+// block beyond the canonical tip must not be rejected as ReorgTooDeep.
+// The forkchoice should detect that unwindTarget equals the canonical tip,
+// skip the unwind path, write the new canonicals, and let AppendCanonicalTxNums
+// re-extend TxNums past commitBlock.
+func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 10)
+
+	// Drive the full chain in (insert + validate + UFC). State commitBlock and
+	// TxNums.Last are now both at block 10.
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks))
+
+	const truncateTo uint64 = 5
+	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
+	// extend to a frozen tip but the snapshot/state files commit to a later
+	// block. We truncate canonical+TxNums down to block 5 while leaving the
+	// commitment domain at block 10, and clear the changeset table (which a
+	// chaindata wipe would empty). With no changesets, CanUnwindToBlockNum
+	// falls back to the commitment block (10) — so an unwind to block 5 looks
+	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
+	var commitBlock uint64
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(v), 16)
+		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
+		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		return nil
+	}))
+	require.Equal(t, uint64(10), commitBlock, "commitBlock should be at block 10 after the initial chain")
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
+		return nil
+	}))
+
+	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
+	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
+	// so the no-unwind branch fires. The handler then writes canonical entries
+	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
+	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
+
+	// After the FCU, TxNums must have caught up to (or past) commitBlock so
+	// the next NewSharedDomains() will not return ErrBehindCommitment.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
 }
 
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
