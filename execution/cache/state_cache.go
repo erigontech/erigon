@@ -27,11 +27,11 @@ import (
 )
 
 const (
-	// DefaultAccountCacheBytes is the byte limit for account cache (1 GB)
+	// DefaultAccountCacheBytes is the byte limit for account cache
 	DefaultAccountCacheBytes = 64 * datasize.MB
-	// DefaultStorageCacheBytes is the byte limit for storage cache (1 GB)
+	// DefaultStorageCacheBytes is the byte limit for storage cache
 	DefaultStorageCacheBytes = 64 * datasize.MB
-	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
+	// DefaultCommitmentCacheBytes is the byte limit for commitment cache
 	DefaultCommitmentCacheBytes = 128 * datasize.MB
 )
 

@@ -34,9 +34,9 @@ func uint64AsBytes(v *uint64) []byte {
 }
 
 const (
-	// DefaultCodeCacheBytes is the byte limit for code cache (512 MB)
-	DefaultCodeCacheBytes = 256 * datasize.MB
-	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
+	// DefaultCodeCacheBytes is the byte limit for code cache
+	DefaultCodeCacheBytes = 128 * datasize.MB
+	// DefaultAddrCacheBytes is the byte limit for address cache
 	DefaultAddrCacheBytes = 16 * datasize.MB
 )
 
