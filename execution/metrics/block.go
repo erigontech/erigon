@@ -34,7 +34,8 @@ var (
 	BlockConsumerPostExecutionDelay  = diagmetrics.NewSummary(`block_consumer_delay{type="post_execution"}`)
 	BlockProducerProductionDelay     = diagmetrics.NewSummary(`block_producer_delay{type="production"}`)
 
-	ChainTipMgasPerSec = diagmetrics.NewGauge(`chain_tip_mgas_per_sec`)
+	ChainTipMgasPerSec    = diagmetrics.NewGauge(`chain_tip_mgas_per_sec`)
+	ChainTipAvgMgasPerSec = diagmetrics.NewGauge(`chain_tip_avg_mgas_per_sec`)
 
 	BlockConsumerHeaderDownloadDelayHistogram = diagmetrics.NewHistogram(`block_consumer_delay_hist{type="header_download"}`, delayBuckets)
 	BlockConsumerBodyDownloadDelayHistogram   = diagmetrics.NewHistogram(`block_consumer_delay_hist{type="body_download"}`, delayBuckets)
