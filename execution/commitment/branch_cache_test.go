@@ -18,9 +18,12 @@ package commitment
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TestBranchCache_RootPinning verifies the root branch lands in the pinned
@@ -288,4 +291,66 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 	require.True(t, ok, "entry at txN==watermark must survive")
 	_, _, ok = c.Get(aboveKey)
 	require.False(t, ok, "entry at txN>watermark must be evicted")
+}
+
+// TestContractHashFromPrefix_EvenAndOddNibblePaths verifies that the
+// contract-hash extraction handles both parities of hex-prefix compact
+// encoding (the odd-length-path flag puts the first nibble in byte 0,
+// which a naive prefix[1:33] read mis-attributes by one nibble).
+func TestContractHashFromPrefix_EvenAndOddNibblePaths(t *testing.T) {
+	var contract [32]byte
+	for i := range contract {
+		contract[i] = byte((i * 31) & 0xff)
+	}
+	contractNibbles := make([]byte, 64)
+	for i, b := range contract {
+		contractNibbles[2*i] = b >> 4
+		contractNibbles[2*i+1] = b & 0x0f
+	}
+
+	// Even-length path: depth 64 (no storage-trunk nibble). Encodes as
+	// flag byte (0x00) followed by the 32 contract bytes.
+	even := nibbles.HexToCompact(contractNibbles)
+	got, ok := ContractHashFromPrefix(even)
+	require.True(t, ok)
+	require.Equal(t, contract, got, "even-length path must round-trip")
+
+	// Odd-length path: depth 65 (contract + one storage nibble).
+	odd := nibbles.HexToCompact(append(append([]byte(nil), contractNibbles...), 0x0a))
+	got, ok = ContractHashFromPrefix(odd)
+	require.True(t, ok)
+	require.Equal(t, contract, got, "odd-length path must extract the contract hash, not a nibble-shifted slice")
+
+	// Even-length path at depth 66 (contract + two storage nibbles).
+	even66 := nibbles.HexToCompact(append(append([]byte(nil), contractNibbles...), 0x0a, 0x05))
+	got, ok = ContractHashFromPrefix(even66)
+	require.True(t, ok)
+	require.Equal(t, contract, got, "depth-66 even path must extract the contract hash")
+}
+
+// TestBranchCache_PutIfClean_DoesNotCountAsMiss verifies that the
+// write-path dirty check does not bump miss counters or fire the
+// onMiss callback — write traffic must not masquerade as read pressure
+// for the adaptive pin controller.
+func TestBranchCache_PutIfClean_DoesNotCountAsMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	var fired atomic.Uint64
+	c.SetMissCallback(func(prefix []byte) { fired.Add(1) })
+
+	key := []byte{0x12, 0x34}
+	// PutIfClean on a cold prefix must succeed without registering as a
+	// triple-miss (no fire, no tail-miss counter bump).
+	require.True(t, c.PutIfClean(key, []byte("v1"), 0, 0, "test"))
+	require.Equal(t, uint64(0), fired.Load(), "PutIfClean must not fire onMiss on the write path")
+	require.Equal(t, uint64(0), c.tailMisses.Load(), "PutIfClean must not bump tail miss counter")
+
+	// MarkDirty on a different cold prefix: also write-path, also must not count.
+	c.MarkDirty([]byte{0xff, 0xee})
+	require.Equal(t, uint64(0), fired.Load(), "MarkDirty must not fire onMiss on the write path")
+	require.Equal(t, uint64(0), c.tailMisses.Load(), "MarkDirty must not bump tail miss counter")
+
+	// A real read miss should still count.
+	_, _, ok := c.Get([]byte{0xaa, 0xbb})
+	require.False(t, ok)
+	require.Equal(t, uint64(1), fired.Load(), "Get on cold prefix must fire onMiss")
 }

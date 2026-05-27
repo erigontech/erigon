@@ -1273,36 +1273,25 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sd.sdCtx.EnableParaTrieDB(db)
 
-	// Stage-init is the right firing point for both the env-driven
-	// forced preload AND the adaptive controller's bind:
-	//  (a) we have a kv.TemporalRoDB to spawn an own-tx preload goroutine
-	//      with — avoids the cgo-pointer panic that the earlier shared-tx
-	//      attempt produced.
-	//  (b) we run from the stage-init path, not an engine request handler,
-	//      so we don't block engine HTTP responses during the 3-4s preload
-	//      window — the synchronous-from-NewSharedDomains shape caused the
-	//      bench's first NewPayload to be dropped, breaking block validation.
-	// TryClaimPreload guards fire-once-per-BranchCache-lifetime.
-	if sd.branchCache == nil || !sd.branchCache.TryClaimPreload() {
+	if sd.branchCache == nil {
 		return
 	}
 
-	// Operator-override path: PIN_CONTRACT_TRUNKS forces specific
-	// contracts to be pinned regardless of adaptive policy. Runs
-	// first so its pin set is in place before the controller binds.
-	if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
-		triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
+	// PIN_CONTRACT_TRUNKS preload is fire-once-per-BranchCache-lifetime:
+	// the cache is aggregator-scope and the preload's IO cost is paid up
+	// front; subsequent SDs reuse the already-populated pins.
+	if sd.branchCache.TryClaimPreload() {
+		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
+			triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
+		}
 	}
 
-	// Bind the adaptive controller to the cache so it starts
-	// observing miss pressure for un-forced contracts. The reader
-	// for promote/extend preloads is constructed per-call from the
-	// in-flight Flush tx (see SD.Flush).
+	// Bind the adaptive controller on every SD: the controller is
+	// per-SD and Bind installs the cache's onMiss callback. Without
+	// this, SDs created after the first have inert controllers and
+	// the cache's onMiss may point at a closed predecessor.
 	if sd.adaptivePinController != nil {
 		sd.adaptivePinController.Bind()
-		sd.logger.Info("[adaptive-pin] enabled",
-			"max_promoted", commitment.DefaultAdaptivePinControllerConfig().MaxPromotedContracts,
-			"per_contract_max_mb", commitment.DefaultAdaptivePinControllerConfig().PerContractMaxBudgetBytes/(1<<20))
 	}
 }
 
