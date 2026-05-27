@@ -796,6 +796,7 @@ func (s *KvServer) CurrentDomainVersion(_ context.Context, req *remoteproto.Curr
 	}
 
 	fmt.Printf("CurrentDomainVersion: %s, %s\n", reply.String(), reply.String())
+	panic(reply)
 	return reply, nil
 }
 
