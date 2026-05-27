@@ -18,14 +18,20 @@ package graphql
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGraphQLQueryBlock(t *testing.T) {
-	t.Skip("Not a unit test")
+	conn, err := net.DialTimeout("tcp", "localhost:8545", 300*time.Millisecond)
+	if err != nil {
+		t.Skipf("requires a running rpcdaemon with graphql at localhost:8545: %v", err)
+	}
+	_ = conn.Close()
 
 	for i, tt := range []struct {
 		body string
