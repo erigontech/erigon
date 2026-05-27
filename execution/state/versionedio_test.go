@@ -723,6 +723,136 @@ func TestSetAccountBalanceOrDelete_OtherAddressWritesPreserved(t *testing.T) {
 	require.True(t, selfDestructFound, "target must have SelfDestructPath")
 }
 
+// TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount
+// regression-pins the addrHasAnyWrite guard added in #21017 (bug #2).
+//
+// Setup: the worker has already written addr's NoncePath at version V (e.g.
+// a miner-self-send tx where sender == coinbase; the worker bumps the sender
+// nonce). The writes slice contains the NoncePath entry but no BalancePath
+// entry. finalize then calls SetAccountBalanceOrDelete to credit the tip.
+//
+// Pre-fix (bug #2): no BalancePath match found → fell through to the
+// new-account branch and re-emitted all four account fields from the
+// pre-block snapshot acc, clobbering the worker's already-bumped Nonce
+// under last-wins downstream merge.
+//
+// Post-fix: addrHasAnyWrite=true short-circuits the new-account branch
+// and appends ONLY the BalancePath; existing NoncePath is preserved.
+func TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xA000"))
+	writes := VersionedWrites{
+		// Worker wrote NoncePath only (e.g. nonce-bump on a sender = coinbase tx).
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(42)},
+	}
+
+	// Pre-block snapshot of the account — stale nonce that must NOT clobber
+	// the worker's already-bumped value.
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 41 // stale; worker has it at 42
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	// Should be NoncePath (worker's) + BalancePath (newly appended).
+	// Must NOT re-emit Incarnation / CodeHash from the stale snapshot.
+	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
+
+	pathSet := map[AccountPath]bool{}
+	for _, w := range result {
+		require.Equal(t, addr, w.Address)
+		pathSet[w.Path] = true
+		if w.Path == NoncePath {
+			require.Equal(t, uint64(42), w.Val, "worker's nonce must NOT be clobbered by stale snapshot")
+		}
+		if w.Path == BalancePath {
+			bal := w.Val.(uint256.Int)
+			require.Equal(t, uint256.NewInt(500), &bal)
+		}
+	}
+	require.True(t, pathSet[NoncePath], "NoncePath must be preserved")
+	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
+	require.False(t, pathSet[IncarnationPath], "IncarnationPath must NOT be re-emitted from stale snapshot")
+	require.False(t, pathSet[CodeHashPath], "CodeHashPath must NOT be re-emitted from stale snapshot")
+}
+
+// TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount
+// covers the same addrHasAnyWrite guard for a CodeHash-only worker write.
+// Less common in practice (CREATE without balance change) but a real path
+// the guard must handle for completeness.
+func TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB000"))
+	workerCodeHash := accounts.InternCodeHash(common.HexToHash("0xcafe"))
+	writes := VersionedWrites{
+		// Worker wrote CodeHashPath only (e.g. CREATE installed new code).
+		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: workerCodeHash},
+	}
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 5
+	acc.Incarnation = 2
+	acc.CodeHash = accounts.EmptyCodeHash // stale; worker installed real code
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
+
+	pathSet := map[AccountPath]bool{}
+	for _, w := range result {
+		require.Equal(t, addr, w.Address)
+		pathSet[w.Path] = true
+		if w.Path == CodeHashPath {
+			require.Equal(t, workerCodeHash, w.Val, "worker's CodeHash must NOT be clobbered by stale snapshot")
+		}
+	}
+	require.True(t, pathSet[CodeHashPath], "CodeHashPath must be preserved")
+	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
+	require.False(t, pathSet[NoncePath], "NoncePath must NOT be re-emitted from stale snapshot")
+	require.False(t, pathSet[IncarnationPath], "IncarnationPath must NOT be re-emitted from stale snapshot")
+}
+
+// TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount
+// covers the same addrHasAnyWrite guard for an Incarnation-only worker write
+// (e.g. a SELFDESTRUCT-and-recreate that bumps incarnation without changing
+// other paths via this code path).
+func TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xC000"))
+	writes := VersionedWrites{
+		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: uint64(7)},
+	}
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 3
+	acc.Incarnation = 6 // stale; worker has it at 7
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
+
+	pathSet := map[AccountPath]bool{}
+	for _, w := range result {
+		require.Equal(t, addr, w.Address)
+		pathSet[w.Path] = true
+		if w.Path == IncarnationPath {
+			require.Equal(t, uint64(7), w.Val, "worker's incarnation must NOT be clobbered by stale snapshot")
+		}
+	}
+	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be preserved")
+	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
+	require.False(t, pathSet[NoncePath], "NoncePath must NOT be re-emitted from stale snapshot")
+	require.False(t, pathSet[CodeHashPath], "CodeHashPath must NOT be re-emitted from stale snapshot")
+}
+
 // --- StripBalanceWrite tests ---
 
 // TestStripBalanceWrite_NoRead verifies that when the TX didn't read the
