@@ -50,6 +50,16 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// erigonLogLine matches the "[LVL] [MM-DD|HH:MM:SS.mmm] ..." prefix that erigon's
+// logger emits. Such diagnostic lines (e.g. the dbg package's "[env]" notices,
+// logged at startup when ERIGON_* vars are set — as CI does) are not part of a
+// command's data output, so they must be ignored when matching against goldens.
+var erigonLogLine = regexp.MustCompile(`(?m)^\[[A-Z]{3,5}\] \[\d{2}-\d{2}\|\d{2}:\d{2}:\d{2}.*\n?`)
+
+func withoutLogLines(b []byte) []byte {
+	return erigonLogLine.ReplaceAll(b, nil)
+}
+
 type testT8n struct {
 	*cmdtest.TestCmd
 }
@@ -236,7 +246,7 @@ func TestT8n(t *testing.T) {
 			if err != nil {
 				t.Fatalf("test %d: could not read expected output: %v", i, err)
 			}
-			have := tt.Output()
+			have := withoutLogLines(tt.Output())
 			ok, err := cmpJson(have, want)
 			switch {
 			case err != nil:
@@ -316,6 +326,7 @@ func checkExpectedOutput(t *testing.T, output []byte, expectationFilePath string
 			t.Fatalf("test %d: could not compile regular expression: %v", i, err)
 		}
 
+		output = withoutLogLines(output)
 		if !re.Match(output) {
 			t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(output), string(want))
 		}
