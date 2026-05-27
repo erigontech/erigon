@@ -204,10 +204,10 @@ Key design decisions:
 
 ### Task 9: Verify acceptance criteria
 
-- [ ] all Overview requirements implemented (manifest, Makefile, shard, seam, parser, runner, CI)
-- [ ] confirm zero failure-muting constructs in the diff (`grep` for `Skip`/`Fails`/build-tags in the new files)
-- [ ] full suite run completed and results reported
-- [ ] `make lint` clean; `make erigon integration` green
+- [x] all Overview requirements implemented (manifest, Makefile, shard, seam, parser, runner, CI) — all 7 present in the branch diff vs `origin/main` (`test-fixtures.json`, `Makefile`, `tools/test-groups`, `block_test_util.go` seam, `witness_block_test_util.go` parser, `eest_zkevm_witness/*` runner, `test-all-erigon-race.yml`)
+- [x] confirm zero failure-muting constructs in the diff (`grep` for `Skip`/`Fails`/build-tags in the new files) — grep over the new files found only one match: a *comment* in `witness_test.go:58` documenting Walk's own `t.Skip`. No `t.Skip`/`SkipNow`/`Skipf`/`bt.Fails`/`SkipLoad`/build-tags/`os.Getenv` gates in any new code. The seam preserves `UnsupportedForkError` as a real returned error
+- [x] full suite run completed and results reported — see "## Task 8 results" (15425 PASS / 7107 FAIL, surfaced not muted)
+- [x] `make lint` clean; `make erigon integration` green — re-verified at the acceptance gate: `make erigon integration` built both binaries green; `make lint` reported 0 issues on two consecutive runs (non-deterministic linter)
 
 ### Task 10: Documentation & plan close-out
 
