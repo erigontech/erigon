@@ -72,6 +72,23 @@ jobs:
           build-cache-extra-key: ${{ matrix.test-group }}
           ramdisk: true
 
+      # Only cache the .tar.gz; test-fixtures.sh re-extracts on each run. The
+      # extracted corpus is not mtime-normalized, so this heavy serial shard
+      # doesn't get Go test-result caching — its deep import graph rebuilds the
+      # test binary almost every run anyway, so normalization would buy little.
+      - name: Cache zkevm execution-witness tarball
+        if: ${{ matrix.test-group == 'execution-eest-zkevm' }}
+        uses: actions/cache@v5
+        with:
+          path: test-fixtures-cache/eest_zkevm.tar.gz
+          key: test-fixtures-zkevm-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-zkevm-${{ runner.os }}-
+
+      - name: Download zkevm execution-witness fixtures
+        if: ${{ matrix.test-group == 'execution-eest-zkevm' }}
+        run: make test-fixtures-zkevm
+
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
           SKIP_FLAKY_TESTS: 'true'
