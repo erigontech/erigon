@@ -605,8 +605,12 @@ func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecM
 		return nil, common.Hash{}, 0, 0, err
 	}
 
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(db)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
+	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}

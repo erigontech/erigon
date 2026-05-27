@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -45,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func TestEmptyQuery(t *testing.T) {
@@ -594,4 +597,32 @@ func TestRawTransactionInvalidType(t *testing.T) {
 	_, err := api.RawTransaction(context.Background(), encoded, []string{"unknown"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unrecognized trace type")
+}
+
+func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	// EVM bytecode: GASPRICE (0x3a), PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
+	gasPriceCode := hexutil.Bytes{0x3a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	result, err := api.Call(context.Background(), TraceCallParam{
+		From:                 &bankAddr,
+		To:                   &contractAddr,
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(contractAddr): {Code: &gasPriceCode},
+		},
+		BlockOverrides: &ethapi.BlockOverrides{
+			BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+		},
+	})
+	require.NoError(t, err)
+	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.Output.String())
 }

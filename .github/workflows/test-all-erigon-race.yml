@@ -41,6 +41,13 @@ jobs:
         os:
           - ubuntu-latest
         test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
+        # Run both serial and parallel exec paths so race-detector signal
+        # covers both. Each entry runs on its own GitHub-hosted runner —
+        # wall-clock unchanged, runner-minutes doubled.
+        exec_mode:
+          - serial
+          - parallel
+    name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -79,10 +86,14 @@ jobs:
         if: matrix.test-group == 'execution-eest-zkevm'
         run: make test-fixtures-zkevm
 
-      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
+      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
           SKIP_FLAKY_TESTS: 'true'
           CGO_CFLAGS: -D__BLST_PORTABLE__
+          # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+          # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+          # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon

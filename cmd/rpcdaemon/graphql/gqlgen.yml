@@ -92,6 +92,14 @@ models:
         resolver: true
       logs:
         resolver: true
+  Pending:
+    fields:
+      account:
+        resolver: true
+      call:
+        resolver: true
+      estimateGas:
+        resolver: true
   Transaction:
     fields:
       from:
