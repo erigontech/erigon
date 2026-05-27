@@ -193,7 +193,7 @@ additional_services:
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:v0.0.17
+  image: ethpandaops/assertoor:v0.1.2
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml

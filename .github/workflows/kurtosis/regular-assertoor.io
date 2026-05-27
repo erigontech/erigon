@@ -19,7 +19,7 @@ additional_services:
 assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:v0.0.17
+  image: ethpandaops/assertoor:v0.1.2
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/all-opcodes-test.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml

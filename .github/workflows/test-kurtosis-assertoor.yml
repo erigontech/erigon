@@ -8,7 +8,7 @@ env:
   # on every run and to eliminate Docker Hub rate-limit exposure.
   LIGHTHOUSE_IMAGE: "sigp/lighthouse:v7.0.1"
   TEKU_IMAGE: "consensys/teku:25.9.1"
-  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
+  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.1.2"
 
 on:
   workflow_dispatch:
