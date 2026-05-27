@@ -70,8 +70,8 @@ func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool, wa
 	writeAndBuild(t, ctx, db, agg, txs)
 	require.NoError(t, agg.MergeLoop(ctx))
 
-	// Reopen so commitment file versions are parsed from the on-disk names — the merge path
-	// does not stamp the in-memory FilesItem version.
+	// Reopen so commitment file versions are parsed from the on-disk names, exercising the
+	// on-disk parse path independently of the in-memory version stamp set during merge.
 	db = reopenAgg(t, db, agg, dirs, stepSize, logger)
 
 	gotVer, gotSpan := largestCommitmentFile(t, ctx, db)

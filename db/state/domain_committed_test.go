@@ -45,6 +45,8 @@ func TestCommitmentBranchReferenced(t *testing.T) {
 		{"v2.0 below threshold is plain", version.V2_0, fromBelow, toBelow, false},
 		{"v2.1 below threshold is plain", version.V2_1, fromBelow, toBelow, false},
 		{"hypothetical v2.2 above threshold is plain", version.Version{Major: 2, Minor: 2}, fromAbove, toAbove, false},
+		{"zero version (missing file) above threshold is referenced", version.Version{}, fromAbove, toAbove, true},
+		{"zero version (missing file) below threshold is plain", version.Version{}, fromBelow, toBelow, false},
 	}
 
 	for _, tc := range cases {

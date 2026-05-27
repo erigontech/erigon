@@ -16,8 +16,7 @@ type DomainCfg struct {
 	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	LargeValues bool
 
-	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
-	// for commitment domain only
+	// Write shortened key references in commitment branch values; commitment domain only.
 	ReferencesInCommitmentBranches bool
 
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
