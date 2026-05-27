@@ -21,9 +21,15 @@ import (
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+)
+
+const (
+	nukeMinSamples       = 1000 // minimum accesses before considering a nuke
+	nukeHitRateThreshold = 10   // nuke if hit_rate < 10% when full
 )
 
 // GenericCache is a bounded concurrent cache for key-value data.
@@ -105,7 +111,15 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 
 	// New key
 	if c.currentSize.Load()+entrySize > int64(c.capacityB) {
-		return
+		hits := c.hits.Load()
+		total := hits + c.misses.Load()
+		if total >= nukeMinSamples && hits*100/total < nukeHitRateThreshold {
+			c.Clear()
+			c.hits.Store(0)
+			c.misses.Store(0)
+		} else {
+			return
+		}
 	}
 
 	c.data.Set(key, value)
