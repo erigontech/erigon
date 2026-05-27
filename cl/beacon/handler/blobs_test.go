@@ -57,6 +57,7 @@ func TestGetBlobsFrozenSlot(t *testing.T) {
 
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, blockRoot, slot))
 	require.NoError(t, beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, blockRoot))
 	require.NoError(t, tx.Commit())
