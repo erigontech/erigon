@@ -125,21 +125,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      # Build erigon from the checked-out commit and wrap it with Hive's
-      # prebuilt-image client Dockerfile. Avoids cloning the commit inside
-      # Hive's builder: the merge_group ref is ephemeral and can be deleted
-      # mid-run (queue re-form / slow runner), which fails the clone.
+      # Build erigon from the checked-out commit, then wrap it with Hive's
+      # prebuilt-image client Dockerfile — avoids cloning the ephemeral
+      # merge_group ref inside Hive's builder.
+      # Plain docker build (host daemon's persistent cache), not a shared
+      # type=gha scope: many matrix jobs writing one gha scope risks 504s
+      # (cf. the centralized build in test-kurtosis-assertoor.yml).
       - name: Build erigon image from local source
-        uses: docker/build-push-action@v6
-        with:
-          context: erigon-full
-          load: true
-          tags: hive/erigon:cilocal
-          cache-from: type=gha,scope=hive-erigon-build
-          cache-to: type=gha,mode=max,scope=hive-erigon-build
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: docker build -t hive/erigon:cilocal erigon-full
 
       - name: Get dependencies and build hive
         env:
