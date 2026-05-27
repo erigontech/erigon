@@ -83,10 +83,18 @@ Key design decisions:
 
 ## Technical Details
 
-- Extracted corpus path: `test-fixtures-cache/eest_zkevm/<tarball-internal-layout>` — confirm the exact `blockchain_tests` subpath in Task 2 (likely `fixtures/blockchain_tests/`).
-- **Early schema confirmation available in-repo:** there is already a `blockchain_tests_zkevm/` witness corpus (~93 JSON files) in the `execution/tests/execution-spec-tests` submodule on `main`. Task 2 can inspect these immediately to confirm schema (`executionWitness.headers[]` = RLP-hex strings; keys `state`/`codes`/`headers`) without waiting on the 221MB download. The downloaded v0.4.0 tarball is still the corpus the suite runs against; this is only to de-risk the parser/comparison early.
-- Fixture JSON: standard EEST blockchain-test object plus a per-block `executionWitness` object — exact field names/encoding confirmed in Task 2.
-- `ExperimentalBAL`: Amsterdam fixtures likely require block-access-list support; set `bt.ExperimentalBAL = true` (via existing `WithExperimentalBAL` path) if the corpus needs it (confirm from a fixture's `network`/contents).
+### ✅ Task 2 findings (confirmed against the real v0.4.0 tarball — 2026-05-27)
+
+- **Tarball verified:** downloaded asset is **exactly** size `221172523` and sha256 `f1d6dbec741e325a08d1227c2292be1aa228a78003d6d62b4ab5b53aefc8480a` — both Context values are correct; use them verbatim in `test-fixtures.json` (Task 3).
+- **Internal layout:** tarball extracts to `fixtures/blockchain_tests/...`. So the extracted corpus path the runner (Task 6) walks is `test-fixtures-cache/eest_zkevm/fixtures/blockchain_tests`. Two top-level subtrees: `for_amsterdam/` and `for_bpo2toamsterdamattime15k/`. **2871 JSON files total.**
+- **In-repo submodule fast-path was NOT available:** `execution/tests/execution-spec-tests/blockchain_tests_zkevm/` does not exist in this worktree (only the `legacy-tests` submodule is present, and it is uninitialized). Schema was confirmed directly from the downloaded v0.4.0 corpus instead — strictly better, since it is the exact corpus the suite runs against.
+- **Fixture JSON shape:** standard EEST blockchain-test object. Top-level test-object keys: `_info`, `blocks`, `config`, `genesisBlockHeader`, `genesisRLP`, `lastblockhash`, `network`, `postState`, `pre`, `sealEngine`. One file holds **multiple** test objects (one per pytest parametrization); the top key is the `tests/...py::test_x[...]` id.
+- **Per-block keys:** `blockAccessList`, `blockHeader`, `blocknumber`, `executionWitness`, `receipts`, `rlp`, `statelessInputBytes`, `statelessOutputBytes`, `transactions`, `uncleHeaders`, `withdrawals`.
+- **`executionWitness` shape (CONFIRMED):** a JSON object with **exactly three keys — `state`, `codes`, `headers`** — each an **array of `0x`-prefixed RLP-hex strings**. There is **NO `keys` field anywhere in the corpus** (matches the RPC, where `Keys` is always null). `headers[]` entries are **RLP-hex strings** (e.g. `0xf90279a0…`, an RLP list = encoded `types.Header`), **not** JSON objects — so the Task 79 design holds: decode the fixture RLP-hex → `types.Header` → `.Hash()` and compare to the RPC map's embedded `hash`. In sampled fixtures `headers` had at most **1** element (the parent header); `state` and `codes` are small (single-digit lengths).
+- **Some blocks have NO `executionWitness`** (observed e.g. a trailing block in one `eip4895_withdrawals` parametrization, with no `expectException` either). The parser's `ExpectedWitnessForBlock(i)` MUST return `nil` for such blocks and the runner MUST skip the witness assertion for them (not fail).
+- **Networks present:** `for_amsterdam/` fixtures are `network: "Amsterdam"`; `for_bpo2toamsterdamattime15k/` fixtures are `network: "BPO2ToAmsterdamAtTime15k"`. **Both are registered** in `execution/tests/testforks/forks.go` (`Forks["Amsterdam"]` line 218, `Forks["BPO2ToAmsterdamAtTime15k"]` line 214). **No `UnsupportedForkError` blocker.**
+- **`ExperimentalBAL` REQUIRED:** every sampled block carries a `blockAccessList` → set `bt.ExperimentalBAL = true` (via `WithExperimentalBAL`) in the runner.
+- **Ordering / comparison decision:** RPC builds `Codes` as `accessed.SortedCodes` (sorted) and `State` as the trie-node list from `buildWitnessTrie` (`rpc/jsonrpc/debug_execution_witness.go:647,695`); EEST does not document a matching element order for witness trie-node lists. Robust choice for Task 6: compare `state` and `codes` as **multisets** (decode each side to bytes, sort, compare) with a sorted set-diff diagnostic on mismatch — order-of-MPT-nodes is not semantically load-bearing for statelessness. Exact element-by-element is the fragile path; avoid it.
 - Commitment history: enable schema globally for the test (restore in cleanup) AND write the per-DB flag, since the test DB is built from scratch.
 
 ## What Goes Where
@@ -109,13 +117,13 @@ Key design decisions:
 
 **Files:** (none — investigation; record findings in this plan)
 
-- [ ] FAST PATH: inspect the in-repo submodule corpus `execution/tests/execution-spec-tests/blockchain_tests_zkevm/*.json` first to confirm the `executionWitness` shape without downloading (headers expected as RLP-hex strings; keys `state`/`codes`/`headers`)
-- [ ] download the v0.4.0 tarball once to a scratch dir and sha256-verify against `f1d6dbec741e325a08d1227c2292be1aa228a78003d6d62b4ab5b53aefc8480a` (also record real size to confirm `221172523`)
-- [ ] extract and locate `blockchain_tests` subpath; record the exact path under the extracted root
-- [ ] open one v0.4.0 fixture; confirm the per-block `executionWitness` shape matches the submodule corpus: exact field names (`state`/`codes`/`keys`/`headers`?), `headers` encoding (RLP-hex vs JSON objects), element ordering semantics
-- [ ] record which fork/`network` the fixtures use and whether `ExperimentalBAL` is required
-- [ ] verify `Amsterdam` is registered in `testforks.Forks` (`execution/tests/testforks/forks.go`); if absent, that is a real blocker to surface — every fixture would return `UnsupportedForkError`
-- [ ] ✍️ write findings into "Technical Details" above so Tasks 5–6 build on real data, not assumptions
+- [x] FAST PATH: inspect the in-repo submodule corpus `execution/tests/execution-spec-tests/blockchain_tests_zkevm/*.json` first to confirm the `executionWitness` shape without downloading (headers expected as RLP-hex strings; keys `state`/`codes`/`headers`) — submodule corpus NOT present in this worktree (only `legacy-tests`, uninitialized); confirmed schema directly from the downloaded v0.4.0 corpus instead
+- [x] download the v0.4.0 tarball once to a scratch dir and sha256-verify against `f1d6dbec741e325a08d1227c2292be1aa228a78003d6d62b4ab5b53aefc8480a` (also record real size to confirm `221172523`) — both confirmed exact
+- [x] extract and locate `blockchain_tests` subpath; record the exact path under the extracted root — `fixtures/blockchain_tests/` (subtrees `for_amsterdam/`, `for_bpo2toamsterdamattime15k/`); recorded in Technical Details
+- [x] open one v0.4.0 fixture; confirm the per-block `executionWitness` shape: exact field names (`state`/`codes`/`headers`, NO `keys`), `headers` = RLP-hex strings, comparison-as-multiset decision — recorded in Technical Details
+- [x] record which fork/`network` the fixtures use and whether `ExperimentalBAL` is required — `Amsterdam` + `BPO2ToAmsterdamAtTime15k`; `ExperimentalBAL` required (BAL on every block)
+- [x] verify `Amsterdam` is registered in `testforks.Forks` (`execution/tests/testforks/forks.go`); if absent, that is a real blocker to surface — every fixture would return `UnsupportedForkError` — both `Amsterdam` (line 218) and `BPO2ToAmsterdamAtTime15k` (line 214) registered; no blocker
+- [x] ✍️ write findings into "Technical Details" above so Tasks 5–6 build on real data, not assumptions
 
 ### Task 3: Add fixture to manifest, Makefile target, and CI shard
 
