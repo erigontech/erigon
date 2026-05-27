@@ -331,9 +331,11 @@ post-condition that catches any over-drop.
 - [x] `go test ./rpc/jsonrpc/...` and `go test ./execution/commitment/...` green.
 
 ### Task 6: [Final] Docs and plan housekeeping
-- [ ] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
-      (default: no change).
-- [ ] Move this plan to `docs/plans/completed/`.
+- [x] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
+      (default: no change). → no change: the redundancy criterion and collapse-sibling shapes
+      are fully captured in this plan's DECISION section; nothing is a reusable cross-cutting
+      pattern warranting a CLAUDE.md edit.
+- [x] Move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 *Manual / external — no checkboxes*
