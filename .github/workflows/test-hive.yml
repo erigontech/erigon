@@ -84,13 +84,9 @@ jobs:
             max-allowed-failures: 0
             exec_mode: parallel
     steps:
-      - name: Checkout Erigon meta
+      - name: Checkout Erigon
         uses: actions/checkout@v6
         with:
-          sparse-checkout: |
-            go.mod
-            .github/workflows/hive-versions.json
-          sparse-checkout-cone-mode: false
           path: erigon-src
 
       - name: Read pinned versions
@@ -129,32 +125,40 @@ jobs:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
-      # Targeting the clients/erigon/Dockerfile.git in the Hive directory -
-      # this builds the container from github and uses it for tests
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Build erigon from the checked-out commit and wrap it with Hive's
+      # prebuilt-image client Dockerfile. Avoids cloning the commit inside
+      # Hive's builder: the merge_group ref is ephemeral and can be deleted
+      # mid-run (queue re-form / slow runner), which fails the clone.
+      - name: Build erigon image from local source
+        uses: docker/build-push-action@v6
+        with:
+          context: erigon-src
+          load: true
+          tags: hive/erigon:cilocal
+          cache-from: type=gha,scope=hive-erigon-build
+          cache-to: type=gha,mode=max,scope=hive-erigon-build
+
       - name: Get dependencies and build hive
         env:
-          SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           EXECUTION_APIS_REF: ${{ steps.hive-version.outputs.execution_apis_ref }}
-          # Toggle dbg.Exec3Parallel inside the hive-built erigon container.
+          # Toggle dbg.Exec3Parallel inside the hive erigon container.
           # We bake this as an ENV directive into the client Dockerfile so
           # every erigon instance hive launches inherits it.
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
           cd hive
           go get . >> buildlogs.log
-          rm clients/erigon/Dockerfile
-          mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
-          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[&/\]/\\&/g')
-          echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
-          sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
-          sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          # Point hive's default (prebuilt-image) erigon client at the image we
+          # built locally above, instead of cloning erigon inside the builder.
+          sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=hive/erigon|" clients/erigon/Dockerfile
+          sed -i "s|^ARG tag=main-latest$|ARG tag=cilocal|" clients/erigon/Dockerfile
           # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
           # erigon process inside hive picks it up. Append as the last layer
           # so it doesn't invalidate earlier build caches.
           echo "ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}" >> clients/erigon/Dockerfile
-          go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
-          echo "Patching builder Go version to ${go_version}"
-          sed -i "s|golang:[0-9.]*-|golang:${go_version}-|" clients/erigon/Dockerfile
           # Pin the execution-apis ref used by the rpc-compat simulator so that
           # upstream test additions don't break CI unexpectedly.
           # SECURITY: value comes from hive-versions.json which fork PRs can modify;
