@@ -17,6 +17,8 @@
 package testutil
 
 import (
+	"strconv"
+
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/hexutil"
@@ -34,10 +36,12 @@ type ExpectedWitness struct {
 // executionWitness data so the witness runner can compare it against the RPC.
 type WitnessBlockTest struct {
 	BlockTest
-	witnesses []*ExpectedWitness
+	witnesses    []*ExpectedWitness
+	blockNumbers []string
 }
 
 type witnessBlockJSON struct {
+	BlockNumber      string           `json:"blocknumber"`
 	ExecutionWitness *ExpectedWitness `json:"executionWitness"`
 }
 
@@ -56,14 +60,30 @@ func (wbt *WitnessBlockTest) UnmarshalJSON(in []byte) error {
 		return err
 	}
 	wbt.witnesses = make([]*ExpectedWitness, len(wj.Blocks))
+	wbt.blockNumbers = make([]string, len(wj.Blocks))
 	for i, b := range wj.Blocks {
 		wbt.witnesses[i] = b.ExecutionWitness
+		wbt.blockNumbers[i] = b.BlockNumber
 	}
 	return nil
 }
 
 func (wbt *WitnessBlockTest) NumBlocks() int {
 	return len(wbt.witnesses)
+}
+
+// BlockNumberForBlock returns the canonical block number for block index i,
+// parsed from the fixture's "blocknumber" field, or (0, false) when absent,
+// unparseable, or i is out of range.
+func (wbt *WitnessBlockTest) BlockNumberForBlock(i int) (uint64, bool) {
+	if i < 0 || i >= len(wbt.blockNumbers) {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(wbt.blockNumbers[i], 0, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // ExpectedWitnessForBlock returns the expected witness for block index i, or

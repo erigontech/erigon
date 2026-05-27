@@ -168,14 +168,14 @@ Key design decisions:
 - Create: `execution/tests/eest_zkevm_witness/testmain_test.go`
 - Create: `execution/tests/eest_zkevm_witness/witness_test.go`
 
-- [ ] `testmain_test.go`: `func TestMain(m *testing.M) { testutil.RunTestMain(m) }`
-- [ ] `witness_test.go` `TestExecutionSpecWitness`: enable historical commitment via `statecfg.EnableHistoricalCommitment()` and restore prior schema in `t.Cleanup`
-- [ ] resolve fixtures dir under `test-fixtures-cache/eest_zkevm/...` (path from Task 2); `os.Stat` + `t.Fatalf` with a "run `make test-fixtures-zkevm`" message if the dir is missing — **this guard MUST run before `Walk`**, because `Walk` does its own `t.Skip("missing test files")` (an implicit mute we must not hit)
-- [ ] `Walk` the corpus; per fixture set `ExperimentalBAL` if Task 2 requires it, call `RunWithTester` (real assertion — block-execution failure AND `testforks.UnsupportedForkError` are test failures, NOT absorbed or silently continued)
-- [ ] build `DebugAPIImpl` from the returned tester (`NewBaseApi(...)` + `NewPrivateDebugAPI(...)`); write `rawdb.WriteDBCommitmentHistoryEnabled(tx, true)` into the test DB
-- [ ] for each block with expected witness: call `ExecutionWitness`; assert non-nil result and compare `State`/`Codes` (exact byte-slice arrays) and `Headers` (read the RPC map's embedded `hash` field; compare to the fixture header decoded RLP-hex → `types.Header` → `.Hash()`); emit informative diffs on mismatch
-- [ ] confirm: NO `t.Skip`/`bt.Fails`/`SkipLoad`/build-tags/env gates anywhere in the package, and NO silent tolerance of `UnsupportedForkError`
-- [ ] `go build ./execution/tests/eest_zkevm_witness/...`
+- [x] `testmain_test.go`: `func TestMain(m *testing.M) { testutil.RunTestMain(m) }`
+- [x] `witness_test.go` `TestExecutionSpecWitness`: enable historical commitment via `statecfg.EnableHistoricalCommitment()` and restore prior schema in `t.Cleanup` (snapshots `statecfg.Schema.CommitmentDomain`, restored in cleanup that runs after the parallel-free corpus walk)
+- [x] resolve fixtures dir under `test-fixtures-cache/eest_zkevm/...` (resolved via `runtime.Caller` → `../../../test-fixtures-cache/eest_zkevm/fixtures/blockchain_tests`, CWD-independent); `os.Stat` + `t.Fatalf` with a "run `make test-fixtures-zkevm`" message if the dir is missing — guard runs **before** `Walk`
+- [x] `Walk` the corpus (`tm.NoParallel = true` — serial, fresh MDBX per fixture); per fixture set `ExperimentalBAL = true`, call `RunWithTester` (real assertion — block-execution failure AND `testforks.UnsupportedForkError` surface via `t.Fatalf`, never absorbed)
+- [x] build `DebugAPIImpl` from the returned tester (`NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)` + `NewPrivateDebugAPI(base, m.DB, nil, 0, false)`); write `rawdb.WriteDBCommitmentHistoryEnabled(rwTx, true)` into the test DB
+- [x] for each block with expected witness (block number from the new `BlockNumberForBlock` accessor): call `ExecutionWitness`; assert non-nil result and compare `State`/`Codes` as **multisets** (sorted byte-slice arrays) and `Headers` by embedded `hash` (decode fixture RLP-hex → `types.Header` → `.Hash()`, compare hash multisets); informative sorted-hex diffs on mismatch
+- [x] confirm: NO `t.Skip`/`bt.Fails`/`SkipLoad`/build-tags/env gates anywhere in the package (only a comment referencing Walk's own skip), and NO silent tolerance of `UnsupportedForkError`
+- [x] `go build ./execution/tests/eest_zkevm_witness/...` — builds; `go vet` clean; targeted `golangci-lint` 0 issues; smoke-ran 1-block (`extcodehash_of_empty`) and 2-block (`withdrawing_to_precompiles`) fixtures green
 
 ### Task 7: CI activation — caching + fixture download in the race workflow
 
