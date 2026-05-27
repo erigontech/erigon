@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -121,7 +122,17 @@ func (cc *ExecutionClientDirect) NewPayload(
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+	probeStart := time.Now()
+	log.Info("[#21008-probe] FCU in",
+		"head", head,
+		"safe", safe,
+		"finalized", finalized,
+		"hasAttr", attr != nil)
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
+	log.Info("[#21008-probe] FCU out",
+		"wall", time.Since(probeStart),
+		"status", status,
+		"err", err)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
