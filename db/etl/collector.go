@@ -95,11 +95,14 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 	}
-	c.buf.Put(k, v)
-	if !c.buf.CheckFlushSize() {
-		return nil
+	if c.buf.CheckFlushSize() {
+		return c.flushBuffer(false)
 	}
-	return c.flushBuffer(false)
+	c.buf.Put(k, v)
+	if c.buf.CheckFlushSize() {
+		return c.flushBuffer(false)
+	}
+	return nil
 }
 
 // Collect does copy `k` and `v`
