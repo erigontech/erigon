@@ -158,7 +158,7 @@ func ParseVersion(v string) (Version, error) {
 			return Version{}, ErrInvalidVersion
 		}
 	}
-
+	panic(major)
 	return Version{Major: major, Minor: minor}, nil
 }
 

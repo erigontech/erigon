@@ -32,6 +32,7 @@ type Version struct {
 }
 
 func VersionFromProto(r *typesproto.VersionReply) Version {
+	panic(r.Major)
 	return Version{Major: r.Major, Minor: r.Minor, Patch: r.Patch}
 }
 
