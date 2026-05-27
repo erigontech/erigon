@@ -1812,6 +1812,17 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if err != nil {
 		return err
 	}
+	// A prior tx may have written this address's Balance (e.g. a coinbase tip
+	// credit) at a version the account-record source/version doesn't reflect;
+	// stamp the synthetic BalancePath read with that version to avoid a
+	// non-converging ErrDependency retry loop.
+	balSource, balVersion := source, version
+	if sdb.versionMap != nil {
+		if res := sdb.versionMap.Read(addr, BalancePath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			balSource = MapRead
+			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+		}
+	}
 
 	newObj := sdb.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
@@ -1838,7 +1849,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between transactions get detected
-	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
+	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, balSource, balVersion, newObj.Balance())
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	// Only emit SelfDestructPath=false when this CreateAccount is reviving an
 	// account THAT WAS DESTRUCTED IN THIS IBS (real SD via IBS.Selfdestruct).

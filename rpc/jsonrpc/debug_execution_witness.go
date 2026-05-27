@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -58,11 +59,12 @@ type RecordingState struct {
 	codeOverlay    map[common.Address][]byte
 
 	// Write tracking
-	ModifiedAccounts map[common.Address]struct{}
-	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
-	ModifiedCode     map[common.Address][]byte
-	DeletedAccounts  map[common.Address]struct{}
-	CreatedContracts map[common.Address]struct{}
+	ModifiedAccounts      map[common.Address]struct{}
+	ReallyChangedAccounts map[common.Address]struct{} // subset of ModifiedAccounts where actual state (nonce/balance/code) changed
+	ModifiedStorage       map[common.Address]map[common.Hash]struct{}
+	ModifiedCode          map[common.Address][]byte
+	DeletedAccounts       map[common.Address]struct{}
+	CreatedContracts      map[common.Address]struct{}
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -71,19 +73,20 @@ type RecordingState struct {
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
 func NewRecordingState(inner state.StateReader) *RecordingState {
 	return &RecordingState{
-		inner:            inner,
-		AccessedAccounts: make(map[common.Address]struct{}),
-		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		AccessedCode:     make(map[common.Address][]byte),
-		PreStateCode:     make(map[common.Address][]byte),
-		accountOverlay:   make(map[common.Address]*accounts.Account),
-		storageOverlay:   make(map[common.Address]map[common.Hash]uint256.Int),
-		codeOverlay:      make(map[common.Address][]byte),
-		ModifiedAccounts: make(map[common.Address]struct{}),
-		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		ModifiedCode:     make(map[common.Address][]byte),
-		DeletedAccounts:  make(map[common.Address]struct{}),
-		CreatedContracts: make(map[common.Address]struct{}),
+		inner:                 inner,
+		AccessedAccounts:      make(map[common.Address]struct{}),
+		AccessedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		AccessedCode:          make(map[common.Address][]byte),
+		PreStateCode:          make(map[common.Address][]byte),
+		accountOverlay:        make(map[common.Address]*accounts.Account),
+		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
+		codeOverlay:           make(map[common.Address][]byte),
+		ModifiedAccounts:      make(map[common.Address]struct{}),
+		ReallyChangedAccounts: make(map[common.Address]struct{}),
+		ModifiedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		ModifiedCode:          make(map[common.Address][]byte),
+		DeletedAccounts:       make(map[common.Address]struct{}),
+		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
 
@@ -297,6 +300,9 @@ func (s *RecordingState) TracePrefix() string {
 func (s *RecordingState) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
+	if original == nil || account.Nonce != original.Nonce || !account.Balance.Eq(&original.Balance) || account.CodeHash != original.CodeHash {
+		s.ReallyChangedAccounts[addr] = struct{}{}
+	}
 	// Store a copy in the overlay
 	acctCopy := *account
 	s.accountOverlay[addr] = &acctCopy
@@ -451,20 +457,12 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 
 	// Geth always emits these optional fields as null when absent.
 	nullFields := []string{
-		"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
+		"baseFeePerGas", "blobGasUsed", "blockAccessListHash", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
 
 	for _, field := range nullFields {
 		if _, ok := m[field]; !ok {
 			m[field] = nil
 		}
-	}
-
-	// Geth uses "balHash" instead of Erigon's "blockAccessListHash".
-	if v, ok := m["blockAccessListHash"]; ok {
-		m["balHash"] = v
-		delete(m, "blockAccessListHash")
-	} else {
-		m["balHash"] = nil
 	}
 	delete(m, "size")
 
@@ -780,6 +778,31 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 		for _, key := range keys {
 			out.Storage[addr][key] = struct{}{}
+		}
+	}
+
+	// Per EIP-7928, the system address (0xff...fe) must not appear in the witness
+	// unless it has actual state changes. It is touched as msg.sender on every
+	// block's system call but that alone does not constitute a state access.
+	sysAddr := common.Address(params.SystemAddress.Value())
+	if _, inAddresses := out.Addresses[sysAddr]; inAddresses {
+		_, reallyChanged := rs.ReallyChangedAccounts[sysAddr]
+		hasStorage := len(out.Storage[sysAddr]) > 0
+		preAcct, _ := rs.inner.ReadAccountData(params.SystemAddress)
+		preExists := preAcct != nil
+		_, deleted := rs.DeletedAccounts[sysAddr]
+		postOverlay, hasOverlay := rs.accountOverlay[sysAddr]
+		var postExists bool
+		if deleted {
+			postExists = false
+		} else if hasOverlay {
+			postExists = postOverlay != nil
+		} else {
+			postExists = preExists
+		}
+		existenceChanged := preExists != postExists
+		if !reallyChanged && !hasStorage && !existenceChanged {
+			delete(out.Addresses, sysAddr)
 		}
 	}
 

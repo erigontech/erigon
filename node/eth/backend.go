@@ -852,6 +852,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
+			backend.chainConfig,
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
@@ -1274,19 +1275,36 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
-	if limit == 0 || limit > len(s.sentryProvider.Client.Sentries()) {
-		limit = len(s.sentryProvider.Client.Sentries())
+	sentries := s.sentryProvider.Client.Sentries()
+	if limit == 0 || limit > len(sentries) {
+		limit = len(sentries)
 	}
 
+	// Sentries that share a single p2p.Server return identical NodeInfo
+	// (same Node ID, same enode). Dedup by Enode so admin_nodeInfo doesn't
+	// list the same node N times. `limit` caps the number of *unique* nodes
+	// returned — keep scanning the rest of the sentry list past duplicates
+	// so a hybrid setup with both shared-Server and external sentries can
+	// still fill the cap.
+	seenEnodes := make(map[string]struct{}, limit)
 	nodes := make([]*typesproto.NodeInfoReply, 0, limit)
-	for i := 0; i < limit; i++ {
-		sc := s.sentryProvider.Client.Sentries()[i]
+	for _, sc := range sentries {
+		if len(nodes) >= limit {
+			break
+		}
 
 		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
 			s.logger.Error("sentry nodeInfo", "err", err)
 			continue
 		}
+		if nodeInfo == nil || nodeInfo.Enode == "" {
+			continue
+		}
+		if _, dup := seenEnodes[nodeInfo.Enode]; dup {
+			continue
+		}
+		seenEnodes[nodeInfo.Enode] = struct{}{}
 
 		nodes = append(nodes, nodeInfo)
 	}

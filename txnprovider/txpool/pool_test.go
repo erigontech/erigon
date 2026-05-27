@@ -793,7 +793,7 @@ func TestTxnPoke(t *testing.T) {
 		txnSlot := newTestTxnSlot(2, 0, 300000, 300000, 100000)
 		txnSlot.IDHash[0] = 1
 		txnSlots.Append(txnSlot, addr[:], true)
-		pool.AddRemoteTxns(ctx, txnSlots)
+		pool.AddRemoteTxns(ctx, txnSlots, nil, nil)
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -810,7 +810,7 @@ func TestTxnPoke(t *testing.T) {
 		txnSlot := newTestTxnSlot(2, 0, 3000000, 3000000, 100000)
 		txnSlot.IDHash[0] = 2
 		txnSlots.Append(txnSlot, addr[:], true)
-		pool.AddRemoteTxns(ctx, txnSlots)
+		pool.AddRemoteTxns(ctx, txnSlots, nil, nil)
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -1467,7 +1467,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 		txnSlot.IDHash[0] = 1
 		txnSlots.Append(txnSlot, addr[:], true)
 
-		txnPool.AddRemoteTxns(ctx, txnSlots)
+		txnPool.AddRemoteTxns(ctx, txnSlots, nil, nil)
 	}
 
 	// empty because AddRemoteTxns logic is intentionally empty
@@ -1937,7 +1937,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	// Run the benchmark: process transactions one by one
 	// This measures the performance of adding and processing remote transactions
 	for i := 0; i < b.N; i++ {
-		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
+		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]}, nil, nil)
 		err := pool.processRemoteTxns(ctx)
 		require.NoError(err)
 	}

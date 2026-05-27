@@ -26,7 +26,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
-	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -38,8 +37,6 @@ import (
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 type MockClOption func(*MockCl)
@@ -55,22 +52,18 @@ type MockCl struct {
 	engineApiClient       *engineapi.JsonRpcClient
 	suggestedFeeRecipient common.Address
 	genesis               common.Hash
+	genesisGasLimit       uint64
 	state                 *MockClState
-	blockListener         *shutter.BlockListener
 	chainConfig           *chain.Config
 }
 
-type stateChangesClient interface {
-	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
-}
-
-func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonRpcClient, stateChangesClient stateChangesClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
+func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
 	mcl := &MockCl{
 		logger:                logger,
 		engineApiClient:       elClient,
-		blockListener:         shutter.NewBlockListener(logger, stateChangesClient),
 		suggestedFeeRecipient: genesis.Coinbase(),
 		genesis:               genesis.Hash(),
+		genesisGasLimit:       genesis.GasLimit(),
 		chainConfig:           chainConfig,
 		state: &MockClState{
 			ParentElBlock:     genesis.Hash(),
@@ -82,7 +75,6 @@ func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonR
 	for _, opt := range opts {
 		opt(mcl)
 	}
-	go mcl.blockListener.Run(ctx)
 	return mcl
 }
 
@@ -92,11 +84,6 @@ func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuilding
 	if err != nil {
 		return nil, fmt.Errorf("build new payload failed: %w", err)
 	}
-	lastBlock := make(chan uint64)
-	unregisterObserver := cl.blockListener.RegisterObserver(func(e shutter.BlockEvent) {
-		lastBlock <- e.LatestBlockNum
-	})
-	defer unregisterObserver()
 	status, err := cl.InsertNewPayload(ctx, clPayload)
 	if err != nil {
 		return nil, fmt.Errorf("insert new payload failed: %w", err)
@@ -108,9 +95,6 @@ func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuilding
 	if err != nil {
 		return nil, fmt.Errorf("update fork choice failed: %w", err)
 	}
-	// wait for the block t be published (note: we could just poll the rpc layer
-	// if we want to remove the internal api dependency)
-	<-lastBlock
 	return clPayload, nil
 }
 
@@ -152,6 +136,8 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	if cl.chainConfig.AmsterdamTime != nil {
 		payloadAttributes.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		targetGasLimit := hexutil.Uint64(cl.genesisGasLimit)
+		payloadAttributes.TargetGasLimit = &targetGasLimit
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
