@@ -311,7 +311,6 @@ func TestLvlFilterHandler(t *testing.T) {
 }
 
 func TestNetHandler(t *testing.T) {
-	t.Skip()
 	t.Parallel()
 
 	l, err := net.Listen("tcp", "localhost:0") //nolint:noctx
@@ -551,7 +550,6 @@ func TestCallerFuncHandler(t *testing.T) {
 
 // https://github.com/inconshreveable/log15/issues/27
 func TestCallerStackHandler(t *testing.T) {
-	t.Skip("fix me")
 	t.Parallel()
 
 	l := New()

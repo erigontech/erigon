@@ -34,7 +34,6 @@ import (
 )
 
 func TestSideChainInsert(t *testing.T) {
-	t.Skip("decommissioned - pending removal in future PR")
 	t.Parallel()
 	funds := big.NewInt(1000000000)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -99,6 +98,11 @@ func TestSideChainInsert(t *testing.T) {
 		{"td(incoming) = td(current), number(incoming) = number(current), hash different", chain7, finalExpectedHash, 10},
 	}
 
+	// Total difficulty is cumulative from genesis, so the inserter's TD includes
+	// the genesis block's difficulty on top of the fed headers' difficulties.
+	gd := genesis.Difficulty()
+	genesisDiff := gd.Uint64()
+
 	for _, tc := range testCases {
 		for i, h := range tc.chain {
 			data, _ := rlp.EncodeToBytes(h)
@@ -110,8 +114,8 @@ func TestSideChainInsert(t *testing.T) {
 		if hi.GetHighestHash() != tc.expectedHash {
 			t.Errorf("incorrect highest hash for %s, expected %s, got %s", tc.name, tc.expectedHash, hi.GetHighestHash())
 		}
-		if hi.GetLocalTd().Uint64() != tc.expectedDiff {
-			t.Errorf("incorrect difficulty for %s, expected %d, got %d", tc.name, tc.expectedDiff, hi.GetLocalTd().Uint64())
+		if want := genesisDiff + tc.expectedDiff; hi.GetLocalTd().Uint64() != want {
+			t.Errorf("incorrect difficulty for %s, expected %d, got %d", tc.name, want, hi.GetLocalTd().Uint64())
 		}
 	}
 }

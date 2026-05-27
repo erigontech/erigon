@@ -152,13 +152,6 @@ func mockProvider(ctrl *gomock.Controller, _ int) *component.MockComponentProvid
 	return p
 }
 func TestComponentLifecycle(t *testing.T) {
-	// This test uses gomock with exact call counts, which is sensitive to the
-	// shared root domain's init() goroutine triggering extra lifecycle calls on
-	// orphaned components from earlier tests. The same behavior is thoroughly
-	// tested by TestDependencyActivationOrder, TestDependencyDeactivationOrder,
-	// and TestThreeLevelHierarchy in hierarchy_test.go using real providers
-	// instead of gomock.
-	t.Skip("Superseded by hierarchy_test.go — gomock incompatible with shared root domain")
 	ctrl := gomock.NewController(t)
 	testDomain, err := component.NewComponentDomain(t.Context(), "lifecycle")
 	require.Nil(t, err)
@@ -333,7 +326,6 @@ func TestConfigre(t *testing.T) {
 }
 
 func TestDomainLifecycle(t *testing.T) {
-	t.Skip("Superseded by hierarchy_test.go — gomock incompatible with shared root domain")
 	dom, err := component.NewComponentDomain(t.Context(), "domain")
 	require.Nil(t, err)
 	require.NotNil(t, dom)
@@ -785,7 +777,6 @@ func TestMultipleDependents(t *testing.T) {
 }
 
 func TestAddRemoveDeps(t *testing.T) {
-	t.Skip("Superseded by hierarchy_test.go — gomock incompatible with shared root domain")
 	ctrl := gomock.NewController(t)
 	c, err := component.NewComponent[component.MockComponentProvider](t.Context(),
 		component.WithProvider(mockProvider(ctrl, 1)))
