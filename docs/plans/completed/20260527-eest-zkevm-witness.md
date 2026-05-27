@@ -214,9 +214,9 @@ Key design decisions:
 **Files:**
 - Modify: `docs/plans/20260527-eest-zkevm-witness.md` (this file)
 
-- [ ] note any new pattern in `CLAUDE.md` only if genuinely new (likely none — reuses existing machinery)
-- [ ] move this plan to `docs/plans/completed/`
-- [ ] commit message convention: package prefix, e.g. `execution/tests: add zkevm execution-witness suite (zkevm@v0.4.0)`
+- [x] note any new pattern in `CLAUDE.md` only if genuinely new (likely none — reuses existing machinery) — confirmed none: the suite reuses the PR #21002 fixture manifest, the `tools/test-groups` shard machinery, and the existing block-test framework verbatim. The one non-obvious gotcha (the `tools/test-groups` GROUPS greedy-partition ordering, see Task 3) is local to `tools/test-groups` and recorded in the plan + commit history, not a repo-wide convention warranting a top-level `CLAUDE.md` entry.
+- [x] move this plan to `docs/plans/completed/`
+- [x] commit message convention: package prefix, e.g. `execution/tests: add zkevm execution-witness suite (zkevm@v0.4.0)`
 
 ## Task 8 results (full corpus run — 2026-05-27)
 
