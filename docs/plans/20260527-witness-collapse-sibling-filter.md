@@ -321,13 +321,14 @@ post-condition that catches any over-drop.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] Tidy the helper; no scenario comments; consistent naming.
-- [ ] Pre-Amsterdam `TestExecutionWitness` (all existing sub-cases) still pass unchanged.
-- [ ] All new tests green: account collapse minimal, storage collapse minimal, no-op
+- [x] Tidy the helper; no scenario comments; consistent naming. (already clean — single-sentence
+      docstring, consistent `drop`/`out`/`node`/`path` naming, no scenario comments; no code change needed.)
+- [x] Pre-Amsterdam `TestExecutionWitness` (all existing sub-cases) still pass unchanged.
+- [x] All new tests green: account collapse minimal, storage collapse minimal, no-op
       unchanged, load-bearing retained.
-- [ ] `make lint` (repeat until clean — non-deterministic).
-- [ ] `make erigon integration` builds.
-- [ ] `go test ./rpc/jsonrpc/...` and `go test ./execution/commitment/...` green.
+- [x] `make lint` (repeat until clean — non-deterministic). → 0 issues.
+- [x] `make erigon integration` builds.
+- [x] `go test ./rpc/jsonrpc/...` and `go test ./execution/commitment/...` green.
 
 ### Task 6: [Final] Docs and plan housekeeping
 - [ ] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
