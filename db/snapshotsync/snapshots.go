@@ -553,10 +553,10 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock  sync.RWMutex                   // guards `dirty` field
-	dirty      []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
-	visible    atomic.Pointer[snapshotVisible]
-	recalcLock sync.Mutex // serializes recalcVisibleFiles publishers
+	dirtyLock   sync.RWMutex                   // guards `dirty` field
+	dirty       []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	visibleLock sync.RWMutex
+	visible     atomic.Pointer[snapshotVisible]
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
@@ -828,8 +828,8 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	s.recalcLock.Lock()
-	defer s.recalcLock.Unlock()
+	s.visibleLock.Lock()
+	defer s.visibleLock.Unlock()
 
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()
@@ -1546,6 +1546,8 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 	v := s.visible.Load()
 	sgs := make([]*RoTx, snaptype.MaxEnum)
 	for _, t := range s.enums {
@@ -1573,10 +1575,14 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) *RoTx {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 	return s.visible.Load().segments[t.Enum()].BeginRo()
 }
 
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *VisibleSegment, ok bool, close func()) {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
 	segmentRotx := s.visible.Load().segments[t.Enum()].BeginRo()
 
 	for _, seg := range segmentRotx.Segments {

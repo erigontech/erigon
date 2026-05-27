@@ -77,8 +77,8 @@ type Aggregator struct {
 
 	reorgBlockDepth uint64
 
-	dirtyFilesLock sync.Mutex
-	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
+	dirtyFilesLock    sync.Mutex
+	visibleFilesLock  sync.RWMutex
 	visible           atomic.Pointer[aggregatorVisible]
 	snapshotBuildSema *semaphore.Weighted
 
@@ -1667,9 +1667,8 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 }
 
 // aggregatorVisible is the immutable per-entity snapshot read by every
-// AggregatorRoTx. The bundle is what makes BeginFilesRo lock-free and
-// cross-entity consistent: a single atomic load pins one generation for all
-// domains, histories, inverted indexes and the state minimax.
+// AggregatorRoTx. A single load under visibleFilesLock.RLock pins one
+// cross-entity-consistent generation for all domains, histories, and indexes.
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
@@ -1678,12 +1677,6 @@ type aggregatorVisible struct {
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 }
 
-// recalcVisibleFiles must be called with dirtyFilesLock held (writers are
-// serialized by it; readers take no lock and instead load a.visible). It builds
-// a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
-// helpers, then publishes the completed snapshot with a.visible.Store(next).
-// Per-entity visibility is not mutated; readers atomically observe one
-// cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles() {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
@@ -1700,7 +1693,9 @@ func (a *Aggregator) recalcVisibleFiles() {
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	a.visibleFilesLock.Lock()
 	a.visible.Store(next)
+	a.visibleFilesLock.Unlock()
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2281,6 +2276,8 @@ type AggregatorRoTx struct {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
+	a.visibleFilesLock.RLock()
+	defer a.visibleFilesLock.RUnlock()
 	v := a.visible.Load()
 	ac := &AggregatorRoTx{
 		a:        a,
