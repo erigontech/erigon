@@ -27,6 +27,11 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
+const (
+	nukeMinSamples       = 1000 // minimum accesses before considering a nuke
+	nukeHitRateThreshold = 10   // nuke if hit_rate < 10% when full
+)
+
 // GenericCache is a bounded concurrent cache for key-value data.
 type GenericCache[T any] struct {
 	data        *maphash.Map[T]
@@ -104,9 +109,22 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 		return
 	}
 
-	// New key
+	// Cache is full
 	if c.currentSize.Load()+entrySize > int64(c.capacityB) {
-		return
+		hits := c.hits.Load()
+		total := hits + c.misses.Load()
+		// low-hit-ratio: nuke, high-hit-ratio: ignore key
+		if total < nukeMinSamples {
+			return
+		}
+		hitRate := hits * 100 / total
+		if hitRate < nukeHitRateThreshold {
+			c.Clear()
+			c.hits.Store(0)
+			c.misses.Store(0)
+		} else {
+			return
+		}
 	}
 
 	c.data.Set(key, value)
