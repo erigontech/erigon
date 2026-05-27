@@ -5,9 +5,9 @@ participants_matrix:
       el_log_level: "debug"
   cl:
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v7.0.1
+      cl_image: sigp/lighthouse:v8.1.3
     - cl_type: teku
-      cl_image: consensys/teku:25.9.1
+      cl_image: consensys/teku:26.4.0
 network_params:
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
