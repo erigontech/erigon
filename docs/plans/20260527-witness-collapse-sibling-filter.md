@@ -135,28 +135,51 @@ assertion.
 - Modify: `rpc/jsonrpc/debug_api_test.go`
 - Possibly Modify: `cmd/rpcdaemon/rpcdaemontest/test_util.go` (add a custom-chain constructor if none fits)
 
-- [ ] Stand up a witness test that authors its **own** chain (the canned
+- [x] Stand up a witness test that authors its **own** chain (the canned
       `CreateTestExecModule` 13-block chain cannot trigger a controlled collapse). Reuse the
       bespoke-chain pattern from `CreateTestExecModuleForTraces`/`...Collision`, or
       `execmoduletester.New(...)` + `blockgen.GenerateChain` with a block closure. Copy the
       commitment-history setup verbatim from `TestExecutionWitness` (~L754):
       `statecfg.EnableHistoricalCommitment()` + `rawdb.WriteDBCommitmentHistoryEnabled`.
-- [ ] **Deterministic shared-prefix key selection:** pick two addresses (account case) and two
+      → `rpc/jsonrpc/debug_witness_collapse_test.go`, helper `newWitnessTester`.
+- [x] **Deterministic shared-prefix key selection:** pick two addresses (account case) and two
       storage slots (storage case) whose **keccak hashes share a leading nibble** so they sit
       under one branch. Brute-force/search candidate keys in the test setup and assert the
       shared-prefix precondition (so the test is self-validating, not relying on luck).
-- [ ] `TestExecutionWitnessCollapseSiblingAccount`: block creates both accounts, later block
-      deletes one (selfdestruct or balance/nonce→0 path) → account branch collapses 2→1.
-- [ ] `TestExecutionWitnessCollapseSiblingStorage`: contract with two shared-prefix slots set,
-      later block zeroes one → storage branch collapses 2→1.
-- [ ] For each: assert `verifyWitnessStateless` passes (block valid) **without** setting
-      `ERIGON_WITNESS_NO_VERIFY`, and assert the `state` set equals the expected **minimal**
-      multiset (exact, with the redundant sibling absent). Record the current buggy count to
-      prove RED is for the right reason (extra node present).
-- [ ] `TestExecutionWitnessNoCollapseUnchanged`: a block with no deletes → assert filter is a
-      strict no-op (witness identical to pre-change output / a recorded golden count).
-- [ ] Run the new tests — confirm RED on the collapse cases for the right reason; the no-op
-      case should already pass.
+      → `findSubtreeSiblingAddresses` / `findSubtreeSiblingHashes`; self-validating via
+      `require` on the divergence nibble. Address search starts above the precompile range
+      (≥0x100000) — initial attempt landed on `0x05` (modexp precompile), so the call ran the
+      precompile instead of the contract's selfdestruct and no deletion occurred.
+- [x] `TestExecutionWitnessCollapseSiblingAccount`: block selfdestructs one account in a
+      2-child account-trie branch whose **other child is a 2-account subtree** → branch
+      collapses onto the subtree (subtree root needed only by hash = redundant).
+- [x] `TestExecutionWitnessCollapseSiblingStorage`: contract with three slots forming a
+      2-child storage branch (one slot vs a 2-slot subtree); block zeroes the lone slot →
+      branch collapses onto the subtree.
+- [x] For each: assert `verifyWitnessStateless` passes (block valid) **without** setting
+      `ERIGON_WITNESS_NO_VERIFY`, and assert the witness is **minimal** via a criterion-free
+      probe (`probeRedundantNodes`: a node is redundant iff removing it still re-roots to the
+      block root) plus an exact node-count pin. Buggy counts recorded below.
+- [x] `TestExecutionWitnessNoCollapseUnchanged`: a block with no deletes (plain value
+      transfer) → witness already minimal; filter must be a strict no-op.
+- [x] Run the new tests — confirm RED on the collapse cases for the right reason; the no-op
+      case should already pass. **Confirmed:** account RED (removable node `[5]`, 6→5),
+      storage RED (removable node `[6]`, 8→7), no-collapse PASS.
+
+➕ **Key finding (feeds Task 2 & Task 4):** a plain **2-leaf** 2→1 collapse's surviving
+  sibling is **load-bearing**, NOT redundant — the standard verifier needs the sibling leaf's
+  preimage to merge it up on collapse (probe finds zero removable nodes). The redundant
+  collapse-sibling (the actual #21312 bug) only appears when the surviving sibling is a
+  **subtree** (≥2 children) referenced by hash, so its preimage is never descended into. Task 1
+  fixtures therefore use subtree siblings. The 2-leaf shape is the **load-bearing** counter-case
+  for Task 4.
+
+➕ **Oracle choice:** instead of a hardcoded golden multiset, minimality is asserted with a
+  criterion-free removal probe (remove each non-root node, re-run `execBlockStatelessly`, a
+  removal that still reproduces the root means the node was redundant). This is robust and
+  directly encodes the Geth-parity/minimality claim; the verifier may *panic* on a missing
+  load-bearing node, so the probe recovers and treats a panic as "needed". Exact counts (5/7)
+  are also pinned.
 
 ### Task 2: Derive and document the redundancy criterion (decision, before any filter code)
 
