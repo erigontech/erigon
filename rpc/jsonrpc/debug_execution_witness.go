@@ -688,7 +688,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, accessed, siblingPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -876,15 +876,8 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	return out
 }
 
-// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
-// commitment for this block against a split reader (commitment from parent state,
-// plain state from end of block) and record every sibling path the trie collapses
-// through. The collected paths are returned so STEP 2 can touch them while building
-// the witness — without those touches, collapsed-sibling data would be missing from
-// the witness and stateless re-execution would diverge from the canonical root.
-//
-// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
-// including the lupin012 seekBlockNum != parentNum guard.
+// detectCollapseSiblings computes the block commitment against a split reader and
+// returns sibling paths that must be included in the witness when branch collapses occur.
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -943,8 +936,12 @@ func detectCollapseSiblings(
 		}
 	}
 
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+	// Include storage leaf siblings (len==128, needed for correct merged-key hash) and
+	// storage branch siblings (hashedExtLen==0, depth>=64, Geth resolves the branch child).
+	sdCtx.SetCollapseTracer(func(siblingPath []byte, hashedExtLen int16) {
+		if len(siblingPath) == 128 || (hashedExtLen == 0 && len(siblingPath) >= 65) {
+			siblingPaths = append(siblingPaths, common.Copy(siblingPath))
+		}
 	})
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
@@ -956,20 +953,11 @@ func detectCollapseSiblings(
 		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
 	}
 
-	sdCtx.SetCollapseTracer(nil)
-	for i, sp := range siblingPaths {
-		log.Info("[WITNESS_SIBLING] detected", "block", blockNum, "idx", i, "len", len(sp), "path", fmt.Sprintf("%x", sp))
-	}
 	return siblingPaths, nil
 }
 
-// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
-// against the parent-state reader, touch every accessed key plus the sibling
-// paths collected during collapse detection, then generate the witness trie and
-// RLP-encode it. The pre-state root is verified against expectedParentRoot
-// before the encoded nodes are returned.
-//
-// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+// buildWitnessTrie rebuilds the pre-state commitment trie, touches all accessed keys plus
+// collapse sibling paths, and returns the RLP-encoded witness nodes.
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -977,8 +965,8 @@ func buildWitnessTrie(
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
 	expectedParentRoot common.Hash,
-	siblingPaths [][]byte,
 	accessed *accessedState,
+	siblingPaths [][]byte,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
@@ -988,13 +976,8 @@ func buildWitnessTrie(
 	}
 
 	accessed.touchAll(sdCtx)
-
-	if len(siblingPaths) > 0 {
-		log.Info("[WITNESS_SIBLING] touching sibling paths in buildWitnessTrie", "count", len(siblingPaths))
-		for i, siblingPath := range siblingPaths {
-			log.Info("[WITNESS_SIBLING] touching", "idx", i, "len", len(siblingPath), "path", fmt.Sprintf("%x", siblingPath))
-			sdCtx.TouchHashedKey(siblingPath)
-		}
+	for _, siblingPath := range siblingPaths {
+		sdCtx.TouchHashedKey(siblingPath)
 	}
 
 	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
