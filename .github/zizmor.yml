@@ -44,6 +44,7 @@ rules:
       - qa-rpc-integration-tests-gnosis.yml
       - qa-rpc-integration-tests.yml
       - qa-sync-from-scratch.yml
+      - test-hive-eest.yml
       - test-hive.yml
       - test-kurtosis-assertoor.yml
       - test-kurtosis-gloas.yml
