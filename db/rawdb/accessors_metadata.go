@@ -106,7 +106,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	if err = json.NewEncoder(buf).Encode(g); err != nil {
 		return err
 	}
-	fmt.Printf("[dbg] do %s\n", time.Since(t))
+	fmt.Printf("[dbg] WriteGenesisIfNotExist.json.Encode %s\n", time.Since(t))
 	return db.Put(kv.ConfigTable, kv.GenesisKey, buf.Bytes())
 }
 
