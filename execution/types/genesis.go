@@ -27,8 +27,6 @@ import (
 	"fmt"
 	"math/big"
 
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -93,7 +91,7 @@ type GenesisAlloc map[common.Address]GenesisAccount
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
-	if err := jsoniter.ConfigFastest.Unmarshal(data, &m); err != nil {
+	if err := json.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*ga = make(GenesisAlloc)
