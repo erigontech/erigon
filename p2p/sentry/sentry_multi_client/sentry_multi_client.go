@@ -346,11 +346,17 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []sentryproto.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
-	// Reject oversized announcements before any further work: a 10 MiB wire
-	// packet otherwise expands into one GetBlockHeaders RPC per hash and
-	// drives unbounded heap growth.
-	if exceeded, err := newBlockHashesExceedsCap(req.Data); err == nil && exceeded {
-		cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String(), "cap", maxBlockHashesPerMsg)
+	// Reject malformed or oversized announcements before the
+	// disableBlockDownload / InitialCycle short-circuits so abusive peers
+	// are kicked regardless of internal sync state. ParseList errors are
+	// not caught by the centralized rlp.IsInvalidRLPError kick path.
+	exceeded, peekErr := newBlockHashesExceedsCap(req.Data)
+	if peekErr != nil || exceeded {
+		if peekErr != nil {
+			cs.logger.Warn("Kick peer for malformed NewBlockHashes", "peer", req.PeerId.String(), "err", peekErr)
+		} else {
+			cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String(), "cap", maxBlockHashesPerMsg)
+		}
 		if _, err1 := sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
 			PeerId:  req.PeerId,
 			Penalty: sentryproto.PenaltyKind_Kick,

@@ -281,6 +281,48 @@ func TestNewBlockHashes66_NormalSizeIgnored(t *testing.T) {
 	}
 }
 
+// TestNewBlockHashes66_MalformedKicksPeer verifies that a peer sending
+// RLP that cannot be parsed by the peek helper is kicked. The handler's
+// disableBlockDownload short-circuit (and the centralized rlp.IsInvalidRLPError
+// kick path, which does not match ParseList errors) would otherwise let
+// malformed announcements through unpenalized.
+func TestNewBlockHashes66_MalformedKicksPeer(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	// 0x80 is the RLP encoding for an empty string, not a list — rejected
+	// by rlp.ParseList with "must be a list".
+	payload := []byte{0x80}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New(), disableBlockDownload: true}
+
+	if err := cs.newBlockHashes66(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err != nil {
+		t.Fatalf("newBlockHashes66 returned error: %v", err)
+	}
+
+	if penalized == nil {
+		t.Fatal("expected PenalizePeer to be called for malformed NewBlockHashes payload")
+	}
+	if penalized.Penalty != proto_sentry.PenaltyKind_Kick {
+		t.Fatalf("expected Kick penalty, got %v", penalized.Penalty)
+	}
+}
+
 // TestNewBlockHashes66_AtCapNotKicked verifies a packet with exactly
 // maxBlockHashesPerMsg entries — block numbers sized to mainnet scale so
 // each pair exceeds the minimum RLP encoding — is allowed through.
