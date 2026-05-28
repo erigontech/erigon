@@ -2469,7 +2469,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, err
 				}
 				if dbg.TraceAuthRefund && txResult.Receipt != nil {
-					fmt.Printf("[auth-refund] block=%d txIdx=%d FINALIZE resultInc=%d receiptGas=%d cumGas=%d\n",
+					fmt.Fprintf(os.Stderr, "[auth-refund] block=%d txIdx=%d FINALIZE resultInc=%d receiptGas=%d cumGas=%d\n",
 						be.blockNum, txVersion.TxIndex, txResult.Version().Incarnation, txResult.Receipt.GasUsed, txResult.Receipt.CumulativeGasUsed)
 				}
 				addWrites := finalizeWrites

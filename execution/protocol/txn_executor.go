@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -746,7 +747,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				if trace {
-					fmt.Printf("%s i=%d SKIP reason=chainID auth.chainId=%s\n", tracePrefix, i, auth.ChainID.String())
+					fmt.Fprintf(os.Stderr, "%s i=%d SKIP reason=chainID auth.chainId=%s\n", tracePrefix, i, auth.ChainID.String())
 				}
 				continue
 			}
@@ -756,7 +757,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if err != nil {
 				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
 				if trace {
-					fmt.Printf("%s i=%d SKIP reason=recover-failed err=%v\n", tracePrefix, i, err)
+					fmt.Fprintf(os.Stderr, "%s i=%d SKIP reason=recover-failed err=%v\n", tracePrefix, i, err)
 				}
 				continue
 			}
@@ -783,7 +784,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
 					if trace {
-						fmt.Printf("%s i=%d authority=%x SKIP reason=code-not-empty-not-delegated codeHash=%x\n", tracePrefix, i, authority, codeHash)
+						fmt.Fprintf(os.Stderr, "%s i=%d authority=%x SKIP reason=code-not-empty-not-delegated codeHash=%x\n", tracePrefix, i, authority, codeHash)
 					}
 					continue
 				}
@@ -798,7 +799,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if authorityNonce != auth.Nonce {
 				log.Trace("invalid nonce, skipping", "auth index", i)
 				if trace {
-					fmt.Printf("%s i=%d authority=%x SKIP reason=nonce-mismatch auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t\n", tracePrefix, i, authority, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation)
+					fmt.Fprintf(os.Stderr, "%s i=%d authority=%x SKIP reason=nonce-mismatch auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t\n", tracePrefix, i, authority, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation)
 				}
 				continue
 			}
@@ -828,7 +829,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			applied++
 			if trace {
-				fmt.Printf("%s i=%d authority=%x auth.addr=%x auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t exists=%t +sgna=%d +sgab=%d\n", tracePrefix, i, authority, auth.Address, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation, exists, sgna, sgab)
+				fmt.Fprintf(os.Stderr, "%s i=%d authority=%x auth.addr=%x auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t exists=%t +sgna=%d +sgab=%d\n", tracePrefix, i, authority, auth.Address, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation, exists, sgna, sgab)
 			}
 
 			// 7. set authority code
@@ -848,7 +849,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 		}
 		if trace {
-			fmt.Printf("%s TOTAL refund=%d recovered=%d applied=%d auths=%d\n", tracePrefix, stateIgasRefund, len(verifiedAuthorities), applied, len(auths))
+			fmt.Fprintf(os.Stderr, "%s TOTAL refund=%d recovered=%d applied=%d auths=%d\n", tracePrefix, stateIgasRefund, len(verifiedAuthorities), applied, len(auths))
 		}
 	}
 
