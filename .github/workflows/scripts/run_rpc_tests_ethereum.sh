@@ -30,8 +30,6 @@ DISABLED_TEST_LIST=(
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
-  # Temporarily disabled: test is flaky and fails non-deterministically; needs investigation
-  eth_simulateV1/test_201.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
   # Temporary disable required block 23917742
@@ -47,7 +45,6 @@ DISABLED_TEST_LIST=(
   web3_clientVersion/test_1.json
   # Temporarily disabled: the following tests hang (possible regression in Erigon).
   # For debug_traceTransaction, the issue is under analysis.
-  eth_createAccessList/test_15.json
   debug_traceTransaction/test_12.json
   # Temporarily disabled: the following tests: ots_searchTransactionsAfter/test_11.json, ots_searchTransactionsAfter/test_12.json have been disabled because their response changed after moving the TIP. The request or the response should be updated so that the output is unaffected by changes to the TIP
   ots_searchTransactionsAfter/test_11.json

@@ -247,11 +247,13 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 	slotNumber := hexutil.Uint64(456)
+	targetGasLimit := hexutil.Uint64(36000000)
 	attrs := &engine_types.PayloadAttributes{
 		Timestamp:             1,
 		SuggestedFeeRecipient: common.HexToAddress("0x1234"),
 		Withdrawals:           nil,
 		SlotNumber:            &slotNumber,
+		TargetGasLimit:        &targetGasLimit,
 		SSZVersion:            clparams.GloasVersion,
 	}
 	state := engine_types.ForkChoiceState{}
@@ -266,6 +268,8 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 	require.NotNil(t, engineAttrs)
 	require.NotNil(t, engineAttrs.SlotNumber)
 	require.Equal(t, hexutil.Uint64(456), *engineAttrs.SlotNumber)
+	require.NotNil(t, engineAttrs.TargetGasLimit)
+	require.Equal(t, hexutil.Uint64(36000000), *engineAttrs.TargetGasLimit)
 }
 
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {

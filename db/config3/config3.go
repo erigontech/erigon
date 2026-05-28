@@ -40,7 +40,17 @@ const UnboundedDomainMerge uint64 = math.MaxUint64
 
 const EnableHistoryV4InTest = true
 
-const DefaultPruneDistance = 100_000
+// DefaultPruneDistance is the retention window used by full and blocks prune
+// modes. The value (2^18 blocks ≈ 36.4 days) matches EIP-8252's
+// REORG_RETENTION_WINDOW, the inactivity-leak-bounded non-finality window
+// across which an EL must be able to reconstruct state to process a reorg
+// without external sync.
+const DefaultPruneDistance = 262_144
+
+// MinimalPruneDistance is the retention window used by the minimal prune
+// mode. Smaller than DefaultPruneDistance — minimal nodes deliberately opt
+// out of EIP-8252 compliance in exchange for less disk usage.
+const MinimalPruneDistance = 100_000
 
 // These are network parameters that need to be constant between clients, but
 // aren't necessarily consensus related.
