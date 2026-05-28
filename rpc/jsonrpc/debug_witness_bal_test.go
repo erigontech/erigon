@@ -172,6 +172,28 @@ func TestExecutionWitnessAmsterdamActivationBlock(t *testing.T) {
 	require.NoError(t, err, "first Amsterdam-era block must produce a verifiable witness via the BAL branch")
 }
 
+// TestExecutionWitnessAmsterdamAtGenesis_NoBALPath locks the regression
+// guard for Amsterdam-at-genesis fixtures: blockNum == 0 must NOT be routed
+// to buildAccessedStateFromBAL even when IsAmsterdam(header.Time) is true,
+// because genesis writing never persists a BAL sidecar and the BAL path
+// would falsely report "block access list pruned".
+func TestExecutionWitnessAmsterdamAtGenesis_NoBALPath(t *testing.T) {
+	h := setupAmsterdamBALHarness(t, chain.AllProtocolChanges, 1)
+	require.True(t, h.m.ChainConfig.IsAmsterdam(h.m.Genesis.Time()),
+		"AllProtocolChanges must activate Amsterdam at the genesis timestamp")
+
+	hookCount := installRecordingHookCounter(t)
+
+	bn := rpc.BlockNumber(0)
+	func() {
+		defer func() { _ = recover() }()
+		_, _ = h.api.ExecutionWitness(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &bn})
+	}()
+
+	require.Equal(t, 1, hookCount(),
+		"genesis (blockNum == 0) must take the re-exec path, not the BAL branch — RecordingState was constructed %d time(s)", hookCount())
+}
+
 // fakeBALCodeReader is a unit-test code lookup that returns a canned code blob
 // per address. Missing entries return (nil, nil) — same shape as
 // HistoryReaderV3.ReadAccountCode for absent/empty-code addresses.
@@ -304,6 +326,30 @@ func TestAccessedStateFromBAL_CodeOverApproximation(t *testing.T) {
 		require.Equal(t, []byte(out.SortedCodes[0]), codeB)
 		require.Equal(t, []byte(out.SortedCodes[1]), codeA)
 	}
+}
+
+// TestAccessedStateFromBAL_CodeChangesTouchCodeDomain: a BAL entry with
+// CodeChanges and no parent-state code (contract creation, EIP-7702 install
+// over an empty slot) must still appear in CodeAddrs so the witness pipeline
+// touches kv.CodeDomain — matching the re-exec path, which puts modified-code
+// addresses into CodeAddrs via ModifiedCode regardless of parent code.
+func TestAccessedStateFromBAL_CodeChangesTouchCodeDomain(t *testing.T) {
+	addrCreate := common.HexToAddress("0x000000000000000000000000000000000000000a")
+
+	bal := types.BlockAccessList{
+		{
+			Address: accounts.InternAddress(addrCreate),
+			CodeChanges: []*types.CodeChange{
+				{Index: 0, Bytecode: []byte{0x60, 0x00}},
+			},
+		},
+	}
+
+	out, err := accessedStateFromBAL(bal, fakeBALCodeReader{addrCreate: nil}.read)
+	require.NoError(t, err)
+	require.Contains(t, out.CodeAddrs, addrCreate, "CodeChanges must touch CodeDomain even with no parent-state code")
+	require.NotContains(t, out.CodeReads, keccak(addrCreate.Bytes()), "no parent code means no CodeReads entry")
+	require.Empty(t, out.SortedCodes, "SortedCodes is parent-state code only; CodeChanges bytecode is excluded")
 }
 
 // TestAccessedStateFromBAL_DedupSharedCode: two BAL addresses sharing the

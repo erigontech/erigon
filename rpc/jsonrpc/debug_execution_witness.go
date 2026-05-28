@@ -568,7 +568,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	var accessed *accessedState
 	var accessedBlockHashes []uint64
 
-	if chainConfig.IsAmsterdam(header.Time) {
+	if blockNum != 0 && chainConfig.IsAmsterdam(header.Time) && !chainConfig.IsEIPDisabled(7928) {
 		accessed, err = buildAccessedStateFromBAL(ctx, tx, block.Hash(), blockNum, firstTxNumInBlock)
 		if err != nil {
 			return nil, err
@@ -939,6 +939,9 @@ func accessedStateFromBAL(bal types.BlockAccessList, readCode balCodeReader) (*a
 	for _, ac := range bal {
 		addr := ac.Address.Value()
 		out.Addresses[addr] = struct{}{}
+		if len(ac.CodeChanges) > 0 {
+			out.CodeAddrs[addr] = struct{}{}
+		}
 		if len(ac.StorageChanges) == 0 && len(ac.StorageReads) == 0 {
 			continue
 		}
@@ -982,6 +985,7 @@ func accessedStateFromBAL(bal types.BlockAccessList, readCode balCodeReader) (*a
 		if len(code) == 0 {
 			continue
 		}
+		code = common.Copy(code)
 		out.CodeAddrs[addr] = struct{}{}
 		codeHash := crypto.Keccak256Hash(code)
 		addrHash := crypto.Keccak256Hash(addr.Bytes())
