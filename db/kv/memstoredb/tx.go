@@ -23,13 +23,15 @@ type tx struct {
 	db     *DB
 	rw     bool
 	closed bool
-	// tables starts as a shallow clone of the master map: btree pointers are
-	// shared with master. On the first mutation of a table (write path), the
-	// btree is COW-cloned into a tx-private copy and recorded in
-	// privateTables — the entry in `tables` is replaced so subsequent reads
-	// of the same tx see the mutated view.
+	// tables is master's tables map.
+	//   - RoTx: shared by reference (never mutated). Reads of missing tables
+	//     are satisfied from roLocal.
+	//   - RwTx: clone-on-first-write. tables starts as a maps.Clone of master;
+	//     the first mutation of a table COW-clones the btree into a tx-private
+	//     copy recorded in privateTables.
 	tables        map[string]*table
-	privateTables map[string]struct{}
+	privateTables map[string]struct{} // RwTx only
+	roLocal       map[string]*table   // RoTx only: empty-stub tables
 	sequences     map[string]uint64
 }
 
@@ -42,18 +44,31 @@ var (
 // getOrCreateTable returns a tx-private table that the caller may safely
 // mutate. For RwTx, the first write to a master-shared table triggers a
 // cheap COW copy (btree.Copy is O(1)); subsequent writes mutate that copy.
-// For RoTx, returns master's table directly (callers are read-only).
+// For RoTx, returns master's table if present, else a per-tx empty stub —
+// never mutates the master map (which RoTx shares by reference, not clone).
 func (t *tx) getOrCreateTable(name string) *table {
 	tab, ok := t.tables[name]
-	if !ok {
-		tab = newTable(t.db.isDupSort(name))
-		t.tables[name] = tab
-		if t.rw {
-			t.privateTables[name] = struct{}{}
-		}
+	if ok && !t.rw {
 		return tab
 	}
 	if !t.rw {
+		// RoTx + missing table: return a per-tx empty stub. Cursors over it
+		// behave like an empty table. The stub lives in roLocal so we don't
+		// mutate the master map.
+		if t.roLocal == nil {
+			t.roLocal = make(map[string]*table)
+		}
+		if s, has := t.roLocal[name]; has {
+			return s
+		}
+		s := newTable(t.db.isDupSort(name))
+		t.roLocal[name] = s
+		return s
+	}
+	if !ok {
+		tab = newTable(t.db.isDupSort(name))
+		t.tables[name] = tab
+		t.privateTables[name] = struct{}{}
 		return tab
 	}
 	if _, private := t.privateTables[name]; !private {

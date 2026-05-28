@@ -223,27 +223,36 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 	return db.Update(ctx, f)
 }
 
-// beginRoTx clones only the tables MAP (cheap), not the btrees themselves.
-// RwTx commits replace the master map with a new one; writers work on COW
-// clones of the btrees, so the pre-commit btrees this RoTx references stay
-// untouched.
+// beginRoTx shares master's tables map by reference — no clone. Safe because
+// RoTx never mutates the map (writes-via-cursor for read-only tx panic; reads
+// of missing tables return a per-tx empty stub instead of inserting into the
+// master). RwTx commits swap the master map with a fresh one, so a RoTx
+// holding the old reference observes its pre-commit data via the still-valid
+// old btree pointers.
 func (db *DB) beginRoTx() *tx {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	t := &tx{
 		db:        db,
 		rw:        false,
-		tables:    maps.Clone(db.tables),
-		sequences: maps.Clone(db.sequences),
+		tables:    db.tables,
+		sequences: db.sequences,
 	}
 	if t.tables == nil {
-		t.tables = make(map[string]*table)
+		t.tables = emptyTables
 	}
 	if t.sequences == nil {
-		t.sequences = make(map[string]uint64)
+		t.sequences = emptySequences
 	}
 	return t
 }
+
+// emptyTables / emptySequences are the read-only fallbacks for RoTx when the
+// master maps are nil. They MUST NOT be mutated.
+var (
+	emptyTables    = map[string]*table{}
+	emptySequences = map[string]uint64{}
+)
 
 // privateTables is not allocated for RoTx — only RwTx clones-on-write.
 
