@@ -131,6 +131,10 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	defer tx.Rollback()
 
+	if maxResult < 0 {
+		maxResult = 0
+	}
+
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {

@@ -164,7 +164,13 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.builder.BuilderConfig.GasLimit)
+	targetGasLimit := cfg.builder.BuilderConfig.GasLimit
+	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.TargetGasLimit != nil {
+		// PayloadAttributesV4: CL-supplied target gas limit takes precedence over the
+		// static --miner.gaslimit so the EL follows engine_forkchoiceUpdatedV4.
+		targetGasLimit = cfg.blockBuilderParameters.TargetGasLimit
+	}
+	header := MakeEmptyHeader(parent, cfg.chainConfig, timestamp, targetGasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit

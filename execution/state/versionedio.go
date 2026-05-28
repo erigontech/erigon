@@ -192,12 +192,13 @@ func (vr VersionedRead) String() string {
 }
 
 type VersionedWrite struct {
-	Address accounts.Address
-	Path    AccountPath
-	Key     accounts.StorageKey
-	Version Version
-	Val     any
-	Reason  tracing.BalanceChangeReason
+	Address             accounts.Address
+	Path                AccountPath
+	Key                 accounts.StorageKey
+	Version             Version
+	Val                 any
+	BalanceChangeReason tracing.BalanceChangeReason
+	NonceChangeReason   tracing.NonceChangeReason
 }
 
 func (vr VersionedWrite) String() string {
@@ -273,17 +274,25 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
 			if destructed, ok := res.Value().(bool); ok && destructed {
 				destructTxIndex := res.DepIdx()
+				// Cap at vr.txIndex-1 so a prior incarnation of the same
+				// tx (whose writes still sit in the versionMap at
+				// (vr.txIndex, prevIncarnation)) doesn't masquerade as
+				// a "later tx revived this account." versionMap.Read
+				// excludes the current tx via floor(txIdx-1); the
+				// LatestTxIndex bound is inclusive, so subtract one
+				// explicitly to keep both consistent.
+				revivalLimit := vr.txIndex - 1
 				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 					revived = true
 				}
 				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 						revived = true
 					}
 				}
 				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 						revived = true
 					}
 				}
@@ -692,21 +701,6 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	return
 }
 
-// SetBalance replaces the BalancePath write for addr in the write set with
-// the given value. If no existing BalancePath write is found, a new entry is
-// appended. This is used in the direct finalize path to adjust fee-calc
-// balances in pre-computed collector writes without IBS reconstruction.
-func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
-	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
-			w.Val = val
-			w.Reason = reason
-			return writes
-		}
-	}
-	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
-}
-
 // SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
 // address has no existing writes in the set, all four account fields (balance,
 // nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
@@ -734,16 +728,35 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
 	}
 
+	// First pass: if a Balance entry exists for this addr, just update value.
+	// Tracks whether ANY entry for this addr exists — if yes we MUST NOT
+	// re-emit Nonce/Incarnation/CodeHash from the pre-block snapshot acc,
+	// because the worker has already written some fields with the correct
+	// post-execution values; appending pre-block field entries after the
+	// worker's writes would clobber them under last-wins downstream merge.
+	addrHasAnyWrite := false
 	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
+		if w.Address != addr {
+			continue
+		}
+		addrHasAnyWrite = true
+		if w.Path == BalancePath {
 			w.Val = val
-			w.Reason = reason
+			w.BalanceChangeReason = reason
 			return writes
 		}
 	}
+	if addrHasAnyWrite {
+		// Worker already wrote some other field (e.g. Nonce on a miner
+		// self-send where sender == coinbase). Append only the Balance
+		// write; the other fields are correct in the existing entries.
+		return append(writes,
+			&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
+		)
+	}
 	// Account not in writes — emit complete account fields.
 	return append(writes,
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
 		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
 		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
 		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
@@ -763,15 +776,104 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 	var destrcutedVersion Version
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
+		// If the in-memory deletion reflects a prior tx's selfdestruct
+		// (versionMap has SelfDestructPath=true), surface the SD version
+		// instead of UnknownVersion. Returning UnknownVersion here was
+		// causing CreateAccount's synthetic Balance/Incarnation read records
+		// (intra_block_state.go:1864-1865) to be stamped with UnknownVersion
+		// while subsequent reads — via the SD-revival path that falls through
+		// to MVReadResultDone — observed the real (0.0) version, producing a
+		// versionedReads mismatch that panicked tx N+1 on every incarnation
+		// and exhausted the parallel-exec retry budget ("too many incarnations").
+		// Aligning this shortcut with the SD-zero path below removes the
+		// inconsistency.
+		if s.versionMap != nil {
+			sdRes := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
+			if sdRes.Status() == MVReadResultDone {
+				if v, ok := sdRes.value.(bool); ok && v {
+					sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
+					if !commited {
+						if s.versionedReads == nil {
+							s.versionedReads = ReadSet{}
+						}
+						s.versionedReads.Set(VersionedRead{
+							Address: addr,
+							Path:    SelfDestructPath,
+							Key:     accounts.NilKey,
+							Source:  MapRead,
+							Version: sdVer,
+							Val:     true,
+						})
+					}
+					var zero T
+					return zero, MapRead, sdVer, nil
+				}
+			}
+		}
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
-		if path != CodePath {
+		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
+		// at a strictly higher TxIndex re-creates the account, so the SD
+		// must NOT short-circuit the read. Mirrors versionedStateReader
+		// .ReadAccountData's revival check at lines 273-293 of this file.
+		//
+		// Without this the worker reads zero for any post-revival access:
+		// e.g. EIP-161 fires for the coinbase when tx N's finalize emits
+		// SelfDestructPath=true (empty-removal: balance 0, no fee tip),
+		// then tx N+1's finalize emits BalancePath=FeeTipped (revives it
+		// with a non-zero balance). A subsequent tx's BALANCE coinbase
+		// must surface the revived balance — the serial equivalent is
+		// AddBalance(amount>0) on a previously-deleted stateObject, where
+		// GetOrNewStateObject implicitly recreates a fresh object with
+		// the new balance. Without this check the parallel worker reads
+		// zero, SSTOREs zero into the contract's slot (was non-zero),
+		// triggering a spurious SSTORE_CLEAR_REFUND that doesn't fire
+		// under serial — observed as TestLegacyBlockchain bcEIP3675/
+		// tipInsideBlock failing with gas exactly 4800 short under
+		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
+		destructTxIndex := res.DepIdx()
+		if !commited {
+			if vw, ok := s.versionedWrite(addr, path, key); ok {
+				// The current tx has itself written this field — a same-tx
+				// value-transfer or recreate that revived the account. A tx
+				// always observes its own write, regardless of a prior tx's
+				// self-destruct, so return it directly as WriteSetRead (issue
+				// #21319). Falling through to the normal read path instead
+				// would route an own-write read through the cross-tx
+				// dependency check and spuriously abort.
+				return vw.Val.(T), WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+			}
+		}
+		// Per-path revival resolution (issue #21319): the account was
+		// self-destructed at destructTxIndex. THIS field is revived iff the
+		// version map holds a write to THIS path at a strictly higher
+		// TxIndex. versionMap.Read floors at txIndex-1, so a prior
+		// incarnation of the current tx cannot masquerade as a later tx's
+		// revival (this is why the old explicit revivalLimit subtraction is
+		// no longer needed). Per-path (vs. the old Balance|Nonce|CodeHash
+		// account-wide scan) is precise: a field with no post-SD write
+		// reads as the fresh account's zero value — exactly correct for a
+		// value-transfer revival, where GetOrNewStateObject yields nonce 0
+		// and empty code — and never surfaces a stale pre-SD nonce/codeHash
+		// for an account revived only via BalancePath.
+		//
+		// An in-flight revival (Estimate cell → MVReadResultDependency) also
+		// counts as revived: it must fall through so the normal read below
+		// surfaces the dependency and re-executes, rather than being
+		// swallowed as a zero. This matches the old LatestTxIndex scan,
+		// which descended Estimate cells too.
+		revived := false
+		if pathRevival := s.versionMap.Read(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
+			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
+			revived = true
+		}
+		if !revived && path != CodePath {
 			// A prior tx self-destructed this account — all state reads must
 			// return the zero value of the type, not the caller-supplied default.
 			// refreshVersionedAccount passes the account's pre-destruction field
 			// values as defaultV, so using defaultV here would return stale data.
 			var zero T
-			sdVersion := Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: res.Incarnation()}
 			if commited {
 				return zero, MapRead, sdVersion, nil
 			}
@@ -796,7 +898,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				return zero, MapRead, sdVersion, nil
 			}
 			destrcutedVersion = Version{
-				TxIndex: res.DepIdx(),
+				TxIndex: destructTxIndex,
 			}
 		}
 	}
@@ -945,12 +1047,64 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 		}
 
+		// Self-destructed account: a per-account field (Balance/Nonce/
+		// Incarnation/CodeHash/Code) with no dedicated versionMap cell reads as
+		// the post-SD zero value. Record the read as a dependency on the
+		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion
+		// read — the latter is rejected on sight by the validator's
+		// path==AddressPath cross-check (IncarnationPath is Done), producing a
+		// non-converging validator-invalid retry loop. The SelfDestructPath
+		// dependency validates cleanly via checkVersion. (Branch 794's SD
+		// short-circuit misses this when its revival check fires for a
+		// recreate-in-the-same-tx target.)
+		//
+		// Per-path revival resolution (issue #21319): reaching here means res
+		// — the version-map read of THIS path — was MVReadResultNone, so this
+		// field has no post-SD write and per-path it is not revived; it reads
+		// as the post-SD zero value regardless of whether other fields were
+		// revived. The old account-wide LatestTxIndex scan over
+		// Balance|Nonce|CodeHash would, for a value-transfer revival
+		// (BalancePath write only), treat the whole account as revived and
+		// fall through to surface a stale pre-SD nonce/codeHash — the same
+		// imprecision #21323 removed from the branch-794 SD short-circuit.
+		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
+			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if sd := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); sd.Status() == MVReadResultDone {
+				if destructed, ok := sd.Value().(bool); ok && destructed {
+					sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
+					if !commited {
+						if s.versionedReads == nil {
+							s.versionedReads = ReadSet{}
+						}
+						s.versionedReads.Set(VersionedRead{
+							Address: addr,
+							Path:    SelfDestructPath,
+							Key:     accounts.NilKey,
+							Source:  MapRead,
+							Version: sdVer,
+							Val:     true,
+						})
+					}
+					var zero T
+					return zero, MapRead, sdVer, nil
+				}
+			}
+		}
+
 		if readStorage == nil {
 			// Record reads so that ValidateVersion can detect when a prior
 			// transaction modifies any account property.  Without tracking
 			// these reads, validation misses conflicts where a prior tx
 			// changes an account's balance/nonce/etc. — causing later txs
-			// to execute against stale data.
+			// to execute against stale data, and the parallel-built block
+			// access list (AsBlockAccessList) to diverge from the header.
+			//
+			// AddressPath probes MUST be recorded: getStateObject probes the
+			// versionMap for AddressPath before falling back to the
+			// stateReader. The validator's path==AddressPath branch cross-
+			// checks the precise IncarnationPath signal (account create /
+			// destruct), so the recorded probe does not over-invalidate on
+			// ordinary BalancePath/NoncePath writes.
 			//
 			// Do NOT cache CodePath: getStateObject calls versionedRead for
 			// CodePath with readStorage=nil to check if a prior tx wrote

@@ -211,6 +211,30 @@ func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKe
 // also relies on this — but blocks aren't single txs; the SD-then-recreate
 // pattern there spans txs, and last-write-wins on acc.Deleted still holds.)
 func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
+	// Pre-scan: which addresses are self-destructed BY THIS tx's writeset.
+	// For those, the trailing zero account-field writes that IBS emits as
+	// part of the SELFDESTRUCT (BalancePath=0, etc. — when not stripped by
+	// normalizeWriteSet) must NOT clear Deleted. For any OTHER address, an
+	// account-field write — even a zero one — means the address is alive at
+	// the end of this tx (e.g. a 0-value transfer that re-creates a
+	// previously-destroyed address as an empty account on a pre-EIP-161
+	// fork — EEST frontier/opcodes/test_double_kill under EXEC3_PARALLEL),
+	// so it must clear Deleted.
+	sdThisCall := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		if w.Path == state.SelfDestructPath {
+			if destructed, ok := w.Val.(bool); ok {
+				// Last SelfDestructPath entry wins (matches normalizeWriteSet /
+				// applyVersionedWrites): a SELFDESTRUCT followed by a same-tx
+				// CREATE2-recreate ends ALIVE, so the recreate's writes must
+				// clear Deleted.
+				sdThisCall[w.Address] = destructed
+			}
+		}
+	}
+	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
+		return nonZero || !sdThisCall[addr]
+	}
 	for _, w := range writes {
 		if w.Val == nil {
 			continue
@@ -221,17 +245,14 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc := cs.ensureAccount(w.Address)
 			acc.Balance = w.Val.(uint256.Int)
 			acc.dirty = true
-			if !acc.Balance.IsZero() {
-				// Only a non-zero balance reflects real recreate or
-				// transfer-in. Zero is part of the SD emission (see
-				// invariant 1) and must not clear Deleted.
+			if clearsDeleted(w.Address, !acc.Balance.IsZero()) {
 				acc.Deleted = false
 			}
 		case state.NoncePath:
 			acc := cs.ensureAccount(w.Address)
 			acc.Nonce = w.Val.(uint64)
 			acc.dirty = true
-			if acc.Nonce != 0 {
+			if clearsDeleted(w.Address, acc.Nonce != 0) {
 				acc.Deleted = false
 			}
 		case state.CodeHashPath:
@@ -239,7 +260,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			v := w.Val.(accounts.CodeHash)
 			acc.CodeHash = v.Value()
 			acc.dirty = true
-			if v.Value() != empty.CodeHash {
+			if clearsDeleted(w.Address, v.Value() != empty.CodeHash) {
 				acc.Deleted = false
 			}
 		case state.CodePath:
@@ -247,7 +268,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			code := w.Val.([]byte)
 			acc.CodeHash = crypto.Keccak256Hash(code)
 			acc.dirty = true
-			if len(code) > 0 {
+			if clearsDeleted(w.Address, len(code) > 0) {
 				acc.Deleted = false
 			}
 		case state.SelfDestructPath:

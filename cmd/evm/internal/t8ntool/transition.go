@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -209,7 +208,7 @@ func Main(ctx *cli.Context) error {
 		vmConfig.ExtraEips = extraEips
 	}
 	// Set the chain id
-	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
+	chainConfig.ChainID = new(uint256.Int).SetUint64(ctx.Uint64(ChainIDFlag.Name))
 
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector {
@@ -645,52 +644,17 @@ func NewHeader(env stEnv) *types.Header {
 }
 
 func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
-	// Generate hashed state
-	c, err := tx.RwCursor(kv.PlainState)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
+	// SharedDomains.ComputeCommitment reads from kv.CommitmentDomain
+	// directly; the legacy PlainState → HashedAccounts/HashedStorage hashing
+	// loop that used to precede this call wrote into tables no current
+	// commitment path reads (and PlainState itself is never populated by
+	// the E3 execution writer).
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}
 	defer domains.Close()
 
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, fmt.Errorf("interate over plain state: %w", err)
-		}
-		var newK []byte
-		if len(k) == length.Addr {
-			newK = make([]byte, length.Hash)
-		} else {
-			newK = make([]byte, length.Hash*2+length.Incarnation)
-		}
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[:length.Addr])
-		//nolint:errcheck
-		h.Sha.Read(newK[:length.Hash])
-		if len(k) > length.Addr {
-			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[length.Addr+length.Incarnation:])
-			//nolint:errcheck
-			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorageDeprecated, newK, common.Copy(v)); err != nil {
-				return nil, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccountsDeprecated, newK, common.Copy(v)); err != nil {
-				return nil, fmt.Errorf("insert hashed key: %w", err)
-			}
-		}
-	}
-	c.Close()
 	root, err := domains.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return nil, err

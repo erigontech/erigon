@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -163,7 +162,7 @@ type (
 
 	// Changes to other state values.
 	refundChange struct {
-		prev mdgas.MdGas
+		prev uint64
 	}
 	addLogChange struct {
 		txIndex int
@@ -213,7 +212,30 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 }
 
 func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
+	// Symmetric with createObjectChange.dirtied: both journal entries
+	// represent the same logical operation (a stateObject was placed at
+	// this address); they differ only in revert behaviour
+	// (createObjectChange.revert deletes; resetObjectChange.revert swaps
+	// back to prev). Dirty tracking must be identical, otherwise the
+	// recreated address is missed from journal.dirties and downstream
+	// consumers (FinalizeTx, GetRemovedAccountsWithBalance, MakeWriteSet)
+	// silently skip it.
+	//
+	// Manifests under parallel-exec when tx1 SD's an address and tx2 hits
+	// CreateAccount / GetOrNewStateObject on the same address — the
+	// versionedRead-synthesised `previous` is non-nil so createObject's
+	// else-branch is taken; with dirtied() returning false the worker's
+	// MakeWriteSet drops the write for the recreated address and the
+	// receipts / state root diverge from serial. See #21138.
+	//
+	// Known regression at the time of this change: TestSelfDestructReceive
+	// fails under EXEC3_PARALLEL=true with a wrong-trie-root, because the
+	// validator's stateObject reconstruction for an SD-then-revived address
+	// emits different field values (`nonce=1, codehash=emptyHash`) than
+	// the unfixed canonical (`nonce=0, codehash=<nil>`). Tracked in #21217
+	// — needs a narrower fix that gets the empty-touch / CreateAccount
+	// case right without changing the AddBalance(non-zero) writeset.
+	return ch.account, true
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
