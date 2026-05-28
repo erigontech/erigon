@@ -323,6 +323,47 @@ func TestNewBlockHashes66_MalformedKicksPeer(t *testing.T) {
 	}
 }
 
+// TestNewBlockHashes66_TrailingBytesKickPeer verifies that a payload whose
+// outer RLP list parses cleanly but is followed by extra bytes is treated as
+// malformed and kicks the peer even under the disableBlockDownload
+// short-circuit, where rlp.DecodeBytes is never reached.
+func TestNewBlockHashes66_TrailingBytesKickPeer(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	// 0xc0 is an empty RLP list; 0x42 is a stray trailing byte that
+	// rlp.ParseList alone does not catch.
+	payload := []byte{0xc0, 0x42}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New(), disableBlockDownload: true}
+
+	if err := cs.newBlockHashes66(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err != nil {
+		t.Fatalf("newBlockHashes66 returned error: %v", err)
+	}
+
+	if penalized == nil {
+		t.Fatal("expected PenalizePeer to be called for NewBlockHashes payload with trailing bytes")
+	}
+	if penalized.Penalty != proto_sentry.PenaltyKind_Kick {
+		t.Fatalf("expected Kick penalty, got %v", penalized.Penalty)
+	}
+}
+
 // TestNewBlockHashes66_AtCapNotKicked verifies a packet with exactly
 // maxBlockHashesPerMsg entries — block numbers sized to mainnet scale so
 // each pair exceeds the minimum RLP encoding — is allowed through.

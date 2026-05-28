@@ -78,6 +78,9 @@ func newBlockHashesExceedsCap(payload []byte) (bool, error) {
 		return false, err
 	}
 	end := pos + outerLen
+	if end != len(payload) {
+		return false, fmt.Errorf("%w: trailing bytes after NewBlockHashes list", rlp.ErrParse)
+	}
 	count := 0
 	for pos < end {
 		var pairLen int
