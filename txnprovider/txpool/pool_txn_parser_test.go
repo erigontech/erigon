@@ -52,7 +52,7 @@ func TestParseTransactionRLP(t *testing.T) {
 						signHash := hexutil.MustDecodeHex(tt.SignHashStr)
 						var computedSignHash common.Hash
 						if txn.Txn.Protected() {
-							computedSignHash = txn.Txn.SigningHash(ctx.chainID.ToBig())
+							computedSignHash = txn.Txn.SigningHash(&ctx.chainID)
 						} else {
 							computedSignHash = txn.Txn.SigningHash(nil)
 						}

@@ -1045,12 +1045,14 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	view := s.View()
 	defer view.Close()
 
+	// header is hoisted: walker must not retain &header beyond its callback.
+	var header types.Header
+
 	for _, sn := range view.Headers() {
 		if err := sn.Src().WithReadAhead(func(g *seg.Getter) error {
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
-				var header types.Header
-				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
+				if err := types.DecodeHeader(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {

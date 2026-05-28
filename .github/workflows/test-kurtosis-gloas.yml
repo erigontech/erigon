@@ -60,15 +60,15 @@ jobs:
         continue-on-error: true
         uses: docker/login-action@v4
         with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Restore cached third-party containers
         id: cache-cl-images
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: /tmp/docker-cache
           key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
@@ -87,6 +87,13 @@ jobs:
           docker pull ${{ env.ASSERTOOR_IMAGE }}
           docker save ${{ env.LIGHTHOUSE_IMAGE }} -o /tmp/docker-cache/lighthouse.tar
           docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
+
+      - name: Save third-party containers to cache
+        if: steps.cache-cl-images.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        uses: actions/cache/save@v5
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
 
       - name: Build erigon Docker image (with BuildKit layer cache)
         uses: docker/build-push-action@v6

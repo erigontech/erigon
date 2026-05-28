@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -270,7 +271,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
 		MdbxDBSizeLimit: mdbxDBSizeLimit,
@@ -293,9 +293,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		},
 		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
-	}
-	if args.BatchSize > 0 {
-		ethConfig.BatchSize = args.BatchSize
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -371,9 +368,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	}
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config)
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config)
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
@@ -409,7 +406,6 @@ type EngineApiTesterInitArgs struct {
 	Genesis                *types.Genesis
 	CoinbaseKey            *ecdsa.PrivateKey
 	EthConfigTweaker       func(*ethconfig.Config)
-	BatchSize              datasize.ByteSize
 	MockClState            *MockClState
 	NoEmptyBlock1          bool
 	EngineApiClientTimeout *time.Duration
@@ -441,7 +437,7 @@ func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *t
 	test(t.Context(), t, eat)
 }
 
-func (eat EngineApiTester) ChainId() *big.Int {
+func (eat EngineApiTester) ChainId() *uint256.Int {
 	return eat.ChainConfig.ChainID
 }
 

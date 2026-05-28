@@ -514,6 +514,7 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
+func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before
@@ -525,6 +526,12 @@ func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
 // as a kv.RwTx to route rawdb writes through the overlay instead of a real RwTx.
 // Returns nil if no overlay has been initialized via InitBlockOverlay.
 func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay.Load() }
+
+func (sd *SharedDomains) CloseBlockOverlay() {
+	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
+		overlay.Close()
+	}
+}
 
 // BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
 // This allows consumers (RPC, shutter) to read uncommitted block data with
@@ -636,9 +643,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.mem.Close()
 
-	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
-		overlay.Close()
-	}
+	sd.CloseBlockOverlay()
 
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
