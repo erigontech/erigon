@@ -1673,28 +1673,40 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	// to), so revert must restore it via ch.prev. Otherwise a CALL→CreateAccount
 	// →REVERT inside the same block would leak a resurrected stateObject
 	// (TestDeleteCreateRevert).
-	if previous == nil || (sdb.versionMap != nil && previous.selfdestructed) {
+	// Use createObjectChange only for fresh creates (no previous) or when the
+	// SD signal lives outside stateObjects[addr] (versionMapMarker = cross-tx
+	// SD synthesised by per-tx IBS readers in parallel apply). In both cases
+	// revert clears stateObjects[addr] and the SD signal survives elsewhere
+	// (no signal needed at all for fresh creates; versionMap retains the
+	// marker for the parallel cross-tx case). Otherwise (real same-IBS prior
+	// stateObject — pure serial, or blockgen-with-versionMap shared IBS) the
+	// SD signal lives only in stateObjects[addr], so revert must restore it
+	// via resetObjectChange so MakeWriteSet still sees the SD'd account and
+	// emits the DeleteAccount that wipes its trie leaf.
+	if previous == nil || previous.versionMapMarker {
 		sdb.journal.append(createObjectChange{account: addr})
 	} else {
 		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
 	}
-	// recreatedFromDestructed is only needed in the accumulating-IBS path
-	// (blockgen serial: one IBS handles every tx in a block, with per-tx
-	// NoopWriter and end-of-block real Writer). In that path the SD's
-	// real Writer.DeleteAccount fires only at block end, so the IBS must
-	// signal the wipe across the SD-then-recreate-in-same-block boundary
-	// via this flag.
+	// recreatedFromDestructed signals updateAccount to wipe leftover
+	// storage+code before writing the new account state. Needed when the SD
+	// happened in a PRIOR tx in this same IBS (accumulating-IBS path: pure
+	// serial, or blockgen-with-versionMap which shares one IBS across all
+	// txs in a block with per-tx NoopWriter and end-of-block real Writer).
 	//
-	// Skip in the parallel/versionMap path: each worker has a fresh IBS
-	// per tx, and the SD tx's own writeset already drives the apply-time
-	// storage wipe via SelfDestructPath=true. Setting the flag here for
-	// later txs that simply observe a prior-tx SD (markers, value-
-	// transfer-revival) would cause updateAccount → versionedWriteCollector.
-	// DeleteAccount to emit a SECOND SelfDestructPath=true, which
-	// normalizeWriteSet treats as a destruction and drops the recreated
-	// account's fields — corrupting EEST test_recreate's post-state.
-	if previous != nil && sdb.versionMap == nil && !previous.versionMapMarker && (previous.selfdestructed || previous.deleted) {
-		newobj.recreatedFromDestructed = true
+	// Skip when the SD happened in the CURRENT tx — in that case the SD's
+	// own writeset already drives the apply-time storage wipe via
+	// SelfDestructPath=true, and emitting a second DeleteAccount via this
+	// flag would produce a second SelfDestructPath=true that
+	// normalizeWriteSet treats as destruction (dropping the recreated
+	// account's fields — corrupting EEST test_recreate's post-state).
+	// hasWrite checks the current tx's versioned writes; it is empty in
+	// pure-serial mode (no versionMap) and empty after ResetVersionedIO
+	// between txs in blockgen-with-versionMap.
+	if previous != nil && !previous.versionMapMarker && (previous.selfdestructed || previous.deleted) {
+		if sdb.versionMap == nil || !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
+			newobj.recreatedFromDestructed = true
+		}
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
