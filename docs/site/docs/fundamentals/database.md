@@ -75,17 +75,7 @@ snapshots/idx      430 GB
 snapshots TOTAL    2.3 TB
 ```
 
-```sh
-# bor-mainnet (Polygon PoS) — archive
-chaindata           20 GB
-snapshots/accessor 360 GB
-snapshots/domain   1.1 TB
-snapshots/history  750 GB
-snapshots/idx      1.5 TB
-snapshots TOTAL    4.9 TB
-```
-
-For non-archive footprints (`--prune.mode=full` or `minimal`), see [Hardware Requirements](../get-started/hardware-requirements).
+For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
 ## Why `chaindata/` stays so small
 
@@ -95,7 +85,7 @@ In Erigon 3, `chaindata/` only holds:
 - Recent blocks not yet folded into snapshots
 - Live txpool, peer state, sync stage progress
 
-Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on Polygon archive nodes.
+Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
 
 It also means **`rm -rf chaindata/` is recoverable**: Erigon will rebuild it from snapshots on next start, given enough time. (You will still want a backup for fast recovery, but the cost of losing it is hours, not weeks.)
 
