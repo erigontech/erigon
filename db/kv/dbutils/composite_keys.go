@@ -78,10 +78,7 @@ func GenerateStoragePlainKey(address common.Address, storageKey common.Hash) []b
 
 // AddrHash + KeyHash. Compact storage-key format used by the legacy MPT
 // path (eth_getProof / witness generation in execution/commitment/trie)
-// and by the modern E3 storage domain (kv.StorageDomain). The
-// per-account incarnation counter used to sit between the two hashes in
-// the MPT format; it has been dropped now that IntraBlockState no
-// longer tracks it.
+// and by the modern E3 storage domain (kv.StorageDomain).
 func GenerateCompositeStorageKey(addressHash common.Hash, seckey common.Hash) []byte {
 	compositeKey := make([]byte, length.Hash+length.Hash)
 	copy(compositeKey, addressHash[:])

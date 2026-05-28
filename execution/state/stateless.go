@@ -255,7 +255,7 @@ func (s *Stateless) DeleteAccount(address accounts.Address, original *accounts.A
 
 // UpdateAccountCode is a part of the StateWriter interface
 // This implementation adds the code to the codeMap to make it available for further accesses
-func (s *Stateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (s *Stateless) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	s.codeUpdates[codeHash.Value()] = code
 
 	if s.trace {
@@ -266,7 +266,7 @@ func (s *Stateless) UpdateAccountCode(address accounts.Address, incarnation uint
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (s *Stateless) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	addrValue := address.Value()
 	keyValue := key.Value()
 	addrHash, err := common.HashData(addrValue[:])

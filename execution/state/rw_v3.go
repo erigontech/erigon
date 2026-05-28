@@ -613,7 +613,7 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	return nil
 }
 
-func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
 
 	c.rs.accountsMutex.Lock()
@@ -648,7 +648,7 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	return nil
 }
 
-func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -719,7 +719,7 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	return nil
 }
 
-func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, _ accounts.CodeHash, code []byte) error {
+func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ accounts.CodeHash, code []byte) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
 	return nil
 }
@@ -729,7 +729,7 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 	return nil
 }
 
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, _, value uint256.Int) error {
 	// Always emit — deduplication happens in the BlockStateCache write buffer.
 	// The buffer compares with pre-block committed values at flush time.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
@@ -857,7 +857,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	return nil
 }
 
-func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (w *Writer) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
@@ -877,9 +877,7 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	}
 	addressValue := address.Value()
 	// Explicit removal of code and storage on SELFDESTRUCT (and EIP-161 empty-account
-	// removal), mirroring what the parallel-exec apply path already does. Previously
-	// the storage wipe relied on the incarnation bump on re-creation; doing it here
-	// up front makes the semantics independent of incarnations.
+	// removal), mirroring what the parallel-exec apply path already does.
 	if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
@@ -895,7 +893,7 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (w *Writer) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}

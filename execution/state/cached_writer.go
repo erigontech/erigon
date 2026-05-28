@@ -43,8 +43,8 @@ func (cw *CachedWriter) UpdateAccountData(address accounts.Address, original, ac
 	return nil
 }
 
-func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	if err := cw.w.UpdateAccountCode(address, 1, codeHash, code); err != nil {
+func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
+	if err := cw.w.UpdateAccountCode(address, codeHash, code); err != nil {
 		return err
 	}
 	addressValue := address.Value()
@@ -61,8 +61,8 @@ func (cw *CachedWriter) DeleteAccount(address accounts.Address, original *accoun
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if err := cw.w.WriteAccountStorage(address, 1, key, original, value); err != nil {
+func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
+	if err := cw.w.WriteAccountStorage(address, key, original, value); err != nil {
 		return err
 	}
 	if original == value {

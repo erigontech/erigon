@@ -382,11 +382,11 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 		stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
 			CodeHash: withdrawalRequestCodeHash,
 		})
-		stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
+		stateWriter.UpdateAccountCode(withdrawalAddr, withdrawalRequestCodeHash, withdrawalRequestCode)
 		stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
 			CodeHash: consolidationRequestCodeHash,
 		})
-		stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+		stateWriter.UpdateAccountCode(consolidationAddr, consolidationRequestCodeHash, consolidationRequestCode)
 
 		if err := domains.Flush(ctx, tx); err != nil {
 			return err

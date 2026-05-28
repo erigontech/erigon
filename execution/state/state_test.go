@@ -52,7 +52,7 @@ type recordingWriter struct {
 	storageWrites []struct{ orig, val uint256.Int }
 }
 
-func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ uint64, _ accounts.StorageKey, orig, val uint256.Int) error {
+func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ accounts.StorageKey, orig, val uint256.Int) error {
 	rw.storageWrites = append(rw.storageWrites, struct{ orig, val uint256.Int }{orig, val})
 	return nil
 }

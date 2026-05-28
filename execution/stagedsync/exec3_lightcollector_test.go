@@ -276,7 +276,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	// --- Case 1: TX A writes slot to different value, TX B writes same as block origin ---
 	// TX A (txNum 10): SSTORE(cb, 2) — changes from 1 to 2
 	lc1 := state.NewLightCollector()
-	err = lc1.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(2))
+	err = lc1.WriteAccountStorage(contract, slotKey, *uint256.NewInt(1), *uint256.NewInt(2))
 	require.NoError(t, err)
 	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, lc1.TakeWrites(), nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
@@ -290,7 +290,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	// LightCollector with original = blockOrigin = 1, value = 1
 	// With skip: dropped. With skip removed: emitted.
 	lc2 := state.NewLightCollector()
-	err = lc2.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(1))
+	err = lc2.WriteAccountStorage(contract, slotKey, *uint256.NewInt(1), *uint256.NewInt(1))
 	require.NoError(t, err)
 	writes2 := lc2.TakeWrites()
 
@@ -350,7 +350,7 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	// TX A (txNum 10): SSTORE(cb, 1) — same as block origin (reentrancy guard)
 	// LightCollector: original = blockOrigin = 1, value = 1
 	lc := state.NewLightCollector()
-	err = lc.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(1))
+	err = lc.WriteAccountStorage(contract, slotKey, *uint256.NewInt(1), *uint256.NewInt(1))
 	require.NoError(t, err)
 	writes := lc.TakeWrites()
 
@@ -373,9 +373,9 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 
 	// TX B writes a different slot but also has the reentrancy guard
 	lc2 := state.NewLightCollector()
-	err = lc2.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(1)) // guard
+	err = lc2.WriteAccountStorage(contract, slotKey, *uint256.NewInt(1), *uint256.NewInt(1)) // guard
 	require.NoError(t, err)
-	err = lc2.WriteAccountStorage(contract, 1, slotKey2, *uint256.NewInt(37), *uint256.NewInt(42)) // actual change
+	err = lc2.WriteAccountStorage(contract, slotKey2, *uint256.NewInt(37), *uint256.NewInt(42)) // actual change
 	require.NoError(t, err)
 
 	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, lc2.TakeWrites(), nil, &chain.Rules{}, nil)

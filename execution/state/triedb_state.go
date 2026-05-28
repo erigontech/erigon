@@ -791,7 +791,7 @@ func (tsw *TrieStateWriter) DeleteAccount(address accounts.Address, original *ac
 	return nil
 }
 
-func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	if tsw.tds.resolveReads {
 		tsw.tds.retainListBuilder.CreateCode(codeHash)
 	}
@@ -804,7 +804,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, incarnat
 	return nil
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	addressValue := address.Value()
 	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
 
@@ -814,7 +814,6 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarn
 		m = make(map[common.Hash][]byte)
 		tsw.tds.currentBuffer.storageUpdates[addrHash] = m
 	}
-	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
 	keyValue := key.Value()
 	seckey, err := common.HashData(keyValue[:])
 	if err != nil {
