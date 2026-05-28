@@ -518,6 +518,12 @@ func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error)
 	return common.Hash{}, nil
 }
 
+// recordingStateConstructedHookForTest, if set, fires once per ExecutionWitness
+// call on the re-exec path (immediately after RecordingState is built). Tests
+// assert it did NOT fire to confirm the Amsterdam BAL branch was taken.
+// Production code leaves it nil.
+var recordingStateConstructedHookForTest func()
+
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
@@ -558,6 +564,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
+	if recordingStateConstructedHookForTest != nil {
+		recordingStateConstructedHookForTest()
+	}
 	recordingState.SetAccountsToTrace([]common.Address{
 		// Add addresses to trace here, e.g.:
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),

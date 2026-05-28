@@ -258,18 +258,39 @@ needed. Test: `rpc/jsonrpc/debug_witness_bal_constructability_test.go`
 **Files:**
 - Modify: `rpc/jsonrpc/debug_api_test.go` (or the location decided in Task 0)
 
-- [ ] `TestExecutionWitnessAmsterdamBAL`: using the Task-0 harness, call
+- [x] `TestExecutionWitnessAmsterdamBAL`: using the Task-0 harness, call
       `debugApi.ExecutionWitness` on the Amsterdam block; assert a **verifiable** witness
       (`verifyWitnessStateless` passes / root reproduced) **without** setting
       `ERIGON_WITNESS_NO_VERIFY`.
-- [ ] Path assertion by **indirect observation** (no production-code counter). Acceptable
+- [x] Path assertion by **indirect observation** (no production-code counter). Acceptable
       forms: assert `RecordingState` was not constructed (instrument the existing re-exec path
       with a `t.Helper()`-only test hook or a `_, ok := tx.Debug()...` style observation), or
       assert a re-exec-only side effect is absent. Prefer the simplest indirect signal.
-- [ ] Add `TestExecutionWitnessAmsterdamActivationBlock` exercising `header.Time ==
+- [x] Add `TestExecutionWitnessAmsterdamActivationBlock` exercising `header.Time ==
       AmsterdamTime` to lock the boundary.
-- [ ] Run the new tests — confirm RED for the right reason (today the Amsterdam block goes
+- [x] Run the new tests — confirm RED for the right reason (today the Amsterdam block goes
       through re-exec or errors before the new branch lands).
+
+**Task 1 notes:**
+
+- Spike file `debug_witness_bal_constructability_test.go` absorbed into
+  `debug_witness_bal_test.go` per the Task-0 decision (single Amsterdam test surface). The
+  shared harness `setupAmsterdamBALHarness` is the Task-0 recipe extracted as a helper.
+- Path observation: added `recordingStateConstructedHookForTest` test seam in
+  `debug_execution_witness.go` (nil in production, fired once when the re-exec path
+  constructs `RecordingState`). Tests install a counter via `installRecordingHookCounter`.
+- Activation boundary: AllProtocolChanges has `AmsterdamTime=0`, so the genesis block sits
+  exactly on the boundary; the test locks inclusivity via
+  `IsAmsterdam(*AmsterdamTime)==true` and then exercises the first Amsterdam-era block. A
+  non-zero AmsterdamTime can't be tested via the in-test chain builder — when
+  `parent.Time < AmsterdamTime`, the parallel-exec BAL infra isn't allocated
+  (chain_makers.go gates on `IsAmsterdam(parent.Time)`), and `InsertChain` then fails with
+  `Amsterdam processing is not supported by serial exec`. Documented in the test.
+- RED reason confirmed: both tests fail today with
+  `[debug_executionWitness] computedRootHash != expectedRootHash` — the existing re-exec
+  path produces wrong state roots for Amsterdam blocks, which is precisely what the BAL
+  branch (Tasks 2/3) will fix. The hook-count assertion is the path-observation gate that
+  will flip green once the IsAmsterdam branch lands.
 
 ### Task 2: buildAccessedStateFromBAL — tests first, then implementation
 
