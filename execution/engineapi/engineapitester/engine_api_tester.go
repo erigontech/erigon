@@ -386,7 +386,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	addCleanup(func() error { cancel(); return nil })
 	success = true
 	return EngineApiTester{
-		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,
 		ChainConfig:          genesis.Config,
 		EngineApiClient:      engineApiClient,
@@ -416,7 +415,6 @@ type EngineApiTesterInitArgs struct {
 }
 
 type EngineApiTester struct {
-	GenesisBlock         *types.Block
 	CoinbaseKey          *ecdsa.PrivateKey
 	ChainConfig          *chain.Config
 	EngineApiClient      *engineapi.JsonRpcClient
