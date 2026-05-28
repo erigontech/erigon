@@ -522,17 +522,6 @@ nil                  // db returned nil - means no more keys there, done
 On practice Trie is no full - it means after account key `{30 zero bytes}0000` may come `{5 zero bytes}01` and amount of
 iterations will not be big.
 
-### Attack - by delete account with huge state
-
-It's possible to create Account with very big storage (increase storage size during many blocks). Then delete this
-account (SELFDESTRUCT). Naive storage deletion may take several minutes - depends on Disk speed - means every Eth client
-will not process any incoming block that time. To protect against this attack:
-PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" -
-just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
-`{account_key}{incarnation}{storage_hash}`. And [execution/commitment/trie/trie_root.go](../../execution/commitment/trie/trie_root.go) has logic -
-every time when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or
-IntermediateTrieHashes with another incarnation.
-
 Transaction processing
 ----------------------
 
