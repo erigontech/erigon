@@ -92,9 +92,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+s.beaconCfg.MinSeedLookahead)
 	}
 
-	// [IGNORE] The proposal slot has not already passed
+	// [IGNORE] The proposal slot has not already passed (proposal_slot > current_slot)
 	currentSlot := s.ethClock.GetCurrentSlot()
-	if proposalSlot < currentSlot {
+	if proposalSlot <= currentSlot {
 		return fmt.Errorf("%w: proposal slot %d has already passed (current slot %d)",
 			ErrIgnore, proposalSlot, currentSlot)
 	}

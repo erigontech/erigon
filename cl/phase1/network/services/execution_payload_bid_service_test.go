@@ -67,6 +67,7 @@ func newTestSignedExecutionPayloadBid(slot uint64, builderIndex uint64, value ui
 			ParentBlockRoot:    common.HexToHash("0xbbbb"),
 			BlockHash:          common.HexToHash("0xcccc"),
 			GasLimit:           30_000_000,
+			FeeRecipient:       common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
 			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		},
 		Signature: common.Bytes96{},
@@ -491,6 +492,41 @@ func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
 
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
 	require.Error(t, err)
+}
+
+func TestExecutionPayloadBidServiceNonZeroExecutionPayment(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.ExecutionPayment = 500 // must be 0 at gossip time
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "execution_payment must be 0")
+}
+
+func TestExecutionPayloadBidServiceFeeRecipientMismatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.FeeRecipient = common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fee_recipient")
+	require.Contains(t, err.Error(), "does not match")
 }
 
 func TestExecutionPayloadBidServiceFailedValidationNotStored(t *testing.T) {

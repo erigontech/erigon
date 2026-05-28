@@ -178,6 +178,17 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	builderIndex := bid.BuilderIndex
 	prefs := preferences.Message
 
+	// [REJECT] execution_payment must be zero at gossip time
+	if bid.ExecutionPayment != 0 {
+		return fmt.Errorf("bid execution_payment must be 0, got %d", bid.ExecutionPayment)
+	}
+
+	// [REJECT] fee_recipient must match proposer preferences
+	if bid.FeeRecipient != prefs.FeeRecipient {
+		return fmt.Errorf("bid fee_recipient %v does not match proposer preferences %v",
+			bid.FeeRecipient, prefs.FeeRecipient)
+	}
+
 	// [IGNORE] First valid bid from this builder for this slot
 	seenKey := seenBidKey{builderIndex: builderIndex, slot: slot}
 	if s.seenCache.Contains(seenKey) {

@@ -157,6 +157,25 @@ func TestProposerPreferencesServiceSlotAlreadyPassed(t *testing.T) {
 	require.Contains(t, err.Error(), "already passed")
 }
 
+func TestProposerPreferencesServiceCurrentSlotIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, _ := setupProposerPreferencesService(t, ctrl)
+
+	// proposalSlot == currentSlot → spec says proposal_slot > current_slot, so this should be IGNORED
+	msg := newTestSignedProposerPreferences(100, 42)
+
+	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
+	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrIgnore))
+	require.Contains(t, err.Error(), "already passed")
+}
+
 func TestProposerPreferencesServiceDuplicate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
