@@ -10,28 +10,35 @@ Erigon is an Ethereum execution-layer client designed around three goals: **low 
 
 ## At a glance
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                              erigon (one binary)                     │
-│                                                                      │
-│   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────────┐  │
-│   │  Sentry  │ → │Downloader│ → │ Execution│ → │  RPC Daemon      │  │
-│   │  (p2p)   │   │(snapshots│   │ (Staged  │   │  (JSON-RPC, WS,  │  │
-│   │          │   │  + EL)   │   │   Sync)  │   │   GraphQL, gRPC) │  │
-│   └──────────┘   └────┬─────┘   └────┬─────┘   └────────┬─────────┘  │
-│                       │              │                  │            │
-│                       ▼              ▼                  ▼            │
-│                  ┌─────────────────────────────────────────┐         │
-│                  │  Single MDBX key-value store + .seg     │         │
-│                  │  snapshot files on disk (the datadir)   │         │
-│                  └─────────────────────────────────────────┘         │
-│                                                                      │
-│   ┌────────┐                                ┌─────────────────┐      │
-│   │ TxPool │ ←──── private gRPC ─────────── │ Caplin (CL)     │      │
-│   │        │                                │ embedded by     │      │
-│   │        │                                │ default         │      │
-│   └────────┘                                └─────────────────┘      │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph erigon["erigon (one binary)"]
+        direction TB
+        Sentry["Sentry<br/>(p2p)"]
+        Downloader["Downloader<br/>(snapshots + EL data)"]
+        Execution["Execution<br/>(Staged Sync)"]
+        RPC["RPC Daemon<br/>(JSON-RPC, WS,<br/>GraphQL, gRPC)"]
+        TxPool["TxPool"]
+        Caplin["Caplin (CL)<br/>embedded by default"]
+        Datadir[("datadir<br/>MDBX chaindata<br/>+ .seg snapshots")]
+
+        Sentry --> Downloader
+        Downloader --> Execution
+        Execution --> RPC
+
+        Downloader -.writes.-> Datadir
+        Execution -.reads/writes.-> Datadir
+        RPC -.reads.-> Datadir
+
+        TxPool <-- private gRPC --> Caplin
+        TxPool -.reads.-> Datadir
+        Caplin -.reads/writes.-> Datadir
+    end
+
+    classDef component fill:#fff5e6,stroke:#EF7716,stroke-width:1.5px,color:#000
+    classDef storage fill:#f0f0ff,stroke:#5860EF,stroke-width:1.5px,color:#000
+    class Sentry,Downloader,Execution,RPC,TxPool,Caplin component
+    class Datadir storage
 ```
 
 Every box above is a Go package that runs **inside the `erigon` process by default**. The same binary can also be split into independent processes — see [Modular processes](#modular-processes).
