@@ -68,14 +68,14 @@ import (
 // and unbounded heap growth.
 const maxBlockHashesPerMsg = 4096
 
-// peekNewBlockHashesCount counts [hash, number] pairs in an RLP-encoded
-// NewBlockHashes packet without decoding entry contents, bailing out once
-// the count exceeds maxBlockHashesPerMsg so oversized DoS packets are
+// newBlockHashesExceedsCap reports whether an RLP-encoded NewBlockHashes
+// packet contains more than maxBlockHashesPerMsg [hash, number] pairs,
+// bailing out as soon as the cap is exceeded so oversized DoS packets are
 // rejected after bounded work.
-func peekNewBlockHashesCount(payload []byte) (int, error) {
+func newBlockHashesExceedsCap(payload []byte) (bool, error) {
 	pos, outerLen, err := rlp.ParseList(payload, 0)
 	if err != nil {
-		return 0, err
+		return false, err
 	}
 	end := pos + outerLen
 	count := 0
@@ -83,15 +83,15 @@ func peekNewBlockHashesCount(payload []byte) (int, error) {
 		var pairLen int
 		pos, pairLen, err = rlp.ParseList(payload, pos)
 		if err != nil {
-			return 0, err
+			return false, err
 		}
 		pos += pairLen
 		count++
 		if count > maxBlockHashesPerMsg {
-			return count, nil
+			return true, nil
 		}
 	}
-	return count, nil
+	return false, nil
 }
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -349,8 +349,8 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.In
 	// Reject oversized announcements before any further work: a 10 MiB wire
 	// packet otherwise expands into one GetBlockHeaders RPC per hash and
 	// drives unbounded heap growth.
-	if count, err := peekNewBlockHashesCount(req.Data); err == nil && count > maxBlockHashesPerMsg {
-		cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String(), "count", count)
+	if exceeded, err := newBlockHashesExceedsCap(req.Data); err == nil && exceeded {
+		cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String(), "cap", maxBlockHashesPerMsg)
 		if _, err1 := sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
 			PeerId:  req.PeerId,
 			Penalty: sentryproto.PenaltyKind_Kick,
