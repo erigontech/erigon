@@ -1,16 +1,16 @@
 # Introduction
 URL: https://docs.erigon.tech/
 
-An efficient, modular Ethereum execution client built for performance, low disk footprint, and flexible deployment.
+An efficient, modular Ethereum execution layer client built for performance, low disk footprint, and flexible deployment.
 
 ## Sections
 
 - [Get Started](https://docs.erigon.tech/get-started): Hardware requirements, installation options, and first-run guides to get your node online fast.
 - [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
-- [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
+- [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC Daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
 - [Staking](https://docs.erigon.tech/staking): Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
-- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
+- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, TxPool, and other namespaces.
 - [Why Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.
 
 ---
@@ -27,7 +27,7 @@ Everything you need to go from zero to a running Erigon node — requirements, i
 - [Installation](https://docs.erigon.tech/get-started/installation): Binary releases, building from source, Docker images, and upgrade instructions.
 - [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
 - [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
-- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
+- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, TxPool, and other namespaces.
 
 ---
 
@@ -40,7 +40,7 @@ URL: https://docs.erigon.tech/get-started/why-using-erigon
 - [State Storage (Flat DB)](../fundamentals/optimizing-storage): Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.
 - [Immutable, Decentralised Data](../fundamentals/modules/downloader): Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
 - [Predictable RPC Performance](../fundamentals/modules/rpc-daemon): No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
-- [Modularity](../fundamentals/modules/): Core node, RPC daemon, and tx pool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
+- [Modularity](../fundamentals/modules/): Core node, RPC Daemon, and TxPool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
 - [OtterSync](../fundamentals/sync-modes): Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
 - [Flexible Pruning](../fundamentals/optimizing-storage): Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
 - [Home Users & Solo Stakers](../staking/): Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
@@ -507,7 +507,7 @@ The basic Erigon configuration is suitable for most users who simply want to run
 
 First, clone the Erigon repository (you do not need to specify a branch):
 
-```
+```text
 git clone https://github.com/erigontech/erigon.git
 cd erigon
 ```
@@ -667,7 +667,7 @@ You can use the same command to build other binaries such as `RPCDaemon`, `TxPoo
 
 To make Erigon executable from anywhere from your terminal repeat step 1.5 and add Erigon executable path
 
-```
+```text
 C:\Users\your-user\erigon.\build\bin\
 ```
 
@@ -700,7 +700,7 @@ The location of your Erigon data directory (`datadir`) is the most crucial facto
 
 | **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
+| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC Daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
 | Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Performance is reduced as the native Windows drives are mounted using DrvFS (a slower network file system). This affects MDBX database access, and complicates filesystem operations that expect unix-like behaviour. Setting [`automount.options=metadata`](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#automount-options) in `/etc/wsl.conf` in your distribution is recommended, but not required. Note that Docker on Windows is also affected. |
 
 **RPC Daemon Configuration**
@@ -713,7 +713,7 @@ The choice of data location directly impacts how you must configure the RPC daem
 | Data on Mounted Windows Partition             | The `rpcdaemon` must be configured as a remote DB even when running on the same machine. |
 
 :::warning
-⚠️ Warning: The remote DB RPC daemon is an experimental feature, is not recommended, and is extremely slow. Always aim to use the embedded RPC daemon by keeping your data on the native Linux filesystem.
+⚠️ Warning: The remote DB RPC Daemon is an experimental feature, is not recommended, and is extremely slow. Always aim to use the embedded RPC Daemon by keeping your data on the native Linux filesystem.
 :::
 
 **Networking Notes**
@@ -789,7 +789,7 @@ Follow the below instructions depending on your installation method:
 * [Docker](#docker)
 * [Compiled source code](#compiled-from-source)
 
-### Pre-built Binaries (only Linux and MacOS)
+### Pre-built Binaries (only Linux and macOS)
 
 Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#install-prebuilt) and reinstall it, no other operation needed.
 
@@ -877,7 +877,7 @@ services:
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```
+```text
 docker compose up
 ```
 
@@ -953,7 +953,7 @@ services:
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```
+```text
 docker compose up
 ```
 
@@ -1082,7 +1082,7 @@ services:
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```
+```text
 docker compose up
 ```
 
@@ -1147,7 +1147,7 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
 
     Copy
 
-    ```
+    ```text
      lighthouse \
      --network gnosis beacon_node \
      --datadir=data \
@@ -1161,7 +1161,7 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
 
     Copy
 
-    ```
+    ```text
      lighthouse \
      --network chiado \
      --datadir=data \
@@ -1189,7 +1189,7 @@ Core concepts and day-to-day operations for running a healthy Erigon node.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
 - [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose): Run Erigon and all its modules together with Docker Compose.
 - [Security](https://docs.erigon.tech/fundamentals/security): Firewall rules, API exposure best practices, and hardening recommendations.
-- [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable setups.
+- [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC Daemon, TxPool, Sentry, and Downloader as independent processes for scalable setups.
 
 ---
 
@@ -1201,7 +1201,7 @@ Erigon is mainly operated through the command line. The commands may vary based 
 
 Open your terminal and simply start Erigon with the command:
 
-```
+```text
 erigon [options]
 ```
 
@@ -1212,7 +1212,7 @@ erigon [options]
 
 Open your terminal and move to the directory where you installed Erigon
 
-```
+```text
 cd erigon
 ```
 
@@ -1248,7 +1248,7 @@ The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship em
 
 ## Example of configuration
 
-To run Erigon with RPCDaemon, TxPool, and other components in a single process is the simplest way to get started. For better performance and load management, you might consider distributing these components across multiple machines.
+To run Erigon with RPC Daemon, TxPool, and other components in a single process is the simplest way to get started. For better performance and load management, you might consider distributing these components across multiple machines.
 
 ```sh
 ./build/bin/erigon --datadir=/desired/path/to/datadir \
@@ -1291,7 +1291,7 @@ Once your node is running, there are two ways to confirm it is making progress a
 
 Erigon's logs are organized by [staged sync](logs#staged-synchronization-architecture). Every log line emitted by the sync engine is prefixed with the current stage and its position in the pipeline. For example:
 
-```
+```text
 INFO[02-20|15:00:00.123] [4/8 Bodies] Downloading block bodies   block=18234567 ...
 ```
 
@@ -1301,7 +1301,7 @@ The full ordered stage list is in [Logs → Stage Definitions](logs#stage-defini
 
 ### 2. Query the JSON-RPC
 
-If the RPC daemon is enabled (default port `8545`), the standard `eth_syncing` method tells you whether the node is still catching up and how far behind it is:
+If the RPC Daemon is enabled (default port `8545`), the standard `eth_syncing` method tells you whether the node is still catching up and how far behind it is:
 
 ```bash
 curl -s -X POST -H "Content-Type: application/json" \
@@ -1326,7 +1326,7 @@ make help
 
 This command will display a list of convenience commands available in the Makefile, along with their descriptions.
 
-```
+```text
  go-version:                        print and verify go version
  validate_docker_build_args:        ensure docker build args are valid
  docker:                            validate, update submodules and build with docker
@@ -1470,14 +1470,14 @@ Erigon use the following default port for each service:
 | engine    | `9090`  | TCP       | gRPC Server                 | Private       |
 | engine    | `42069` | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | `8551`  | TCP       | Engine API (JWT auth)       | Private       |
-| sentry    | `30303` | TCP & UDP | eth/68 peering              | Public        |
-| sentry    | `30304` | TCP & UDP | eth/69 peering              | Public        |
-| sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
-| rpcdaemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| Sentry    | `30303` | TCP & UDP | eth/68 peering              | Public        |
+| Sentry    | `30304` | TCP & UDP | eth/69 peering              | Public        |
+| Sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
+| RPC Daemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
 | mcp       | `8553`  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
-Typically, `30303` and `30304` are exposed to the internet to allow incoming peering connections. `9090` is exposed only internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
+Typically, `30303` and `30304` are exposed to the internet to allow incoming peering connections. `9090` is exposed only internally for RPC Daemon or other connections, (e.g. RPC Daemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
 
 To ensure proper P2P functionality for both the Execution and Consensus layers use a minimal configuration without exposing unnecessary services:
 
@@ -1500,9 +1500,9 @@ Here is a comprehensive list of port-related options:
 
 * `--port [value]`: Network listening port (default: `30303`)
 * `--p2p.allowed-ports [value]`: Allowed ports to pick for different eth p2p protocol versions (default: `30303`, `30304`, `30305`, `30306`, `30307`)
-* `--sentry.api.addr [value]`: Comma separated sentry addresses `<host>:<port>,<host>:<port>` (default `127.0.0.1:9091`)
+* `--sentry.api.addr [value]`: Comma separated Sentry addresses `<host>:<port>,<host>:<port>` (default `127.0.0.1:9091`)
 
-### RPCdaemon
+### RPC Daemon
 
 * `--ws.port [value]`: WS-RPC server listening port (default: `8546`)
 * `--http.port [value]`: HTTP-RPC server listening port (default: `8545`)
@@ -1731,7 +1731,7 @@ Erigon features a sophisticated logging framework that offers detailed visibilit
 The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.
 
 :::tip
-Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
+Erigon offers a `--metrics` flag for using Prometheus/Grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
 :::
 
 ## Logging Framework Architecture
@@ -1763,7 +1763,7 @@ The logging system defines six distinct log levels in hierarchical order:
 
 The log level is set by using the `--verbosity` flag, for example:
 
-```
+```text
 ./build/bin/erigon --verbosity=1
 ```
 
@@ -1817,7 +1817,7 @@ The prefix format includes stage position and total count (e.g., "1/10 Headers")
 URL: https://docs.erigon.tech/fundamentals/security
 
 
-The security practices focus heavily on the RPC daemon since it's the primary external interface. The modular architecture allows you to run components separately, which can improve security by isolating services. For production deployments, consider using the distributed mode where services communicate via secured gRPC rather than running everything in a single process.
+The security practices focus heavily on the RPC Daemon since it's the primary external interface. The modular architecture allows you to run components separately, which can improve security by isolating services. For production deployments, consider using the distributed mode where services communicate via secured gRPC rather than running everything in a single process.
 
 ## Network Security
 
@@ -1829,7 +1829,7 @@ Based on best practices for execution clients, your local machine's firewall set
 | -------- | ------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | 30303    | TCP & UDP    | Peer-to-Peer (P2P) Networking | Allow inbound and outbound traffic to enable peer discovery and connections.                                                             |
 | 8545     | TCP          | JSON-RPC (Public API)         | Block all traffic _except_ from explicitly defined trusted machines. This port should never be publicly exposed without strict controls. |
-| 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC daemon and core node).                            |
+| 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC Daemon and core node).                            |
 
 #### CORS Protection
 
@@ -1840,11 +1840,11 @@ When exposing public RPC endpoints (like those on port 8545), use the following 
 
 ## API Security
 
-The RPC daemon is the primary external interface, making API security critical. To protect against abuse, denial-of-service (DoS) attacks, OOM issues and unauthorized access, implement the following controls:
+The RPC Daemon is the primary external interface, making API security critical. To protect against abuse, denial-of-service (DoS) attacks, OOM issues and unauthorized access, implement the following controls:
 
 | **Security Measure** | **Description**                                                                                                                                                                                           | **Erigon Configuration**                                                                                                                                                             |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Method Allowlisting  | Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface.Can be applied to erigon or rpcdaemon process. | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
+| Method Allowlisting  | Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface.Can be applied to erigon or RPC Daemon process. | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
 | Remove Admin APIs    | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only.                                             | Omit the `admin` and `debug` namespaces from `--http.api`.                                                                                                                           |
 | Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for HTTP requests and batch requests.                                                                                                               | Configure `--rpc.max.concurrency` (HTTP admission control: `0` = use `--db.read.concurrency`, `-1` = unlimited), `--rpc.batch.concurrency` and `--rpc.batch.limit`. |
 | Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                        | Utilize the various --rpc.subscription.filters.* flags.Note: These are disabled by default because they increase the risk of OOM issues. |
@@ -1861,13 +1861,13 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 ## TLS and Authentication
 
-**TLS Encryption**: For remote RPC daemon deployments, enable TLS authentication. The process involves:
+**TLS Encryption**: For remote RPC Daemon deployments, enable TLS authentication. The process involves:
 
 1. Generating CA key pairs
 2. Creating certificates for each instance
 3. Deploying certificates to secure communication
 
-**Private API Security**: Configure secure communication between RPC daemon and Erigon instance using TLS certificates.
+**Private API Security**: Configure secure communication between RPC Daemon and Erigon instance using TLS certificates.
 
 ## Operational Security
 
@@ -1918,9 +1918,9 @@ At a high level, the process consists of:
 3. [Generate a key pair](#3-generating-a-key-pair)
 4. [Create the certificate file for each public key](#4-creating-the-certificate-file-for-each-public-key)
 5. [Deploy the files to each instance](#5-deploy-the-files-on-each-instance)
-6. [Run Erigon and RPCdaemon with the correct tags](#6-run-erigon-and-rpcdaemon-with-the-correct-tags)
+6. [Run Erigon and RPC Daemon with the correct tags](#6-run-erigon-and-rpc-daemon-with-the-correct-tags)
 
-The following is a detailed description of how to use the **OpenSSL** suite of tools to secure the connection between a remote Erigon node and a remote or local RPCdaemon. The same procedure applies to any Erigon component you wish to run separately; it is recommended to name the files accordingly.
+The following is a detailed description of how to use the **OpenSSL** suite of tools to secure the connection between a remote Erigon node and a remote or local RPC Daemon. The same procedure applies to any Erigon component you wish to run separately; it is recommended to name the files accordingly.
 
 :::warning
 **Warning**: To maintain a high level of security, it is recommended to create all the keys locally and then copy the 3 required files remotely to the remote node.
@@ -1932,7 +1932,7 @@ Make sure you have [openssl](https://openssl-library.org/source/) installed.
 
 ### Notes
 
-Normally, the "client side" (in our case, the RPCdaemon) will check that the server's host name matches the "Common Name" attribute of the "server" certificate. At this time, this check is disabled and will be re-enabled when the instructions above on how to correctly generate Common Name certificates are updated. For example, if you are running the Erigon instance in the Google Cloud, you will need to specify the internal IP in the `-private.api.addr` option. You will also need to open the firewall on the port you use to connect to the Erigon instances.
+Normally, the "client side" (in our case, the RPC Daemon) will check that the server's host name matches the "Common Name" attribute of the "server" certificate. At this time, this check is disabled and will be re-enabled when the instructions above on how to correctly generate Common Name certificates are updated. For example, if you are running the Erigon instance in the Google Cloud, you will need to specify the internal IP in the `-private.api.addr` option. You will also need to open the firewall on the port you use to connect to the Erigon instances.
 
 ## 1. Generating the key pair for the Certificate Authority (CA)
 
@@ -1976,7 +1976,7 @@ Now create the Certificate Signing Request for the Erigon key pair, and from thi
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
 ```
 
-Then create the certificate signing request for the RPC daemon key pair:
+Then create the certificate signing request for the RPC Daemon key pair:
 
 ```bash
 openssl req -new -key RPC-key.pem -out RPC.csr
@@ -1998,7 +1998,7 @@ These three files must be placed in the /erigon folder on the machine running Er
 
 `erigon.crt`
 
-On the RPCdaemon machine, these three files must also be placed in the /erigon folder:
+On the RPC Daemon machine, these three files must also be placed in the /erigon folder:
 
 `CA-cert.pem`
 
@@ -2006,7 +2006,7 @@ On the RPCdaemon machine, these three files must also be placed in the /erigon f
 
 `RPC.crtv`
 
-## 6. Run Erigon and RPCdaemon with the correct tags
+## 6. Run Erigon and RPC Daemon with the correct tags
 
 Once all the files have been moved, Erigon must be run with these additional options:
 
@@ -2014,7 +2014,7 @@ Once all the files have been moved, Erigon must be run with these additional opt
 --tls --tls.cacert CA-cert.pem --tls.key erigon-key.pem --tls.cert erigon.crt
 ```
 
-While the RPC daemon must be started with these additional options:
+While the RPC Daemon must be started with these additional options:
 
 ```bash
 --tls.key RPC-key.pem --tls.cacert CA-cert.pem --tls.cert RPC.crt
@@ -2078,7 +2078,7 @@ For containerized deployments, the docker-compose configuration shows how servic
 
 The compose file demonstrates the port allocation strategy:
 
-* **9090-9094**: Internal gRPC services (execution, sentry, consensus, downloader, txpool)
+* **9090-9094**: Internal gRPC services (execution, Sentry, consensus, Downloader, TxPool)
 * **8545, 8551**: External HTTP APIs
 * **30303, 42069**: P2P networking ports
 
@@ -2115,7 +2115,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
 | Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
-| RPCDaemon | 8545         | TCP      | HTTP/WebSocket (Private) |
+| RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
 ### 4. Service Separation
@@ -2174,7 +2174,7 @@ ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 
 If it is failing with "can't allocate memory", try:
 
-```
+```text
 sync && sudo sysctl vm.drop_caches=3
 echo 1 > /proc/sys/vm/compact_memory
 ```
@@ -2191,7 +2191,7 @@ What can be done:
 * increase RAM
 * if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
-* Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
+* Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ```yaml
 # Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
@@ -2204,7 +2204,7 @@ What can be done:
 
 Erigon will utilize all available RAM, but this memory will not be directly owned by Erigon's process. Instead, the operating system (OS) will manage this memory. The OS will keep the frequently accessed parts of the database (DB) in RAM. If the OS needs to allocate RAM for other programs or for a second instance of Erigon, it will handle the memory management accordingly. This mechanism is known as PageCache.
 
-Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPCDaemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPCDaemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
+Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPC Daemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPC Daemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
 
 ```go
 	// These are set to prevent disk and page size churn which can be excessive
@@ -2689,7 +2689,7 @@ There is a `.env.example` file in the root of the repo.
 
 Copy
 
-```
+```text
 * DOCKER_UID - The UID of the docker user
 
 * DOCKER_GID - The GID of the docker user
@@ -2703,7 +2703,7 @@ A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory cr
 
 #### Check: Permissions
 
-In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
+In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in Docker, which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
 
 If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -2745,9 +2745,9 @@ ERIGON_USER=erigon
 sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
-`makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
+`makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and RPC Daemon which is required to open Erigon's DB from another process (RPC Daemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
 
-If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+If your Docker installation requires the Docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running Docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
 ---
 
@@ -3146,7 +3146,7 @@ Flags related to consensus mechanisms and network forks.
 
 Flags for configuring the Sentry component.
 
-* `--sentry.api.addr value`: A comma-separated list of sentry addresses.
+* `--sentry.api.addr value`: A comma-separated list of Sentry addresses.
 * `--sentry.log-peer-info`: Logs detailed peer info when a peer connects or disconnects.
   * Default: `false`
 * `--sentinel.addr value`: The address for the sentinel component.
@@ -3162,12 +3162,12 @@ Here is the rewritten and merged Downloader section, combining the two original 
 
 These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
 
-* `--downloader.api.addr value`: The downloader address.
-* `--downloader.disable.ipv4`: Disables IPv4 for the downloader.
+* `--downloader.api.addr value`: The Downloader address.
+* `--downloader.disable.ipv4`: Disables IPv4 for the Downloader.
   * Default: `false`
-* `--downloader.disable.ipv6`: Disables IPv6 for the downloader.
+* `--downloader.disable.ipv6`: Disables IPv6 for the Downloader.
   * Default: `false`
-* `--no-downloader`: Disables the downloader component.
+* `--no-downloader`: Disables the Downloader component.
   * Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
   * Default: `false`
@@ -3354,8 +3354,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 When running Erigon in Docker, you can configure user permissions and data directories:
 
-* `DOCKER_UID` - The UID of the docker user
-* `DOCKER_GID` - The GID of the docker user
+* `DOCKER_UID` - The UID of the Docker user
+* `DOCKER_GID` - The GID of the Docker user
 * `XDG_DATA_HOME` - The data directory mounted to containers
 
 ### Usage Examples
@@ -3459,12 +3459,12 @@ Benefits:
 
 * enables inbound peer connections
 * improves transaction gossip freshness
-* leads to healthier txpool "pending" state
+* leads to healthier TxPool "pending" state
 * strongly recommended for validators
 
 Example:
 
-```
+```yaml
 nat: "extip:203.0.113.114"
 ```
 
@@ -3506,7 +3506,7 @@ This flag sets the external address advertised in the **discv5 ENR** and **libp2
 :::tip For validators running behind NAT or inside Docker
 Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your execution-layer peers and consensus-layer peers will see different (or no) reachable addresses.
 
-```
+```bash
 --nat extip:203.0.113.114 --caplin.nat extip:203.0.113.114
 ```
 :::
@@ -3531,7 +3531,7 @@ Erigon's internal components can run as separate processes for scalability, secu
 URL: https://docs.erigon.tech/fundamentals/modules/rpc-daemon
 
 
-The RPC daemon is a core component of Erigon that implements the [RPC Service](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
+The RPC Daemon is a core component of Erigon that implements the [RPC Service](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
 
 ### RPC Deployment Modes
 
@@ -3555,7 +3555,7 @@ To interact with the **RPC Service** visit the dedicated page [Interacting with 
 
 ## Command Line Options
 
-When running RPC daemon in Local or Remote deployment mode, use this command to display available options:
+When running RPC Daemon in Local or Remote deployment mode, use this command to display available options:
 
 ```bash
 ./build/bin/rpcdaemon --help
@@ -3563,7 +3563,7 @@ When running RPC daemon in Local or Remote deployment mode, use this command to 
 
 The `--help` flag listing is reproduced below for your convenience.
 
-```
+```text
 rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access
 
 Usage:
@@ -3662,17 +3662,17 @@ URL: https://docs.erigon.tech/fundamentals/modules/txpool
 
 The transaction pool, also known as the mempool, is a dynamic storage area where pending transactions are held before being confirmed and added to the blockchain. Each node on the Ethereum network maintains its own local transaction pool, which is combined with others to form the global pool.
 
-In Erigon, the txpool is a dedicated API namespace that stores pending and queued transactions in local memory. Its primary function is to manage transactions waiting to be processed by miners.
+In Erigon, the TxPool is a dedicated API namespace that stores pending and queued transactions in local memory. Its primary function is to manage transactions waiting to be processed by miners.
 
 The TxPool component is typically run as an internal Erigon component, but it can also be operated as a separate process, providing flexibility in transaction management.
 
-## Txpool as an internal Erigon component
+## TxPool as an internal Erigon component
 
-Txpool is run as an internal Erigon component by default.
+TxPool is run as an internal Erigon component by default.
 
-## Txpool as a separate process (experimental)
+## TxPool as a separate process (experimental)
 
-Running an external txpool can provide a more secure, scalable, and flexible transaction management solution, which can be particularly beneficial in high-performance or high-availability Ethereum node deployments.
+Running an external TxPool can provide a more secure, scalable, and flexible transaction management solution, which can be particularly beneficial in high-performance or high-availability Ethereum node deployments.
 
 1. Before TxPool can be using as a separate process the executable must be built:
 
@@ -3681,7 +3681,7 @@ cd erigon
 make txpool
 ```
 
-2. Together with external TxPool also [Sentry](sentry) and [RPCDaemon](rpc-daemon) must be compiled and run separately.
+2. Together with external TxPool also [Sentry](sentry) and [RPC Daemon](rpc-daemon) must be compiled and run separately.
 
 ```bash
 make sentry
@@ -3713,18 +3713,18 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 ## Flags explanation
 
-* `--txpool.disable`: This flag disables the internal transaction pool (txpool) and block producer (default: `false`). When running the txpool as a separate process, this flag is used to prevent the internal txpool from interfering with the external one.
+* `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
 * `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
-* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the txpool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external txpool.
-* `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the sentry API. The sentry API is used for communication between the txpool and the sentry.
-* `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the txpool API (default: use value of `--private.api.addr`). The txpool API is used for communication between the txpool and other Erigon components.
+* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
+* `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
+* `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
 * `--pprof.addr 0.0.0.0`: This flag sets the address for the pprof HTTP server (default: `127.0.0.1`). The pprof server is used for profiling and debugging Erigon. By setting this flag to `0.0.0.0`, the pprof server is made accessible from outside the local machine.
 
 ## Command Line Options
 
-To display available options for Txpool digit:
+To display available options for TxPool digit:
 
 ```bash
 ./build/bin/txpool --help
@@ -3732,7 +3732,7 @@ To display available options for Txpool digit:
 
 The `--help` flag listing is reproduced below for your convenience.
 
-```
+```text
 ./build/bin/txpool --help
 Launch external Transaction Pool instance - same as built-into Erigon, but as independent Process
 
@@ -3805,7 +3805,7 @@ Sentry connects Erigon to the Ethereum P2P network, enabling the discovery of ot
 
 The ETH core interacts with the Ethereum p2p network through the Sentry component. Sentry provides a simple interface to the core, with functions to download data, receive notifications about gossip messages, upload data on request from peers, and broadcast gossip messages either to a selected set of peers or to all peers.
 
-## Running with an external Sentry or multiple Sentries
+## Running with one or more external Sentry instances
 
 It is possible to have multiple Sentry to increase connectivity to the network or to obscure the location of the core computer. In this case it is necessary to define address and port of each Sentry that should be connected to the Core.
 
@@ -3844,7 +3844,7 @@ Erigon might be attached to several Sentry instances running across different ma
 --sentry.api.addr value
 ```
 
-Where `value` is comma separated sentry addresses `<host>:<port>,<host>:<port>`.
+Where `value` is comma separated Sentry addresses `<host>:<port>,<host>:<port>`.
 
 ## More info
 
@@ -3860,7 +3860,7 @@ To display available options for Sentry digit:
 
 The `--help` flag listing is reproduced below for your convenience.
 
-```
+```text
 Run p2p sentry
 
 Usage:
@@ -3949,7 +3949,7 @@ By referring to the embedded documentation file, you can gain a deeper understan
 
 ## Command line options
 
-To display available options for downloader digit:
+To display available options for Downloader digit:
 
 ```bash
 ./build/bin/downloader --help
@@ -3957,7 +3957,7 @@ To display available options for downloader digit:
 
 The `--help` flag listing is reproduced below for your convenience.
 
-```
+```text
 snapshot downloader
 
 Usage:
@@ -4041,7 +4041,7 @@ Use " [command] --help" for more information about a command.
 URL: https://docs.erigon.tech/interacting-with-erigon
 
 
-The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
 * [`eth`](/interacting-with-erigon/eth): Standard Ethereum API.
 * [`erigon`](/interacting-with-erigon/erigon): Erigon-specific extensions.
@@ -4064,7 +4064,7 @@ For a complete reference on the standard Ethereum JSON-RPC methods, especially t
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](/interacting-with-erigon/#http), [HTTPS](/interacting-with-erigon/#https), [WebSockets](/interacting-with-erigon/#websockets), [IPC](/interacting-with-erigon/#ipc), [gRPC](/interacting-with-erigon/#grpc) and [GraphQL](/interacting-with-erigon/#graphql) through its RPC daemon.
+Erigon supports [HTTP](/interacting-with-erigon/#http), [HTTPS](/interacting-with-erigon/#https), [WebSockets](/interacting-with-erigon/#websockets), [IPC](/interacting-with-erigon/#ipc), [gRPC](/interacting-with-erigon/#grpc) and [GraphQL](/interacting-with-erigon/#graphql) through its RPC Daemon.
 
 ### HTTP
 
@@ -4148,7 +4148,7 @@ IPC is a simpler transport protocol for use in local environments where the node
 **Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
 modular architecture where RPC functionality is handled by a standalone daemon.
 
-#### Enabling IPC with rpcdaemon
+#### Enabling IPC with RPC Daemon
 
 First, start Erigon with the private API enabled:
 
@@ -4156,7 +4156,7 @@ First, start Erigon with the private API enabled:
 erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
 ```
 
-Then, in a separate terminal, start rpcdaemon with IPC enabled:
+Then, in a separate terminal, start RPC Daemon with IPC enabled:
 
 ```bash
 rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
@@ -4259,7 +4259,7 @@ For API usage refer to the below official resources:
 
 To enable historical proof support, activate commitment history storage at startup:
 
-```
+```text
 --prune.include-commitment-history=true
 ```
 
@@ -4299,11 +4299,11 @@ URL: https://docs.erigon.tech/interacting-with-erigon/erigon
 
 Erigon provides several RPC namespaces that extend beyond the standard Ethereum JSON-RPC API, exposing Erigon-specific functionality and data structures. The primary Erigon-specific namespace is **`erigon_`** which offer extended blockchain data access methods.
 
-These methods must be explicitly enabled using the `--http.api` flag when starting the RPC daemon.
+These methods must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon.
 
 ### Namespace Availability
 
-* The `erigon_` namespace is enabled by default in the RPC daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
+* The `erigon_` namespace is enabled by default in the RPC Daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
 
 ### Performance Considerations
 
@@ -4639,7 +4639,7 @@ For security, the Engine API listens on port 8551 by default and requires JWT au
 URL: https://docs.erigon.tech/interacting-with-erigon/web3
 
 
-The `web3` namespace provides utility methods that are part of the standard Ethereum JSON-RPC API. These methods offer basic functionality for client identification and cryptographic operations. In Erigon, the web3 namespace is implemented through the `Web3API` interface and `Web3APIImpl` struct. The web3 namespace is enabled by default in Erigon's RPC daemon and provides essential utility functions that many Ethereum applications rely on for basic operations.
+The `web3` namespace provides utility methods that are part of the standard Ethereum JSON-RPC API. These methods offer basic functionality for client identification and cryptographic operations. In Erigon, the web3 namespace is implemented through the `Web3API` interface and `Web3APIImpl` struct. The web3 namespace is enabled by default in Erigon's RPC Daemon and provides essential utility functions that many Ethereum applications rely on for basic operations.
 
 For API usage refer to the below official resources:
 
@@ -4659,7 +4659,7 @@ For API usage refer to the below official resources:
 
 ### Availability
 
-* The web3 namespace is enabled by default in Erigon's RPC daemon
+* The web3 namespace is enabled by default in Erigon's RPC Daemon
 * No special configuration is required to use these methods
 * They are available on both HTTP and WebSocket connections
 
@@ -4671,7 +4671,7 @@ URL: https://docs.erigon.tech/interacting-with-erigon/net
 
 The `net` namespace provides network-related methods that are part of the standard Ethereum JSON-RPC API. These methods offer information about the node's network connectivity, peer count, and network version. In Erigon, the net namespace is implemented through the `NetAPI` interface and `NetAPIImpl` struct.
 
-The `net` namespace is enabled by default in Erigon's RPC daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
+The `net` namespace is enabled by default in Erigon's RPC Daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
 
 For API usage refer to the below official resources:
 
@@ -4697,9 +4697,9 @@ For API usage refer to the below official resources:
 
 ### Availability and Configuration
 
-* The net namespace is enabled by default in Erigon's RPC daemon.
+* The net namespace is enabled by default in Erigon's RPC Daemon.
 * These methods are available on both HTTP and WebSocket connections.
-* For remote RPC daemon setups, the `net` namespace must be explicitly enabled for health check functionality.
+* For remote RPC Daemon setups, the `net` namespace must be explicitly enabled for health check functionality.
 
 ### Documentation References
 
@@ -4714,7 +4714,7 @@ URL: https://docs.erigon.tech/interacting-with-erigon/debug
 
 The `debug` namespace provides debugging and diagnostic methods for Erigon node operators and developers. These methods offer deep introspection into blockchain state, transaction execution, and node performance.
 
-The debug namespace must be explicitly enabled using the `--http.api=debug` flag when starting the RPC daemon.
+The debug namespace must be explicitly enabled using the `--http.api=debug` flag when starting the RPC Daemon.
 
 :::warning
 The `debug` namespace is intended for debugging and development purposes, not for production use.
@@ -5167,7 +5167,7 @@ The `traceAddress` field of all returned traces, gives the exact location in the
 
 i.e. if the trace is:
 
-```
+```text
 A
   CALLs B
     CALLs G
@@ -5883,13 +5883,13 @@ URL: https://docs.erigon.tech/interacting-with-erigon/txpool
 
 The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending, queued, and base fee transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
 
-The txpool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
+The TxPool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
 
 ### Transaction Pool Architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
-* Transaction pool methods communicate via gRPC with the txpool service when running in external mode
+* Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
 
 ### Implementation Details
 
@@ -5900,7 +5900,7 @@ The txpool namespace must be explicitly enabled using the `--http.api` flag when
 ### External vs Internal Mode
 
 * **Internal Mode**: Transaction pool runs within the main Erigon process (default configuration)
-* **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external sentry service and provides better resource isolation
+* **External Mode**: Transaction pool runs as a separate service, requiring explicit configuration with `--txpool.api.addr`. External mode requires an external Sentry service and provides better resource isolation
 
 ### Usage in Development and Testing
 
@@ -6005,7 +6005,7 @@ URL: https://docs.erigon.tech/interacting-with-erigon/admin
 
 The `admin` namespace provides administrative methods for managing the Erigon node, including peer management and node information retrieval. These methods are designed for node operators and developers who need to monitor and control various aspects of the Erigon client's operation.
 
-The admin namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon. For security reasons, it's recommended not to include `admin` in the API list for public RPC endpoints.
+The admin namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon. For security reasons, it's recommended not to include `admin` in the API list for public RPC endpoints.
 
 ### Security Considerations
 
@@ -6181,7 +6181,7 @@ URL: https://docs.erigon.tech/interacting-with-erigon/bor
 
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
 
-The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon and is only functional when running on Polygon networks with the Bor consensus engine.
+The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.
 
 ### Network Compatibility
 
@@ -6488,7 +6488,7 @@ URL: https://docs.erigon.tech/interacting-with-erigon/grpc
 
 Erigon provides gRPC APIs that allow users to access blockchain data and services directly through protocol buffer interfaces. These APIs offer high-performance, strongly-typed access to Erigon's internal services and are particularly useful for applications requiring efficient data access or integration with other gRPC-based systems.
 
-The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like txpool, downloader, and sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
+The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like TxPool, Downloader, and Sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
 
 ### Performance Considerations
 
@@ -6604,7 +6604,7 @@ The Downloader interface provides access to snapshot downloading and torrent man
 | Add          | Adds files to download queue       |
 | Delete       | Removes files from download queue  |
 | Completed    | Checks if downloads are completed  |
-| SetLogPrefix | Sets logging prefix for downloader |
+| SetLogPrefix | Sets logging prefix for Downloader |
 
 ***
 
