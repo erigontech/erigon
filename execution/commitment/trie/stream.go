@@ -170,11 +170,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					fmt.Printf("accountNode %x\n", hex)
 				}
 				if v.Storage != nil {
-					// Storage subtree is rooted directly under the account
-					// hash — there used to be 16 nibbles of incarnation
-					// between them when accounts tracked an SD counter; that
-					// counter has been removed from IntraBlockState and the
-					// trie path elides it now.
 					it.hex = hex
 					it.nodeStack[l] = v.Storage
 					it.iStack[l] = 0
