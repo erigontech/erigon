@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -129,6 +130,20 @@ func countRowsAtOrAbove(t *testing.T, db kv.RoDB, minNumber uint64) int {
 		return nil
 	}))
 	return count
+}
+
+func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
+	c := &PersistentBlockCollector{}
+	for name, raw := range map[string][]byte{
+		"empty decompressed value": nil,
+		"missing parent root":      {byte(clparams.DenebVersion)},
+		"missing requests hash":    append([]byte{byte(clparams.ElectraVersion)}, make([]byte, 32)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := c.decodeBlock(utils.CompressSnappy(raw))
+			require.ErrorContains(t, err, "persistent block value too short")
+		})
+	}
 }
 
 func TestFlushSkipsDuplicateBlockNumbers(t *testing.T) {
