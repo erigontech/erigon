@@ -62,7 +62,9 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
+		t := time.Now()
 		err = json.Unmarshal(b, &preAlloc)
+		fmt.Printf("[dbg] NewEngineXTestRunner.json.Unmarshal: %s", time.Since(t))
 		if err != nil {
 			return err
 		}
