@@ -888,6 +888,116 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	return out
 }
 
+// balCodeReader returns the code for an address at parent state. Empty/missing
+// code returns (nil, nil) so the BAL mapper can skip Code* population.
+type balCodeReader func(common.Address) ([]byte, error)
+
+// buildAccessedStateFromBAL builds an accessedState directly from the persisted
+// Block Access List for an Amsterdam block, skipping EVM re-execution.
+// Distinguishes nil bytes (BAL pruned — distinct error) from a successfully
+// decoded empty list (legitimate empty block).
+func buildAccessedStateFromBAL(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum, parentTxNum uint64) (*accessedState, error) {
+	data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, fmt.Errorf("debug_executionWitness: block access list pruned for block %d", blockNum)
+	}
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode block access list: %w", err)
+	}
+	hr := state.NewHistoryReaderV3(tx, parentTxNum)
+	return accessedStateFromBAL(bal, func(addr common.Address) ([]byte, error) {
+		return hr.ReadAccountCode(accounts.InternAddress(addr))
+	})
+}
+
+// accessedStateFromBAL is the pure mapping from a decoded BlockAccessList plus
+// a parent-state code lookup into the accessedState consumed by the witness
+// pipeline. SystemAddress entries are taken as-is (the BAL already encodes the
+// consensus inclusion rule). Codes are deliberately over-approximated: for
+// every BAL address, parent code is fetched and included iff len(code) > 0
+// (see plan Risk 1).
+func accessedStateFromBAL(bal types.BlockAccessList, readCode balCodeReader) (*accessedState, error) {
+	out := &accessedState{
+		Addresses:   make(map[common.Address]struct{}),
+		Storage:     make(map[common.Address]map[common.Hash]struct{}),
+		CodeAddrs:   make(map[common.Address]struct{}),
+		SortedCodes: []hexutil.Bytes{},
+		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
+	}
+
+	for _, ac := range bal {
+		addr := ac.Address.Value()
+		out.Addresses[addr] = struct{}{}
+		if len(ac.StorageChanges) == 0 && len(ac.StorageReads) == 0 {
+			continue
+		}
+		if out.Storage[addr] == nil {
+			out.Storage[addr] = make(map[common.Hash]struct{})
+		}
+		for _, sc := range ac.StorageChanges {
+			out.Storage[addr][sc.Slot.Value()] = struct{}{}
+		}
+		for _, key := range ac.StorageReads {
+			out.Storage[addr][key.Value()] = struct{}{}
+		}
+	}
+
+	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
+	for addr := range out.Addresses {
+		sortedKeys = append(sortedKeys, addr.Bytes())
+	}
+	for addr, keys := range out.Storage {
+		for key := range keys {
+			composite := append(addr.Bytes(), key.Bytes()...)
+			sortedKeys = append(sortedKeys, composite)
+		}
+	}
+	slices.SortFunc(sortedKeys, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
+	out.SortedKeys = sortedKeys
+
+	type codeWithHash struct {
+		code []byte
+		hash common.Hash
+	}
+	seenHash := make(map[common.Hash]struct{})
+	var uniqueCodes []codeWithHash
+	for addr := range out.Addresses {
+		code, err := readCode(addr)
+		if err != nil {
+			return nil, fmt.Errorf("read parent-state code for %s: %w", addr.Hex(), err)
+		}
+		if len(code) == 0 {
+			continue
+		}
+		out.CodeAddrs[addr] = struct{}{}
+		codeHash := crypto.Keccak256Hash(code)
+		addrHash := crypto.Keccak256Hash(addr.Bytes())
+		out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
+			Code:     code,
+			CodeHash: accounts.InternCodeHash(codeHash),
+		}
+		if _, ok := seenHash[codeHash]; ok {
+			continue
+		}
+		seenHash[codeHash] = struct{}{}
+		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: codeHash})
+	}
+	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
+		return bytes.Compare(a.hash[:], b.hash[:])
+	})
+	for _, c := range uniqueCodes {
+		out.SortedCodes = append(out.SortedCodes, c.code)
+	}
+
+	return out, nil
+}
+
 // detectCollapseSiblings runs STEP 1 of witness construction: compute the full
 // commitment for this block against a split reader (commitment from parent state,
 // plain state from end of block) and record every sibling path the trie collapses

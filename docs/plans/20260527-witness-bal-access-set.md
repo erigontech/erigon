@@ -298,19 +298,33 @@ needed. Test: `rpc/jsonrpc/debug_witness_bal_constructability_test.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Add tests in: `rpc/jsonrpc/debug_witness_bal_test.go` (or appended to `debug_api_test.go`)
 
-- [ ] Write the mapping unit tests first (RED): feed a hand-built `types.BlockAccessList` into
+- [x] Write the mapping unit tests first (RED): feed a hand-built `types.BlockAccessList` into
       the new function and assert the resulting `accessedState` shape; include cases for
       *empty BAL* (decoded list of zero entries — legitimate, returns empty accessedState),
       *pruned BAL* (`ReadBlockAccessListBytes` returns nil — distinct error), and
       *SystemAddress-included-by-BAL* (entry preserved, no heuristic stripping).
-- [ ] Implement `buildAccessedStateFromBAL(ctx, tx, blockHash, blockNum, parentTxNum) (*accessedState, error)`:
+- [x] Implement `buildAccessedStateFromBAL(ctx, tx, blockHash, blockNum, parentTxNum) (*accessedState, error)`:
       `rawdb.ReadBlockAccessListBytes` + `types.DecodeBlockAccessListBytes`; distinguish nil
       bytes (pruned, error) from empty list (legit empty accessedState).
-- [ ] Map addresses + storage (`StorageReads` ∪ `StorageChanges[].Slot`); for **every** BAL
+- [x] Map addresses + storage (`StorageReads` ∪ `StorageChanges[].Slot`); for **every** BAL
       address, `HistoryReaderV3.ReadAccountCode(addr)` at `parentTxNum` and include code in
       `SortedCodes`/`CodeReads` iff `len(code) > 0` (over-approximation per Technical Details).
-- [ ] Do NOT apply the SystemAddress heuristic; take BAL entries as-is.
-- [ ] Mapping tests — green.
+- [x] Do NOT apply the SystemAddress heuristic; take BAL entries as-is.
+- [x] Mapping tests — green.
+
+**Task 2 notes:**
+
+- Implementation lives in `rpc/jsonrpc/debug_execution_witness.go`: pure mapping
+  `accessedStateFromBAL(bal, readCode)` is split from the DB-touching wrapper
+  `buildAccessedStateFromBAL(ctx, tx, blockHash, blockNum, parentTxNum)` so the
+  mapping is unit-testable without DB infrastructure.
+- Six unit tests in `rpc/jsonrpc/debug_witness_bal_test.go` cover: empty BAL,
+  addresses+storage (reads ∪ changes dedup), SystemAddress preserved as-is,
+  code over-approximation incl. EOA skip, shared-code dedup in SortedCodes, and
+  the pruned-BAL distinct error via a never-written block hash through the
+  harness. All six pass; `make lint` is clean.
+- Task 1's Amsterdam tests remain RED — they only flip green when Task 3 wires
+  the `IsAmsterdam` branch into `ExecutionWitness`.
 
 ### Task 3: Branch ExecutionWitness on IsAmsterdam
 
