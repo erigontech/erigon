@@ -281,6 +281,53 @@ func TestNewBlockHashes66_NormalSizeIgnored(t *testing.T) {
 	}
 }
 
+// TestNewBlockHashes66_AtCapNotKicked verifies that a packet whose entry
+// count equals maxBlockHashesPerMsg — encoded with realistic mainnet-scale
+// block numbers (whose pairs exceed the absolute-minimum RLP encoding) — is
+// allowed through. Regression test for an earlier payload-size estimate that
+// false-positived in this range.
+func TestNewBlockHashes66_AtCapNotKicked(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	const baseBlock = uint64(22_000_000)
+	announces := make(eth.NewBlockHashesPacket, maxBlockHashesPerMsg)
+	for i := range announces {
+		announces[i].Hash = common.Hash{byte(i), byte(i >> 8), byte(i >> 16)}
+		announces[i].Number = baseBlock + uint64(i)
+	}
+	payload, err := rlp.EncodeToBytes(&announces)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New(), disableBlockDownload: true}
+
+	if err := cs.newBlockHashes66(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err != nil {
+		t.Fatalf("newBlockHashes66 returned error: %v", err)
+	}
+
+	if penalized != nil {
+		t.Fatalf("did not expect PenalizePeer for a %d-entry packet at the cap, got %v",
+			maxBlockHashesPerMsg, penalized)
+	}
+}
+
 // TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
 // BlockRangeUpdate (e.g. Earliest > Latest) causes the peer to be penalized.
 // This mirrors the Hive `TestBlockRangeUpdateInvalid` simulator check.

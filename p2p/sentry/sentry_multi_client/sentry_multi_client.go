@@ -68,21 +68,26 @@ import (
 // and unbounded heap growth.
 const maxBlockHashesPerMsg = 4096
 
-// minNewBlockHashesPairSize is the smallest valid RLP encoding of a
-// [hash, number] pair: 1-byte pair-list prefix + 1-byte hash-string prefix +
-// 32-byte hash + 1-byte number = 35 bytes.
-const minNewBlockHashesPairSize = 35
-
-// newBlockHashesOversized reports whether the outer-list payload of an
-// encoded NewBlockHashes packet is large enough that, even at the minimum
-// per-pair encoding, it would contain more than maxBlockHashesPerMsg
-// entries. It only reads the outer-list prefix, so it does not allocate.
-func newBlockHashesOversized(payload []byte) (bool, error) {
-	_, dataLen, err := rlp.ParseList(payload, 0)
+// peekNewBlockHashesCount returns the number of [hash, number] pairs in an
+// RLP-encoded NewBlockHashes packet by walking pair prefixes without
+// decoding or allocating entry contents.
+func peekNewBlockHashesCount(payload []byte) (int, error) {
+	pos, outerLen, err := rlp.ParseList(payload, 0)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	return dataLen/minNewBlockHashesPairSize > maxBlockHashesPerMsg, nil
+	end := pos + outerLen
+	count := 0
+	for pos < end {
+		var pairLen int
+		pos, pairLen, err = rlp.ParseList(payload, pos)
+		if err != nil {
+			return 0, err
+		}
+		pos += pairLen
+		count++
+	}
+	return count, nil
 }
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -340,8 +345,8 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.In
 	// Reject oversized announcements before any further work: a 10 MiB wire
 	// packet otherwise expands into one GetBlockHeaders RPC per hash and
 	// drives unbounded heap growth.
-	if oversized, err := newBlockHashesOversized(req.Data); err == nil && oversized {
-		cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String())
+	if count, err := peekNewBlockHashesCount(req.Data); err == nil && count > maxBlockHashesPerMsg {
+		cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String(), "count", count)
 		if _, err1 := sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
 			PeerId:  req.PeerId,
 			Penalty: sentryproto.PenaltyKind_Kick,
