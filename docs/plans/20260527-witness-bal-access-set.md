@@ -27,16 +27,33 @@ This is **Change 3 of 3** independent deliverables:
 2. collapse-sibling output filter (`awskii/witness-collapse-sibling-filter`) — separate PR
 3. **this change** — Amsterdam BAL access-set provider
 
-## Scope decision: the "fewer-nodes" zkevm class
+## Scope decision: ship the BAL plumbing now; defer witness correctness
 
-A zkevm-corpus run against Change 2 surfaced ~4,128 fixtures where Erigon returns *fewer*
-witness nodes than EEST (a distinct class from the +3,923 "more" cases Change 2 addresses).
-**This PR owns only the subset attributable to BAL access-set under-coverage** — namely the
-Codes/Headers/exclusion-reads risks below. Residual fewer-class failures after this PR (i.e.
-HPH-conversion under-emission unrelated to the BAL access set) are explicitly **out of scope**
-and tracked as a future **Change 4**. The merge gate for this PR is `verifyWitnessStateless`
-passing on a self-contained Amsterdam fixture; the zkevm corpus is a local cross-check, not a
-blocker.
+This PR delivers the **BAL access-set provider + the `IsAmsterdam` branch in
+`ExecutionWitness`** — the plumbing that replaces EVM re-execution with a BAL read for
+Amsterdam blocks. **Witness verification correctness for Amsterdam blocks is explicitly
+deferred** to a follow-up **Change 4** that owns the pre-existing **commitment-pipeline
+divergence** observed during Task 3 implementation.
+
+The divergence: `detectCollapseSiblings.ComputeCommitment` produces a root that does not match
+`block.Root()` for the Amsterdam test fixture **regardless of how the access set is obtained**
+— it reproduces under both the new BAL path and a force-routed re-execution path with the
+full `RecordingState` access set. So the bug is in the witness's recompute pipeline under
+Amsterdam, not in the BAL provider, and fixing it is out of scope here.
+
+Deferred to Change 4:
+- **Amsterdam commitment-pipeline divergence** — `detectCollapseSiblings.ComputeCommitment`
+  reproducing `block.Root()` for Amsterdam blocks (the verification blocker).
+- **"Fewer-nodes" zkevm class** (~4,128 fixtures observed during Change 2 work). Subset
+  attributable to BAL Codes/Headers/exclusion-reads under-coverage stays in this PR's risk
+  section; residual HPH-conversion under-emission tracked in Change 4.
+
+**Merge gate for this PR:** mapping unit tests on `buildAccessedStateFromBAL` pass; the
+`IsAmsterdam` branch fires for an Amsterdam block (no re-exec); the pre-Amsterdam path is
+byte-for-byte unchanged. **`verifyWitnessStateless` passing on the Amsterdam fixture is NOT a
+gate** — that assertion is `t.Skip`'d with a tracking link to Change 4 per the explicit
+user-override of the no-skip rule (CLAUDE.md "Test skips" §"If a user explicitly directs an
+agent to add a skip").
 
 ## Context (from discovery)
 
@@ -84,21 +101,22 @@ blocker.
 
 ## Testing Strategy
 
-- **In-tree merge oracle (on `main`, no zkevm-suite dependency):** a small synthetic
-  **Amsterdam** chain carrying a persisted BAL + commitment history enabled, exercised through
-  `debugApi.ExecutionWitness`. Asserts the witness is **verifiable** — `verifyWitnessStateless`
-  passes and reproduces the block root. That's the *only* in-tree correctness claim; Codes
-  node-set parity and Headers node-set parity are NOT covered by `verifyWitnessStateless`
-  (which checks state root only) and are validated locally against the zkevm corpus.
-- **Path assertion**: confirm the Amsterdam branch was taken by indirect observation
-  (e.g. `RecordingState` not constructed, no re-exec-only side effect), **not** a production
-  test-only counter on the provider.
-- **Regression:** a pre-Amsterdam block goes through the existing path and its witness is
-  byte-for-byte unchanged. Verify via `git diff -w` that the pre-Amsterdam branch carries only
-  indentation changes after Task 3.
+- **In-tree merge oracle (on `main`, no zkevm-suite dependency):**
+  - **Mapping unit tests** on `buildAccessedStateFromBAL` (already green in Task 2).
+  - **Path assertion:** for an Amsterdam block routed through `debugApi.ExecutionWitness`, the
+    `IsAmsterdam` branch fires (no `RecordingState` constructed). Indirect observation only,
+    not a production test-only counter.
+  - **Regression:** a pre-Amsterdam block goes through the existing path and its witness is
+    byte-for-byte unchanged. Verified via `git diff -w` showing only indentation changes
+    inside the `else` after Task 3.
+- **Deferred to Change 4 (NOT a gate here):** `verifyWitnessStateless` passing on an Amsterdam
+  fixture. The end-to-end witness test is scaffolded with `t.Skip("blocked on Change 4: <link>")`
+  per the explicit user override of the no-skip rule. The skip carries the tracking link and
+  is removed by Change 4, not by closing the issue with the skip in place.
 - **Local cross-check (Post-Completion, NOT a merge gate):** zkevm suite
   (`execution/tests/eest_zkevm_witness`) via a scratch layering `main + this change +
-  Change 2 + awskii/eest-zkevm-witness`; confirms multiset parity on Amsterdam fixtures.
+  Change 2 + awskii/eest-zkevm-witness`; confirms multiset parity on Amsterdam fixtures once
+  Change 4 lands.
 - No e2e/UI tests in this repo.
 
 ## Progress Tracking
@@ -170,24 +188,33 @@ after a successful decode of an empty list means legitimately empty. Tests cover
 **Activation block.** `IsAmsterdam` is `time >= AmsterdamTime`, so the activation block
 itself takes the BAL branch. Verified by the in-tree test using the activation timestamp.
 
-## Risks (resolved Post-Completion, NOT merge gates)
+## Risks (recorded for reviewers; not merge gates)
 
-These are recorded so reviewers can see the boundaries. None block the in-tree merge oracle
-(`verifyWitnessStateless` on a self-contained Amsterdam fixture); each is investigated against
-the zkevm corpus locally and either fixed within this PR's scope or deferred to **Change 4**
-with a tracking note.
+1. **Amsterdam commitment-pipeline divergence (verification blocker, deferred to Change 4).**
+   Observed during Task 3: `detectCollapseSiblings.ComputeCommitment` does not reproduce
+   `block.Root()` for the Amsterdam test fixture under either the BAL path or a force-routed
+   re-exec path. Confirmed via instrumentation:
+   - `IsAmsterdam` branch fires
+   - `buildAccessedStateFromBAL` returns 7 addresses + 8 storage keys + 2 code addresses
+     matching the persisted BAL exactly
+   - All keys touched on `sdCtx` before `ComputeCommitment`
+   - Plain state at `endTxNum` has post-block values (`InsertChain` succeeded)
+   - Yet `ComputeCommitment` returns a root that diverges from `block.Root()`
 
-1. **Codes precision.** Persisted BAL has `CodeChanges` (deployments) + accessed addresses but
-   no "code read via GetCode/GetCodeSize" signal and no access *kind*. This PR ships the
-   deliberate over-approximation rule (include code for every BAL address with non-empty
-   parent-state code); exact Codes multiset parity with Geth is **out of scope here** —
-   addressed in Change 4 if it turns out to matter for downstream consumers.
-2. **Absent-account exclusion reads.** `AsBlockAccessList` drops reads of non-existent accounts
-   (`versionedio.go:1382-1391`). `verifyWitnessStateless` catches it if a witness consumer
-   actually needs the exclusion proof (missing-node failure); if it fires on real fixtures we
-   add the minimal supplement, otherwise leave as-is.
-3. **Headers / BLOCKHASH set.** `result.Headers` = parent header only is our claim. Headers
-   parity is NOT covered by `verifyWitnessStateless`; validated locally against fixtures.
+   This validates the original "block reexecution should completely match how we regularly
+   execute the block" intuition: the chain insertion's `ComputeCommitment` path (via
+   `chain_makers` with `versionMap`+`blockIO`) diverges from the witness's `SplitHistoryReader`
+   `ComputeCommitment` path under Amsterdam. Change 4 owns this.
+
+2. **Codes precision.** Persisted BAL has `CodeChanges` + accessed addresses but no "code read
+   via GetCode/GetCodeSize" signal. This PR ships the deliberate over-approximation rule
+   (include code for every BAL address with non-empty parent-state code); exact Codes multiset
+   parity with Geth deferred to Change 4.
+3. **Absent-account exclusion reads.** `AsBlockAccessList` drops reads of non-existent
+   accounts (`versionedio.go:1382-1391`). Not detectable without `verifyWitnessStateless`
+   green; deferred to Change 4.
+4. **Headers / BLOCKHASH set.** `result.Headers` = parent header only is our claim. Headers
+   parity validated locally against fixtures once Change 4 unblocks the corpus run.
 
 ## What Goes Where
 
@@ -326,31 +353,68 @@ needed. Test: `rpc/jsonrpc/debug_witness_bal_constructability_test.go`
 - Task 1's Amsterdam tests remain RED — they only flip green when Task 3 wires
   the `IsAmsterdam` branch into `ExecutionWitness`.
 
-### Task 3: Branch ExecutionWitness on IsAmsterdam
+### Task 3: Branch ExecutionWitness on IsAmsterdam (ship BAL plumbing)
 
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
+- Modify: `rpc/jsonrpc/debug_witness_bal_test.go`
 
-- [ ] Wrap the existing re-exec + `collectAccessedState` block in `else` and add the
-      `if chainConfig.IsAmsterdam(header.Time)` branch calling `buildAccessedStateFromBAL`.
-      Confirm pre-Amsterdam branch is **byte-identical** to today: `git diff -w` shows zero
-      non-whitespace changes inside `else`.
-- [ ] For the Amsterdam branch: `result.Headers` = parent header only (empty
-      `accessedBlockHashes`); shared `detectCollapseSiblings` / `buildWitnessTrie` /
-      `verifyWitnessStateless` calls untouched.
-- [ ] Run Task 1 + activation-block tests — GREEN.
-- [ ] Run full `go test ./rpc/jsonrpc/ -run TestExecutionWitness` — pre-Amsterdam cases
-      unchanged and green.
+The Task-3 wiring landed during the prior ralphex run (uncommitted, in working tree). It is
+structurally correct per debug instrumentation. The end-to-end witness assertion is blocked by
+the Amsterdam commitment-pipeline divergence (Risk 1) — Change 4 owns the fix. This task
+ships the wiring and reshapes the tests around the softer merge gate.
+
+- [ ] Commit the Task-3 wiring already in working tree (`rpc/jsonrpc/debug_execution_witness.go`):
+      existing re-exec + `collectAccessedState` block wrapped in `else`; `if chainConfig.IsAmsterdam(header.Time)`
+      branch calls `buildAccessedStateFromBAL`; Amsterdam branch sets `accessedBlockHashes`
+      empty so `collectAccessedHeaders` emits parent-only; shared `detectCollapseSiblings` /
+      `buildWitnessTrie` / `verifyWitnessStateless` calls untouched.
+- [ ] Verify pre-Amsterdam branch is **byte-identical** to today: `git diff -w main --
+      rpc/jsonrpc/debug_execution_witness.go` shows only the new `if` + indentation inside
+      `else`.
+- [ ] Update Task-1 tests (`TestExecutionWitnessAmsterdamBAL`,
+      `TestExecutionWitnessAmsterdamActivationBlock`) to **skip the
+      `verifyWitnessStateless`-passes assertion** with `t.Skip("blocked on Change 4:
+      Amsterdam commitment-pipeline divergence — see
+      docs/plans/20260528-witness-amsterdam-commitment-divergence.md")`. **Keep the
+      path-assertion (`installRecordingHookCounter` count == 0) as the active live
+      assertion** — that one IS testable today and is what proves the BAL branch fires.
+      The Skip is per the explicit user override of the no-skip rule; trade-off is logged in
+      the Scope section above.
+- [ ] Pre-Amsterdam regression: full `go test ./rpc/jsonrpc/ -run TestExecutionWitness` green
+      (no changes to existing sub-cases).
+- [ ] Path-assertion is GREEN for the Amsterdam tests; verify-passes assertions are SKIPPED
+      with the tracking link.
 
 ### Task 4: Final integration verification (merge gate)
 
-- [ ] In-tree merge oracle: Amsterdam witness via BAL is verifiable; pre-Amsterdam unchanged;
-      mapping + activation-block tests green.
+- [ ] **Mapping unit tests** (Task 2's 6 unit tests on `buildAccessedStateFromBAL`) — green.
+- [ ] **Path assertion** for Amsterdam block (`installRecordingHookCounter` count == 0) —
+      green.
+- [ ] **Pre-Amsterdam regression** — `TestExecutionWitness` and all existing sub-cases
+      unchanged and green.
+- [ ] **No new green tests asserting witness correctness for Amsterdam** — those are skipped
+      pending Change 4. Verify the skip messages reference the Change 4 plan path.
 - [ ] `make lint` (repeat until clean — non-deterministic).
 - [ ] `make erigon integration` builds.
-- [ ] `go test ./rpc/jsonrpc/...` green.
+- [ ] `go test ./rpc/jsonrpc/...` clean (skipped tests OK).
 
-### Task 5: [Final] Docs and plan housekeeping
+### Task 5: Create Change 4 stub plan
+
+**Files:**
+- Create: `docs/plans/20260528-witness-amsterdam-commitment-divergence.md`
+
+- [ ] Write a brief stub plan capturing the divergence findings recorded in Risk 1:
+      `detectCollapseSiblings.ComputeCommitment` does not reproduce `block.Root()` for
+      Amsterdam blocks under either the BAL path or a force-routed re-exec path; lists the
+      debug observations; sketches investigation entry points (compare `chain_makers`
+      `ComputeCommitment` path with the witness `SplitHistoryReader` path; check Amsterdam
+      EIPs that touch commitment state: EIP-2935 history-storage, EIP-4788 beacon root,
+      EIP-7708 transfer logs, EIP-8037 state-gas). Marks acceptance: the Skipped Amsterdam
+      witness tests flip green when Change 4 lands.
+- [ ] Commit the stub plan.
+
+### Task 6: [Final] Docs and plan housekeeping
 - [ ] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
       (default: no change).
 - [ ] Move this plan to `docs/plans/completed/`.
@@ -358,23 +422,26 @@ needed. Test: `rpc/jsonrpc/debug_witness_bal_constructability_test.go`
 ## Post-Completion
 *Manual / external — no checkboxes*
 
-**Local cross-check via scratch layering** (`main + this change + Change 2 +
-awskii/eest-zkevm-witness`), run `execution/tests/eest_zkevm_witness` and record findings
-back into this file:
+**Change 4 (the verification-blocker follow-up):** open after this PR ships. The
+`docs/plans/20260528-witness-amsterdam-commitment-divergence.md` stub (Task 5) is the
+starting point. When Change 4 lands and removes the divergence, the Skipped Amsterdam witness
+tests in this PR's test file flip green automatically — Change 4's PR removes the `t.Skip`.
 
-- **Risk 1 — Codes multiset parity.** If mismatched against EEST, log the gap and open
-  **Change 4** (HPH/Codes precision) with the residual scope. Do not block this PR.
-- **Risk 2 — Absent-account exclusion reads.** If any fixture surfaces a missing-node failure
-  attributable to BAL dropping non-existent reads, add the minimal supplement here; else
-  document the decision and defer.
-- **Risk 3 — Headers parity.** Confirm `result.Headers = [parent]` against fixtures; adjust if
-  Amsterdam expects more.
-- **"Fewer-nodes" residual.** Subtract Risk-1/2 attributable failures from the ~4,128 fewer
-  cases; remainder defines Change 4's initial scope.
+**Local cross-check via scratch layering** (deferred until Change 4 lands; the corpus run is
+not useful while verification is blocked): `main + this change + Change 2 + Change 4 +
+awskii/eest-zkevm-witness`, run `execution/tests/eest_zkevm_witness` and record:
 
-**PR:**
+- Codes multiset parity (Risk 2 — refine over-approximation if needed)
+- Absent-account exclusion reads (Risk 3 — add supplement if fixtures need it)
+- Headers parity (Risk 4 — confirm `result.Headers = [parent]`)
+- "Fewer-nodes" residual scope for Change 4 / Change 5
+
+**PR for THIS change:**
 - Open against `main`. Title:
   `rpc/jsonrpc: build executionWitness access set from BAL for Amsterdam blocks`.
-- Body: rationale (no re-execution for Amsterdam; access set is the consensus BAL), link
-  EIP-7928, note Codes/Headers parity validated locally (not by the in-tree oracle), and the
-  deferral of the residual "fewer" class to Change 4.
+- Body: rationale (no re-execution for Amsterdam; access set is the consensus BAL); links
+  EIP-7928; explicitly states **witness verification correctness is deferred to Change 4**
+  (Amsterdam commitment-pipeline divergence reproducible under both BAL and re-exec paths);
+  notes the in-tree merge gate is mapping unit tests + path assertion + pre-Amsterdam
+  byte-identical regression; flags the per-user-override `t.Skip` on the verify-passes
+  assertions, with the link to the Change 4 stub plan in this repo.
