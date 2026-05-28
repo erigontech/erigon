@@ -30,7 +30,7 @@ func IsNil[T any](t T) bool {
 	if !v.IsValid() {
 		return true
 	}
-	return (kind == reflect.Ptr ||
+	return (kind == reflect.Pointer ||
 		kind == reflect.Interface ||
 		kind == reflect.Slice ||
 		kind == reflect.Map ||

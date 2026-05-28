@@ -25,6 +25,7 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -409,7 +410,7 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 // HeaderInserter encapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
-	localTd          *big.Int
+	localTd          *uint256.Int
 	logPrefix        string
 	prevHash         common.Hash // Hash of previously seen header - to filter out potential duplicates
 	highestHash      common.Hash
@@ -422,7 +423,7 @@ type HeaderInserter struct {
 	headerReader     services.HeaderAndCanonicalReader
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *uint256.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
 	hi := &HeaderInserter{
 		logPrefix:    logPrefix,
 		localTd:      localTd,

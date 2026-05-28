@@ -44,7 +44,7 @@ import (
 // TestEngineApiBALMultiSenderBlock packs transfers from many independent senders
 // into a single block. Because the senders are independent the parallel executor
 // speculatively executes them concurrently, exercising the coinbase-balance
-// strip→rebase→merge path in finalizeWithIBS. Any divergence between the
+// fee-aggregation path in finalizeTxSimple. Any divergence between the
 // assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
 // BAL hash mismatch returned by ProcessBAL.
 func TestEngineApiBALMultiSenderBlock(t *testing.T) {
