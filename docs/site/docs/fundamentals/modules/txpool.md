@@ -12,11 +12,11 @@ In Erigon, the TxPool is a dedicated API namespace that stores pending and queue
 
 The TxPool component is typically run as an internal Erigon component, but it can also be operated as a separate process, providing flexibility in transaction management.
 
-## Txpool as an internal Erigon component
+## TxPool as an internal Erigon component
 
 TxPool is run as an internal Erigon component by default.
 
-## Txpool as a separate process (experimental)
+## TxPool as a separate process (experimental)
 
 Running an external TxPool can provide a more secure, scalable, and flexible transaction management solution, which can be particularly beneficial in high-performance or high-availability Ethereum node deployments.
 
