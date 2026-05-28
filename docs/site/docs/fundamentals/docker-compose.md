@@ -6,13 +6,13 @@ sidebar_position: 18
 
 # Docker Compose
 
-#### Understanding file permissions
+#### Understanding File Permissions
 
 When Erigon runs inside a Docker container and creates files (like its data directory), those files need to be accessible to your local user account on your host machine.
 
 The potential issue is that Docker often creates these files with a default User ID (UID) of `1000`. If this doesn't match your host machine's UID, you may run into permission issues when trying to access, modify, or delete the data directory from your host machine.
 
-#### The solution: Using your host UID
+#### The Solution: Using Your Host UID
 
 To prevent these problems, you can run the Docker container using your local operating system's User ID (UID).
 
@@ -24,7 +24,7 @@ If you are encountering permission issues, you can find your user ID using this 
 id -u
 ```
 
-#### Example run
+#### Example Run
 
 To use a specific UID, like `1205`, and mount a host data directory (`/erigon-data`) into the container, use the `--user` flag:
 
@@ -40,7 +40,7 @@ docker run \
 
 In this example, the Erigon process inside the container will run as user `1205` and the contents of the host directory `/erigon-data` will be written and owned by user `1205` on your host OS.
 
-### Environment variables
+### Environment Variables
 
 There is a `.env.example` file in the root of the repo.
 

@@ -8,7 +8,7 @@ sidebar_position: 11
 
 The security practices focus heavily on the RPC Daemon since it's the primary external interface. The modular architecture allows you to run components separately, which can improve security by isolating services. For production deployments, consider using the distributed mode where services communicate via secured gRPC rather than running everything in a single process.
 
-## Network security
+## Network Security
 
 Securing your network ports is essential for protecting your Erigon node. Proper firewall configuration is the first line of defense.
 
@@ -38,7 +38,7 @@ The RPC Daemon is the primary external interface, making API security critical. 
 | Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for HTTP requests and batch requests.                                                                                                               | Configure `--rpc.max.concurrency` (HTTP admission control: `0` = use `--db.read.concurrency`, `-1` = unlimited), `--rpc.batch.concurrency` and `--rpc.batch.limit`. |
 | Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                        | <p>Utilize the various <code>--rpc.subscription.filters.*</code> flags.</p><p><strong>Note</strong>: These are disabled by default because they increase the risk of OOM issues.</p> |
 
-### External protection layer (recommended for production)
+### External Protection Layer (Recommended for Production)
 
 For production environments where RPC endpoints are exposed publicly, it is strongly recommended to place the Erigon node behind a robust proxy layer. This layer should be responsible for:
 
@@ -58,7 +58,7 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **Private API Security**: Configure secure communication between RPC Daemon and Erigon instance using TLS certificates.
 
-## Operational security
+## Operational Security
 
 **Dedicated User**: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.
 

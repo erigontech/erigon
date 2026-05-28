@@ -10,17 +10,17 @@ Erigon provides several RPC namespaces that extend beyond the standard Ethereum 
 
 These methods must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon.
 
-### Namespace availability
+### Namespace Availability
 
 * The `erigon_` namespace is enabled by default in the RPC Daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
 
-### Performance considerations
+### Performance Considerations
 
 * Erigon-specific methods are optimized for Erigon's architecture and often provide better performance than standard equivalents
 * Methods like `erigon_getHeaderByNumber` and `erigon_getHeaderByHash` can be faster as they skip transaction and uncle data
 * The `erigon_getLatestLogs` method includes advanced pagination to handle large result sets efficiently
 
-### Enhanced features
+### Enhanced Features
 
 * `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
 * `erigon_getLogs` returns enhanced ErigonLog objects with additional metadata like timestamps

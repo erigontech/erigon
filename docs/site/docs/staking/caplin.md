@@ -39,7 +39,7 @@ erigon \
   * `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
   * `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
 
-## 2. Set up Lighthouse validator client
+## 2. Set Up Lighthouse Validator Client
 
 ### 2.1 Install Lighthouse
 
@@ -49,13 +49,13 @@ Install and run Lighthouse by following the official guide at [https://lighthous
 docker pull sigp/lighthouse:latest
 ```
 
-### 2.2. Create Lighthouse validator key directory
+### 2.2. Create Lighthouse Validator Key Directory
 
 ```bash
 mkdir -p ~/.lighthouse/validators
 ```
 
-### 2.3. Run Lighthouse validator client
+### 2.3. Run Lighthouse Validator Client
 
 Start the validator client and connect it to the Caplin CL:
 
@@ -72,7 +72,7 @@ lighthouse vc \
 * `--beacon-nodes`: Points to the Caplin beacon API at `http://127.0.0.1:5555`.
 * `--suggested-fee-recipient`: Specifies your Ethereum address for block rewards.
 
-### 2.4. Import validator keys
+### 2.4. Import Validator Keys
 
 If you have existing validator keys, import them:
 

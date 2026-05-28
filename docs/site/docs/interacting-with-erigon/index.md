@@ -136,7 +136,7 @@ format). The socket inherits the API namespaces from the `--http.api` flag passe
 rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc --http.api eth,net,web3,debug,trace
 ```
 
-#### TCP socket alternative (advanced)
+#### TCP Socket Alternative (Advanced)
 
 You can also serve the raw JSON-RPC2 protocol over TCP instead of Unix sockets:
 
@@ -147,7 +147,7 @@ rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url tcp://
 **Note**: This creates a raw JSON-RPC2 socket without HTTP wrapping. Most users should use the HTTP endpoint (enabled by
 default on port 8545) instead. The TCP socket is for specialized clients that support raw JSON-RPC2 protocol.
 
-#### Testing IPC connection
+#### Testing IPC Connection
 
 Test your IPC connection using curl:
 

@@ -14,12 +14,12 @@ The key advantages of Shutter Network are:
 * **Threshold encryption:** Transactions are only decrypted when enough key holders (keypers) participate, ensuring security and decentralization.
 * **Support on Gnosis Chain:** Shutter encrypted transaction pools are currently available on [Gnosis Chain](https://docs.gnosischain.com/shutterized-gc/), with plans for Ethereum support.
 
-### Why use Shutter?
+### Why Use Shutter?
 
 * **Access to Extra Transactions:** Shutterized validators can include shielded transactions not available in the public transaction pool, leading to potentially higher block rewards.
 * **User Protection:** Help protect users against MEV attacks, improving the fairness of the chain.
 
-## How to run Erigon as a shutterized validator
+## How to Run Erigon as a Shutterized Validator
 
 To participate in the Shutter encrypted transaction pool as a validator using Erigon, follow these steps:
 
@@ -53,13 +53,13 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
     This works with Erigon's internal CL Caplin (enabled by default) or with an external CL client using `--externalcl`.
 
-## Shutter Network default ports
+## Shutter Network Default Ports
 
 The default peering port for Shutter is `23102` (TCP), to change it use `--shutter.p2p.listen.port <value>`.
 
 Bootstrap nodes are used to help new nodes discover other nodes in the network. By default, the embedded configuration values are used, but these can be overridden with `--shutter.p2p.bootstrap.nodes <value>`.
 
-## Reference documentation
+## Reference Documentation
 
 * [Shutter Validator Registration](https://github.com/shutter-network/shutter-validator-registration)
 * [Shutter Specs](https://github.com/gnosischain/specs/tree/master/shutter)

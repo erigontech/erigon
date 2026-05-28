@@ -15,13 +15,13 @@ The modular, staged approach to logging allows for granular control over verbosi
 Erigon offers a `--metrics` flag for using Prometheus/Grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
 :::
 
-## Logging framework architecture
+## Logging Framework Architecture
 
-### Core logging system
+### Core Logging System
 
 Erigon implements a custom logging framework that supports structured logging with key-value pairs and multiple output handlers.
 
-### Configuration options
+### Configuration Options
 
 Erigon provides extensive logging configuration through command-line flags. Key configuration options include:
 
@@ -52,9 +52,9 @@ The log level is set by using the `--verbosity` flag, for example:
 
 The core Logger interface provides methods for each log level and supports contextual logging.
 
-## Staged synchronization architecture
+## Staged Synchronization Architecture
 
-### Stage definitions
+### Stage Definitions
 
 Erigon's synchronization process is organized into sequential stages, each handling specific aspects of blockchain data processing.
 
@@ -69,13 +69,13 @@ The primary synchronization stages include:
 * **TxLookup**: Generates transaction lookup indices. This indexing is essential for quickly finding transaction by its hash, significantly improving the performance of transaction-related RPC calls.
 * **Finish**: The finalization stage of the sync process. This is the point where the node sends out notifications to subscribers about the new blockchain head, ensuring other components and external applications are instantly aware of the latest block.
 
-### Stage progress tracking
+### Stage Progress Tracking
 
 Each stage maintains progress information in the database, allowing for resumable synchronization.
 
-## Log message structure
+## Log Message Structure
 
-### Structured logging format
+### Structured Logging Format
 
 All log messages follow a consistent structured format with key-value pairs for machine parsing and human readability.
 
@@ -86,7 +86,7 @@ All log messages follow a consistent structured format with key-value pairs for 
 * Message (msg)
 * Contextual key-value pairs
 
-### Prefix system
+### Prefix System
 
 The sync engine uses a sophisticated prefix system to identify stage context.
 

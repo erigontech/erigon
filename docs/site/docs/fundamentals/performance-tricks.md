@@ -8,7 +8,7 @@ sidebar_position: 9
 
 These instructions are designed to improve the performance of Erigon 3, particularly for synchronization and memory management, on cloud drives and other systems with specific performance characteristics.
 
-## Increase sync speed
+## Increase Sync Speed
 
 * Set `--sync.loop.block.limit=10_000` and `--batchSize=2g` to speed up the synchronization process.
 
@@ -22,7 +22,7 @@ These instructions are designed to improve the performance of Erigon 3, particul
 --torrent.download.rate=1024mb
 ```
 
-## Optimize for cloud drives
+## Optimize for Cloud Drives
 
 * Set `SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
 
@@ -30,7 +30,7 @@ These instructions are designed to improve the performance of Erigon 3, particul
 SNAPSHOT_MADV_RND=false
 ```
 
-## Lock latest state in RAM
+## Lock Latest State in RAM
 
 * Use `vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt` to lock the latest state in RAM, preventing it from being evicted due to high historical RPC traffic.
 
@@ -40,7 +40,7 @@ vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 
 * Run `ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw` to apply the same locking to all relevant files.
 
-## Handle memory allocation issues
+## Handle Memory Allocation Issues
 
 * If you encounter issues with memory allocation, run the following to flush any pending write operations and free up memory:
 

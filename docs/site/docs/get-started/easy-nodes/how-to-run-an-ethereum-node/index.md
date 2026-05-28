@@ -7,18 +7,18 @@ sidebar_position: 1
 
 # How to run an Ethereum node
 
-## 1. Prerequisites check
+## 1. Prerequisites Check
 
 1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired sync mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
 
-## 2. Configure and launch Erigon
+## 2. Configure and Launch Erigon
 
 Follow these steps to configure and launch the All-in-One Client. Erigon uses its embedded Consensus Layer (Caplin) by default, so you don't need a separate Consensus Client (CL).
 
-### **A. Create the configuration file**
+### **A. Create the Configuration File**
 
 Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
 
@@ -53,7 +53,7 @@ services:
 ⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
 :::
 
-### **B. Launch the node and monitor progress**
+### **B. Launch the Node and Monitor Progress**
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 

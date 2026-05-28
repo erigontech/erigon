@@ -14,7 +14,7 @@ Erigon provides robust, built-in support for monitoring using the Prometheus and
 * Erigon node running
 * Basic understanding of Prometheus and Grafana
 
-#### Step 1: Enable metrics in Erigon
+#### Step 1: Enable Metrics in Erigon
 
 You must first enable metrics collection in your running Erigon instance.
 
@@ -24,7 +24,7 @@ You must first enable metrics collection in your running Erigon instance.
 
 To specify a custom address and port for metrics, use the `--metrics.addr` and `--metrics.port` flags (default port: `6061`).
 
-#### Step 2: Configure Prometheus targets
+#### Step 2: Configure Prometheus Targets
 
 The Erigon codebase includes a default configuration file for Prometheus.
 
@@ -32,7 +32,7 @@ The Erigon codebase includes a default configuration file for Prometheus.
 2. Edit the file to include the endpoints of your running Erigon instance(s).
 3. Save the modified configuration file.
 
-#### Step 3: Launch monitoring stack
+#### Step 3: Launch Monitoring Stack
 
 Erigon provides a simple Docker Compose setup to launch the monitoring services.
 
@@ -46,13 +46,13 @@ Alternatively, use the built-in `make` target:
 make prometheus
 ```
 
-#### Step 4: Access Grafana dashboard
+#### Step 4: Access Grafana Dashboard
 
 Once the containers are running, access the Grafana interface at `localhost:3000`.
 
 * Default credentials: `admin/admin`
 
-#### Step 5: Utilize pre-configured dashboards
+#### Step 5: Utilize Pre-configured Dashboards
 
 Erigon comes with pre-built dashboards located in `./cmd/prometheus/dashboards/`. See `./cmd/prometheus/Readme.md` for details.
 
@@ -65,13 +65,13 @@ Erigon comes with pre-built dashboards located in `./cmd/prometheus/dashboards/`
 
 **`erigon_internals.json`** is a low-level dashboard used by the Erigon development team for deep internal debugging. It is exported from Erigon's own Grafana Cloud instance and requires a pre-release Grafana build — it is _not recommended_ for typical users or self-hosted setups.
 
-#### Step 6: Memory usage monitoring (important note)
+#### Step 6: Memory Usage Monitoring (Important Note)
 
 Standard OS tools like `htop` can be misleading for Erigon's memory usage because its database (MDBX) uses `MemoryMap`. The OS manages the OS Page Cache, which is shared and automatically freed when needed.
 
 The dedicated panels in the `erigon.json` dashboard track accurate Go memory statistics. Erigon's application typically uses around 1GB during normal operation, while the OS Page Cache handles the bulk of data access memory efficiently.
 
-#### Step 7: Environment and custom configuration
+#### Step 7: Environment and Custom Configuration
 
 You can customize the setup using environment variables:
 
@@ -96,6 +96,6 @@ ERIGON_PROMETHEUS_CONFIG=/path/to/custom/prometheus.yml docker compose up promet
 * Check Docker container logs if services fail to start.
 * Confirm firewall settings allow access to monitoring ports.
 
-#### For developers
+#### For Developers
 
 Custom metrics can be added by searching for `grpc_prometheus.Register` within the codebase.

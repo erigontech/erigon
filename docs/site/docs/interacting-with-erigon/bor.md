@@ -10,19 +10,19 @@ The `bor` namespace provides Polygon-specific RPC methods that are only availabl
 
 The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.
 
-### Network compatibility
+### Network Compatibility
 
 * The bor namespace is only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.)
 * These methods will return errors if called on non-Polygon networks or when the Bor consensus engine is not active
 * The methods require the underlying Bor consensus engine to be properly configured and running
 
-### Consensus integration
+### Consensus Integration
 
 * All bor methods interact directly with the Bor consensus engine and validator set management
 * The methods provide access to Polygon's unique consensus features like validator snapshots and proposer sequences
 * These APIs are essential for applications that need to understand Polygon's validator dynamics and block production
 
-### Usage in Polygon ecosystem
+### Usage in Polygon Ecosystem
 
 * These methods are commonly used by Polygon validators, delegators, and applications that need validator information
 * The snapshot and signer methods are particularly useful for understanding the current validator set and their roles

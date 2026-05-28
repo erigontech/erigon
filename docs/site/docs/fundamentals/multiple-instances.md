@@ -9,7 +9,7 @@ sidebar_position: 14
 
 Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.
 
-## Required configuration flags
+## Required Configuration Flags
 
 To avoid conflicts between instances, you must define **7 essential flags** for each instance:
 
@@ -21,7 +21,7 @@ To avoid conflicts between instances, you must define **7 essential flags** for 
 * `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
 * `--mcp.port` - MCP server port (default: `8553`), or `--mcp.disable` to turn it off
 
-## Example configuration
+## Example Configuration
 
 Here's how to run mainnet and sepolia instances simultaneously:
 
@@ -53,7 +53,7 @@ Here's how to run mainnet and sepolia instances simultaneously:
   --http.api=eth,debug,net,trace,web3,erigon
 ```
 
-## Docker Compose multi-instance setup
+## Docker Compose Multi-Instance Setup
 
 For containerized deployments, the docker-compose configuration shows how services can be orchestrated with proper port isolation:
 
@@ -63,9 +63,9 @@ The compose file demonstrates the port allocation strategy:
 * **8545, 8551**: External HTTP APIs
 * **30303, 42069**: P2P networking ports
 
-## Best practices
+## Best Practices
 
-### 1. Resource management
+### 1. Resource Management
 
 **Memory Considerations:** Erigon uses memory-mapped files (MDBX) where the OS manages page cache. Multiple instances will share the same page cache efficiently, but be aware that:
 
@@ -77,7 +77,7 @@ The compose file demonstrates the port allocation strategy:
 ⚠️ **Disk Performance Warning:** Multiple instances accessing the same disk concurrently will impact performance due to increased random disk access. This is particularly problematic during the "Blocks Execution stage" which performs many random reads. **Avoid running multiple genesis syncs on the same disk.**
 :::
 
-### 2. Database configuration
+### 2. Database Configuration
 
 For multiple instances, consider adjusting database parameters to reduce resource contention:
 
@@ -86,7 +86,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 --db.size.limit=512MB
 ```
 
-### 3. Network port management
+### 3. Network Port Management
 
 **Default Port Allocation:**
 
@@ -99,7 +99,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
-### 4. Service separation
+### 4. Service Separation
 
 Erigon supports modular deployment where components can run as separate processes:
 
@@ -109,7 +109,7 @@ For multiple instances, you can:
 * Separate heavy components like `downloader` or `rpcdaemon` to dedicated processes
 * Use the `--private.api.addr` flag for inter-service communication
 
-### 5. Monitoring and logging
+### 5. Monitoring and Logging
 
 Configure separate log directories for each instance:
 
@@ -123,9 +123,9 @@ Configure separate log directories for each instance:
 
 For Prometheus monitoring, each instance should expose metrics on different ports.
 
-## Performance optimization
+## Performance Optimization
 
-### Cloud storage considerations
+### Cloud Storage Considerations
 
 If using network-attached storage, apply these optimizations:
 
@@ -138,7 +138,7 @@ export SNAPSHOT_MADV_RND=false
 --sync.loop.block.limit=10000
 ```
 
-### Memory locking for performance
+### Memory Locking for Performance
 
 For production setups with sufficient RAM, you can lock critical data in memory:
 

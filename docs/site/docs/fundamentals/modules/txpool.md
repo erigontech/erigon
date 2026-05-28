@@ -12,11 +12,11 @@ In Erigon, the TxPool is a dedicated API namespace that stores pending and queue
 
 The TxPool component is typically run as an internal Erigon component, but it can also be operated as a separate process, providing flexibility in transaction management.
 
-## TxPool as an internal Erigon component
+## Txpool as an internal Erigon component
 
 TxPool is run as an internal Erigon component by default.
 
-## TxPool as a separate process (experimental)
+## Txpool as a separate process (experimental)
 
 Running an external TxPool can provide a more secure, scalable, and flexible transaction management solution, which can be particularly beneficial in high-performance or high-availability Ethereum node deployments.
 
@@ -68,7 +68,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
 * `--pprof.addr 0.0.0.0`: This flag sets the address for the pprof HTTP server (default: `127.0.0.1`). The pprof server is used for profiling and debugging Erigon. By setting this flag to `0.0.0.0`, the pprof server is made accessible from outside the local machine.
 
-## Command line options
+## Command Line Options
 
 To display available options for TxPool digit:
 

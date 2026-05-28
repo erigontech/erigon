@@ -17,7 +17,7 @@ In order to use the Transaction-Trace Filtering API, Erigon must be fully synced
 
 As for the Ad-hoc Tracing API, as long the blocks have not yet been pruned, the RPC calls will work.
 
-## The ad-hoc tracing API
+## The Ad-hoc Tracing API
 
 The ad-hoc tracing API allows you to perform diagnostics on calls or transactions—whether they are historical ones from the chain or hypothetical ones not yet mined. As long as the blocks have not yet been pruned, the RPC calls will work.
 
@@ -27,11 +27,11 @@ The diagnostics are requested by providing a configuration object that specifies
 * `vmTrace`: Provides a Virtual Machine Execution Trace, delivering a full step-by-step trace of the EVM's state throughout the transaction, including all opcodes and gas usage.
 * `stateDiff`: Provides a State Difference, detailing all altered portions of the Ethereum state (e.g., storage, balances, nonces) resulting from the transaction's execution.
 
-#### Flat tracers
+#### Flat Tracers
 
 As of v3.4, Erigon supports **flat tracers**, which produce OpenEthereum-compatible call traces in a flat (non-nested) list format. Each call frame is emitted as a separate object with an explicit `subtraces` count, matching the standard output format of `trace_transaction` and `trace_block`. Flat tracers are available for all ad-hoc tracing methods by including `"trace"` in the trace type array.
 
-#### Providing a transaction to trace
+#### Providing a Transaction to Trace
 
 There are three primary ways to specify the transaction to be traced:
 
@@ -43,7 +43,7 @@ There are three primary ways to specify the transaction to be traced:
 **Note**: For replaying mined transactions, your node must be in archive mode, or the transaction must be within the most recent 1000 blocks.
 :::
 
-## The transaction-trace filtering API
+## The Transaction-Trace Filtering API
 
 These APIs allow you to get a full _externality_ trace on any transaction executed throughout the Erigon chain. Unlike the log filtering API, you are able to search and filter based only upon address information. Information returned includes the execution of all `CREATE`s, `SUICIDE`s and all variants of `CALL` together with input data, output data, gas usage, amount transferred and the success status of each individual action.
 
@@ -67,7 +67,7 @@ then it should look something like:
 
 ## JSON-RPC methods
 
-#### Ad-hoc tracing
+#### Ad-hoc Tracing
 
 * [trace\_call](#trace_call)
 * [trace\_callMany](#trace_callmany)
@@ -82,7 +82,7 @@ then it should look something like:
 * [trace\_get](#trace_get)
 * [trace\_transaction](#trace_transaction)
 
-## Response fields reference
+## Response Fields Reference
 
 All `trace_*` methods return objects built from the same set of fields. Each method's "Returns" section below indicates which top-level shape it produces; the field semantics are defined once here.
 
