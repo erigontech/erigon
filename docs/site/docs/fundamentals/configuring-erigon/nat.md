@@ -110,7 +110,7 @@ If you are running Erigon with the embedded Caplin consensus layer, configure NA
 
 This flag sets the external address advertised in the **discv5 ENR** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
 
-| Value | Behaviour |
+| Value | Behavior |
 |-------|-----------|
 | `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
 | `extip:1.2.3.4` | Advertise a fixed public IP — recommended for VPS / datacenters |

@@ -22,7 +22,6 @@ package js
 import (
 	"encoding/json"
 	"errors"
-	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +64,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, gasLimit, nil, nil), contract.Caller())
 	tracer.OnEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas.Total(), value, contractCode)
-	ret, endGas, err := env.Run(contract, startGas, []byte{}, false)
+	ret, endGas, _, err := env.Run(contract, startGas, []byte{}, false)
 	tracer.OnExit(0, ret, startGas.Total()-endGas.Total(), err, true)
 	// Rest gas assumes no refund
 	tracer.OnTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, nil)
@@ -229,7 +228,7 @@ func TestNoStepExec(t *testing.T) {
 }
 
 func TestIsPrecompile(t *testing.T) {
-	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(0), DAOForkBlock: nil, TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), ByzantiumBlock: common.NewUint64(100), ConstantinopleBlock: common.NewUint64(0), PetersburgBlock: common.NewUint64(0), IstanbulBlock: common.NewUint64(200), MuirGlacierBlock: common.NewUint64(0), BerlinBlock: common.NewUint64(300), LondonBlock: common.NewUint64(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig)}
+	chaincfg := &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), DAOForkBlock: nil, TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), ByzantiumBlock: common.NewUint64(100), ConstantinopleBlock: common.NewUint64(0), PetersburgBlock: common.NewUint64(0), IstanbulBlock: common.NewUint64(200), MuirGlacierBlock: common.NewUint64(0), BerlinBlock: common.NewUint64(300), LondonBlock: common.NewUint64(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig)}
 	chaincfg.ByzantiumBlock = common.NewUint64(100)
 	chaincfg.IstanbulBlock = common.NewUint64(200)
 	chaincfg.BerlinBlock = common.NewUint64(300)
