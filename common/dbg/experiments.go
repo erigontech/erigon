@@ -297,7 +297,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		return
 	}
 	defer f.Close()
-	defer os.Remove(tmpPath) //nolint
+	defer os.Remove(tmpPath) //nolint:gocritic
 
 	if _, err := f.Write(buf.Bytes()); err != nil {
 		if logger != nil {
