@@ -241,7 +241,7 @@ func TestNewBlockHashes66_OversizedKicksPeer(t *testing.T) {
 }
 
 // TestNewBlockHashes66_NormalSizeIgnored guards against the oversize gate
-// false-positively penalizing legitimate small announcements.
+// wrongly penalizing legitimate small announcements.
 func TestNewBlockHashes66_NormalSizeIgnored(t *testing.T) {
 	ctx := context.Background()
 
@@ -281,11 +281,9 @@ func TestNewBlockHashes66_NormalSizeIgnored(t *testing.T) {
 	}
 }
 
-// TestNewBlockHashes66_AtCapNotKicked verifies that a packet whose entry
-// count equals maxBlockHashesPerMsg — encoded with realistic mainnet-scale
-// block numbers (whose pairs exceed the absolute-minimum RLP encoding) — is
-// allowed through. Regression test for an earlier payload-size estimate that
-// false-positived in this range.
+// TestNewBlockHashes66_AtCapNotKicked verifies a packet with exactly
+// maxBlockHashesPerMsg entries — block numbers sized to mainnet scale so
+// each pair exceeds the minimum RLP encoding — is allowed through.
 func TestNewBlockHashes66_AtCapNotKicked(t *testing.T) {
 	ctx := context.Background()
 
