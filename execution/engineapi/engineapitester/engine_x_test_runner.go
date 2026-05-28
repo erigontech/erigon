@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -57,13 +58,12 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		if info.IsDir() {
 			return nil
 		}
-		f, err := os.Open(path)
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.NewDecoder(f).Decode(&preAlloc)
-		_ = f.Close()
+		err = jsoniter.ConfigCompatibleWithStandardLibrary.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
