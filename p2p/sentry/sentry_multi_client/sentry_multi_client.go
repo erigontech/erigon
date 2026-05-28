@@ -61,6 +61,30 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
 
+// maxBlockHashesPerMsg caps the number of entries accepted in an incoming
+// eth/68 NewBlockHashes (msg 0x01) packet. A peer that exceeds this is
+// kicked: the wire framing alone allows ~275k entries per packet, which the
+// handler previously expanded into one synchronous GetBlockHeaders RPC each
+// and unbounded heap growth.
+const maxBlockHashesPerMsg = 4096
+
+// minNewBlockHashesPairSize is the smallest valid RLP encoding of a
+// [hash, number] pair: 1-byte pair-list prefix + 1-byte hash-string prefix +
+// 32-byte hash + 1-byte number = 35 bytes.
+const minNewBlockHashesPairSize = 35
+
+// newBlockHashesOversized reports whether the outer-list payload of an
+// encoded NewBlockHashes packet is large enough that, even at the minimum
+// per-pair encoding, it would contain more than maxBlockHashesPerMsg
+// entries. It only reads the outer-list prefix, so it does not allocate.
+func newBlockHashesOversized(payload []byte) (bool, error) {
+	_, dataLen, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return false, err
+	}
+	return dataLen/minNewBlockHashesPairSize > maxBlockHashesPerMsg, nil
+}
+
 // StartStreamLoops starts message processing loops for all sentries.
 // The processing happens in several streams:
 // RecvMessage - processing incoming headers/bodies
@@ -313,6 +337,20 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []sentryproto.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+	// Reject oversized announcements before any further work: a 10 MiB wire
+	// packet otherwise expands into one GetBlockHeaders RPC per hash and
+	// drives unbounded heap growth.
+	if oversized, err := newBlockHashesOversized(req.Data); err == nil && oversized {
+		cs.logger.Warn("Kick peer for oversized NewBlockHashes", "peer", req.PeerId.String())
+		if _, err1 := sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+			PeerId:  req.PeerId,
+			Penalty: sentryproto.PenaltyKind_Kick,
+		}, &grpc.EmptyCallOption{}); err1 != nil {
+			cs.logger.Error("Could not send penalty", "err", err1)
+		}
+		return nil
+	}
+
 	if cs.disableBlockDownload {
 		return nil
 	}

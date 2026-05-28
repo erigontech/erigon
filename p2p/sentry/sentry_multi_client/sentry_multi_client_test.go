@@ -180,6 +180,107 @@ type mockBlockReader struct {
 	services.FullBlockReader
 }
 
+// TestNewBlockHashes66_OversizedKicksPeer verifies that a peer flooding the
+// handler with a NewBlockHashes packet larger than the per-message cap is
+// kicked instead of being allowed to drive unbounded fan-out of per-hash
+// GetBlockHeaders requests.
+func TestNewBlockHashes66_OversizedKicksPeer(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	const oversize = maxBlockHashesPerMsg + 1
+	announces := make(eth.NewBlockHashesPacket, oversize)
+	for i := range announces {
+		announces[i].Hash = common.Hash{byte(i), byte(i >> 8), byte(i >> 16)}
+		announces[i].Number = uint64(i + 1)
+	}
+	payload, err := rlp.EncodeToBytes(&announces)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	var sendCalls int
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+		sendMessageByIdFunc: func(_ context.Context, _ *proto_sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
+			sendCalls++
+			return &proto_sentry.SentPeers{}, nil
+		},
+	}
+
+	// disableBlockDownload=true keeps the existing handler short-circuit
+	// from dereferencing the unset HeaderDownload field; the oversize check
+	// is required to fire before that short-circuit so abusive peers are
+	// kicked regardless of internal download state.
+	cs := &MultiClient{logger: log.New(), disableBlockDownload: true}
+
+	if err := cs.newBlockHashes66(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err != nil {
+		t.Fatalf("newBlockHashes66 returned error: %v", err)
+	}
+
+	if penalized == nil {
+		t.Fatal("expected PenalizePeer to be called for oversized NewBlockHashes packet")
+	}
+	if penalized.Penalty != proto_sentry.PenaltyKind_Kick {
+		t.Fatalf("expected Kick penalty, got %v", penalized.Penalty)
+	}
+	if sendCalls != 0 {
+		t.Fatalf("expected zero outbound header requests, got %d", sendCalls)
+	}
+}
+
+// TestNewBlockHashes66_NormalSizeIgnored guards against the oversize gate
+// false-positively penalizing legitimate small announcements.
+func TestNewBlockHashes66_NormalSizeIgnored(t *testing.T) {
+	ctx := context.Background()
+
+	peerId := &proto_types.H512{
+		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
+	}
+
+	announces := eth.NewBlockHashesPacket{
+		{Hash: common.HexToHash("0xaa"), Number: 1},
+		{Hash: common.HexToHash("0xbb"), Number: 2},
+	}
+	payload, err := rlp.EncodeToBytes(&announces)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	var penalized *proto_sentry.PenalizePeerRequest
+	mockSentry := &mockSentryClient{
+		penalizePeerFunc: func(_ context.Context, req *proto_sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+			penalized = req
+			return &emptypb.Empty{}, nil
+		},
+	}
+
+	cs := &MultiClient{logger: log.New(), disableBlockDownload: true}
+
+	if err := cs.newBlockHashes66(ctx, &proto_sentry.InboundMessage{
+		PeerId: peerId,
+		Data:   payload,
+	}, mockSentry); err != nil {
+		t.Fatalf("newBlockHashes66 returned error: %v", err)
+	}
+
+	if penalized != nil {
+		t.Fatalf("did not expect PenalizePeer for a 2-entry packet, got %v", penalized)
+	}
+}
+
 // TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
 // BlockRangeUpdate (e.g. Earliest > Latest) causes the peer to be penalized.
 // This mirrors the Hive `TestBlockRangeUpdateInvalid` simulator check.
