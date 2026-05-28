@@ -363,12 +363,18 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(v) < 33 {
+		return nil, fmt.Errorf("persistent block value too short: have %d, want at least 33", len(v))
+	}
 
 	version := clparams.StateVersion(v[0])
 	parentRoot := common.BytesToHash(v[1:33])
 	requestsHash := common.Hash{}
 
 	if version >= clparams.ElectraVersion {
+		if len(v) < 65 {
+			return nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least 65", len(v))
+		}
 		requestsHash = common.BytesToHash(v[33:65])
 		v = v[65:]
 	} else {
