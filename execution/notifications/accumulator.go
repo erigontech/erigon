@@ -110,7 +110,15 @@ func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
 	case ActionCode:
 		accountChange.Action = ActionUpsertCode
 	case ActionRemove:
-		//panic("")
+		// Recreate after delete in the same accumulated batch: treat as a
+		// fresh upsert. Stale Code and StorageChanges from the prior
+		// deployment must be cleared — they were wiped by DeleteAccount,
+		// but the recreate will re-emit any new code/storage via later
+		// ChangeCode / ChangeStorage calls.
+		accountChange.Action = ActionUpsert
+		accountChange.Code = nil
+		accountChange.StorageChanges = nil
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange.Data = data
 }
@@ -150,7 +158,12 @@ func (a *Accumulator) ChangeCode(address common.Address, code []byte) {
 	case ActionUpsert:
 		accountChange.Action = ActionUpsertCode
 	case ActionRemove:
-		//panic("")
+		// Code-only update following a delete-then-recreate within the
+		// same accumulated batch. Treat as a fresh code action and drop
+		// stale storage from the prior deployment.
+		accountChange.Action = ActionCode
+		accountChange.StorageChanges = nil
+		delete(a.storageChangeIndex, address)
 	}
 	accountChange.Code = code
 }
