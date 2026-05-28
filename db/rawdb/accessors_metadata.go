@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"time"
 
+	jsoniter "github.com/json-iterator/go"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -94,7 +96,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	}
 	t := time.Now()
 	// Marshal json g
-	val, err := json.Marshal(g)
+	val, err := jsoniter.ConfigFastest.Marshal(g)
 	if err != nil {
 		return err
 	}
@@ -111,7 +113,7 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 		return nil, nil
 	}
 	var g types.Genesis
-	if err := json.Unmarshal(val, &g); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(val, &g); err != nil {
 		return nil, err
 	}
 	return &g, nil
