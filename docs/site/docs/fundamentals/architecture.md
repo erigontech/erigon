@@ -122,3 +122,4 @@ See [Prune Modes](prune-modes) for the full comparison.
 - [Modules](modules) — running RPC Daemon, TxPool, Sentry, Downloader as separate processes
 - [Prune Modes](prune-modes) — choosing what history to keep
 - [Optimizing Storage](optimizing-storage) — splitting datadir across fast and slow disks
+
