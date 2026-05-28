@@ -250,6 +250,33 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 	require.True(t, found)
 }
 
+func TestExecutionPayloadBidServiceWaitsForParentState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	addPreferencesToPool(epbsPool, 100)
+	delete(fcMock.StateAtBlockRootVal, msg.Message.ParentBlockRoot)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	require.Equal(t, int32(1), service.pendingCount.Load())
+
+	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = newBidParentState(service.beaconCfg, testDependentRoot)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+
+	service.processPendingBids()
+	require.Equal(t, int32(0), service.pendingCount.Load())
+	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	require.True(t, found)
+}
+
 func TestExecutionPayloadBidServiceAdvancesSkippedParentStateForDependentRoot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

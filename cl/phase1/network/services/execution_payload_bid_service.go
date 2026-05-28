@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -56,6 +57,8 @@ type pendingBidJob struct {
 	msg          *cltypes.SignedExecutionPayloadBid
 	creationTime time.Time
 }
+
+var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", ErrIgnore)
 
 const (
 	// seenBidCacheSize: multiple builders can bid per slot.
@@ -149,6 +152,12 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 
 	preferences, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
+		if errors.Is(err, errBidDependencyUnavailable) {
+			s.queuePendingBid(msg)
+			log.Trace("Queued execution payload bid waiting for dependencies",
+				"slot", slot, "builderIndex", builderIndex, "err", err)
+			return nil
+		}
 		return err
 	}
 	if !ok {
@@ -166,7 +175,7 @@ func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.Si
 	bid := msg.Message
 	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
 	if err != nil || parentState == nil {
-		return nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", ErrIgnore, bid.ParentBlockRoot)
+		return nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	dependentRootState, err := s.proposerDependentRootState(parentState, proposalEpoch)
@@ -402,6 +411,9 @@ func (s *executionPayloadBidService) processPendingBids() {
 
 		preferences, ok, err := s.matchingProposerPreferences(job.msg)
 		if err != nil {
+			if errors.Is(err, errBidDependencyUnavailable) {
+				return true
+			}
 			s.pendingBids.Delete(pendingKey)
 			s.pendingCount.Add(-1)
 			log.Trace("Failed to match pending execution payload bid",
