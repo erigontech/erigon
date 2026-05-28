@@ -47,13 +47,13 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	}
 
 	var config chain.Config
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
 
 	if config.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
-		if err := json.Unmarshal(config.BorJSON, borConfig); err != nil {
+		if err := jsoniter.ConfigFastest.Unmarshal(config.BorJSON, borConfig); err != nil {
 			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
 		}
 		config.Bor = borConfig
@@ -68,14 +68,14 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 	}
 
 	if cfg.Bor != nil {
-		borJSON, err := json.Marshal(cfg.Bor)
+		borJSON, err := jsoniter.ConfigFastest.Marshal(cfg.Bor)
 		if err != nil {
 			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
 		}
 		cfg.BorJSON = borJSON
 	}
 
-	data, err := json.Marshal(cfg)
+	data, err := jsoniter.ConfigFastest.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}
@@ -96,7 +96,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	}
 
 	// Marshal json g
-	val, err := json.Marshal(g)
+	val, err := jsoniter.ConfigFastest.Marshal(g)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 		return nil, nil
 	}
 	var g types.Genesis
-	if err := json.Unmarshal(val, &g); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(val, &g); err != nil {
 		return nil, err
 	}
 	return &g, nil

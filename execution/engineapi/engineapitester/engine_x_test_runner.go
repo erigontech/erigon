@@ -18,6 +18,7 @@ package engineapitester
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -43,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-var json = jsoniter.ConfigFastest
-
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
 // per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
 // at construction time. Options may be passed to customise the runner's
@@ -64,7 +63,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
