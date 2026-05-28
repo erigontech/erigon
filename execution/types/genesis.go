@@ -91,11 +91,9 @@ func NewAuraSeal(step uint64, signature []byte) *AuRaSeal {
 // GenesisAlloc specifies the initial state that is part of the genesis block.
 type GenesisAlloc map[common.Address]GenesisAccount
 
-var _jsonFast = jsoniter.ConfigFastest
-
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
-	if err := _jsonFast.Unmarshal(data, &m); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*ga = make(GenesisAlloc)
