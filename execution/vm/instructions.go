@@ -1045,6 +1045,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	res, addr, returnGas, childUsed, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	scope.Contract.selfBalanceCached = false
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1145,6 +1146,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
 	}
+	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1193,6 +1195,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
 	}
+	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1237,6 +1240,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
 	}
+	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
 }
