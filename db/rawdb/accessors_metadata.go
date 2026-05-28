@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var genesisMarshalBufPool = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, int(256*datasize.MB))) }}
+var genesisMarshalBufPool = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, int(256*datasize.KB))) }}
 
 func getGenesisMarshalBuf() *bytes.Buffer  { return genesisMarshalBufPool.Get().(*bytes.Buffer) }
 func putGenesisMarshalBuf(b *bytes.Buffer) { b.Reset(); genesisMarshalBufPool.Put(b) }
