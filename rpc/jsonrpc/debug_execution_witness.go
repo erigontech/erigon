@@ -558,98 +558,106 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	engine := api.engine()
-
-	// Create a state reader at the parent block state using the exact txnum
-	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
-
-	// Create a combined recording state (reader + writer with in-memory overlay)
-	recordingState := NewRecordingState(stateReader)
-	if recordingStateConstructedHookForTest != nil {
-		recordingStateConstructedHookForTest()
-	}
-	recordingState.SetAccountsToTrace([]common.Address{
-		// Add addresses to trace here, e.g.:
-		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
-	})
-
-	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
-
-	// Get header for block context
-	header := block.Header()
-
-	// Create EVM block context
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
-	blockRules := blockCtx.Rules(chainConfig)
-	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
-
-	// Track accessed block hashes for BLOCKHASH opcode
-	var accessedBlockHashes []uint64
-	originalGetHash := blockCtx.GetHash
-	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
-		accessedBlockHashes = append(accessedBlockHashes, n)
-		return originalGetHash(n)
-	}
-
-	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
 	fullEngine, ok := engine.(rules.Engine)
 	if !ok {
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
-	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
-	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
-	}
-	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
-		return nil, fmt.Errorf("failed to initialize block: %w", err)
-	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
-		return nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
-	}
 
-	// Execute all transactions in the block
-	for txIndex, txn := range block.Transactions() {
-		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
+	header := block.Header()
+
+	var accessed *accessedState
+	var accessedBlockHashes []uint64
+
+	if chainConfig.IsAmsterdam(header.Time) {
+		accessed, err = buildAccessedStateFromBAL(ctx, tx, block.Hash(), blockNum, firstTxNumInBlock)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
+			return nil, err
+		}
+	} else {
+		// Create a state reader at the parent block state using the exact txnum
+		var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+
+		// Create a combined recording state (reader + writer with in-memory overlay)
+		recordingState := NewRecordingState(stateReader)
+		if recordingStateConstructedHookForTest != nil {
+			recordingStateConstructedHookForTest()
+		}
+		recordingState.SetAccountsToTrace([]common.Address{
+			// Add addresses to trace here, e.g.:
+			// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
+		})
+
+		// Create the in-block state with the recording state as reader
+		ibs := state.New(recordingState)
+
+		// Create EVM block context
+		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
+		blockRules := blockCtx.Rules(chainConfig)
+		signer := types.MakeSigner(chainConfig, blockNum, header.Time)
+
+		// Track accessed block hashes for BLOCKHASH opcode
+		originalGetHash := blockCtx.GetHash
+		blockCtx.GetHash = func(n uint64) (common.Hash, error) {
+			accessedBlockHashes = append(accessedBlockHashes, n)
+			return originalGetHash(n)
 		}
 
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
-
-		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		ibs.SetTxContext(blockNum, txIndex)
-
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
+		// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
+		chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
+		systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
 		}
-
+		if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+			return nil, fmt.Errorf("failed to initialize block: %w", err)
+		}
 		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
-			return nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
+			return nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 		}
+
+		// Execute all transactions in the block
+		for txIndex, txn := range block.Transactions() {
+			msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
+			}
+
+			txCtx := protocol.NewEVMTxContext(msg)
+			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
+
+			gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
+			ibs.SetTxContext(blockNum, txIndex)
+
+			_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+			if err != nil {
+				return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
+			}
+
+			if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+				return nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
+			}
+		}
+
+		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+		}
+
+		// Collect logs accumulated during transaction execution into a synthetic receipt
+		// so that Finalize can parse EIP-6110 deposit requests from them.
+		// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
+		// into a flat slice and passes them to ParseDepositLogs.
+		allLogs := ibs.Logs()
+		receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
+
+		if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
+			return nil, fmt.Errorf("failed to finalize block: %w", err)
+		}
+
+		if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+			return nil, fmt.Errorf("failed to commit block: %w", err)
+		}
+
+		accessed = collectAccessedState(recordingState)
 	}
-
-	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
-	}
-
-	// Collect logs accumulated during transaction execution into a synthetic receipt
-	// so that Finalize can parse EIP-6110 deposit requests from them.
-	// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
-	// into a flat slice and passes them to ParseDepositLogs.
-	allLogs := ibs.Logs()
-	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
-
-	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
-		return nil, fmt.Errorf("failed to finalize block: %w", err)
-	}
-
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
-		return nil, fmt.Errorf("failed to commit block: %w", err)
-	}
-
-	accessed := collectAccessedState(recordingState)
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},

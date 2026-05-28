@@ -364,15 +364,16 @@ structurally correct per debug instrumentation. The end-to-end witness assertion
 the Amsterdam commitment-pipeline divergence (Risk 1) — Change 4 owns the fix. This task
 ships the wiring and reshapes the tests around the softer merge gate.
 
-- [ ] Commit the Task-3 wiring already in working tree (`rpc/jsonrpc/debug_execution_witness.go`):
+- [x] Commit the Task-3 wiring already in working tree (`rpc/jsonrpc/debug_execution_witness.go`):
       existing re-exec + `collectAccessedState` block wrapped in `else`; `if chainConfig.IsAmsterdam(header.Time)`
       branch calls `buildAccessedStateFromBAL`; Amsterdam branch sets `accessedBlockHashes`
       empty so `collectAccessedHeaders` emits parent-only; shared `detectCollapseSiblings` /
       `buildWitnessTrie` / `verifyWitnessStateless` calls untouched.
-- [ ] Verify pre-Amsterdam branch is **byte-identical** to today: `git diff -w main --
+- [x] Verify pre-Amsterdam branch is **byte-identical** to today: `git diff -w main --
       rpc/jsonrpc/debug_execution_witness.go` shows only the new `if` + indentation inside
-      `else`.
-- [ ] Update Task-1 tests (`TestExecutionWitnessAmsterdamBAL`,
+      `else` plus the necessary hoisting of `fullEngine`, `header`, and
+      `accessedBlockHashes` declarations out of the branch (both paths share them).
+- [x] Update Task-1 tests (`TestExecutionWitnessAmsterdamBAL`,
       `TestExecutionWitnessAmsterdamActivationBlock`) to **skip the
       `verifyWitnessStateless`-passes assertion** with `t.Skip("blocked on Change 4:
       Amsterdam commitment-pipeline divergence — see
@@ -381,9 +382,9 @@ ships the wiring and reshapes the tests around the softer merge gate.
       assertion** — that one IS testable today and is what proves the BAL branch fires.
       The Skip is per the explicit user override of the no-skip rule; trade-off is logged in
       the Scope section above.
-- [ ] Pre-Amsterdam regression: full `go test ./rpc/jsonrpc/ -run TestExecutionWitness` green
+- [x] Pre-Amsterdam regression: full `go test ./rpc/jsonrpc/ -run TestExecutionWitness` green
       (no changes to existing sub-cases).
-- [ ] Path-assertion is GREEN for the Amsterdam tests; verify-passes assertions are SKIPPED
+- [x] Path-assertion is GREEN for the Amsterdam tests; verify-passes assertions are SKIPPED
       with the tracking link.
 
 ### Task 4: Final integration verification (merge gate)

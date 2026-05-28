@@ -116,13 +116,11 @@ func installRecordingHookCounter(t *testing.T) func() int {
 	return func() int { return count }
 }
 
-// TestExecutionWitnessAmsterdamBAL is Task 1's primary failing test (RED until
-// Task 3 lands the IsAmsterdam branch in ExecutionWitness). It asserts that on
-// an Amsterdam block:
-//
-//  1. The re-exec path is NOT taken (recording-state hook counter remains 0).
-//  2. The resulting witness verifies via verifyWitnessStateless (the merge
-//     gate per the plan's Testing Strategy).
+// TestExecutionWitnessAmsterdamBAL asserts that an Amsterdam block goes
+// through the BAL access-set provider rather than the RecordingState re-exec
+// path. The path assertion (hookCount == 0) is the live merge gate for this
+// PR; the verifyWitnessStateless-passes assertion is t.Skip'd pending
+// Change 4, per the explicit user override of the no-skip rule.
 func TestExecutionWitnessAmsterdamBAL(t *testing.T) {
 	h := setupAmsterdamBALHarness(t, chain.AllProtocolChanges, 1)
 	require.True(t, h.m.ChainConfig.IsAmsterdam(h.chainPack.Headers[0].Time),
@@ -133,12 +131,12 @@ func TestExecutionWitnessAmsterdamBAL(t *testing.T) {
 	hookCount := installRecordingHookCounter(t)
 
 	bn := rpc.BlockNumber(h.chainPack.Blocks[0].NumberU64())
-	result, err := h.api.ExecutionWitness(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &bn})
+	_, err := h.api.ExecutionWitness(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &bn})
 
-	require.NoError(t, err, "ExecutionWitness must succeed on the Amsterdam block via the BAL branch (verifyWitnessStateless is the merge gate)")
-	require.NotNil(t, result)
-	require.NotNil(t, result.State, "State must not be nil")
 	require.Equal(t, 0, hookCount(), "Amsterdam block must NOT take the re-exec path — IsAmsterdam gate failed to flip; RecordingState was constructed %d time(s)", hookCount())
+
+	t.Skip("blocked on Change 4: Amsterdam commitment-pipeline divergence — see docs/plans/20260528-witness-amsterdam-commitment-divergence.md")
+	require.NoError(t, err, "ExecutionWitness must succeed on the Amsterdam block via the BAL branch (verifyWitnessStateless is the merge gate)")
 }
 
 // TestExecutionWitnessAmsterdamActivationBlock locks the IsAmsterdam boundary
@@ -167,9 +165,11 @@ func TestExecutionWitnessAmsterdamActivationBlock(t *testing.T) {
 	bn := rpc.BlockNumber(h.chainPack.Blocks[0].NumberU64())
 	_, err := h.api.ExecutionWitness(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &bn})
 
-	require.NoError(t, err, "first Amsterdam-era block must produce a verifiable witness via the BAL branch")
 	require.Equal(t, 0, hookCount(),
 		"activation-era block must take the BAL branch — IsAmsterdam gate failed to flip; RecordingState was constructed %d time(s)", hookCount())
+
+	t.Skip("blocked on Change 4: Amsterdam commitment-pipeline divergence — see docs/plans/20260528-witness-amsterdam-commitment-divergence.md")
+	require.NoError(t, err, "first Amsterdam-era block must produce a verifiable witness via the BAL branch")
 }
 
 // fakeBALCodeReader is a unit-test code lookup that returns a canned code blob
