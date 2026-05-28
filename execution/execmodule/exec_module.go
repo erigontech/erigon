@@ -217,8 +217,9 @@ type ExecModule struct {
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
-	// metrics for average mgas/sec
-	avgMgasSec float64
+	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
+	accumGasMgas float64
+	accumTimeSec float64
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
