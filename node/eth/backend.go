@@ -356,13 +356,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		genesisConfig, err := rawdb.ReadGenesis(tx)
-		if err != nil {
-			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
+		// Only read genesis from DB when no genesis was provided by the caller.
+		// Skipping this when config.Genesis is already set avoids deserializing
+		// a potentially large genesis JSON (e.g. 200 MB pre-alloc fixtures) on
+		// every node startup — the alloc is unused when the genesis block already
+		// exists, because genesisSpec is set to nil below in that case.
+		if config.Genesis == nil {
+			genesisConfig, err := rawdb.ReadGenesis(tx)
+			if err != nil {
+				return err
+			}
+			if genesisConfig != nil {
+				config.Genesis = genesisConfig
+			}
 		}
 
 		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
