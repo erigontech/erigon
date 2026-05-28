@@ -3,9 +3,10 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
+
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
