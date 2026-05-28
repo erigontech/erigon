@@ -185,21 +185,29 @@ func (db *DB) BeginRwTry(_ context.Context) (kv.RwTx, error) {
 	if !db.writeMu.TryLock() {
 		return nil, syscall.EBUSY
 	}
+	return db.newRwTxLocked(), nil
+}
+
+// newRwTxLocked builds a write tx. The caller must hold writeMu.
+// Tables are clone-on-first-write: reads go through the master pointer,
+// the first mutation triggers a COW clone owned by this tx.
+func (db *DB) newRwTxLocked() *tx {
 	db.mu.RLock()
+	defer db.mu.RUnlock()
 	t := &tx{
-		db:        db,
-		rw:        true,
-		tables:    make(map[string]*table, len(db.tables)),
-		sequences: maps.Clone(db.sequences),
+		db:            db,
+		rw:            true,
+		tables:        maps.Clone(db.tables),
+		privateTables: make(map[string]struct{}),
+		sequences:     maps.Clone(db.sequences),
 	}
-	for name, tab := range db.tables {
-		t.tables[name] = tab.cloneShallow()
+	if t.tables == nil {
+		t.tables = make(map[string]*table)
 	}
 	if t.sequences == nil {
 		t.sequences = make(map[string]uint64)
 	}
-	db.mu.RUnlock()
-	return t, nil
+	return t
 }
 
 func (db *DB) Update(_ context.Context, f func(tx kv.RwTx) error) error {
@@ -215,19 +223,21 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 	return db.Update(ctx, f)
 }
 
-// beginRoTx snapshots all tables at the moment of begin. Subsequent writes
-// in concurrent RwTx are invisible to this RoTx.
+// beginRoTx clones only the tables MAP (cheap), not the btrees themselves.
+// RwTx commits replace the master map with a new one; writers work on COW
+// clones of the btrees, so the pre-commit btrees this RoTx references stay
+// untouched.
 func (db *DB) beginRoTx() *tx {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	t := &tx{
 		db:        db,
 		rw:        false,
-		tables:    make(map[string]*table, len(db.tables)),
+		tables:    maps.Clone(db.tables),
 		sequences: maps.Clone(db.sequences),
 	}
-	for name, tab := range db.tables {
-		t.tables[name] = tab.cloneShallow()
+	if t.tables == nil {
+		t.tables = make(map[string]*table)
 	}
 	if t.sequences == nil {
 		t.sequences = make(map[string]uint64)
@@ -235,23 +245,11 @@ func (db *DB) beginRoTx() *tx {
 	return t
 }
 
-// beginRwTx takes the exclusive write lock (held until Commit/Rollback)
-// and snapshots all tables. Writes go to the snapshot; Commit swaps master.
+// privateTables is not allocated for RoTx — only RwTx clones-on-write.
+
+// beginRwTx takes the exclusive write lock (held until Commit/Rollback) and
+// captures the master tables map. Tables are clone-on-first-write.
 func (db *DB) beginRwTx() *tx {
 	db.writeMu.Lock()
-	db.mu.RLock()
-	t := &tx{
-		db:        db,
-		rw:        true,
-		tables:    make(map[string]*table, len(db.tables)),
-		sequences: maps.Clone(db.sequences),
-	}
-	for name, tab := range db.tables {
-		t.tables[name] = tab.cloneShallow()
-	}
-	if t.sequences == nil {
-		t.sequences = make(map[string]uint64)
-	}
-	db.mu.RUnlock()
-	return t
+	return db.newRwTxLocked()
 }

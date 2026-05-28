@@ -20,11 +20,17 @@ import (
 // Single-goroutine semantics, matching MDBX (no internal mutex). Use a fresh
 // tx per goroutine.
 type tx struct {
-	db        *DB
-	rw        bool
-	closed    bool
-	tables    map[string]*table // per-tx snapshot / working set
-	sequences map[string]uint64
+	db     *DB
+	rw     bool
+	closed bool
+	// tables starts as a shallow clone of the master map: btree pointers are
+	// shared with master. On the first mutation of a table (write path), the
+	// btree is COW-cloned into a tx-private copy and recorded in
+	// privateTables — the entry in `tables` is replaced so subsequent reads
+	// of the same tx see the mutated view.
+	tables        map[string]*table
+	privateTables map[string]struct{}
+	sequences     map[string]uint64
 }
 
 // Compile-time checks.
@@ -33,13 +39,27 @@ var (
 	_ kv.RwTx = (*tx)(nil)
 )
 
-// getOrCreateTable returns the tx-local table, lazily creating it from the
-// schema. Mutations on this table are isolated until Commit.
+// getOrCreateTable returns a tx-private table that the caller may safely
+// mutate. For RwTx, the first write to a master-shared table triggers a
+// cheap COW copy (btree.Copy is O(1)); subsequent writes mutate that copy.
+// For RoTx, returns master's table directly (callers are read-only).
 func (t *tx) getOrCreateTable(name string) *table {
 	tab, ok := t.tables[name]
 	if !ok {
 		tab = newTable(t.db.isDupSort(name))
 		t.tables[name] = tab
+		if t.rw {
+			t.privateTables[name] = struct{}{}
+		}
+		return tab
+	}
+	if !t.rw {
+		return tab
+	}
+	if _, private := t.privateTables[name]; !private {
+		tab = tab.cloneShallow()
+		t.tables[name] = tab
+		t.privateTables[name] = struct{}{}
 	}
 	return tab
 }

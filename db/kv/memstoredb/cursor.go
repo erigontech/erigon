@@ -54,10 +54,11 @@ func (c *cursor) seekToCurrent(iter *btree2.IterG[entry]) bool {
 
 func (c *cursor) setPos(it entry) ([]byte, []byte) {
 	c.valid = true
-	// Copy so the cursor position doesn't share storage with whatever the
-	// btree iterator returned — that data is reused on subsequent calls.
-	c.current = entry{k: common.Copy(it.k), v: common.Copy(it.v)}
-	return common.Copy(c.current.k), common.Copy(c.current.v)
+	// Stored entries are never mutated in place (the COW btree creates new
+	// nodes on Set/Delete), so it's safe for the cursor to hold the entry's
+	// slices by reference. The caller gets its own copies.
+	c.current = it
+	return common.Copy(it.k), common.Copy(it.v)
 }
 
 func (c *cursor) clearPos() ([]byte, []byte) {
