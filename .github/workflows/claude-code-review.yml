@@ -12,9 +12,12 @@ on:
 
 jobs:
   claude-review:
-    # Skip Dependabot PRs: the action rejects bot actors and CLAUDE_CODE_OAUTH_TOKEN
-    # is not available to Dependabot workflows anyway.
-    if: github.actor != 'dependabot[bot]'
+    # Skip fork PRs and Dependabot: neither can read secrets or mint an OIDC
+    # token, so the review would always fail red. Maintainers can still trigger
+    # a review on a fork PR by commenting `@claude` (handled by claude.yml).
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,6 +36,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Scope to specific trusted bots, never '*': this is a public repo and
+          # '*' would let external Apps invoke the action with prompts they control.
+          allowed_bots: 'erigon-copilot'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
