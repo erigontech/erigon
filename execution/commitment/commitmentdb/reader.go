@@ -115,6 +115,44 @@ func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewFilesOnlyStateReader(tx, r.limitTxNum)
 }
 
+// StepBoundedFilesStateReader reads from .kv files only, capped at
+// maxStep (file end step). Same "files-only, no fallback" semantic as
+// FilesOnlyStateReader, but the bound is the file's end step instead
+// of an arbitrary txnum.
+//
+// Used by admin SetHead mode B for commitment-domain Branch reads:
+// the commitment domain has Hist.HistoryDisabled=true, so a txnum
+// bound via GetAsOf doesn't time-travel; step-bounded file filtering
+// is the alternative — find files whose end step ≤ maxStep, ignore
+// the over-step file that mmap-survives-unlink still serves through
+// the aggregator catalog mid-mode-B-tx.
+type StepBoundedFilesStateReader struct {
+	roTx    kv.TemporalTx
+	maxStep kv.Step
+}
+
+func NewStepBoundedFilesStateReader(roTx kv.TemporalTx, maxStep kv.Step) *StepBoundedFilesStateReader {
+	return &StepBoundedFilesStateReader{roTx: roTx, maxStep: maxStep}
+}
+
+func (r *StepBoundedFilesStateReader) WithHistory() bool                           { return false }
+func (r *StepBoundedFilesStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *StepBoundedFilesStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	enc, fileEndStep, found, err := r.roTx.Debug().GetLatestFromFilesUpToStep(d, plainKey, r.maxStep)
+	if err != nil {
+		return nil, 0, fmt.Errorf("StepBoundedFilesStateReader %q (maxStep=%d): %w", d, r.maxStep, err)
+	}
+	if !found {
+		return nil, 0, nil
+	}
+	return enc, fileEndStep, nil
+}
+
+func (r *StepBoundedFilesStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewStepBoundedFilesStateReader(tx, r.maxStep)
+}
+
 // SplitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
 // data and account/storage/code data.
 type SplitStateReader struct {

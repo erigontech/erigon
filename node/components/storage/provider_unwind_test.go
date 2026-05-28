@@ -67,7 +67,7 @@ func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 // Provider with a non-nil Tx passes the precondition guards and
 // proceeds into the sub-op chain. The minimum-shape Provider here
 // (no Inventory, no BlockReader) makes snapshot-trim a no-op and
-// fails fast inside unwindDBPastBlock with the BlockReader-nil
+// fails fast inside ensureCommitmentAtBlock with the BlockReader-nil
 // check — that's the next step in the chain, exactly what we want
 // to pin without standing up a real harness. The full happy path
 // lands with the commit-3 scenario-3 E2E test against a real
@@ -77,7 +77,7 @@ func TestProviderUnwind_ValidationOK_ReachesSubOps(t *testing.T) {
 	p := alignedProvider()
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "db-reset")
-	require.Contains(t, err.Error(), "BlockReader is nil",
-		"reaching db-reset proves the sub-op chain is wired in; the BlockReader-nil error is the expected next-step failure on this minimum-shape fixture")
+	require.Contains(t, err.Error(), "commitment-anchor")
+	require.Contains(t, err.Error(), "nil BlockReader",
+		"reaching commitment-anchor proves the sub-op chain is wired in; the BlockReader-nil error is the expected next-step failure on this minimum-shape fixture")
 }

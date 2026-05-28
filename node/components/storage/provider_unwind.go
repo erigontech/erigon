@@ -103,12 +103,20 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		p.logger.Info("[storage] Provider.Unwind: snapshot files trimmed past toBlock", "toBlock", toBlock, "files", len(removed))
 	}
 
-	if err := p.unwindDBPastBlock(ctx, opts.Tx, toBlock); err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: db-reset: %w", err)
+	// Recompute + write the commitment anchor BEFORE the writable
+	// shadow wipe. With the SD-free recompute path, the recompute
+	// looks for a baseline commitment via GetLatestFromDB (writable
+	// shadow) and GetLatestFromFilesUpToStep — the writable shadow
+	// still holds forward-execution's commitment writes at this
+	// point, which provides a tight baseline. The recompute's write
+	// lands at toBlock's last txnum (in step (stepBoundary-1)); the
+	// subsequent wipe (step ≥ stepBoundary) leaves it intact.
+	if err := p.ensureCommitmentAtBlock(ctx, opts.Tx, toBlock); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor: %w", err)
 	}
 
-	if err := p.ensureCommitmentAtBlock(opts.Tx, toBlock); err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor: %w", err)
+	if err := p.unwindDBPastBlock(ctx, opts.Tx, toBlock); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: db-reset: %w", err)
 	}
 
 	return nil

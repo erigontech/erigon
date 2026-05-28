@@ -481,6 +481,13 @@ type TemporalDebugTx interface {
 	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
+	// GetLatestFromFilesUpToStep is the step-bounded variant of
+	// GetLatestFromFiles: returns the latest file-side value whose
+	// containing file's END step is ≤ maxStep. Used by admin SetHead
+	// mode B to find a commitment baseline at-or-before toBlock's
+	// step boundary on the commitment domain (which has history
+	// disabled, so GetAsOf can't time-travel there).
+	GetLatestFromFilesUpToStep(domain Domain, k []byte, maxStep Step) (v []byte, fileEndStep Step, found bool, err error)
 
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)

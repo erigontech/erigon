@@ -17,38 +17,102 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// ensureCommitmentAtBlock is mode-B sub-op #3 — a pure verification.
+// ensureCommitmentAtBlock is mode-B sub-op #3 — anchor the commitment
+// trie at toBlock.
 //
-// After sub-op #2 has wiped the writable-domain MDBX shadow past
-// toBlock's last txNum, LatestCommitmentState resolves through the
-// commitment files: in aligned mode with toBlock at a step boundary,
-// the file for that step has its KeyCommitmentState entry tagged at
-// the step's last txNum = toBlock, so latest == toBlock by
-// construction.
+// Algorithm (SD-free, single-tx):
 //
-// If latest != toBlock here the chain is malformed (the file for
-// toBlock's step is missing or its commitment entry is at the wrong
-// coordinate), and the unwind has nowhere to anchor the new tip.
-// We surface that loudly rather than papering over it with a
-// re-derivation that would only mask the underlying corruption.
+//  1. stepBoundary = (toBlockLastTxNum+1) / stepSize. Files whose end
+//     step ≤ stepBoundary may carry a usable baseline commitment;
+//     anything beyond is the over-step file the wipe in sub-op #2
+//     deliberately superseded.
 //
-// The fork-from CLI's "cut at a non-boundary parent block" case has
-// the same shape but operates on the fork's commitment file, not
-// the active one; its primitive lives alongside that wiring, not
-// here.
-func (p *Provider) ensureCommitmentAtBlock(tx kv.TemporalTx, toBlock uint64) error {
-	latest, err := commitmentdb.LatestBlockNumWithCommitment(tx)
+//  2. commitmentdb.RecomputeAtTxNumWithoutSD reads a file-side
+//     baseline via GetLatestFromFilesUpToStep(stepBoundary), restores
+//     the patricia trie state, replays accounts/storage/code touches
+//     in (baselineTxNum, toBlockLastTxNum+1] via HistoryKeyTxNumRange
+//     (those domains have history; the range query is well-defined),
+//     calls trie.Process to fold them in, and returns the new root +
+//     encoded trie state. No SharedDomains is opened — the
+//     behind-commitment guard in NewSharedDomains is structurally
+//     incompatible with mode B's mid-tx wiped-shadow state.
+//
+//  3. Validate the recomputed root against the block header's
+//     stateRoot. A mismatch means the snapshot/history data couldn't
+//     reproduce consensus — refuse loudly.
+//
+//  4. Write the new commitment entry into the writable shadow at
+//     toBlockLastTxNum via TemporalMemBatch.DomainPut → Flush. After
+//     this write the writable shadow holds the canonical commitment
+//     at toBlock, surviving the next forward execution's
+//     NewSharedDomains seek.
+func (p *Provider) ensureCommitmentAtBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) error {
+	if p.BlockReader == nil {
+		return fmt.Errorf("ensureCommitmentAtBlock: nil BlockReader")
+	}
+	if p.Aggregator == nil {
+		return fmt.Errorf("ensureCommitmentAtBlock: nil Aggregator")
+	}
+
+	header, err := p.BlockReader.HeaderByNumber(ctx, tx, toBlock)
 	if err != nil {
-		return fmt.Errorf("LatestBlockNumWithCommitment: %w", err)
+		return fmt.Errorf("HeaderByNumber(%d): %w", toBlock, err)
 	}
-	if latest == toBlock {
-		return nil
+	if header == nil {
+		return fmt.Errorf("ensureCommitmentAtBlock: no header for block %d", toBlock)
 	}
-	return fmt.Errorf("commitment-anchor verification failed: latest commitment is at block %d, expected %d — the commitment file for toBlock's step is missing or its entry is at the wrong coordinate (sub-op #2 wiped MDBX shadow past toBlock; no override is possible from the writable side)", latest, toBlock)
+
+	lastTxNum, err := rawdbv3.TxNums.Max(ctx, tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("TxNums.Max(%d): %w", toBlock, err)
+	}
+	stepSize := p.Aggregator.StepSize()
+	if stepSize == 0 {
+		return fmt.Errorf("aggregator StepSize() == 0")
+	}
+	if (lastTxNum+1)%stepSize != 0 {
+		return fmt.Errorf("ensureCommitmentAtBlock: aligned-mode invariant violated: toBlock=%d lastTxNum=%d does not land on a step boundary (stepSize=%d)", toBlock, lastTxNum, stepSize)
+	}
+	stepBoundary := kv.Step((lastTxNum + 1) / stepSize)
+
+	tmpDir := p.snapDir
+	root, encodedTrieState, baselineTxNum, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, tx, tmpDir, lastTxNum, stepBoundary, stepSize)
+	if err != nil {
+		return fmt.Errorf("RecomputeAtTxNumWithoutSD(toBlock=%d, lastTxNum=%d, stepBoundary=%d): %w", toBlock, lastTxNum, stepBoundary, err)
+	}
+	if common.Hash(root) != header.Root {
+		return fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
+	}
+
+	// Write the new commitment entry into the writable shadow at
+	// toBlockLastTxNum. We use TemporalMemBatch (a lightweight
+	// memctx) rather than SharedDomains — SD's constructor seeks
+	// commitment and trips the behind-commitment guard against the
+	// over-step file. The memctx writes directly through the
+	// domain-writer chain.
+	cs := commitmentdb.NewCommitmentState(lastTxNum, toBlock, encodedTrieState)
+	encoded, err := cs.Encode()
+	if err != nil {
+		return fmt.Errorf("encode commitment state: %w", err)
+	}
+	metrics := &changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}}
+	mem := tx.Debug().NewMemBatch(metrics)
+	defer mem.Close()
+	if err := mem.DomainPut(kv.CommitmentDomain, string(commitmentdb.KeyCommitmentState), encoded, lastTxNum, nil); err != nil {
+		return fmt.Errorf("memctx DomainPut(CommitmentDomain, KeyCommitmentState): %w", err)
+	}
+	if err := mem.Flush(ctx, tx); err != nil {
+		return fmt.Errorf("memctx Flush: %w", err)
+	}
+	return nil
 }

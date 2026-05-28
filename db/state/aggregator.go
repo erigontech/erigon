@@ -2537,6 +2537,32 @@ func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, ma
 	return
 }
 
+// DebugGetLatestFromFilesUpToStep returns the latest file-side value
+// whose containing file's end step is ≤ maxStep. Used by admin
+// SetHead mode B to find a commitment baseline at-or-before toBlock's
+// step boundary without going through GetAsOf (which can't time-travel
+// on the commitment domain — Hist.HistoryDisabled=true).
+//
+// Returns the value, the file's end step, found, error.
+func (at *AggregatorRoTx) DebugGetLatestFromFilesUpToStep(domain kv.Domain, k []byte, maxStep kv.Step) (v []byte, fileEndStep kv.Step, found bool, err error) {
+	v, found, fileEndStep, err = at.d[domain].getLatestFromFilesUpToStep(k, maxStep)
+	if !found || err != nil {
+		return
+	}
+	if domain == kv.CommitmentDomain {
+		fileEndTxNum := uint64(fileEndStep) * at.StepSize()
+		var fileStartTxNum uint64
+		for i := len(at.d[domain].files) - 1; i >= 0; i-- {
+			if at.d[domain].files[i].endTxNum == fileEndTxNum {
+				fileStartTxNum = at.d[domain].files[i].startTxNum
+				break
+			}
+		}
+		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	}
+	return
+}
+
 func (at *AggregatorRoTx) DebugTraceKey(ctx context.Context, domain kv.Domain, key []byte, fromTxNum uint64, toTxNum uint64, tx kv.Tx) (stream.U64V, error) {
 	if at.d[domain].d.HistoryDisabled {
 		return nil, fmt.Errorf("domain %s has history disabled; can't do TraceKey", domain)

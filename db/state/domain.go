@@ -1349,6 +1349,50 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	return nil, false, 0, 0, nil
 }
 
+// getLatestFromFilesUpToStep is the step-bounded variant of
+// getLatestFromFiles. It iterates files newest→oldest and skips any
+// file whose end step (endTxNum / stepSize) is strictly greater than
+// maxStep. Returns the first surviving file's value for key, with its
+// file end step.
+//
+// Mode-B's commitment-anchor sub-op uses this to find a file-side
+// commitment baseline whose internal txnum lands at-or-before
+// toBlock's last txnum: the commitment domain has no history
+// tracking (Hist.HistoryDisabled=true), so GetAsOf can't time-travel;
+// instead we filter by file end step. A commitment file's
+// KeyCommitmentState record is written at the file's last txnum
+// (endTxNum-1) — a file whose end step ≤ maxStep necessarily has
+// its record at ≤ toBlock's last txnum, which is what we need.
+func (dt *DomainRoTx) getLatestFromFilesUpToStep(k []byte, maxStep kv.Step) (v []byte, found bool, fileEndStep kv.Step, err error) {
+	if len(dt.files) == 0 {
+		return
+	}
+	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
+	hi, lo := dt.ht.iit.hashKey(k)
+
+	maxAllowedEndTxNum := uint64(maxStep) * dt.stepSize
+
+	for i := len(dt.files) - 1; i >= 0; i-- {
+		if dt.files[i].endTxNum > maxAllowedEndTxNum {
+			continue
+		}
+		if useExistenceFilter && dt.files[i].src.existence != nil {
+			if !dt.files[i].src.existence.ContainsHash(hi) {
+				continue
+			}
+		}
+		v, found, _, err = dt.getLatestFromFile(i, k, hi, lo)
+		if err != nil {
+			return nil, false, 0, err
+		}
+		if !found {
+			continue
+		}
+		return v, true, kv.Step(dt.files[i].endTxNum / dt.stepSize), nil
+	}
+	return nil, false, 0, nil
+}
+
 // Returns the first txNum from available history
 func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
 	if len(dt.ht.files) == 0 { // if no history files, check in MDBX

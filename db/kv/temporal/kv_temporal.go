@@ -695,6 +695,10 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 
+func (tx *tx) GetLatestFromFilesUpToStep(domain kv.Domain, k []byte, maxStep kv.Step) (v []byte, fileEndStep kv.Step, found bool, err error) {
+	return tx.aggtx.DebugGetLatestFromFilesUpToStep(domain, k, maxStep)
+}
+
 func (tx *Tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
 	return tx.aggtx.DebugTraceKey(tx.ctx, domain, k, fromTxNum, toTxNum, tx.Tx)
 }
