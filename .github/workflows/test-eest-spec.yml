@@ -70,6 +70,18 @@ jobs:
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
 
+      # blocktests-devnet has been observed to flake on
+      # test_pointer_resets_an_empty_code_account_with_storage[fork_Amsterdam]
+      # under parallel exec — captures the per-auth refund and full receipt
+      # set on the next fire so the diagnosis is one log read away. Scoped to
+      # this shard only because TRACE_AUTH_REFUND emits a line per EIP-7702
+      # auth across all txs.
+      - name: Enable EIP-7702 + receipt-mismatch diagnostics
+        if: matrix.shard == 'blocktests-devnet'
+        run: |
+          echo "ERIGON_TRACE_AUTH_REFUND=true" >> "$GITHUB_ENV"
+          echo "ERIGON_LOG_HASH_MISMATCH_REASON=true" >> "$GITHUB_ENV"
+
       - name: Run eest-spec-${{ matrix.shard }}
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
