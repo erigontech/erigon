@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -76,7 +75,7 @@ type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
-	AddRemoteTxns(ctx context.Context, newTxns TxnSlots)
+	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
@@ -90,6 +89,13 @@ type Pool interface {
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check
 var _ txnprovider.TxnProvider = (*TxPool)(nil)
+
+// remoteSource carries the peer that delivered a remote txn slot so
+// processRemoteTxns can kick that peer on KZG-verify failure.
+type remoteSource struct {
+	peerID PeerID
+	sentry sentryproto.SentryClient
+}
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
@@ -112,6 +118,7 @@ type TxPool struct {
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
+	unprocessedRemotePeers  []remoteSource                                  // per-slot peer source for KZG-fail kick
 	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
@@ -218,10 +225,7 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
-	if overflow {
-		return nil, errors.New("chainID overflow")
-	}
+	configChainID := chainConfig.ChainID
 
 	lock := &sync.Mutex{}
 
@@ -372,12 +376,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			"err", err)
 	}()
 
-	if assert.Enable {
-		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
-			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
-		}
-	}
-
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	if baseFeeChanged {
 		var pendingBaseFee256 uint256.Int
@@ -506,10 +504,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	_, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
+	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
 	if err != nil {
 		return err
 	}
+	p.kickKZGOffenders(ctx, validateReasons)
 
 	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
@@ -544,9 +543,44 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
+	p.unprocessedRemotePeers = p.unprocessedRemotePeers[:0]
 	p.unprocessedRemoteByHash = map[string]int{}
 
 	return nil
+}
+
+// kickKZGOffenders drops the devp2p peer that delivered each KZG-failed blob txn.
+// Called with p.lock held; the actual PenalizePeer RPC is dispatched off-lock to
+// avoid blocking the pool on sentry I/O.
+func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.DiscardReason) {
+	var offenders []remoteSource
+	for i, r := range reasons {
+		if r != txpoolcfg.UnmatchedBlobTxExt {
+			continue
+		}
+		if i >= len(p.unprocessedRemotePeers) {
+			continue
+		}
+		src := p.unprocessedRemotePeers[i]
+		if src.peerID == nil || src.sentry == nil {
+			continue
+		}
+		offenders = append(offenders, src)
+	}
+	if len(offenders) == 0 {
+		return
+	}
+	go func() {
+		for _, src := range offenders {
+			p.logger.Debug("[txpool] penalizing peer for KZG-fail blob txn", "peer", src.peerID)
+			if _, err := src.sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+				PeerId:  src.peerID,
+				Penalty: sentryproto.PenaltyKind_Kick,
+			}); err != nil {
+				p.logger.Debug("[txpool] PenalizePeer failed", "err", err)
+			}
+		}
+	}()
 }
 
 func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender common.Address, isLocal bool, err error) {
@@ -788,7 +822,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			AuthorizationsLen:  authorizationLen,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
-			CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
@@ -897,7 +930,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
+func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -908,6 +941,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	src := remoteSource{peerID: peerID, sentry: sentry}
 	for i, txn := range newTxns.Txns {
 		hashS := string(txn.IDHash[:])
 		_, ok := p.unprocessedRemoteByHash[hashS]
@@ -916,6 +950,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 		}
 		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
+		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
 }
 
@@ -983,7 +1018,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AuthorizationsLen:  uint64(authorizationLen),
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
-		CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 		IsContractCreation: txn.IsCreation(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
@@ -1304,6 +1338,11 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 	return nil
 }
 
+// validateTxns returns per-slot discard reasons and the txns that passed.
+// For a remote (IsLocal=false) batch, validation short-circuits on the first
+// UnmatchedBlobTxExt: trailing reasons stay NotSet but those txns are not in
+// goodTxns, so callers reading reasons in isolation must also consult goodTxns
+// to distinguish "accepted" from "not validated".
 func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
@@ -1314,6 +1353,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 	}
 
 	goodCount := 0
+	checkedCount := len(txns.Txns)
 	for i, txn := range txns.Txns {
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
 		if err != nil {
@@ -1333,14 +1373,19 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
+		// On first KZG-verify failure in a remote batch, drop the rest without re-verifying.
+		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
+			checkedCount = i + 1
+			break
+		}
 	}
 
 	goodTxns.Resize(uint(goodCount))
 
 	j := 0
-	for i, txn := range txns.Txns {
+	for i := 0; i < checkedCount; i++ {
 		if reasons[i] == txpoolcfg.NotSet {
-			goodTxns.Txns[j] = txn
+			goodTxns.Txns[j] = txns.Txns[i]
 			goodTxns.IsLocal[j] = txns.IsLocal[i]
 			copy(goodTxns.Senders.At(j), txns.Senders.At(i))
 			j++

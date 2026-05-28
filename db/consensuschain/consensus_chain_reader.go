@@ -18,7 +18,8 @@ package consensuschain
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -79,7 +80,7 @@ func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr Reader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Warn("ReadTd failed", "err", err)

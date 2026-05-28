@@ -27,6 +27,11 @@ import (
 
 func TestRLP(t *testing.T) {
 	tm := new(testutil.TestMatcher)
+	// Erigon's RLP layer is uint256.Int-only: every protocol field that goes
+	// over RLP fits in 256 bits (EIP-7702 caps chainID at < 2^256, and the
+	// stagnant EIP-2294 even proposes ~2^63 for chainID). The legacy
+	// "bigint" vector encodes 2^256, which exceeds that ceiling.
+	tm.SkipLoad("rlptest.json/bigint$")
 	tm.Walk(t, rlpTestDir, func(t *testing.T, name string, test *testutil.RLPTest) {
 		if err := tm.CheckFailure(t, test.Run()); err != nil {
 			t.Error(err)

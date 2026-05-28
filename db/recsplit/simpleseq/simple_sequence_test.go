@@ -41,32 +41,37 @@ func TestSimpleSequence(t *testing.T) {
 
 	t.Run("seek", func(t *testing.T) {
 		// before baseNum
-		v, found := s.Seek(10)
+		v, pos, found := s.Seek(10)
 		require.True(t, found)
 		require.Equal(t, uint64(1001), v)
+		require.Equal(t, uint64(0), pos)
 
 		// at baseNum
-		v, found = s.Seek(1000)
+		v, pos, found = s.Seek(1000)
 		require.True(t, found)
 		require.Equal(t, uint64(1001), v)
+		require.Equal(t, uint64(0), pos)
 
 		// at elem
-		v, found = s.Seek(1007)
+		v, pos, found = s.Seek(1007)
 		require.True(t, found)
 		require.Equal(t, uint64(1007), v)
+		require.Equal(t, uint64(1), pos)
 
 		// between elems
-		v, found = s.Seek(1014)
+		v, pos, found = s.Seek(1014)
 		require.True(t, found)
 		require.Equal(t, uint64(1015), v)
+		require.Equal(t, uint64(2), pos)
 
 		// at last
-		v, found = s.Seek(1027)
+		v, pos, found = s.Seek(1027)
 		require.True(t, found)
 		require.Equal(t, uint64(1027), v)
+		require.Equal(t, uint64(3), pos)
 
 		// after last
-		v, found = s.Seek(1028)
+		v, _, found = s.Seek(1028)
 		require.False(t, found)
 		require.Equal(t, uint64(0), v)
 
@@ -305,11 +310,12 @@ func TestReadSimpleSequence(t *testing.T) {
 	require.Equal(t, uint64(1001), s.Min())
 	require.Equal(t, uint64(1027), s.Max())
 
-	v, found := s.Seek(1007)
+	v, pos, found := s.Seek(1007)
 	require.True(t, found)
 	require.Equal(t, uint64(1007), v)
+	require.Equal(t, uint64(1), pos)
 
-	v, found = s.Seek(9999)
+	v, _, found = s.Seek(9999)
 	require.False(t, found)
 	require.Equal(t, uint64(0), v)
 }

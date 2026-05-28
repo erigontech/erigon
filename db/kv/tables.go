@@ -312,8 +312,6 @@ var (
 // This list will be sorted in `init` method.
 // ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
 var ChaindataTables = []string{
-	E2AccountsHistory,
-	E2StorageHistory,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
@@ -322,7 +320,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	SyncStageProgress,
-	PlainState,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -451,10 +448,6 @@ var ChaindataTables = []string{
 	BuilderPendingPaymentsTable,
 	PtcWindowTable,
 	LatestExecutionPayloadBidTable,
-	AccountChangeSetDeprecated,
-	StorageChangeSetDeprecated,
-	HashedAccountsDeprecated,
-	HashedStorageDeprecated,
 }
 
 const (
@@ -483,7 +476,23 @@ var DownloaderTables = []string{
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
-var ChaindataDeprecatedTables = []string{}
+var ChaindataDeprecatedTables = []string{
+	// Pre-E3 plain / hashed state, changeset, and history-index tables.
+	// PlainState / HashedStorage / StorageChangeSet baked the per-account
+	// incarnation counter into the storage key; the rest are dead E2-era
+	// indices. The E3 execution path stores state in kv.AccountsDomain /
+	// kv.StorageDomain / kv.CommitmentDomain, which are incarnation-free.
+	// The `drop_legacy_e2_tables` migration drops these buckets on
+	// databases that still carry them; listing them here marks them as
+	// deprecated so the live schema never recreates them on fresh DBs.
+	PlainState,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+	E2AccountsHistory,
+	E2StorageHistory,
+}
 
 // Diagnostics tables
 var DiagnosticsTables = []string{
@@ -515,8 +524,14 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {Flags: DupSort},
-	PlainState:              {Flags: DupSort},
+	// E2-era tables (deprecated; see ChaindataDeprecatedTables). The
+	// DupSort flag is preserved here so that opening an existing E2
+	// database for migration uses the right bucket flags before the
+	// drop_legacy_e2_tables migration drops them.
+	PlainState:                 {Flags: DupSort},
+	HashedStorageDeprecated:    {Flags: DupSort},
+	AccountChangeSetDeprecated: {Flags: DupSort},
+	StorageChangeSetDeprecated: {Flags: DupSort},
 
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},

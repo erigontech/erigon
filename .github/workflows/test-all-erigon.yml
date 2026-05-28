@@ -11,11 +11,19 @@ defaults:
 jobs:
   tests-mac-linux:
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-24.04
           - macos-15
           - windows-2025
+        # Run both serial and parallel exec paths every time so divergence is
+        # caught on the PR rather than after a release. The matrix entries
+        # spawn separate runners and run concurrently — wall-clock unchanged,
+        # runner-minutes doubled.
+        exec_mode:
+          - serial
+          - parallel
         include:
           # Windows GitHub-hosted runners run noticeably slower than Linux for
           # this suite; give them extra headroom to avoid marginal timeouts
@@ -25,6 +33,7 @@ jobs:
             skip_execution_tests: 'true'
           - os: macos-15
             skip_execution_tests: 'true'
+    name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -46,11 +55,15 @@ jobs:
           cleanup-space: true
           ramdisk: true
 
-      - name: Run all tests on ${{ matrix.os }}
+      - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
           SKIP_FLAKY_TESTS: 'true'
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
           ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
+          # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+          # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+          # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
             # Retry after clearing the Go build cache. Low disk space can cause
@@ -73,4 +86,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
