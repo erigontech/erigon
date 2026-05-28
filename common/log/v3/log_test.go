@@ -315,7 +315,7 @@ func TestNetHandler(t *testing.T) {
 
 	l, err := net.Listen("tcp", "localhost:0") //nolint:noctx
 	if err != nil {
-		t.Fatalf("Failed to listen: %v", l)
+		t.Fatalf("Failed to listen: %v", err)
 	}
 
 	errs := make(chan error)
