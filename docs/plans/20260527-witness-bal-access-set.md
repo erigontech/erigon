@@ -389,16 +389,16 @@ ships the wiring and reshapes the tests around the softer merge gate.
 
 ### Task 4: Final integration verification (merge gate)
 
-- [ ] **Mapping unit tests** (Task 2's 6 unit tests on `buildAccessedStateFromBAL`) — green.
-- [ ] **Path assertion** for Amsterdam block (`installRecordingHookCounter` count == 0) —
+- [x] **Mapping unit tests** (Task 2's 6 unit tests on `buildAccessedStateFromBAL`) — green.
+- [x] **Path assertion** for Amsterdam block (`installRecordingHookCounter` count == 0) —
       green.
-- [ ] **Pre-Amsterdam regression** — `TestExecutionWitness` and all existing sub-cases
+- [x] **Pre-Amsterdam regression** — `TestExecutionWitness` and all existing sub-cases
       unchanged and green.
-- [ ] **No new green tests asserting witness correctness for Amsterdam** — those are skipped
+- [x] **No new green tests asserting witness correctness for Amsterdam** — those are skipped
       pending Change 4. Verify the skip messages reference the Change 4 plan path.
-- [ ] `make lint` (repeat until clean — non-deterministic).
-- [ ] `make erigon integration` builds.
-- [ ] `go test ./rpc/jsonrpc/...` clean (skipped tests OK).
+- [x] `make lint` (repeat until clean — non-deterministic).
+- [x] `make erigon integration` builds.
+- [x] `go test ./rpc/jsonrpc/...` clean (skipped tests OK).
 
 ### Task 5: Create Change 4 stub plan
 
