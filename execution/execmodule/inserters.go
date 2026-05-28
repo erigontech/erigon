@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -30,7 +31,30 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// flushBlockOverlayToDB flushes the block overlay to DB, bounding memory
+// during bulk inserts. Not called for single-block chain-tip inserts.
+func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains) error {
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		return nil
+	}
+	rwTx, err := e.db.BeginTemporalRw(ctx)
+	if err != nil {
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin rw for overlay flush: %w", err)
+	}
+	defer rwTx.Rollback()
+	if err := overlay.Flush(ctx, rwTx); err != nil {
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: flush overlay: %w", err)
+	}
+	if err := rwTx.Commit(); err != nil {
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
+	}
+	sd.CloseBlockOverlay()
+	return nil
+}
+
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
+	defer insertBlocksDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return ExecutionStatusBusy, nil
@@ -118,22 +142,19 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			balBytes := block.BlockAccessList
-			if len(balBytes) == 0 {
-				balBytes, err = types.EncodeBlockAccessListBytes(nil)
-				if err != nil {
-					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
-				}
-			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, balBytes); err != nil {
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, block.BlockAccessList); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
 		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	// Writes stay in the block overlay on currentContext — no flush or commit here.
-	// ValidateChain reads from the overlay; UpdateForkChoice flushes everything
-	// in a single commit at the end.
+	// On ChainTip - store blocks in Overlay
+	// On Non-ChainTip - flush to db because batches are big
+	if len(blocks) > 16 {
+		if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
+			return 0, err
+		}
+	}
 	return ExecutionStatusSuccess, nil
 }

@@ -1298,6 +1298,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
+	transactions := block.Transactions()
 
 	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
@@ -1308,6 +1309,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
+	receiptIdx := 0
 	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
 		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
 		if err != nil {
@@ -1326,14 +1328,20 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
 		x := (*types.Receipt)(receipt)
-		transactions := block.Transactions()
 		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx >= len(transactions) {
-			return nil, fmt.Errorf("ReadReceiptsCacheV2: out of range txnIdx=%d, len(transactions)=%d", txnIdx, len(transactions))
+		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
+			// RCacheV2 is read in txNum order. The stored transaction index must
+			// match the next receipt position, otherwise derive the block instead.
+			return nil, nil
 		}
 		txn := transactions[txnIdx]
 		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
 		res = append(res, x)
+		receiptIdx++
+	}
+	if receiptIdx != len(transactions) {
+		// Block receipt RPCs require the full ordered receipt set.
+		return nil, nil
 	}
 	return res, nil
 }

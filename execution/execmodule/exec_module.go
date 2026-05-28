@@ -383,6 +383,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 }
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
@@ -483,6 +484,17 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
+
+	// Chain the validation SD to currentContext when the payload extends the
+	// canonical head. FCU's MergeExtendingFork leaves the latest state in
+	// currentContext.mem; MDBX is committed only later under memory pressure,
+	// so between an FCU and the next newPayload this fresh doms would
+	// otherwise read stale MDBX and compute a wrong trie root. Head-extending
+	// payloads only — a fork payload needs unwindToCommonCanonical to revert
+	// doms to the common ancestor, which the parent link would shadow.
+	if e.currentContext != nil && header.ParentHash == rawdb.ReadHeadBlockHash(tx) {
+		doms.SetParent(e.currentContext)
+	}
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
 	// the validation overlay so unwindToCommonCanonical and ValidatePayload —

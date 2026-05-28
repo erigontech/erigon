@@ -618,6 +618,9 @@ type ByteReader interface {
 type Stream struct {
 	r ByteReader
 
+	// Inline storage for NewBytesStream so the slice header doesn't escape per call.
+	sliceRdr sliceReader
+
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
 	kinderr   error    // error from last readKind
@@ -663,6 +666,24 @@ func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done fun
 	return stream, func() {
 		streamPool.Put(stream)
 	}
+}
+
+// NewBytesStream returns a pooled Stream reading from b. The caller MUST
+// return it via PutStream. Pair as:
+//
+//	stream := rlp.NewBytesStream(b)
+//	defer rlp.PutStream(stream)
+func NewBytesStream(b []byte) *Stream {
+	stream := streamPool.Get().(*Stream)
+	stream.sliceRdr = b
+	stream.Reset(&stream.sliceRdr, uint64(len(b)))
+	return stream
+}
+
+// PutStream returns a Stream to the pool.
+func PutStream(stream *Stream) {
+	stream.sliceRdr = nil // release caller's backing array
+	streamPool.Put(stream)
 }
 
 // Bytes reads an RLP string and returns its contents as a byte slice.
@@ -719,6 +740,40 @@ func (s *Stream) ReadBytes(b []byte) error {
 		return nil
 	default:
 		return ErrExpectedString
+	}
+}
+
+// AppendBytes decodes the next RLP string and appends its contents to dst,
+// returning the extended slice. Pass dst[:0] to reuse a buffer's capacity;
+// pass nil to allocate fresh.
+func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return dst, err
+	}
+	switch kind {
+	case Byte:
+		s.kind = -1
+		return append(dst, s.byteval), nil
+	case String:
+		cur := len(dst)
+		need := cur + int(size)
+		if cap(dst) < need {
+			grown := make([]byte, need)
+			copy(grown, dst)
+			dst = grown
+		} else {
+			dst = dst[:need]
+		}
+		if err = s.readFull(dst[cur:]); err != nil {
+			return dst, err
+		}
+		if size == 1 && dst[cur] < 128 {
+			return dst, ErrCanonSize
+		}
+		return dst, nil
+	default:
+		return dst, ErrExpectedString
 	}
 }
 
