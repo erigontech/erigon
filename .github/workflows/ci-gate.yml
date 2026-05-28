@@ -18,6 +18,8 @@ on:
 concurrency:
   # For PRs: one run per branch; new push cancels the old run.
   # For push/merge_group/workflow_dispatch: unique per run so runs never cancel each other.
+  # merge_group orphans from queue reshuffles are cancelled by
+  # cancel-orphaned-merge-queue-runs.yml when the ephemeral branch is deleted.
   group: >-
     ${{
       github.event_name == 'pull_request' &&
