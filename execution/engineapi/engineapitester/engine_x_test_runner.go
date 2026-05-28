@@ -59,13 +59,12 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return nil
 		}
 		t := time.Now()
-		f, err := os.Open(path)
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 		var preAlloc PreAlloc
-		err = jsoniter.ConfigFastest.NewDecoder(f).Decode(&preAlloc)
-		_ = f.Close()
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		fmt.Printf("[dbg] NewEngineXTestRunner.json.Unmarshal: %s", time.Since(t))
 		if err != nil {
 			return err
