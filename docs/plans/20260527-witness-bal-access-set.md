@@ -405,7 +405,7 @@ ships the wiring and reshapes the tests around the softer merge gate.
 **Files:**
 - Create: `docs/plans/20260528-witness-amsterdam-commitment-divergence.md`
 
-- [ ] Write a brief stub plan capturing the divergence findings recorded in Risk 1:
+- [x] Write a brief stub plan capturing the divergence findings recorded in Risk 1:
       `detectCollapseSiblings.ComputeCommitment` does not reproduce `block.Root()` for
       Amsterdam blocks under either the BAL path or a force-routed re-exec path; lists the
       debug observations; sketches investigation entry points (compare `chain_makers`
@@ -413,7 +413,7 @@ ships the wiring and reshapes the tests around the softer merge gate.
       EIPs that touch commitment state: EIP-2935 history-storage, EIP-4788 beacon root,
       EIP-7708 transfer logs, EIP-8037 state-gas). Marks acceptance: the Skipped Amsterdam
       witness tests flip green when Change 4 lands.
-- [ ] Commit the stub plan.
+- [x] Commit the stub plan.
 
 ### Task 6: [Final] Docs and plan housekeeping
 - [ ] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
