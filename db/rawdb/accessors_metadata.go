@@ -24,6 +24,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,6 +35,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
+
+var genesisMarshalBufPool = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, int(256*datasize.KB))) }}
+
+func getGenesisMarshalBuf() *bytes.Buffer  { return genesisMarshalBufPool.Get().(*bytes.Buffer) }
+func putGenesisMarshalBuf(b *bytes.Buffer) { b.Reset(); genesisMarshalBufPool.Put(b) }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
@@ -91,13 +99,12 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	if has {
 		return nil
 	}
-
-	// Marshal json g
-	val, err := json.Marshal(g)
-	if err != nil {
+	buf := getGenesisMarshalBuf()
+	defer putGenesisMarshalBuf(buf)
+	if err = json.NewEncoder(buf).Encode(g); err != nil {
 		return err
 	}
-	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
+	return db.Put(kv.ConfigTable, kv.GenesisKey, buf.Bytes())
 }
 
 func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
