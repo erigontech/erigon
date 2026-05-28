@@ -731,6 +731,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		if len(auths) == 0 {
 			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
 		}
+		trace := dbg.TraceAuthRefund
+		var tracePrefix string
+		if trace {
+			tracePrefix = fmt.Sprintf("[auth-refund] block=%d txIdx=%d inc=%d", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation())
+		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
@@ -739,6 +744,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 1. chainId check
 			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				if trace {
+					fmt.Printf("%s i=%d SKIP reason=chainID auth.chainId=%s\n", tracePrefix, i, auth.ChainID.String())
+				}
 				continue
 			}
 
@@ -746,6 +754,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
 				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
+				if trace {
+					fmt.Printf("%s i=%d SKIP reason=recover-failed err=%v\n", tracePrefix, i, err)
+				}
 				continue
 			}
 			authority := accounts.InternAddress(*authorityPtr)
@@ -770,6 +781,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				}
 				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					if trace {
+						fmt.Printf("%s i=%d authority=%x SKIP reason=code-not-empty-not-delegated codeHash=%x\n", tracePrefix, i, authority, codeHash)
+					}
 					continue
 				}
 				hasDelegation = true
@@ -782,6 +796,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if authorityNonce != auth.Nonce {
 				log.Trace("invalid nonce, skipping", "auth index", i)
+				if trace {
+					fmt.Printf("%s i=%d authority=%x SKIP reason=nonce-mismatch auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t\n", tracePrefix, i, authority, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation)
+				}
 				continue
 			}
 
@@ -794,15 +811,22 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
+			sgna := uint64(0)
+			sgab := uint64(0)
 			if st.evm.ChainRules().IsAmsterdam {
 				if exists {
-					stateIgasRefund += params.StateGasNewAccount
+					sgna = params.StateGasNewAccount
+					stateIgasRefund += sgna
 				}
 				if hasDelegation || auth.Address == (common.Address{}) {
-					stateIgasRefund += params.StateGasAuthBase
+					sgab = params.StateGasAuthBase
+					stateIgasRefund += sgab
 				}
 			} else if exists {
 				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
+			}
+			if trace {
+				fmt.Printf("%s i=%d authority=%x auth.addr=%x auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t exists=%t +sgna=%d +sgab=%d\n", tracePrefix, i, authority, auth.Address, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation, exists, sgna, sgab)
 			}
 
 			// 7. set authority code
@@ -820,6 +844,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
+		}
+		if trace {
+			fmt.Printf("%s TOTAL refund=%d verified=%d auths=%d\n", tracePrefix, stateIgasRefund, len(verifiedAuthorities), len(auths))
 		}
 	}
 
