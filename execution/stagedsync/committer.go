@@ -138,7 +138,7 @@ func newCommitmentCalculator(
 	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
 	// deferred here. Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
 	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
 	// back and the calculator goroutine is gone.

@@ -296,17 +296,23 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			)
 		}
 
-		progressLogArgs := []any{
-			"num", parentNum,
-			"hash", parentHash,
-			"amount", amount,
-			"peerId", peerId.String(),
-		}
 		select {
 		case <-logProgressTicker.C:
-			bbd.logger.Info("[backward-block-downloader] fetching headers backward periodic progress", progressLogArgs...)
+			progressLogArgs := []any{
+				"num", parentNum,
+				"hash", parentHash,
+				"amount", amount,
+			}
+			bbd.logger.Info("[backward-block-downloader] progress", progressLogArgs...)
 		default:
-			bbd.logger.Trace("[backward-block-downloader] fetching headers backward", progressLogArgs...)
+			if bbd.logger.Enabled(ctx, log.LvlTrace) {
+				progressLogArgs := []any{
+					"num", parentNum,
+					"hash", parentHash,
+					"amount", amount,
+				}
+				bbd.logger.Trace("[backward-block-downloader] fetching headers backward", progressLogArgs...)
+			}
 		}
 
 		peerIndex := peers.peerIdToIndex[peerId]
