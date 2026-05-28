@@ -22,8 +22,9 @@ package rawdb
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
+
+var json = jsoniter.ConfigFastest
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {

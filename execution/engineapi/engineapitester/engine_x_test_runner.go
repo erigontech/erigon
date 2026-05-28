@@ -18,7 +18,6 @@ package engineapitester
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,6 +29,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+var json = jsoniter.ConfigFastest
 
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
 // per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
