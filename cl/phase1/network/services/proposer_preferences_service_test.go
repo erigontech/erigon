@@ -3,16 +3,16 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	synced_data_mock "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
@@ -24,13 +24,19 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 	mockSyncedData := synced_data_mock.NewMockSyncedData(ctrl)
 	ethClockMock := eth_clock.NewMockEthereumClock(ctrl)
 	epbsPool := pool.NewEpbsPool()
-	beaconCfg := &clparams.BeaconChainConfig{
-		SlotsPerEpoch:    32,
-		MinSeedLookahead: 1,
-	}
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 32
+	beaconCfg.SlotsPerHistoricalRoot = 8192
+	beaconCfg.MinSeedLookahead = 1
+	beaconCfg.ValidatorRegistryLimit = 1024
 	forkChoiceMock := &forkchoice_mock.ForkChoiceStorageMock{
-		Headers: map[common.Hash]*cltypes.BeaconBlockHeader{},
+		Headers:             map[common.Hash]*cltypes.BeaconBlockHeader{},
+		StateAtBlockRootVal: map[common.Hash]*state2.CachingBeaconState{},
 	}
+	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = newProposerPreferencesState(&beaconCfg, map[uint64]uint64{96: 42, 100: 42})
+	prevBlsVerify := blsVerify
+	blsVerify = func(_ []byte, _ []byte, _ []byte) (bool, error) { return true, nil }
+	t.Cleanup(func() { blsVerify = prevBlsVerify })
 
 	seenCache, err := lru.New[seenProposerPreferencesKey, struct{}]("seen_proposer_preferences_test", seenProposerPreferencesCacheSize)
 	require.NoError(t, err)
@@ -39,7 +45,7 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 		syncedDataManager: mockSyncedData,
 		forkchoiceStore:   forkChoiceMock,
 		ethClock:          ethClockMock,
-		beaconCfg:         beaconCfg,
+		beaconCfg:         &beaconCfg,
 		epbsPool:          epbsPool,
 		seenCache:         seenCache,
 	}
@@ -49,6 +55,25 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 
 // testDependentRoot is a fixed dependent root used across tests.
 var testDependentRoot = common.HexToHash("0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+
+func newProposerPreferencesState(cfg *clparams.BeaconChainConfig, proposers map[uint64]uint64) *state2.CachingBeaconState {
+	s := state2.New(cfg)
+	s.SetSlot(64)
+	for i := 0; i < 100; i++ {
+		var pk common.Bytes48
+		pk[0] = byte(i)
+		s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), 0)
+	}
+	lookahead := solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch))
+	for slot, validatorIndex := range proposers {
+		epoch := slot / cfg.SlotsPerEpoch
+		stateEpoch := s.Slot() / cfg.SlotsPerEpoch
+		index := (epoch-stateEpoch)*cfg.SlotsPerEpoch + slot%cfg.SlotsPerEpoch
+		lookahead.Set(int(index), validatorIndex)
+	}
+	s.SetProposerLookahead(lookahead)
+	return s
+}
 
 func newTestSignedProposerPreferences(proposalSlot, validatorIndex uint64) *cltypes.SignedProposerPreferences {
 	return &cltypes.SignedProposerPreferences{
@@ -102,7 +127,6 @@ func TestProposerPreferencesServiceWrongEpoch(t *testing.T) {
 	msg := newTestSignedProposerPreferences(100, 42)
 
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(5))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
@@ -114,20 +138,13 @@ func TestProposerPreferencesServiceCurrentEpoch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 
 	// proposalEpoch == currentEpoch (same epoch) → should be accepted now
 	msg := newTestSignedProposerPreferences(100, 42)
 
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
-
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(3))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90)) // slot not yet passed
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	})
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
@@ -148,7 +165,6 @@ func TestProposerPreferencesServiceSlotAlreadyPassed(t *testing.T) {
 	msg := newTestSignedProposerPreferences(100, 42)
 
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(105))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
@@ -167,7 +183,6 @@ func TestProposerPreferencesServiceCurrentSlotIgnored(t *testing.T) {
 	msg := newTestSignedProposerPreferences(100, 42)
 
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
@@ -180,27 +195,19 @@ func TestProposerPreferencesServiceDuplicate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, _, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, _, _ := setupProposerPreferencesService(t, ctrl)
 
 	msg := newTestSignedProposerPreferences(100, 42)
 
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
-
-	// First call: epoch OK, slot not passed, ViewHeadState succeeds
+	// First call: epoch OK and slot not passed.
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90))
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	})
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
 
 	// Second call: same (validatorIndex, slot, dependentRoot) → IGNORE
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90))
 
 	err = service.ProcessMessage(context.Background(), nil, msg)
@@ -209,30 +216,22 @@ func TestProposerPreferencesServiceDuplicate(t *testing.T) {
 	require.Contains(t, err.Error(), "already seen proposer preferences")
 }
 
-func TestProposerPreferencesServiceViewHeadStateError(t *testing.T) {
+func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, _, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, _, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
 
 	msg := newTestSignedProposerPreferences(100, 42)
-
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
+	delete(forkChoiceMock.StateAtBlockRootVal, testDependentRoot)
 
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90))
-
-	// ViewHeadState returns error (e.g. state not synced, or inner validation failed)
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return fmt.Errorf("not synced")
-	})
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "proposer preferences validation failed")
-	require.Contains(t, err.Error(), "not synced")
+	require.True(t, errors.Is(err, ErrIgnore))
+	require.Contains(t, err.Error(), "state for dependent_root")
 
 	// Should NOT be marked as seen (validation failed)
 	seenKey := seenProposerPreferencesKey{validatorIndex: 42, slot: 100, dependentRoot: testDependentRoot}
@@ -243,21 +242,12 @@ func TestProposerPreferencesServiceSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 
 	msg := newTestSignedProposerPreferences(100, 42)
 
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
-
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90))
-
-	// ViewHeadState succeeds (proposer lookahead + BLS all pass)
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	})
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
@@ -272,25 +262,42 @@ func TestProposerPreferencesServiceSuccess(t *testing.T) {
 	require.Equal(t, msg, stored)
 }
 
+func TestProposerPreferencesServiceAdvancesDependentRootStateToBoundary(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+
+	depState := newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 42})
+	depState.SetSlot(63)
+	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = depState
+
+	msg := newTestSignedProposerPreferences(100, 0)
+
+	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.NoError(t, err)
+	require.Equal(t, uint64(63), depState.Slot())
+
+	stored, ok := epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 100, DependentRoot: testDependentRoot})
+	require.True(t, ok)
+	require.Equal(t, msg, stored)
+}
+
 func TestProposerPreferencesServiceDifferentValidatorsSameSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
 
 	msg1 := newTestSignedProposerPreferences(100, 1)
-	msg2 := newTestSignedProposerPreferences(100, 2)
+	msg2 := newTestSignedProposerPreferences(101, 2)
+	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 1, 101: 2})
 
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
-
-	// Both calls: epoch OK, slot not passed, ViewHeadState succeeds
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2)).Times(2)
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3)).Times(2)
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	}).Times(2)
 
 	err := service.ProcessMessage(context.Background(), nil, msg1)
 	require.NoError(t, err)
@@ -298,12 +305,14 @@ func TestProposerPreferencesServiceDifferentValidatorsSameSlot(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, msg2)
 	require.NoError(t, err)
 
-	// Both should be seen (different validators)
+	// Both should be seen (different validators and slots)
 	require.True(t, service.seenCache.Contains(seenProposerPreferencesKey{validatorIndex: 1, slot: 100, dependentRoot: testDependentRoot}))
-	require.True(t, service.seenCache.Contains(seenProposerPreferencesKey{validatorIndex: 2, slot: 100, dependentRoot: testDependentRoot}))
+	require.True(t, service.seenCache.Contains(seenProposerPreferencesKey{validatorIndex: 2, slot: 101, dependentRoot: testDependentRoot}))
 
-	// Pool is keyed by slot, so the second one overwrites the first
 	stored, ok := epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 100, DependentRoot: testDependentRoot})
+	require.True(t, ok)
+	require.Equal(t, msg1, stored)
+	stored, ok = epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 101, DependentRoot: testDependentRoot})
 	require.True(t, ok)
 	require.Equal(t, msg2, stored)
 }
@@ -312,22 +321,13 @@ func TestProposerPreferencesServiceSameValidatorDifferentSlots(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 
 	msg1 := newTestSignedProposerPreferences(96, 42)  // slot 96, epoch 3
 	msg2 := newTestSignedProposerPreferences(100, 42) // slot 100, epoch 3
 
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
-
-	// Both calls: epoch OK, slot not passed, ViewHeadState succeeds
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2)).Times(2)
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(96)).Return(uint64(3))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90)).Times(2)
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	}).Times(2)
 
 	err := service.ProcessMessage(context.Background(), nil, msg1)
 	require.NoError(t, err)
@@ -380,21 +380,14 @@ func TestProposerPreferencesServiceFailedValidationNotStored(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, mockSyncedData, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
+	service, _, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
 
 	msg := newTestSignedProposerPreferences(100, 42)
 
-	// Add dependent root to forkchoice so the check passes
-	forkChoiceMock.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{}
+	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 7})
 
 	ethClockMock.EXPECT().GetCurrentEpoch().Return(uint64(2))
-	ethClockMock.EXPECT().GetEpochAtSlot(uint64(100)).Return(uint64(3))
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(90))
-
-	// ViewHeadState returns error (e.g. wrong proposer or invalid BLS)
-	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return fmt.Errorf("validator 42 is not the proposer for slot 100")
-	})
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)

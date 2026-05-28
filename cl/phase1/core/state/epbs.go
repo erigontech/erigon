@@ -138,6 +138,19 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 	return builderBalance-minBalance >= bidAmount
 }
 
+func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
+	cfg := s.BeaconConfig()
+	if epoch < cfg.MinSeedLookahead {
+		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	}
+	dependentEpoch := epoch - cfg.MinSeedLookahead
+	if dependentEpoch == 0 {
+		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
+	}
+	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	return s.GetBlockRootAtSlot(dependentSlot)
+}
+
 // GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
 // This includes:
 // - Amounts from builder_pending_withdrawals (direct withdrawal requests)

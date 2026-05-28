@@ -739,6 +739,17 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, 0, err
 	}
+	var targetGasLimit *hexutil.Uint64
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) && a.epbsPool != nil {
+		proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
+		dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
+		if err != nil {
+			log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
+		} else if pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot); ok && pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
+			tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
+			targetGasLimit = &tgl
+		}
+	}
 	currEpoch := a.ethClock.GetCurrentEpoch()
 	random := baseState.GetRandaoMixes(currEpoch)
 
@@ -830,16 +841,7 @@ func (a *ApiHandler) produceBeaconBody(
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			sn := hexutil.Uint64(targetSlot)
 			attrs.SlotNumber = &sn
-			if a.epbsPool != nil {
-				// A proposer submits at most one preference per slot, so first-match is deterministic.
-				for _, pref := range a.epbsPool.GetPreferencesForSlot(targetSlot) {
-					if pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
-						tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
-						attrs.TargetGasLimit = &tgl
-						break
-					}
-				}
-			}
+			attrs.TargetGasLimit = targetGasLimit
 		}
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
