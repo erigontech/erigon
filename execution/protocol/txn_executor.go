@@ -736,6 +736,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		if trace {
 			tracePrefix = fmt.Sprintf("[auth-refund] block=%d txIdx=%d inc=%d", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation())
 		}
+		applied := 0
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
@@ -825,6 +826,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			} else if exists {
 				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
 			}
+			applied++
 			if trace {
 				fmt.Printf("%s i=%d authority=%x auth.addr=%x auth.nonce=%d stateNonce=%d codeEmpty=%t hasDelegation=%t exists=%t +sgna=%d +sgab=%d\n", tracePrefix, i, authority, auth.Address, auth.Nonce, authorityNonce, codeHash.IsEmpty(), hasDelegation, exists, sgna, sgab)
 			}
@@ -846,7 +848,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 		}
 		if trace {
-			fmt.Printf("%s TOTAL refund=%d verified=%d auths=%d\n", tracePrefix, stateIgasRefund, len(verifiedAuthorities), len(auths))
+			fmt.Printf("%s TOTAL refund=%d recovered=%d applied=%d auths=%d\n", tracePrefix, stateIgasRefund, len(verifiedAuthorities), applied, len(auths))
 		}
 	}
 
