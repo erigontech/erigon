@@ -482,7 +482,7 @@ type Progress struct {
 	prevCommitTime                 time.Time
 	prevCommittedBlockNum          uint64
 	prevCommittedTxNum             uint64
-	prevCommittedGas               int64
+	prevCommitLogGas               int64
 	prevCommitmentKeyCount         uint64
 	prevCommitmentAccountKeyCount  uint64
 	prevCommitmentStorageKeyCount  uint64
@@ -498,7 +498,7 @@ type Progress struct {
 
 type executor interface {
 	LogExecution()
-	LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
+	LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
 }
 
@@ -723,7 +723,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	}
 }
 
-func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	var te *txExecutor
 	var suffix string
 
@@ -737,14 +737,11 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 		suffix = " serial"
 	}
 
-	if p.prevCommitTime.Before(commitStart) {
-		p.prevCommitTime = commitStart
-	}
-
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevCommitTime)
 
-	committedGasSec := uint64(float64(te.committedGas.Load()-p.prevCommittedGas) / interval.Seconds())
+	executedGas := te.executedGas.Load()
+	gasSec := uint64(float64(executedGas-p.prevCommitLogGas) / interval.Seconds())
 	var committedTxSec uint64
 	if te.lastCommittedTxNum.Load() > p.prevCommittedTxNum {
 		committedTxSec = uint64(float64(te.lastCommittedTxNum.Load()-p.prevCommittedTxNum) / interval.Seconds())
@@ -813,7 +810,7 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	rs.Domains().Metrics().RUnlock()
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
-		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
+		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, gasSec, 0, stepsInDb, commitVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false)
 
@@ -821,7 +818,7 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 
 	if te.lastCommittedTxNum.Load() > 0 {
 		p.prevCommittedTxNum = te.lastCommittedTxNum.Load()
-		p.prevCommittedGas = te.committedGas.Load()
+		p.prevCommitLogGas = executedGas
 		p.prevCommittedBlockNum = te.lastCommittedBlockNum.Load()
 	}
 }

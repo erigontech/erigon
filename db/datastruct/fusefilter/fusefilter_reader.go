@@ -1,7 +1,6 @@
 package fusefilter
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -46,27 +45,32 @@ var (
 	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 )
 
-func NewReader(filePath string) (*Reader, error) {
+func NewReader(filePath string) (_ *Reader, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = f.Close() //nolint
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
-	var content []byte
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
-	content = m
-
+	defer func() {
+		if err != nil {
+			_ = m.Unmap() //nolint
+		}
+	}()
 	_, fileName := filepath.Split(filePath)
-	r, _, err := NewReaderOnBytes(content, fileName)
+	r, _, err := NewReaderOnBytes(m, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -155,13 +159,18 @@ func validateFilterGeometry(filter *xorfilter.BinaryFuse[uint8], fingerprintsLen
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
-	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+	if r.m == nil || r.inner == nil {
+		return 0
+	}
+	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
+	copy(cpy, r.inner.Fingerprints)
+	r.inner.Fingerprints = cpy
 	r.keepInMem = true
 	return datasize.ByteSize(len(r.inner.Fingerprints))
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseWillNeed(r.m); err != nil {
@@ -169,7 +178,7 @@ func (r *Reader) MadvWillNeed() {
 	}
 }
 func (r *Reader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
@@ -198,27 +207,33 @@ type ReaderSharded struct {
 	shards    [256]Reader
 }
 
-func NewReaderSharded(filePath string) (*ReaderSharded, error) {
+func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = f.Close() //nolint
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = m.Unmap() //nolint
+		}
+	}()
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderShardedOnBytes(m, fileName)
 	if err != nil {
-		_ = m.Unmap() //nolint
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	r.f = f
@@ -300,21 +315,11 @@ func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 	if len(r.m) == 0 {
 		return 0
 	}
-	base := unsafe.Pointer(&r.m[0])
-	clone := bytes.Clone(r.m)
+	var res datasize.ByteSize
 	for i := range r.shards {
-		s := &r.shards[i]
-		if s.inner == nil || len(s.inner.Fingerprints) == 0 {
-			continue
-		}
-		off := uintptr(unsafe.Pointer(&s.inner.Fingerprints[0])) - uintptr(base)
-		ln := len(s.inner.Fingerprints)
-		s.inner.Fingerprints = clone[off : off+uintptr(ln)]
-		s.keepInMem = true
+		res += r.shards[i].ForceInMem()
 	}
-	r.m = clone
-	r.keepInMem = true
-	return datasize.ByteSize(len(clone))
+	return res
 }
 
 // MadvWillNeed hints to the OS that all shard blobs will be accessed.

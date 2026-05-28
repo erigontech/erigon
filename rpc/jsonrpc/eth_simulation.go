@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -148,7 +147,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	simulatedBlockResults := make(SimulationResult, 0, len(req.BlockStateCalls))
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
-	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -399,9 +398,9 @@ func (s *simulator) sanitizeCall(
 
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
-		args.ChainID = (*hexutil.Big)(new(big.Int).Set(s.chainConfig.ChainID))
+		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID.ToBig())
 	} else {
-		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID) != 0 {
+		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID.ToBig()) != 0 {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
 		}
 	}
