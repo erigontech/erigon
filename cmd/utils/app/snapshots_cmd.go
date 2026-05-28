@@ -3202,8 +3202,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
-	defer br.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
+	//defer br.MadvNormal().DisableReadAhead()
+	//defer agg.MadvNormal().DisableReadAhead()
 
 	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
 		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
