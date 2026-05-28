@@ -208,15 +208,50 @@ packages and use different chain builders than `TestExecutionWitness`. Composabi
 (BAL-producing executor) + (commitment-history-enabled chain) + (chain queryable through
 `debugApi.ExecutionWitness`) is **unverified**. Confirm or fix it before writing Task 1's test.
 
-- [ ] Stand up the smallest possible in-test Amsterdam chain that **produces a persisted BAL**
+- [x] Stand up the smallest possible in-test Amsterdam chain that **produces a persisted BAL**
       (e.g. `ExperimentalBAL = true`, parallel executor) AND has commitment history enabled
       AND is reachable from a constructed `DebugAPIImpl`. Read back the BAL via
       `rawdb.ReadBlockAccessListBytes` to prove the persistence path works.
-- [ ] Record the working harness in this plan (pointer to the test file / a 5-line sketch). If
+- [x] Record the working harness in this plan (pointer to the test file / a 5-line sketch). If
       no combination of existing builders works, decide whether the test belongs in
       `rpc/jsonrpc` calling the handler directly, or in `engineapi`/`execmodule` calling RPC
       shim helpers — document the decision.
-- [ ] If the harness needs new wiring, list it explicitly so Task 1 doesn't expand silently.
+- [x] If the harness needs new wiring, list it explicitly so Task 1 doesn't expand silently.
+
+**Harness result (Task 0)** — verified composable in `rpc/jsonrpc` package, no new wiring
+needed. Test: `rpc/jsonrpc/debug_witness_bal_constructability_test.go`
+(`TestExecutionWitnessAmsterdamBALConstructability`). Recipe:
+
+1. `statecfg.EnableHistoricalCommitment()` (cleanup-restored) — switches commitment domain
+   to keep per-block history.
+2. `execmoduletester.New(t, WithGenesisSpec({Config: chain.AllProtocolChanges, Alloc: ...}),
+   WithKey(privKey))`. `AllProtocolChanges` has `AmsterdamTime=0`, so the chain is Amsterdam
+   from genesis. **No `WithExperimentalBAL()` needed** — `exec/block_assembler.go:113` builds
+   the BAL whenever `IsAmsterdam(time) || ExperimentalBAL`, and `inserters.go:141-147`
+   unconditionally persists `block.BlockAccessList` via `rawdb.WriteBlockAccessListBytes`.
+3. `blockgen.GenerateChain(..., 1, ...)` with a single simple-transfer tx; assert
+   `chainPack.BlockAccessLists[0]` non-empty and `chainPack.Headers[0].BlockAccessListHash`
+   non-nil before insertion.
+4. `m.InsertChain(chainPack)` — this routes through
+   `chainreader.InsertBlocksAndWaitWithAccessLists(blocks, balMap)` with `balMap` built from
+   `chain.BlockAccessLists`, persisting the BAL.
+5. `rawdb.ReadBlockAccessListBytes(tx, hash, num)` returns the persisted payload;
+   `types.DecodeBlockAccessListBytes(data)` decodes a non-empty `BlockAccessList`. ✓
+6. `rawdb.WriteDBCommitmentHistoryEnabled(tx, true)` — gates `debug_executionWitness`.
+7. `NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false).ExecutionWitness(...)`
+   reaches the handler with no infrastructure error. (Today it goes through the pre-existing
+   re-exec path; Task 1's real test will assert verifiability and the BAL-branch indirect
+   signal once Task 2/3 land.)
+
+**Decisions logged for Task 1:**
+
+- Test home stays in `rpc/jsonrpc` (no need to move to `engineapi`/`execmodule`).
+- Task 1's `TestExecutionWitnessAmsterdamBAL` will use the same harness — either appended to
+  this spike file or to `debug_api_test.go`. The spike file can be kept (it's a useful smoke
+  test for the harness itself) or absorbed into Task 1 — preference: absorb in Task 1 to keep
+  one Amsterdam test surface.
+- No new wiring required beyond what already exists. Both `chain.AllProtocolChanges` (Amsterdam
+  at genesis) and the `WithGenesisSpec`+`InsertChain` path are sufficient.
 
 ### Task 1: Failing test — Amsterdam block witness via the BAL path (RED)
 
