@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -34,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var genesisMarshalBufPool = sync.Pool{New: func() any { return &bytes.Buffer{} }}
+var genesisMarshalBufPool = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, int(256*datasize.MB))) }}
 
 func getGenesisMarshalBuf() *bytes.Buffer  { return genesisMarshalBufPool.Get().(*bytes.Buffer) }
 func putGenesisMarshalBuf(b *bytes.Buffer) { b.Reset(); genesisMarshalBufPool.Put(b) }
