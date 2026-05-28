@@ -7,7 +7,7 @@ An efficient, modular Ethereum execution layer client built for performance, low
 
 - [Get Started](https://docs.erigon.tech/get-started): Hardware requirements, installation options, and first-run guides to get your node online fast.
 - [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
-- [Fundamentals](https://docs.erigon.tech/fundamentals): Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
+- [Fundamentals](https://docs.erigon.tech/fundamentals): Prune modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
 - [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC Daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
 - [Staking](https://docs.erigon.tech/staking): Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
 - [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, TxPool, and other namespaces.
@@ -41,7 +41,7 @@ URL: https://docs.erigon.tech/get-started/why-using-erigon
 - [Immutable, Decentralised Data](../fundamentals/modules/downloader): Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
 - [Predictable RPC Performance](../fundamentals/modules/rpc-daemon): No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
 - [Modularity](../fundamentals/modules/): Core node, RPC Daemon, and TxPool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
-- [OtterSync](../fundamentals/sync-modes): Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
+- [OtterSync](../fundamentals/prune-modes): Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
 - [Flexible Pruning](../fundamentals/optimizing-storage): Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
 - [Home Users & Solo Stakers](../staking/): Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
 
@@ -65,15 +65,15 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [sync mode](../fundamentals/sync-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [prune mode](../fundamentals/prune-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
 
-| Sync Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
+| Prune Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
 | Archive | — | 4 TB | 32 GB | 64 GB |
 | Full (Default) | — | 2 TB | 16 GB | 32 GB |
 | Minimal | — | 1 TB | 16 GB | 64 GB |
 
-| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| **Prune Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | — | 1 TB                        | 16 GB              | 32 GB                 |
 | Full (Default) | —    | 1 TB                        | 8 GB               | 16 GB                 |
@@ -83,7 +83,7 @@ The amount of disk space recommended and RAM you need depends on the [sync mode]
 The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
 :::
 
-| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| **Prune Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
 | Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
@@ -365,7 +365,7 @@ docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=mi
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
 * `--chain=hoodi` specifies which [network](/fundamentals/supported-networks) to sync
-* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](/fundamentals/sync-modes)
+* `--prune.mode=minimal` tells Erigon to use minimal [Prune Mode](/fundamentals/prune-modes)
 * `--datadir` tells Erigon where to store data inside the container
 
 ### Linux/macOS
@@ -828,7 +828,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired sync mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired prune mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -855,8 +855,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
+      # --- Prune Mode (Optional) ---
+      # To change Prune Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -887,7 +887,7 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 * `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
   * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
-* Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Prune Mode](../../fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 
@@ -905,7 +905,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired sync mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired prune mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -931,8 +931,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
+      # --- Prune Mode (Optional) ---
+      # To change Prune Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -960,7 +960,7 @@ docker compose up
 ## Flag explanation
 
 * `--chain=mainnet` specifies to run on Ethereum mainnet
-* Add `--prune.mode=minimal` to run minimal [Sync Mode](/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Prune Mode](/fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
 * `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -1034,7 +1034,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-n
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired sync mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired prune mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -1060,8 +1060,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
+      # --- Prune Mode (Optional) ---
+      # To change Prune Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -1089,7 +1089,7 @@ docker compose up
 ## Flag explanation
 
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
-* Add `--prune.mode=minimal` to run minimal [Sync Mode](/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Prune Mode](/fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
 
@@ -1183,7 +1183,7 @@ Core concepts and day-to-day operations for running a healthy Erigon node.
 ## Sections
 
 - [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
-- [Sync Modes](https://docs.erigon.tech/fundamentals/sync-modes): Full, minimal, and archive sync explained — choose the right mode for your use case.
+- [Prune Modes](https://docs.erigon.tech/fundamentals/prune-modes): Full, minimal, and archive sync explained — choose the right mode for your use case.
 - [Configuration](https://docs.erigon.tech/fundamentals/configuring-erigon): Full CLI flag reference, config file format, and per-component tuning options.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): All chains and testnets supported by Erigon, with network-specific flags and notes.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
@@ -1273,7 +1273,7 @@ To run Erigon with RPC Daemon, TxPool, and other components in a single process 
     ```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
-* Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
+* Based on the [prune mode](prune-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
 * `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -1373,8 +1373,8 @@ This will execute the clean target in the Makefile, which cleans the `go cache`,
 
 ---
 
-# Sync Modes
-URL: https://docs.erigon.tech/fundamentals/sync-modes
+# Prune Modes
+URL: https://docs.erigon.tech/fundamentals/prune-modes
 
 
 Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
@@ -2886,7 +2886,7 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](/fundamentals/sync-modes)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Prune Modes](/fundamentals/prune-modes)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
@@ -7271,11 +7271,11 @@ This list addresses the most common inquiries from the Erigon community, offerin
 
 1. **What is the difference between Erigon and Geth?** Erigon originated as a fork of Geth but has been entirely rewritten with a focus on disk space and sync speed. It uses a flat, key-value database (MDBX) instead of a Merkle Patricia Trie, resulting in a much smaller disk footprint and faster synchronization times.
 2. **Is Erigon a good choice for client diversity?** Yes. The codebases have diverged so significantly from Geth that they are now considered separate clients, making Erigon an excellent choice to support Ethereum's client diversity goals.
-3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and sync mode.
+3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and prune mode.
 4. **How long does it take to sync a node?** Initial synchronization time is highly dependent on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in as little as few hours, while on slower hardware, it can take several days.
 5. **How much disk space is required?** Disk space needs are constantly changing as the blockchain grows. As of September 2025, an Ethereum Mainnet full node requires about 920GB, while an archive node is significantly larger at around 1.77TB. See [Hardware Requirements](/get-started/hardware-requirements) for up-to-date figures.
 6. **Can I run Erigon on an HDD?** It is not recommended to run Erigon on an HDD. The client's performance is critically dependent on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the blockchain tip.
-7. **What is the `--prune.mode` flag, and which mode should I use?** This flag determines which historical data is discarded. The `full` mode (the default for Erigon 3) is suitable for most users. The `minimal` mode is for validators with limited disk space. The `archive` mode is for those who need a full historical record for all past states. See [Sync Modes](/fundamentals/sync-modes) for a full comparison.
+7. **What is the `--prune.mode` flag, and which mode should I use?** This flag determines which historical data is discarded. The `full` mode (the default for Erigon 3) is suitable for most users. The `minimal` mode is for validators with limited disk space. The `archive` mode is for those who need a full historical record for all past states. See [Prune Modes](/fundamentals/prune-modes) for a full comparison.
 8. **Can I change my pruning mode after starting the node?** No. The pruning mode is a permanent choice made at the first sync. Changing it requires deleting the `datadir` directory and a full re-sync from scratch.
 9. **Do I need a separate consensus client?** No, you don't need a separate consensus client. In many cases, it's fine to use [Caplin](/staking/caplin), the embedded consensus client that runs by default within Erigon. However, some users, especially validators, prefer to run a [separate consensus client](/staking/external-consensus-client-as-validator) for enhanced reliability.
 10. **How do I upgrade my Erigon binary?** The process involves gracefully shutting down the node, replacing the old binary with the new one, and restarting. See the [Upgrading](/get-started/installation/upgrading) guide for step-by-step instructions. It is also recommended to back up your datadir before any major upgrade.
@@ -7283,7 +7283,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 12. **What is Erigon's RPC daemon?** The [RPC daemon](/fundamentals/modules/rpc-daemon) is a separate process that handles JSON RPC API requests. It can run on a different machine from the core Erigon client to enhance security and scalability.
 13. **Is it possible to recover from a database corruption?** While Erigon's database is robust, an ungraceful shutdown can cause corruption. The most reliable solution is to delete the corrupted datadir and perform a full re-sync, but it is also worth using repair tools.
 14. **What are the required ports?** Erigon requires specific ports for P2P networking (default `30303` TCP/UDP) and RPC access (`8545` HTTP, `8546` WS, `8551` Engine API). See [Default Ports](/fundamentals/default-ports) for the complete list.
-15. **What is a "snapshot sync"?** Snapshot sync is a stage of the synchronization process where the node downloads pre-made snapshots of the blockchain state. This significantly accelerates the initial sync, reducing the time required to catch up with the network. See [Sync Modes](/fundamentals/sync-modes) for details.
+15. **What is a "snapshot sync"?** Snapshot sync is a stage of the synchronization process where the node downloads pre-made snapshots of the blockchain state. This significantly accelerates the initial sync, reducing the time required to catch up with the network. See [Prune Modes](/fundamentals/prune-modes) for details.
 16. **How do I monitor my node's sync progress?** There are three complementary ways:
 
     * **Read the live log line** — every sync log line is prefixed with the current stage and its position in the pipeline, e.g. `[4/8 Bodies]`. The prefix advances through the stages until `[8/8 Finish]`, at which point the node is at the chain tip. See [Logs → Stage Definitions](/fundamentals/logs#stage-definitions) for the full ordered list.
@@ -7302,7 +7302,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 19. **Where can I find official support?** The primary channels for support and community discussions are the official Erigon Discord and GitHub repository.
 20. **What is Caplin?** [Caplin](/staking/caplin) is Erigon's built-in beacon API server. It allows Erigon to function as both a consensus and execution client.
 21. **What is OtterSync?** OtterSync is a syncing algorithm that further enhances performance by shifting 98% of the computation to network bandwidth, reducing synchronization times and improving chain tip performance, disk footprint, and decentralization.
-22. **Why can't I query blocks before a certain height?** In `full` and `minimal` prune modes, Erigon discards historical state data that is older than the pruning window. If you need to query early blocks, you must run an archive node (`--prune.mode=archive`). See [Sync Modes](/fundamentals/sync-modes) for more on pruning. Note that the pruning mode is set permanently at the first sync and cannot be changed without a full re-sync.
+22. **Why can't I query blocks before a certain height?** In `full` and `minimal` prune modes, Erigon discards historical state data that is older than the pruning window. If you need to query early blocks, you must run an archive node (`--prune.mode=archive`). See [Prune Modes](/fundamentals/prune-modes) for more on pruning. Note that the pruning mode is set permanently at the first sync and cannot be changed without a full re-sync.
 23. **Can I run Erigon on a Raspberry Pi or low-power ARM device?** It is not recommended for Mainnet. Erigon requires a high-end NVMe SSD and sufficient RAM (16 GB minimum) for reliable operation. Low-power ARM devices typically lack the disk I/O performance and memory needed to keep up with the chain tip. See [Hardware Requirements](/get-started/hardware-requirements). A testnet like Sepolia may be feasible on higher-end ARM hardware, but expect limited performance.
 24. **What is the MCP server?** The MCP (Model Context Protocol) server is a built-in component that exposes Erigon's blockchain data to AI assistants like Claude Desktop. It is enabled by default and listens on `127.0.0.1:8553`. To disable it, pass `--mcp.disable` at startup.
 25. **How do I connect Claude Desktop to my Erigon node?** Build the standalone `mcp` binary with `make mcp`, then add it to your Claude Desktop configuration at `~/.config/claude-desktop/config.json` pointing to your node's JSON-RPC endpoint or datadir. See the [MCP Server](/fundamentals/mcp) page for the full configuration example.
@@ -7462,13 +7462,13 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Use a High-End NVMe SSD             | This is a non-negotiable prerequisite. NVMe SSDs are essential for reliable, high-performance node operation. See [Hardware Requirements](/get-started/hardware-requirements).  | Erigon is highly disk I/O intensive. Fast storage prevents bottlenecks and sync issues.                                                                                                 |
 | Integrate Hardware Reliability      | Use ECC memory and consider a disk RAID setup. Do regular backups of your chain data.                                                                                           | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
 | Symlink Data Directories (Advanced) | For systems with multiple disks, consider symlinking `snapshots` and `temp` directories to a cheaper, high-capacity drive, while keeping the main `chaindata` on the fast NVMe. See [Optimizing Storage](/fundamentals/optimizing-storage). | Optimizes cost and capacity while retaining performance for critical files.                                                                          |
-| Maintain Sufficient RAM             | Ensure your system has at least the recommended RAM for your chosen network and [sync mode](/fundamentals/sync-modes). See [Hardware Requirements](/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory).                                                                                   |
+| Maintain Sufficient RAM             | Ensure your system has at least the recommended RAM for your chosen network and [prune mode](/fundamentals/prune-modes). See [Hardware Requirements](/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory).                                                                                   |
 
 ## Node Configuration and Startup
 
 | **Practice**                               | **Details**                                                                                                                                                                         | **Rationale**                                                                                                                                                           |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Make a Mindful Pruning Mode Decision       | The `--prune.mode` flag is irreversible. Choose `full` for most cases, `minimal` for validators with limited space, and `archive` only if all historical data is absolutely needed. See [Sync Modes](/fundamentals/sync-modes). | An incorrect choice can lead to a necessary resync. `Full` is a balance of performance and space.                                |
+| Make a Mindful Pruning Mode Decision       | The `--prune.mode` flag is irreversible. Choose `full` for most cases, `minimal` for validators with limited space, and `archive` only if all historical data is absolutely needed. See [Prune Modes](/fundamentals/prune-modes). | An incorrect choice can lead to a necessary resync. `Full` is a balance of performance and space.                                |
 | Employ a Process Manager                   | Always run Erigon as a systemd or supervisor service. See the [Installation](/get-started/installation) guide for service setup examples.                                           | Ensures a graceful shutdown and allows for automatic restarts, contributing to stability.                                                                               |
 | Use a Dedicated User Account               | Run the Erigon service with a non-root, dedicated user account.                                                                                                                     | Follows security best practices and prevents potential permission-related errors.                                                                                       |
 | Avoid Graceful Shutdown (Unless Necessary) | While a process manager ensures a graceful shutdown, know that Erigon is safe against abrupt halts like process kills (`kill -9`) or a power outage.                                | Erigon's database is fully-transactional, meaning writes are atomic ("all-or-nothing"), preventing "partial writes" and database corruption from non-hardware failures. |
@@ -7616,7 +7616,7 @@ URL: https://docs.erigon.tech/help-center/glossary-of-key-terms
 This glossary provides concise definitions for essential terms related to the Erigon client. Understanding this terminology is crucial for troubleshooting, configuration, and general operation.
 
 * **Account:** A unique entity on the Ethereum blockchain that can hold an ETH balance and send transactions. There are two types: externally owned accounts (EOAs) and contract accounts.
-* **Archive Node:** A node that stores the complete history of the blockchain. This includes all historical states and past transactions, allowing for deep queries into any moment in the blockchain's history. Erigon is particularly known for its highly optimized archive node. See [Sync Modes](/fundamentals/sync-modes).
+* **Archive Node:** A node that stores the complete history of the blockchain. This includes all historical states and past transactions, allowing for deep queries into any moment in the blockchain's history. Erigon is particularly known for its highly optimized archive node. See [Prune Modes](/fundamentals/prune-modes).
 * **Attestation:** A validator's vote on the validity of a block or chain. A high attestation effectiveness is critical for a healthy validator and node. See [Caplin](/staking/caplin).
 * **Block:** A collection of transactions, data, and a header that is cryptographically linked to the previous block.
 * **Consensus Client (CL):** Software that runs the Proof-of-Stake (PoS) consensus protocol. It is responsible for a node's peer discovery, block propagation, and attesting to blocks. Examples include Lighthouse, Nimbus, and Prysm. Erigon includes its own built-in CL called [Caplin](/staking/caplin).
@@ -7624,12 +7624,12 @@ This glossary provides concise definitions for essential terms related to the Er
 * **Engine API:** The communication protocol that allows the **Execution Client** (Erigon) and the **Consensus Client** to communicate and exchange data, such as new blocks and validator attestations. See the [Engine API](/interacting-with-erigon/engine) reference.
 * **Erigon:** An Ethereum **Execution Client** built for efficiency. It is designed to be highly scalable and fast, with a focus on minimizing disk space and improving synchronization speed. See [Why Erigon](/get-started/why-using-erigon).
 * **Execution Client (EL):** Software that executes and validates all transactions, and propagates new blocks across the network. It maintains a full record of the blockchain state. Erigon is an execution client.
-* **Full Node:** A node that holds a complete copy of all block data, from the genesis block to the current head. It retains recent state, all blocks post-Merge, and prunes ancient blocks and state (EIP-4444 enabled). It verifies every block and state transition. See [Sync Modes](/fundamentals/sync-modes).
+* **Full Node:** A node that holds a complete copy of all block data, from the genesis block to the current head. It retains recent state, all blocks post-Merge, and prunes ancient blocks and state (EIP-4444 enabled). It verifies every block and state transition. See [Prune Modes](/fundamentals/prune-modes).
 * **Go (Golang)**: The open-source programming language used to develop Erigon, known for its performance, concurrency, and efficiency.
 * **Gnosis Chain:** A stable, community-owned EVM-compatible chain that uses a PoS consensus mechanism. Erigon has specific optimizations and troubleshooting steps for Gnosis Chain due to its large transaction history. See the [Gnosis Chain Node](/get-started/easy-nodes/how-to-run-a-gnosis-chain-node) guide.
 * **JSON RPC**: JSON Remote Procedure Call. A lightweight protocol used by Ethereum clients to communicate with applications (like wallets or block explorers) over HTTP or WebSockets. See [Interacting with Erigon](/interacting-with-erigon) for the full API reference.
 * **head:** The most recent block in the blockchain.
-* **Minimal Node**: A node that retains the minimum amount of data necessary to function, typically by heavily pruning historical state data to significantly save disk space. See [Sync Modes](/fundamentals/sync-modes).
+* **Minimal Node**: A node that retains the minimum amount of data necessary to function, typically by heavily pruning historical state data to significantly save disk space. See [Prune Modes](/fundamentals/prune-modes).
 * **MDBX:** The high-performance, key-value database that Erigon uses to store blockchain data. It is a more efficient and scalable alternative to the databases used by other clients.
 * **Merkle Patricia Trie:** A data structure used by most Ethereum clients (like Geth) to store the blockchain state. It is highly secure but can be less space-efficient than MDBX.
 * **Mempool:** A pool of unconfirmed transactions that have been submitted to the network but have not yet been included in a block.
@@ -7637,10 +7637,10 @@ This glossary provides concise definitions for essential terms related to the Er
 * **Node:** A piece of software that runs on a computer and interacts with the blockchain network. It can be a full node, light node, or validator node.
 * **OOM-kill:** An event where the operating system's "Out of Memory" killer terminates a process (e.g., Erigon) that is consuming too much memory. See [Hardware Requirements](/get-started/hardware-requirements) for recommended RAM specs.
 * **Peer:** Another node on the network that your client is connected to. The more healthy peers you have, the more reliable your connection is. See [Default Ports](/fundamentals/default-ports) for P2P port configuration.
-* **Pruning:** The process of removing older, unnecessary data from the blockchain to save disk space. Erigon offers different pruning modes (full, minimal, archive) to suit various needs. See [Sync Modes](/fundamentals/sync-modes).
+* **Pruning:** The process of removing older, unnecessary data from the blockchain to save disk space. Erigon offers different pruning modes (full, minimal, archive) to suit various needs. See [Prune Modes](/fundamentals/prune-modes).
 * **rpcdaemon:** A separate, lightweight process in Erigon that handles JSON RPC API requests. This design allows Erigon to continue syncing efficiently even under heavy RPC load. See [RPC Daemon](/fundamentals/modules/rpc-daemon).
-* **Snapshot Sync:** A rapid synchronization method that downloads a pre-made snapshot of the blockchain state and then syncs the remaining blocks. This is much faster than syncing from the genesis block. See [Sync Modes](/fundamentals/sync-modes).
-* **Staged Sync:** Erigon's unique synchronization model. It processes the blockchain in a series of logical stages, such as downloading headers, verifying bodies, and building the state, to maximize speed and efficiency. See [Sync Modes](/fundamentals/sync-modes).
+* **Snapshot Sync:** A rapid synchronization method that downloads a pre-made snapshot of the blockchain state and then syncs the remaining blocks. This is much faster than syncing from the genesis block. See [Prune Modes](/fundamentals/prune-modes).
+* **Staged Sync:** Erigon's unique synchronization model. It processes the blockchain in a series of logical stages, such as downloading headers, verifying bodies, and building the state, to maximize speed and efficiency. See [Prune Modes](/fundamentals/prune-modes).
 * **Validator:** A participant in a Proof-of-Stake network who has staked the network token and is responsible for proposing and attesting to new blocks. See [Caplin](/staking/caplin) and [External Consensus Client](/staking/external-consensus-client-as-validator).
 
 ---

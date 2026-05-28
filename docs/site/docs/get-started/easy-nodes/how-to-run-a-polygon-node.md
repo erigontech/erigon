@@ -13,7 +13,7 @@ sidebar_position: 3
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired sync mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired prune mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -40,8 +40,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Sync Mode (Optional) ---
-      # To change Sync Mode, uncomment the line below:
+      # --- Prune Mode (Optional) ---
+      # To change Prune Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -72,7 +72,7 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 * `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
   * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
-* Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Prune Mode](../../fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 
