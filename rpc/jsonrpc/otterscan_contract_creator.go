@@ -68,8 +68,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// and probe History periodically. In result will have small range of blocks. For binary search or full-scan.
 	//
 	// popular contracts may have dozens of states changes due to ETH deposits/withdraw after contract creation,
-	// so it is optimal to search from the beginning even if the contract has multiple
-	// incarnations.
+	// so it is optimal to search from the beginning even if the contract has been
+	// SELFDESTRUCT'd and re-created multiple times.
 	var prevTxnID, nextTxnID uint64
 	it, err := tx.IndexRange(kv.AccountsHistoryIdx, addr[:], 0, -1, order.Asc, kv.Unlim)
 	if err != nil {
@@ -108,9 +108,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		break
 	}
 
-	// The sort.Search function finds the first block where the incarnation has
-	// changed to the desired one, so we get the previous block from the bitmap;
-	// however if the creationTxnID block is already the first one from the bitmap, it means
+	// The sort.Search function finds the first block where the contract appears
+	// (post-creation), so we get the previous block from the bitmap; however if
+	// the creationTxnID block is already the first one from the bitmap, it means
 	// the block we want is the max block from the previous shard.
 	var creationTxnID uint64
 	var searchErr error
@@ -118,8 +118,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	if nextTxnID == 0 {
 		nextTxnID = prevTxnID + 1
 	}
-	// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
-	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
+	// Binary search in [prevTxnID, nextTxnID] range; get first block where the
+	// contract code is non-empty (= post-creation).
+	// Can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)

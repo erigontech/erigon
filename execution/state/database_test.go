@@ -1041,8 +1041,8 @@ func TestEip2200Gas(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Create contract, drop trie, reload trie from disk and add block with contract call
-func TestWrongIncarnation(t *testing.T) {
+// Deploy a contract in block 1, call it in block 2, assert state is readable after each block.
+func TestContractDeployThenCall(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -1157,8 +1157,10 @@ func TestWrongIncarnation(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// create acc, deploy to it contract, reorg to state without contract
-func TestWrongIncarnation2(t *testing.T) {
+// Pre-fund a deterministic address with a plain transfer, deploy a contract at
+// that same address on the short chain, then reorg to a longer chain that only
+// does the pre-funding (no deploy). Asserts post-reorg state is consistent.
+func TestContractReorgPrefundedAddress(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
