@@ -34,7 +34,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	libdeflate "github.com/erigontech/go-libdeflate"
+	"github.com/erigontech/go-libdeflate"
 
 	"github.com/rs/cors"
 
@@ -490,6 +490,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Either invalid (too many colons) or no port specified
 		host = r.Host
 	}
+	host = strings.ToLower(host)
 	if ipAddr := net.ParseIP(host); ipAddr != nil {
 		// It's an IP address, we can serve that
 		h.next.ServeHTTP(w, r)
@@ -505,7 +506,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
-	if _, exist := h.vhosts[strings.ToLower(host)]; exist {
+	if _, exist := h.vhosts[host]; exist {
 		h.next.ServeHTTP(w, r)
 		return
 	}
@@ -565,13 +566,6 @@ func putDst(dst []byte) {
 	if cap(dst) <= gzPoolBufCap {
 		gzDstPool.Put(dst)
 	}
-}
-
-func gzDstGrow(b []byte, wantLen int) []byte {
-	if cap(b) >= wantLen {
-		return b[:wantLen]
-	}
-	return make([]byte, wantLen, max(wantLen, 2*cap(b)))
 }
 
 type gzipResponseWriter struct {
@@ -645,7 +639,8 @@ func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
 	defer gzCompressorPool.Put(c)
 
 	dst := gzDstPool.Get().([]byte)
-	dst = gzDstGrow(dst, c.GzipCompressBound(len(src)))
+	gzBound := c.GzipCompressBound(len(src))
+	dst = slices.Grow(dst[:0], gzBound)[:gzBound]
 	defer putDst(dst)
 
 	n, err := c.CompressGzip(dst, src)

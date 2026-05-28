@@ -140,7 +140,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	ibsApply.SetTxContext(1, 0)
 	err = ibsApply.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibsApply.SetNonce(addr, 7)
+	err = ibsApply.SetNonce(addr, 7, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibsApply.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)

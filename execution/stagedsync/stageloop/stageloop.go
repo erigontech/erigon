@@ -18,7 +18,6 @@ package stageloop
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"runtime"
@@ -36,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -211,13 +209,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		// Collate+prune OLD data (its own RwTx).
 		if a, ok := db.(state.HasAgg); ok {
 			agg := a.Agg().(*state.Aggregator)
-			if capRoTx, capErr := db.BeginTemporalRo(ctx); capErr == nil {
-				if maxTxNum, e := rawdbv3.TxNums.Max(ctx, capRoTx, blockReader.FrozenBlocks()); e == nil && maxTxNum > 0 {
-					stepSize := agg.StepSize()
-					agg.SetMaxCollationTxNum((maxTxNum / stepSize) * stepSize)
-				}
-				capRoTx.Rollback()
-			}
 			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
 				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
 			}, logger); err != nil {
@@ -265,27 +256,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if a, ok := db.(state.HasAgg); ok {
 			a.Agg().(*state.Aggregator).UnlockCollation()
 			collationLocked = false
-		}
-
-		// Read the actual committed txNum from the DB "state" key.
-		// This is the authoritative source for what's been committed —
-		// use it to cap collation so files don't capture uncommitted data.
-		if verifyTx, verifyErr := db.BeginTemporalRo(ctx); verifyErr == nil {
-			v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
-			if getErr != nil {
-				// Log but continue — aggregator stays at its prior watermark; the next iteration
-				// will retry. Silent failure here is the failure mode that motivated the fix:
-				// without the watermark refresh, collation files capture uncommitted data.
-				logger.Warn("[stageloop frozen] SetLastFlushedCommitmentTxNum: GetLatest failed; aggregator watermark unchanged", "err", getErr)
-			} else if len(v) >= 16 {
-				committedTxNum := binary.BigEndian.Uint64(v[:8])
-				if a, ok := db.(state.HasAgg); ok {
-					a.Agg().(*state.Aggregator).SetLastFlushedCommitmentTxNum(committedTxNum)
-				}
-			}
-			verifyTx.Rollback()
-		} else {
-			logger.Warn("[stageloop frozen] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
 		}
 
 		// Reopen RO tx and reinit block overlay on same doms.
@@ -376,7 +346,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 		// Collate (if steps accumulated) + prune in separate transaction.
 		if a, ok := db.(state.HasAgg); ok {
 			agg := a.Agg().(*state.Aggregator)
-			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(tx kv.TemporalRwTx) error {
+			if err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
 				return sync.RunPrune(ctx, tx, initialCycle, 0)
 			}, logger); err != nil {
 				return err

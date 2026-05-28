@@ -23,11 +23,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -520,13 +521,13 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 	return hd.engine.VerifyHeader(hd.consensusHeaderReader, header, true /* seal */)
 }
 
-type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
+type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *uint256.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *uint256.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	var returnTd *big.Int
-	var lastD *big.Int
+	var returnTd *uint256.Int
+	var lastD *uint256.Int
 	var lastTime uint64
 	if hd.insertQueue.Len() > 0 {
 		link := hd.insertQueue[0]
@@ -588,7 +589,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return true, true, 0, lastTime, nil
 				}
 				returnTd = td
-				lastD = link.header.Difficulty.ToBig()
+				lastD = &link.header.Difficulty
 			}
 		}
 
@@ -620,9 +621,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		link.ClearChildren()
 	}
 	var blocksToTTD uint64
-	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil {
+	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil && !lastD.IsZero() {
 		// Calculate the estimation of when TTD will be hit
-		var x big.Int
+		var x uint256.Int
 		x.Sub(terminalTotalDifficulty, returnTd)
 		x.Div(&x, lastD)
 		if x.IsUint64() {
@@ -635,7 +636,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, terminalTotalDifficulty *uint256.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool
@@ -843,7 +844,7 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 }
 
 func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader) FeedHeaderFunc {
-	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (*big.Int, error) {
+	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (*uint256.Int, error) {
 		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight)
 	}
 }
@@ -914,7 +915,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	return
 }
 
-func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *uint256.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil, nil
@@ -942,7 +943,10 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		return nil, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
-	td = new(big.Int).Add(parentTd, header.Difficulty.ToBig())
+	td = new(uint256.Int)
+	if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
+		return nil, fmt.Errorf("[%s] TD overflows uint256 for header %x %d", hi.logPrefix, hash, blockHeight)
+	}
 
 	// Now we can decide whether this header will create a change in the canonical head
 	// TODO: Add bor check here if required
@@ -964,7 +968,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+	if err = rawdb.WriteTd(db, hash, blockHeight, *td); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 	// skipIndexing=true - because next stages will build indices in-batch (for example StageBlockHash)
@@ -976,7 +980,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	return td, nil
 }
 
-func (hi *HeaderInserter) GetLocalTd() *big.Int {
+func (hi *HeaderInserter) GetLocalTd() *uint256.Int {
 	return hi.localTd
 }
 

@@ -96,6 +96,15 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
+	// Clean up block timeliness entries for finalized blocks.
+	f.blockTimeliness.Range(func(k, v any) bool {
+		blockRoot := k.(common.Hash)
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if !has || header.Slot <= finalizedSlot {
+			f.blockTimeliness.Delete(k)
+		}
+		return true
+	})
 	// Clean up GLOAS-specific payload votes for finalized blocks.
 	// Note: envelope files are cleaned up in forkGraph.Prune().
 	if newFinalized.Epoch >= f.beaconCfg.GloasForkEpoch {

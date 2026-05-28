@@ -64,6 +64,26 @@ var ourCapabilities = []string{
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
 	"engine_getBlobsV3",
+	"POST /engine/v1/payloads",
+	"POST /engine/v2/payloads",
+	"POST /engine/v3/payloads",
+	"POST /engine/v4/payloads",
+	"POST /engine/v5/payloads",
+	"GET /engine/v1/payloads/{payload_id}",
+	"GET /engine/v2/payloads/{payload_id}",
+	"GET /engine/v3/payloads/{payload_id}",
+	"GET /engine/v4/payloads/{payload_id}",
+	"GET /engine/v5/payloads/{payload_id}",
+	"GET /engine/v6/payloads/{payload_id}",
+	"POST /engine/v1/forkchoice",
+	"POST /engine/v2/forkchoice",
+	"POST /engine/v3/forkchoice",
+	"POST /engine/v4/forkchoice",
+	"POST /engine/v1/blobs",
+	"POST /engine/v2/blobs",
+	"POST /engine/v3/blobs",
+	"POST /engine/v1/client/version",
+	"POST /engine/v1/capabilities",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -193,8 +213,6 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	// TODO(racytech): add proper version or refactor this part
-	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
 }
 
