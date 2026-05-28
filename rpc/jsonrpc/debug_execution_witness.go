@@ -744,6 +744,14 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
 	}
 	for addr := range a.CodeAddrs {
+		plainKey := addr.Bytes()
+		postEnc, _, _ := post.Read(kv.CodeDomain, plainKey, stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := pre.Read(kv.CodeDomain, plainKey, stepSize)
+			if len(preEnc) == 0 {
+				continue
+			}
+		}
 		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
 	}
 	for addr, keys := range a.Storage {
