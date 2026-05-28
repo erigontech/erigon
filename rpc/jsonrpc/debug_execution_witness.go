@@ -737,7 +737,7 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
 		if len(postEnc) == 0 {
 			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
-			if len(preEnc) == 0 {
+			if len(preEnc) == 0 || bytes.Equal(postEnc, preEnc) {
 				continue
 			}
 		}
@@ -748,7 +748,7 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 		postEnc, _, _ := post.Read(kv.CodeDomain, plainKey, stepSize)
 		if len(postEnc) == 0 {
 			preEnc, _, _ := pre.Read(kv.CodeDomain, plainKey, stepSize)
-			if len(preEnc) == 0 {
+			if len(preEnc) == 0 || bytes.Equal(postEnc, preEnc) {
 				continue
 			}
 		}
@@ -760,7 +760,7 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
 				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
-				if len(preEnc) == 0 {
+				if len(preEnc) == 0 || bytes.Equal(postEnc, preEnc) {
 					continue
 				}
 			}
