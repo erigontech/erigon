@@ -8,7 +8,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -72,7 +71,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.RequestsHash = g.RequestsHash
 	enc.BlockAccessListHash = g.BlockAccessListHash
 	enc.SlotNumber = (*math.HexOrDecimal64)(g.SlotNumber)
-	return jsoniter.ConfigFastest.Marshal(&enc)
+	return json.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
@@ -100,7 +99,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		SlotNumber            *math.HexOrDecimal64                        `json:"slotNumber"`
 	}
 	var dec Genesis
-	if err := jsoniter.ConfigFastest.Unmarshal(input, &dec); err != nil {
+	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Config != nil {
