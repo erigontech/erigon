@@ -327,8 +327,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 
 // Finalize the execution of a block and computes the resulting state root
 func (s *Stateless) Finalize() common.Hash {
-	// New contracts are being created at these addresses. Therefore, we need to clear the storage items
-	// that might be remaining in the trie and figure out the next incarnations
+	// Newly-created contracts: clear any stale storage left in the trie at these addresses.
 	for addrHash := range s.created {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot

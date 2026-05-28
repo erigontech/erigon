@@ -1256,16 +1256,10 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		//
 		// Case (2) is disabled for newly-created stateObjects (CREATE2 after
 		// SELFDESTRUCT, or any contract creation). stateObject.original holds
-		// the PRE-CREATION account snapshot (carried over from the destructed
-		// previous incarnation by createObject(addr, previous)). New code that
-		// happens to match the destroyed contract's code is NOT a cumulative
-		// net-zero — it is a deploy of the same bytecode at a new incarnation,
-		// and the CodePath/CodeHashPath writes are load-bearing. Deleting them
-		// causes FlushVersionedWrites to omit them, so a later tx's read of
-		// CodeHashPath misses the versionMap and falls through to the recursive
-		// AddressPath read, which returns the stale snapshot captured at
-		// createObject time (CodeHash=EmptyCodeHash). That empty CodeHash then
-		// serialises into the account and corrupts the trie root.
+		// the pre-creation snapshot, so new code that happens to match the
+		// destroyed contract's code is a deploy, not a net-zero — dropping
+		// the CodePath/CodeHashPath writes lets a later tx's CodeHashPath
+		// read fall through to a stale empty CodeHash and corrupt the trie.
 		matchesOriginal := !stateObject.newlyCreated && codeHash == stateObject.original.CodeHash
 		if codeHash == baseCodeHash || matchesOriginal {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -1929,7 +1923,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	//      fresh stateObject within the same block (e.g. value transfer to a just-
 	//      SD'd address, or a CREATE2 reusing a recently destroyed slot). The new
 	//      stateObject's selfdestructed/deleted flags are false, but we still need
-	//      to wipe the stale storage/code from the prior incarnation before writing
+	//      to wipe the stale storage/code from the pre-destruction state before writing
 	//      the new account state. Branch 2 below then re-enables the write path.
 	if stateObject.selfdestructed || stateObject.recreatedFromDestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()

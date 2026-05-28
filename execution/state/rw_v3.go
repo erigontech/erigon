@@ -78,8 +78,8 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // emitted by UpdateAccountData), so no domain reads are needed to reconstruct
 // the full serialised account. SelfDestructPath=true signals either:
 //   - pure account deletion (no account fields follow) — from DeleteAccount
-//   - code+storage cleanup before recreation — from UpdateAccountData when
-//     original.Incarnation > account.Incarnation (followed by account fields)
+//   - code+storage cleanup before recreation — from Writer.DeleteAccount when
+//     stateObject.recreatedFromDestructed fires (followed by account fields)
 func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes VersionedWrites, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
 	domains := rs.domains
 
@@ -181,8 +181,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						continue
 					}
 				}
-				// Otherwise: cleanup code+storage before recreating account
-				// (originalIncarnation > account.Incarnation case).
+				// Otherwise: cleanup code+storage before recreating account.
 			}
 
 			// Contract creation: clear stale storage before writing new account.
@@ -697,10 +696,6 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
 
-	// Note: selfdestruct/recreate cleanup is signalled via DeleteAccount
-	// (driven by stateObject.recreatedFromDestructed in updateAccount),
-	// not via an incarnation comparison here.
-
 	// Only emit fields that changed vs `original`. In the parallel executor
 	// `original` comes from the worker's block-origin snapshot (pre-block
 	// values), so emitting an unchanged field would carry a stale block-
@@ -842,10 +837,6 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.CodeHash)
 	}
 	addressValue := address.Value()
-	// Note: code+storage cleanup on selfdestruct/recreate now flows through
-	// DeleteAccount (driven by stateObject.selfdestructed or
-	// stateObject.recreatedFromDestructed in updateAccount); no incarnation
-	// comparison is performed here anymore.
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(addressValue, value)

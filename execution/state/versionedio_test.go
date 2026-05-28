@@ -570,8 +570,8 @@ func TestSetAccountBalanceOrDelete_UpdateExisting(t *testing.T) {
 }
 
 // TestSetAccountBalanceOrDelete_NewAccount verifies that when an account has no
-// existing writes, all 4 account fields are emitted (balance, nonce, incarnation,
-// codeHash) so that applyVersionedWrites can reconstruct a complete account.
+// existing writes, balance, nonce and codeHash are all emitted so that
+// applyVersionedWrites can reconstruct a complete account.
 func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	t.Parallel()
 

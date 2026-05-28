@@ -199,8 +199,7 @@ func TestLightCollectorNewAccountCodeHash(t *testing.T) {
 
 	// A transfer creates the account with balance only.
 	// LightCollector emits balance (changed), nonce (unchanged from zero original),
-	// incarnation (unchanged), codeHash (unchanged).
-	// With partial writes: only balance is emitted.
+	// codeHash (unchanged). With partial writes: only balance is emitted.
 	lc := state.NewLightCollector()
 	original := &accounts.Account{} // zero — account didn't exist
 	account := &accounts.Account{Balance: *uint256.NewInt(1000)}

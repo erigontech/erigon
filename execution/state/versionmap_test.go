@@ -426,26 +426,12 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	}
 }
 
-// TestValidateRead_PriorContractCreation_DetectedViaCreateContractPath
-// reproduces the bug originally fixed by PR #19628 (and patched in #19656):
-// when a prior tx creates a contract and a later same-block tx speculatively
-// reads the account as non-existent (AddressPath = StorageRead → nil), the
-// stale read must be invalidated.
-//
-// Under HasBAL + parallel exec, the worker's AddressPath write is filtered
-// out of the per-tx flush (the BAL doesn't list AddressPath, so normalize
-// drops it), so the AddressPath MVReadResultDone branch can't catch the
-// staleness on its own. PRs #19628/#19656 used BalancePath as the cross-check
-// signal — wrong, because BalancePath also fires for ordinary
-// UpdateAccountData on a pre-existing account and for BAL pre-population of
-// any balance-changing tx. That caused the same-sender BAL retry storm
-// (PR #21240).
-//
-// On the post-incarnation-removal moksha branch, CreateContractPath is the
-// available creation-specific signal: it is written only by the CREATE /
-// CREATE2 path in IBS.CreateAccount, never by UpdateAccountData, never by
-// BAL pre-pop. This test asserts that when CreateContractPath has a Done
-// entry at a prior txIdx, a same-block AddressPath/StorageRead is invalidated.
+// CreateContractPath is the creation-specific cross-check signal: written
+// only by the CREATE/CREATE2 path in IBS.CreateAccount, never by
+// UpdateAccountData or BAL pre-population. This test asserts that a Done
+// CreateContractPath entry at a prior txIdx invalidates a same-block
+// AddressPath/StorageRead — the speculative "account does not exist" read
+// must lose to the prior tx's deployment.
 func TestValidateRead_PriorContractCreation_DetectedViaCreateContractPath(t *testing.T) {
 	t.Parallel()
 

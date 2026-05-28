@@ -65,7 +65,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			return nil, err
 		}
 
-		if len(v) == 0 { // creation, but maybe not our Incarnation
+		if len(v) == 0 { // creation entry, but maybe not the one we're searching for
 			prevTxnID = txnID
 			continue
 		}

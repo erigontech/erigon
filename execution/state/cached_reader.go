@@ -97,8 +97,7 @@ func (cr *CachedReader) HasStorage(address accounts.Address) (bool, error) {
 	return cr.r.HasStorage(address)
 }
 
-// ReadAccountCode is called when code of an account needs to be fetched from the state
-// Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
+// ReadAccountCode is called when code of an account needs to be fetched from the state.
 func (cr *CachedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addrValue := address.Value()
 	if c, ok := cr.cache.GetCode(addrValue[:]); ok {

@@ -508,8 +508,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
 		}
-		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
-		// that might be remaining in the trie and figure out the next incarnations
+		// Newly-created contracts: clear any stale storage left in the trie at these addresses.
 		for addrHash := range b.created {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
@@ -518,7 +517,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, accountWithAddress := range b.accountUpdates {
 			if accountWithAddress.Account != nil {
-				//fmt.Println("updateTrieRoots b.accountUpdates", addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], accountWithAddress.Account)
 			} else {
 				tds.t.Delete(addrHash[:])

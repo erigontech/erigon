@@ -330,7 +330,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		var deferredRootErr error
 
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
-		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
+		// (balance, nonce, codeHash, code, storage, selfDestruct are
 		// separate entries).  This differs from the old StateUpdates count which
 		// grouped all fields of one account as a single entry.  The values are only
 		// used for an internal consistency check (blockUpdateCount==ApplyCount) and
@@ -3226,7 +3226,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// Don't fill account fields for SD'd addresses — same rationale as
 			// the sdSet drop in the filter loop above. Without this, the
 			// stateReader fallback below would round-trip pre-SD account state
-			// (Nonce, CodeHash, Incarnation) back into the writeset and undo
+			// (Nonce, CodeHash) back into the writeset and undo
 			// the SD when applyVersionedWrites picks the cleanup-then-recreate
 			// branch.
 			continue
