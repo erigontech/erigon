@@ -30,6 +30,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # dorny/paths-filter needs the merge-base between this ref and the
+          # default branch to diff the push. With the action's default shallow
+          # clone, it has to call `git fetch --deepen=...`, which intermittently
+          # fails on busy runners with `fatal: shallow file has changed since
+          # we read it` (exit 128) — sinking the whole "All tests" workflow
+          # because the matrix `needs: source-of-changes`. Fetching full history
+          # here avoids the deepen path entirely.
+          fetch-depth: 0
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
@@ -99,7 +108,18 @@ jobs:
         env:
           SKIP_FLAKY_TESTS: 'true'
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all
+        run: |
+          if ! GOGC=80 make test-all; then
+            # Retry after clearing the Go build cache. Low disk space can cause
+            # severe, non-obvious build/test failures that don't surface a clear
+            # "no space left" message (e.g. linker mmap failure, SIGBUS in cgo
+            # mdbx_env_open). Tuning a cache size limit is too fragile; Go's own
+            # cache trimmer handles the common case, and this clobber handles
+            # the rest.
+            echo "::notice::make test-all failed; clearing Go build cache and retrying"
+            time go clean -cache
+            GOGC=80 make test-all
+          fi
 
       - name: SonarCloud scan in case OS Linux and changed_files is not true
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
