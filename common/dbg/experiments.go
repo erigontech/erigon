@@ -250,14 +250,16 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	totalMemory := estimate.TotalMemory()
+	aboveThreshold := memStats.Alloc < (totalMemory/100)*heapProfileThreshold
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap profile threshold check",
+			"aboveThreshold", aboveThreshold,
 			"alloc", common.ByteCount(memStats.Alloc),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
+	if aboveThreshold {
 		return
 	}
 
