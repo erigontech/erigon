@@ -25,7 +25,11 @@ jobs:
     name: benchmarks (${{ matrix.exec_mode }})
     runs-on: ubuntu-24.04
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         # Each entry runs on its own GitHub-hosted runner — wall-clock
         # unchanged, runner-minutes doubled. Bench numbers are reported

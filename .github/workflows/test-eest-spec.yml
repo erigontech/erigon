@@ -29,7 +29,11 @@ jobs:
     needs: load-matrix
     name: eest-spec-${{ matrix.shard }}
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         include: ${{ fromJson(needs.load-matrix.outputs.matrix) }}
     runs-on: ubuntu-24.04
