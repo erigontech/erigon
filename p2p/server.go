@@ -368,12 +368,20 @@ func (s *sharedUDPConn) Close() error {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
+func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	if srv.running.Load() {
 		return errors.New("server already running")
 	}
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
+
+	// Mark running before listener/dialer setup so startup connections pass setupConn's running check.
+	srv.running.Store(true)
+	defer func() {
+		if err != nil {
+			srv.running.Store(false)
+		}
+	}()
 
 	srv.logger = logger
 	if srv.clock == nil {
@@ -420,7 +428,6 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
 
-	srv.running.Store(true)
 	srv.loopWG.Add(1)
 	go srv.run()
 	return nil
