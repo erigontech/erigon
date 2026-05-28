@@ -398,17 +398,18 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
 		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
 
-		if isExistingBuilder || hasBuilderCredentials {
+		if !isExistingBuilder {
+			if !hasBuilderCredentials {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
 			if IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
 				newPendingDeposits.Append(deposit)
-			} else {
-				ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
+				continue
 			}
-			continue
 		}
 
-		// Non-builder deposits all stay in the pending queue
-		newPendingDeposits.Append(deposit)
+		ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
 	}
 
 	b.SetPendingDeposits(newPendingDeposits)
