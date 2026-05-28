@@ -37,7 +37,7 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 	enc.Balance = (*math.HexOrDecimal256)(g.Balance)
 	enc.Nonce = math.HexOrDecimal64(g.Nonce)
 	enc.PrivateKey = g.PrivateKey
-	return json.Marshal(&enc)
+	return jsoniter.ConfigFastest.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
