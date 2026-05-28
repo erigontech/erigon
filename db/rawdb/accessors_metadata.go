@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -99,11 +100,13 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	if has {
 		return nil
 	}
+	t := time.Now()
 	buf := getGenesisMarshalBuf()
 	defer putGenesisMarshalBuf(buf)
 	if err = json.NewEncoder(buf).Encode(g); err != nil {
 		return err
 	}
+	fmt.Printf("[dbg] do %s\n", time.Since(t))
 	return db.Put(kv.ConfigTable, kv.GenesisKey, buf.Bytes())
 }
 
