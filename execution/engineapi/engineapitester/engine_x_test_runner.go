@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -62,7 +63,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
