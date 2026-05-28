@@ -729,6 +729,38 @@ func (a *accessedState) isEmpty() bool {
 	return len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0
 }
 
+// touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
+// skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
+func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
+	for addr := range a.Addresses {
+		plainKey := addr.Bytes()
+		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
+			if len(preEnc) == 0 {
+				continue
+			}
+		}
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+	}
+	for addr := range a.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			plainKey := append(addr.Bytes(), key.Bytes()...)
+			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
+			if len(postEnc) == 0 {
+				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
+				if len(preEnc) == 0 {
+					continue
+				}
+			}
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+		}
+	}
+}
+
 // touchAll touches every accessed account, storage slot, and code address on the
 // commitment context. Order matches the original inline implementation: accounts
 // first, then storage, then code.
@@ -915,10 +947,10 @@ func detectCollapseSiblings(
 			blockNum, seekBlockNum, parentNum)
 	}
 
-	accessed.touchAll(sdCtx)
+	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
