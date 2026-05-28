@@ -138,6 +138,19 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 	return builderBalance-minBalance >= bidAmount
 }
 
+func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
+	cfg := s.BeaconConfig()
+	if epoch < cfg.MinSeedLookahead {
+		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	}
+	dependentEpoch := epoch - cfg.MinSeedLookahead
+	if dependentEpoch == 0 {
+		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
+	}
+	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	return s.GetBlockRootAtSlot(dependentSlot)
+}
+
 // GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
 // This includes:
 // - Amounts from builder_pending_withdrawals (direct withdrawal requests)
@@ -174,24 +187,24 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	return total
 }
 
-// IsPendingValidator returns true if there's a pending deposit for the given pubkey
-// with a valid signature. This is used to prevent builder deposits from being applied
-// when there's already a valid pending validator deposit for the same pubkey.
+// IsPendingValidator returns true if any pending deposit in the list matches
+// the given pubkey AND has a valid deposit signature.
 // [New in Gloas:EIP7732]
-func IsPendingValidator(s abstract.BeaconState, pubkey common.Bytes48) bool {
-	pendingDeposits := s.GetPendingDeposits()
+func IsPendingValidator(cfg *clparams.BeaconChainConfig, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit], pubkey common.Bytes48) bool {
 	if pendingDeposits == nil {
 		return false
 	}
-	cfg := s.BeaconConfig()
 	for i := 0; i < pendingDeposits.Len(); i++ {
-		deposit := pendingDeposits.Get(i)
-		if deposit.PubKey != pubkey {
+		d := pendingDeposits.Get(i)
+		if d.PubKey != pubkey {
 			continue
 		}
-		// Check if this pending deposit has a valid signature
-		valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
-		if err == nil && valid {
+		valid, err := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		if err != nil {
+			log.Debug("IsValidDepositSignature failed", "pubkey", d.PubKey, "err", err)
+			continue
+		}
+		if valid {
 			return true
 		}
 	}
