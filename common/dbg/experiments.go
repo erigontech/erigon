@@ -263,7 +263,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if aboveThreshold {
+	if !aboveThreshold {
 		return
 	}
 
