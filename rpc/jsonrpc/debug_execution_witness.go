@@ -926,8 +926,7 @@ func buildAccessedStateFromBAL(ctx context.Context, tx kv.TemporalTx, blockHash 
 // a parent-state code lookup into the accessedState consumed by the witness
 // pipeline. SystemAddress entries are taken as-is (the BAL already encodes the
 // consensus inclusion rule). Codes are deliberately over-approximated: for
-// every BAL address, parent code is fetched and included iff len(code) > 0
-// (see plan Risk 1).
+// every BAL address, parent code is fetched and included iff len(code) > 0.
 func accessedStateFromBAL(bal types.BlockAccessList, readCode balCodeReader) (*accessedState, error) {
 	out := &accessedState{
 		Addresses:   make(map[common.Address]struct{}),
