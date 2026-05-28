@@ -405,7 +405,7 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 			}
 		}
 		if mgasPerSec > 0 {
-			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+			metrics.ChainTipMgasPerSecw.Add(mgasPerSec)
 			logCtx = append(logCtx, "mgas/s", mgasPerSec)
 		}
 	}
