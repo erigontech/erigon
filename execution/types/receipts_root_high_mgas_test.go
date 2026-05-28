@@ -17,6 +17,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 
@@ -58,6 +59,10 @@ func TestDeriveSha_ReceiptOver16MiB(t *testing.T) {
 	}
 	receipts := Receipts{r}
 	r.Bloom = CreateBloom(receipts)
+
+	var buf bytes.Buffer
+	receipts.EncodeIndex(0, &buf)
+	require.Greater(t, buf.Len(), 1<<24, "test only exercises the bug if the receipt RLP exceeds 16 MiB")
 
 	expectedBytes, err := hex.DecodeString(expectedRootHex)
 	require.NoError(t, err)

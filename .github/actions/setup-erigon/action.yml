@@ -302,7 +302,7 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
         echo "ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
 
     - name: Display free disk space after setup
