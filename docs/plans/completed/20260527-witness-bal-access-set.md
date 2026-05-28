@@ -416,9 +416,9 @@ ships the wiring and reshapes the tests around the softer merge gate.
 - [x] Commit the stub plan.
 
 ### Task 6: [Final] Docs and plan housekeeping
-- [ ] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
-      (default: no change).
-- [ ] Move this plan to `docs/plans/completed/`.
+- [x] Update CLAUDE.md / package notes only if a genuinely new, non-obvious pattern emerged
+      (default: no change). — no change; followed existing fork-gate + provider patterns.
+- [x] Move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 *Manual / external — no checkboxes*
