@@ -106,6 +106,7 @@ type MatchFinder3 struct {
 	sa         []int32
 	lcp        []int32
 	inv        []int32
+	saisBuf    []int32
 	headLen    int
 	tailLen    int
 	side       int // 0, 1, or 2 (undetermined)
@@ -273,7 +274,7 @@ func (mf *MatchFinder3) FindLongestMatches(data []byte) []Match {
 	} else {
 		mf.sa = mf.sa[:n]
 	}
-	if err := sais.Sais(data, mf.sa); err != nil {
+	if err := sais.Sais(data, mf.sa, &mf.saisBuf); err != nil {
 		panic(err)
 	}
 	if cap(mf.inv) < n {

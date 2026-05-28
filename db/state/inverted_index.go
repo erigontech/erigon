@@ -414,7 +414,6 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
@@ -429,9 +428,7 @@ func (iit *InvertedIndexRoTx) Close() {
 	if iit.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	files := iit.files
 	iit.files = nil
-	files.refcntDecrement(iit.ii.FilenameBase, iit.ii.logger)
 
 	for _, r := range iit.readers {
 		r.Close()
