@@ -106,6 +106,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 	// side-effect, preventing the subsequent accede-mode open from panicking.
 	if applyMigrations {
 		dirs := datadir.New(datadirCli)
+
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
 			return nil, fmt.Errorf("open migrations db: %w", err)
@@ -113,6 +114,9 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		defer migrationsDB.Close()
 
 		migrator := migrations.NewMigrator(opts.GetLabel())
+		migrator.ReopenDB = func() (kv.RwDB, error) {
+			return opts.Exclusive(true).Open(context.Background())
+		}
 		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
 			return nil, err
@@ -120,11 +124,12 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			rawDBExcl := opts.Exclusive(true).MustOpen()
-			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
+			rawDBExcl, err = migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger)
+			if err != nil {
 				rawDBExcl.Close()
 				return nil, err
 			}
-			rawDBExcl.Close()
+			defer rawDBExcl.Close()
 		}
 	}
 

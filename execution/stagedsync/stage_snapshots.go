@@ -588,9 +588,10 @@ func alignStateToBlockSnapshots(ctx context.Context, agg *state.Aggregator, cfg 
 	// Re-running alignment on restart would remove snapshot files that
 	// the downloader re-downloaded, cascading until all state is gone.
 	if roTx, err := cfg.db.BeginRo(ctx); err == nil {
-		// Check if the commitment domain values table has any entries.
-		// This table is only populated by execution, not by OtterSync.
-		if cursor, cErr := roTx.Cursor(kv.TblCommitmentVals); cErr == nil {
+		// Check if the commitment domain keys table has any entries.
+		// TblCommitmentKeys (DupSort) is written by every execution flush including
+		// deletions; TblCommitmentVals would miss pure-deletion runs.
+		if cursor, cErr := roTx.Cursor(kv.TblCommitmentKeys); cErr == nil {
 			k, _, _ := cursor.First()
 			cursor.Close()
 			roTx.Rollback()

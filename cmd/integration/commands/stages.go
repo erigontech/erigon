@@ -752,6 +752,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 	doms.SetInMemHistoryReads(false)
 
+	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+	collateAndPrune := func() error {
+		return agg.CollateAndPruneIfNeeded(ctx, db, func(pruneTx kv.TemporalRwTx) error {
+			return sync.RunPrune(ctx, pruneTx, s.CurrentSyncCycle.IsInitialCycle, 0)
+		}, logger)
+	}
+
 	if chainTipMode {
 		//if chainTip = true, forced noCommit = false
 		for bn := execProgress; bn < block; bn++ {
@@ -782,6 +789,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			if err := collateAndPrune(); err != nil {
+				return err
+			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -792,7 +802,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		doms.ClearRam(true)
 		return tx.Commit()
 	}
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.PresetOfflineExecution()
@@ -821,6 +830,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if err := collateAndPrune(); err != nil {
 				return err
 			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
