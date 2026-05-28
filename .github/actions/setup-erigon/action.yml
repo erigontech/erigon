@@ -97,9 +97,6 @@ runs:
         filter: ${{ inputs.filter }}
         clean: false
         submodules: false
-        lfs: false
-      env:
-        GIT_LFS_SKIP_SMUDGE: 1
 
     - name: Unshallow current commit
       shell: bash
@@ -143,7 +140,7 @@ runs:
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
-      run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
+      run: time git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
 
     - name: Install git-restore-mtime
       shell: bash
