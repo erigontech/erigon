@@ -936,10 +936,10 @@ func detectCollapseSiblings(
 		}
 	}
 
-	// Only leaf siblings need their content in the witness: branch siblings have their hash
-	// embedded in the parent branch node, which is already on the access path.
-	sdCtx.SetCollapseTracer(func(siblingPath []byte, _ int16) {
-		if len(siblingPath) == 64 || len(siblingPath) == 128 {
+	// Include storage leaf siblings (len==128, needed for correct merged-key hash) and
+	// storage branch siblings (hashedExtLen==0, depth>=64, Geth resolves the branch child).
+	sdCtx.SetCollapseTracer(func(siblingPath []byte, hashedExtLen int16) {
+		if len(siblingPath) == 128 || (hashedExtLen == 0 && len(siblingPath) >= 65) {
 			siblingPaths = append(siblingPaths, common.Copy(siblingPath))
 		}
 	})
