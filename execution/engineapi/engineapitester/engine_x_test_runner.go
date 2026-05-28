@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -63,7 +64,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		}
 		var preAlloc PreAlloc
 		t := time.Now()
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		fmt.Printf("[dbg] NewEngineXTestRunner.json.Unmarshal: %s", time.Since(t))
 		if err != nil {
 			return err
