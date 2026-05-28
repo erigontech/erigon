@@ -67,7 +67,6 @@ jobs:
         id: erigon
         with:
           submodules: true
-          lfs: tests
           cleanup-space: true
           build-cache-extra-key: ${{ matrix.test-group }}
           ramdisk: true
