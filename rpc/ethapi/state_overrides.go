@@ -17,9 +17,11 @@
 package ethapi
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -32,17 +34,18 @@ import (
 
 type StateOverrides map[accounts.Address]Account
 
-func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
-	for addr, account := range *so {
+func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.Address) error {
+	for _, addr := range addrs {
+		account := (*so)[addr]
 		// Override account nonce.
 		if account.Nonce != nil {
-			if err := ibs.SetNonce(addr, uint64(*account.Nonce)); err != nil {
+			if err := ibs.SetNonce(addr, uint64(*account.Nonce), tracing.NonceChangeUnspecified); err != nil {
 				return err
 			}
 		}
 		// Override account (contract) code.
 		if account.Code != nil {
-			if err := ibs.SetCode(addr, *account.Code); err != nil {
+			if err := ibs.SetCode(addr, *account.Code, tracing.CodeChangeUnspecified); err != nil {
 				return err
 			}
 		}
@@ -85,13 +88,28 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 }
 
 func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
-	err := so.override(ibs)
+	if precompiles == nil {
+		precompiles = make(vm.PrecompiledContracts)
+	}
+	// Sort addresses for deterministic iteration order across both loops (map iteration is random in Go).
+	addrs := make([]accounts.Address, 0, len(*so))
+	for addr := range *so {
+		addrs = append(addrs, addr)
+	}
+	sort.Slice(addrs, func(i, j int) bool {
+		ai, aj := addrs[i].Value(), addrs[j].Value()
+		return bytes.Compare(ai[:], aj[:]) < 0
+	})
+
+	err := so.override(ibs, addrs)
 	if err != nil {
 		return err
 	}
+
 	// Tracks destinations of precompiles that were moved.
 	dirtyAddresses := make(map[accounts.Address]struct{})
-	for addr, account := range *so {
+	for _, addr := range addrs {
+		account := (*so)[addr]
 		// If a precompile was moved to this address already, it can't be overridden.
 		if _, ok := dirtyAddresses[addr]; ok {
 			return fmt.Errorf("account %s has already been overridden by a precompile", addr)

@@ -99,10 +99,9 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
-		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
 		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
 			Block:     block,
-			TD:        td,
+			TD:        chainReader.GetTd(block.ParentHash(), block.NumberU64()-1),
 			Finalized: chainReader.CurrentFinalizedHeader(),
 			Safe:      chainReader.CurrentSafeHeader(),
 		})
@@ -406,9 +405,14 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
 
+	var lbloom types.Bloom
+	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if bloomFromReceipts {
+				lbloom.Or(&r.Bloom)
+			}
 		}
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
@@ -427,7 +431,9 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 	// a pre-Byzantium block (e.g. hive bcInvalidHeaderTest/log1_wrongBloom)
 	// is silently accepted.
 	if checkBloom && !alwaysSkipReceiptCheck {
-		lbloom := types.CreateBloom(receipts)
+		if !bloomFromReceipts {
+			lbloom = types.CreateBloom(receipts)
+		}
 		if lbloom != h.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
 		}

@@ -83,6 +83,44 @@ func TestBloomExtensively(t *testing.T) {
 	}
 }
 
+func TestBloomOr(t *testing.T) {
+	t.Parallel()
+
+	var left Bloom
+	left.Add([]byte("left"))
+	var right Bloom
+	right.Add([]byte("right"))
+
+	merged := left
+	merged.Or(&right)
+
+	if !merged.Test([]byte("left")) {
+		t.Fatal("expected merged bloom to contain left input")
+	}
+	if !merged.Test([]byte("right")) {
+		t.Fatal("expected merged bloom to contain right input")
+	}
+	if left.Test([]byte("right")) {
+		t.Fatal("Or should not mutate the source bloom")
+	}
+
+	r1 := &Receipt{Logs: []*Log{{
+		Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Topics:  []common.Hash{common.HexToHash("0x01")},
+	}}}
+	r2 := &Receipt{Logs: []*Log{{
+		Address: common.HexToAddress("0x2222222222222222222222222222222222222222"),
+		Topics:  []common.Hash{common.HexToHash("0x02"), common.HexToHash("0x03")},
+	}}}
+	combined := CreateBloom(Receipts{r1, r2})
+	acc := CreateBloom(Receipts{r1})
+	r2Bloom := CreateBloom(Receipts{r2})
+	acc.Or(&r2Bloom)
+	if acc != combined {
+		t.Fatal("expected OR of receipt blooms to match CreateBloom over all receipts")
+	}
+}
+
 func BenchmarkBloom9(b *testing.B) {
 	test := []byte("testestestest")
 	for b.Loop() {
@@ -137,6 +175,12 @@ func BenchmarkCreateBloom(b *testing.B) {
 	for i := 0; i < 200; i += 2 {
 		copy(rLarge[i:], rSmall)
 	}
+	var rLargeWithBloom = make(Receipts, len(rLarge))
+	for i, receipt := range rLarge {
+		cpy := *receipt
+		cpy.Bloom = CreateBloom(Receipts{&cpy})
+		rLargeWithBloom[i] = &cpy
+	}
 	b.Run("small", func(b *testing.B) {
 		b.ReportAllocs()
 		var bl Bloom
@@ -155,6 +199,22 @@ func BenchmarkCreateBloom(b *testing.B) {
 		var bl Bloom
 		for b.Loop() {
 			bl = CreateBloom(rLarge)
+		}
+		b.StopTimer()
+		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
+		got := crypto.Keccak256Hash(bl.Bytes())
+		if got != exp {
+			b.Errorf("Got %x, exp %x", got, exp)
+		}
+	})
+	b.Run("large/or-receipt-blooms", func(b *testing.B) {
+		b.ReportAllocs()
+		var bl Bloom
+		for b.Loop() {
+			bl = Bloom{}
+			for _, receipt := range rLargeWithBloom {
+				bl.Or(&receipt.Bloom)
+			}
 		}
 		b.StopTimer()
 		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")

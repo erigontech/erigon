@@ -798,7 +798,7 @@ func TestTxnPoke(t *testing.T) {
 		txnSlot := newTestTxnSlot(2, 0, 300000, 300000, 100000)
 		txnSlot.IDHash[0] = 1
 		txnSlots.Append(txnSlot, addr[:], true)
-		pool.AddRemoteTxns(ctx, txnSlots)
+		pool.AddRemoteTxns(ctx, txnSlots, nil, nil)
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -815,7 +815,7 @@ func TestTxnPoke(t *testing.T) {
 		txnSlot := newTestTxnSlot(2, 0, 3000000, 3000000, 100000)
 		txnSlot.IDHash[0] = 2
 		txnSlots.Append(txnSlot, addr[:], true)
-		pool.AddRemoteTxns(ctx, txnSlots)
+		pool.AddRemoteTxns(ctx, txnSlots, nil, nil)
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -1015,7 +1015,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
 	copier.Copy(&chainConfig, testforks.Forks["Prague"])
-	chainConfig.ChainID = maxUint256.ToBig()
+	chainConfig.ChainID = maxUint256
 	cache := kvcache.NewSimple()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
@@ -1378,7 +1378,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 
 	key, err := crypto.GenerateKey()
 	require.NoError(err)
-	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID.ToBig()), key)
+	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID), key)
 	require.NoError(err)
 	dt := &wrapper.Tx.DynamicFeeTransaction
 	v, r, s := signedTx.RawSignatureValues()
@@ -1474,7 +1474,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 		txnSlot.IDHash[0] = 1
 		txnSlots.Append(txnSlot, addr[:], true)
 
-		txnPool.AddRemoteTxns(ctx, txnSlots)
+		txnPool.AddRemoteTxns(ctx, txnSlots, nil, nil)
 	}
 
 	// empty because AddRemoteTxns logic is intentionally empty
@@ -1668,7 +1668,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 
 	// Step 5: A valid Osaka-shaped blob txn must now be admittable (not rejected
 	// with BlobPoolOverflow), proving the counters were properly cleaned up.
-	chainID := uint256.MustFromBig(testforks.Forks["Cancun"].ChainID)
+	chainID := testforks.Forks["Cancun"].ChainID
 	osakaRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, 2)
 	parseCtx := NewTxnParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -1701,7 +1701,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
-	chainID := uint256.MustFromBig(testforks.Forks["Osaka"].ChainID)
+	chainID := testforks.Forks["Osaka"].ChainID
 	rawTxn := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, params.MaxBlobsPerTxn)
 
 	parseCtx := NewTxnParseContext(*chainID)
@@ -1949,7 +1949,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	// Run the benchmark: process transactions one by one
 	// This measures the performance of adding and processing remote transactions
 	for i := 0; i < b.N; i++ {
-		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
+		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]}, nil, nil)
 		err := pool.processRemoteTxns(ctx)
 		require.NoError(err)
 	}

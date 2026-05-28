@@ -138,7 +138,7 @@ func newCommitmentCalculator(
 	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
 	// deferred here. Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
 	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
 	// back and the calculator goroutine is gone.
@@ -222,6 +222,23 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
+		// Block-validity rejection (set by the worker-result path in
+		// nextResult — insufficient funds, gas overflow, finalize error,
+		// scheduler-exhausted incarnations). The apply loop's case
+		// *blockResult fast-paths Err != nil and returns it directly;
+		// we must NOT compute commitment for this block because (a)
+		// sd.mem may contain partial-tx writes from txs that succeeded
+		// before the failing one, so the computed root would be
+		// non-canonical, and (b) computing here would emit an
+		// ErrWrongTrieRoot through rootResults that races with the apply
+		// loop's Err return — the wrong-trie-root error wins and masks
+		// the original validation diagnostic (EEST assertions on the
+		// underlying exception class then fail). Skip silently and let
+		// the apply loop surface the worker's diagnosis.
+		if r.Err != nil {
+			return
+		}
+
 		// Track the latest block boundary.
 		cc.lastBlockResult = r
 
