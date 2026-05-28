@@ -181,6 +181,121 @@ func TestBlockAccessListHashEmpty(t *testing.T) {
 	}
 }
 
+func TestBlockAccessListCountDeclaredReads(t *testing.T) {
+	var addrA, addrB, addrC common.Address
+	addrA[19] = 0x01
+	addrB[19] = 0x02
+	addrC[19] = 0x03
+
+	bal := BlockAccessList{
+		{
+			Address: accounts.InternAddress(addrA),
+			StorageReads: []accounts.StorageKey{
+				accounts.InternKey(common.HexToHash("0x01")),
+				accounts.InternKey(common.HexToHash("0x02")),
+			},
+		},
+		{
+			Address: accounts.InternAddress(addrB),
+			StorageReads: []accounts.StorageKey{
+				accounts.InternKey(common.HexToHash("0x03")),
+			},
+		},
+		{Address: accounts.InternAddress(addrC)}, // no reads
+	}
+	if got, want := bal.CountDeclaredReads(), 3; got != want {
+		t.Fatalf("CountDeclaredReads: got %d, want %d", got, want)
+	}
+	if got := (BlockAccessList{}).CountDeclaredReads(); got != 0 {
+		t.Fatalf("empty BAL CountDeclaredReads: got %d, want 0", got)
+	}
+}
+
+func TestDeclaredReadTracker(t *testing.T) {
+	var addrA, addrB common.Address
+	addrA[19] = 0x01
+	addrB[19] = 0x02
+	slotA1 := common.HexToHash("0x01")
+	slotA2 := common.HexToHash("0x02")
+	slotB1 := common.HexToHash("0x03")
+
+	bal := BlockAccessList{
+		{
+			Address: accounts.InternAddress(addrA),
+			StorageReads: []accounts.StorageKey{
+				accounts.InternKey(slotA1),
+				accounts.InternKey(slotA2),
+			},
+		},
+		{
+			Address:      accounts.InternAddress(addrB),
+			StorageReads: []accounts.StorageKey{accounts.InternKey(slotB1)},
+		},
+	}
+
+	tr := NewDeclaredReadTracker(bal)
+	if got := tr.Remaining(); got != 3 {
+		t.Fatalf("initial Remaining: got %d, want 3", got)
+	}
+
+	tr.ObserveRead(addrA, slotA1)
+	if got := tr.Remaining(); got != 2 {
+		t.Fatalf("after first declared read: got %d, want 2", got)
+	}
+
+	tr.ObserveRead(addrA, slotA1)
+	if got := tr.Remaining(); got != 2 {
+		t.Fatalf("duplicate observe must not double-count: got %d, want 2", got)
+	}
+
+	tr.ObserveRead(addrA, common.HexToHash("0xff"))
+	if got := tr.Remaining(); got != 2 {
+		t.Fatalf("undeclared slot must not decrement: got %d, want 2", got)
+	}
+
+	tr.ObserveRead(common.HexToAddress("0xdeadbeef"), slotA1)
+	if got := tr.Remaining(); got != 2 {
+		t.Fatalf("read on unknown address must not decrement: got %d, want 2", got)
+	}
+
+	tr.ObserveRead(addrA, slotA2)
+	tr.ObserveRead(addrB, slotB1)
+	if got := tr.Remaining(); got != 0 {
+		t.Fatalf("after draining all declared reads: got %d, want 0", got)
+	}
+}
+
+func TestDeclaredReadTrackerEmpty(t *testing.T) {
+	tr := NewDeclaredReadTracker(nil)
+	if got := tr.Remaining(); got != 0 {
+		t.Fatalf("nil BAL Remaining: got %d, want 0", got)
+	}
+	tr.ObserveRead(common.HexToAddress("0x01"), common.HexToHash("0x01"))
+	if got := tr.Remaining(); got != 0 {
+		t.Fatalf("observe on empty tracker must remain 0: got %d", got)
+	}
+}
+
+func TestEarlyRejectCheck(t *testing.T) {
+	// 60M gas limit, 1000 declared reads ⇒ 2,000,000 gas needed.
+	// gasUsed=58,000,000 leaves exactly 2,000,000 → pass.
+	if err := EarlyRejectCheck(60_000_000, 58_000_000, 1000); err != nil {
+		t.Fatalf("expected pass at exact boundary, got %v", err)
+	}
+	// gasUsed=58,000,001 leaves 1,999,999 → fail.
+	if err := EarlyRejectCheck(60_000_000, 58_000_001, 1000); err == nil {
+		t.Fatal("expected error when gasRemaining < R_remaining * BalItemCost")
+	}
+	// Zero outstanding reads → trivially passes regardless of gas.
+	if err := EarlyRejectCheck(60_000_000, 60_000_000, 0); err != nil {
+		t.Fatalf("zero remaining declared reads must always pass, got %v", err)
+	}
+	// gasUsed > blockGasLimit is a caller bug — surface it.
+	if err := EarlyRejectCheck(100, 101, 0); err == nil {
+		t.Fatal("expected error when gasUsed exceeds blockGasLimit")
+	}
+}
+
 // TestBlockAccessListEmptyRoundTrip verifies that an empty BAL encodes to the
 // canonical empty RLP list (0xc0) and decodes back to a non-nil empty slice.
 // EIP-7928 requires: "When no state changes are present, this field is the

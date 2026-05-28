@@ -2054,6 +2054,12 @@ type blockExecutor struct {
 	blobGasUsed         uint64
 	gasPool             *protocol.GasPool
 
+	// EIP-7928 phantom-read DoS mitigation: blockGasLimit is captured at
+	// newBlockExec time (fresh gasPool); declaredReadTracker counts which
+	// storage_reads from the declared BAL have been observed as actual reads.
+	blockGasLimit       uint64
+	declaredReadTracker *types.DeclaredReadTracker
+
 	execFailed, execAborted []int
 
 	// Stores the execution statistics for the last incarnation of each task
@@ -2104,24 +2110,47 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err err
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
-	return &blockExecutor{
-		blockNum:         blockNum,
-		blockHash:        blockHash,
-		begin:            time.Now(),
-		stats:            map[int]ExecutionStat{},
-		finalizedResults: map[int]*execResult{},
-		settledInput:     map[int]bool{},
-		estimateDeps:     map[int][]int{},
-		preValidated:     map[int]bool{},
-		blockIO:          &state.VersionedIO{},
-		versionMap:       state.NewVersionMap(accessList),
-		profile:          profile,
-		applyResults:     applyResults,
-		commitResults:    commitResults,
-		gasPool:          gasPool,
-		blockStateCache:  state.NewBlockStateCache(),
-		exhausted:        exhausted,
+	// gasPool is freshly constructed per block, so its regular-dimension capacity
+	// equals the block gas limit at this point. Capture it for EIP-7928 mitigation.
+	var blockGasLimit uint64
+	if gasPool != nil {
+		blockGasLimit = gasPool.RegularGasAvailable()
 	}
+	return &blockExecutor{
+		blockNum:            blockNum,
+		blockHash:           blockHash,
+		begin:               time.Now(),
+		stats:               map[int]ExecutionStat{},
+		finalizedResults:    map[int]*execResult{},
+		settledInput:        map[int]bool{},
+		estimateDeps:        map[int][]int{},
+		preValidated:        map[int]bool{},
+		blockIO:             &state.VersionedIO{},
+		versionMap:          state.NewVersionMap(accessList),
+		profile:             profile,
+		applyResults:        applyResults,
+		commitResults:       commitResults,
+		gasPool:             gasPool,
+		blockStateCache:     state.NewBlockStateCache(),
+		exhausted:           exhausted,
+		blockGasLimit:       blockGasLimit,
+		declaredReadTracker: types.NewDeclaredReadTracker(accessList),
+	}
+}
+
+// gasUsedSoFar returns the conservative high-water mark of block gas consumed
+// across both EIP-8037 dimensions: blockGasLimit minus the smaller remaining
+// reservoir. Used by EIP-7928 EarlyRejectCheck to size the gas budget still
+// available for outstanding declared reads.
+func (be *blockExecutor) gasUsedSoFar() uint64 {
+	if be.gasPool == nil {
+		return 0
+	}
+	remaining := min(be.gasPool.RegularGasAvailable(), be.gasPool.StateGasAvailable())
+	if remaining >= be.blockGasLimit {
+		return 0
+	}
+	return be.blockGasLimit - remaining
 }
 
 // invalidBlockResult wraps a block-validity failure (insufficient funds, gas
@@ -2556,6 +2585,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						return keys
 					}
 					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum))
+				}
+
+				// EIP-7928 phantom-read DoS mitigation. After a tx validates and
+				// consumes its gas, attribute its storage reads to the declared
+				// BAL and verify enough gas remains to satisfy outstanding
+				// declared reads at BalItemCost each. Empty BAL ⇒ Remaining()
+				// is 0 and the check is a no-op.
+				if reads := be.blockIO.ReadSet(txVersion.TxIndex); reads != nil {
+					reads.Scan(func(vr *state.VersionedRead) bool {
+						if vr.Path == state.StoragePath {
+							be.declaredReadTracker.ObserveRead(vr.Address.Value(), vr.Key.Value())
+						}
+						return true
+					})
+				}
+				if err := types.EarlyRejectCheck(be.blockGasLimit, be.gasUsedSoFar(), be.declaredReadTracker.Remaining()); err != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 				}
 
 				// Snapshot the finalized result before pushing — prevents
