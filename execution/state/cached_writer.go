@@ -48,7 +48,7 @@ func (cw *CachedWriter) UpdateAccountCode(address accounts.Address, codeHash acc
 		return err
 	}
 	addressValue := address.Value()
-	cw.cache.SetCodeWrite(addressValue[:], 1, code)
+	cw.cache.SetCodeWrite(addressValue[:], code)
 	return nil
 }
 
@@ -71,9 +71,9 @@ func (cw *CachedWriter) WriteAccountStorage(address accounts.Address, key accoun
 	addressValue := address.Value()
 	keyValue := key.Value()
 	if value.IsZero() {
-		cw.cache.SetStorageDelete(addressValue[:], 1, keyValue[:])
+		cw.cache.SetStorageDelete(addressValue[:], keyValue[:])
 	} else {
-		cw.cache.SetStorageWrite(addressValue[:], 1, keyValue[:], value.Bytes())
+		cw.cache.SetStorageWrite(addressValue[:], keyValue[:], value.Bytes())
 	}
 	return nil
 }

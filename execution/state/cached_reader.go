@@ -69,7 +69,7 @@ func (cr *CachedReader) ReadAccountDataForDebug(address accounts.Address) (*acco
 func (cr *CachedReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addrValue := address.Value()
 	keyValue := key.Value()
-	if s, ok := cr.cache.GetStorage(addrValue[:], 1, keyValue[:]); ok {
+	if s, ok := cr.cache.GetStorage(addrValue[:], keyValue[:]); ok {
 		var v uint256.Int
 		(&v).SetBytes(s)
 		return v, true, nil
@@ -79,9 +79,9 @@ func (cr *CachedReader) ReadAccountStorage(address accounts.Address, key account
 		return uint256.Int{}, false, err
 	}
 	if !ok {
-		cr.cache.SetStorageAbsent(addrValue[:], 1, keyValue[:])
+		cr.cache.SetStorageAbsent(addrValue[:], keyValue[:])
 	} else {
-		cr.cache.SetStorageRead(addrValue[:], 1, keyValue[:], v.Bytes())
+		cr.cache.SetStorageRead(addrValue[:], keyValue[:], v.Bytes())
 	}
 	return v, ok, nil
 }
@@ -101,7 +101,7 @@ func (cr *CachedReader) HasStorage(address accounts.Address) (bool, error) {
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addrValue := address.Value()
-	if c, ok := cr.cache.GetCode(addrValue[:], 1); ok {
+	if c, ok := cr.cache.GetCode(addrValue[:]); ok {
 		return c, nil
 	}
 	c, err := cr.r.ReadAccountCode(address)
@@ -109,7 +109,7 @@ func (cr *CachedReader) ReadAccountCode(address accounts.Address) ([]byte, error
 		return nil, err
 	}
 	if cr.cache != nil && len(c) <= 1024 {
-		cr.cache.SetCodeRead(addrValue[:], 1, c)
+		cr.cache.SetCodeRead(addrValue[:], c)
 	}
 	return c, nil
 }
