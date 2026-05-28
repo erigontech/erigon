@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"math/big"
 
+	jsoniter "github.com/json-iterator/go"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -89,9 +91,11 @@ func NewAuraSeal(step uint64, signature []byte) *AuRaSeal {
 // GenesisAlloc specifies the initial state that is part of the genesis block.
 type GenesisAlloc map[common.Address]GenesisAccount
 
+var _jsonFast = jsoniter.ConfigCompatibleWithStandardLibrary
+
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := _jsonFast.Unmarshal(data, &m); err != nil {
 		return err
 	}
 	*ga = make(GenesisAlloc)

@@ -57,12 +57,13 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		if info.IsDir() {
 			return nil
 		}
-		b, err := os.ReadFile(path)
+		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = json.NewDecoder(f).Decode(&preAlloc)
+		_ = f.Close()
 		if err != nil {
 			return err
 		}
