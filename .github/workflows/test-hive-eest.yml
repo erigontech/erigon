@@ -15,7 +15,12 @@ jobs:
       group: hive
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR is evicted
+      # without waiting ~20 min for long-running hive simulators to drain
+      # after `gh run cancel`. In PR runs: keep all shards going so authors
+      # see the full failure picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         # Each shard runs twice — once with serial exec
         # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so
