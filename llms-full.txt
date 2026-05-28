@@ -1422,28 +1422,35 @@ Erigon is an Ethereum execution-layer client designed around three goals: **low 
 
 ## At a glance
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                              erigon (one binary)                     │
-│                                                                      │
-│   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────────┐  │
-│   │  Sentry  │ → │Downloader│ → │ Execution│ → │  RPC Daemon      │  │
-│   │  (p2p)   │   │(snapshots│   │ (Staged  │   │  (JSON-RPC, WS,  │  │
-│   │          │   │  + EL)   │   │   Sync)  │   │   GraphQL, gRPC) │  │
-│   └──────────┘   └────┬─────┘   └────┬─────┘   └────────┬─────────┘  │
-│                       │              │                  │            │
-│                       ▼              ▼                  ▼            │
-│                  ┌─────────────────────────────────────────┐         │
-│                  │  Single MDBX key-value store + .seg     │         │
-│                  │  snapshot files on disk (the datadir)   │         │
-│                  └─────────────────────────────────────────┘         │
-│                                                                      │
-│   ┌────────┐                                ┌─────────────────┐      │
-│   │ TxPool │ ←──── private gRPC ─────────── │ Caplin (CL)     │      │
-│   │        │                                │ embedded by     │      │
-│   │        │                                │ default         │      │
-│   └────────┘                                └─────────────────┘      │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph erigon["erigon (one binary)"]
+        direction TB
+        Sentry["Sentry<br/>(p2p)"]
+        Downloader["Downloader<br/>(snapshots + EL data)"]
+        Execution["Execution<br/>(Staged Sync)"]
+        RPC["RPC Daemon<br/>(JSON-RPC, WS,<br/>GraphQL, gRPC)"]
+        TxPool["TxPool"]
+        Caplin["Caplin (CL)<br/>embedded by default"]
+        Datadir[("datadir<br/>MDBX chaindata<br/>+ .seg snapshots")]
+
+        Sentry --> Downloader
+        Downloader --> Execution
+        Execution --> RPC
+
+        Downloader -.writes.-> Datadir
+        Execution -.reads/writes.-> Datadir
+        RPC -.reads.-> Datadir
+
+        TxPool <-- private gRPC --> Caplin
+        TxPool -.reads.-> Datadir
+        Caplin -.reads/writes.-> Datadir
+    end
+
+    classDef component fill:#fff5e6,stroke:#EF7716,stroke-width:1.5px,color:#000
+    classDef storage fill:#f0f0ff,stroke:#5860EF,stroke-width:1.5px,color:#000
+    class Sentry,Downloader,Execution,RPC,TxPool,Caplin component
+    class Datadir storage
 ```
 
 Every box above is a Go package that runs **inside the `erigon` process by default**. The same binary can also be split into independent processes — see [Modular processes](#modular-processes).
@@ -2448,17 +2455,7 @@ snapshots/idx      430 GB
 snapshots TOTAL    2.3 TB
 ```
 
-```sh
-# bor-mainnet (Polygon PoS) — archive
-chaindata           20 GB
-snapshots/accessor 360 GB
-snapshots/domain   1.1 TB
-snapshots/history  750 GB
-snapshots/idx      1.5 TB
-snapshots TOTAL    4.9 TB
-```
-
-For non-archive footprints (`--prune.mode=full` or `minimal`), see [Hardware Requirements](../get-started/hardware-requirements).
+For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
 ## Why `chaindata/` stays so small
 
@@ -2468,7 +2465,7 @@ In Erigon 3, `chaindata/` only holds:
 - Recent blocks not yet folded into snapshots
 - Live txpool, peer state, sync stage progress
 
-Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on Polygon archive nodes.
+Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
 
 It also means **`rm -rf chaindata/` is recoverable**: Erigon will rebuild it from snapshots on next start, given enough time. (You will still want a backup for fast recovery, but the cost of losing it is hours, not weeks.)
 
