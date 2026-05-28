@@ -23,18 +23,26 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/memstoredb"
 )
 
 func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
+	if dbg.UseInMemoryKV {
+		return memstoredb.New(label, nil)
+	}
 	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
 }
 
 func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
+	if dbg.UseInMemoryKV {
+		return memstoredb.New(dbcfg.ChainDB, nil)
+	}
 	return mdbx.New(dbcfg.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 }
 

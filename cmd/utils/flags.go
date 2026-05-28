@@ -173,6 +173,10 @@ var (
 		Name:  "externalcl",
 		Usage: "Enables the external consensus layer",
 	}
+	ExperimentalInMemKVFlag = cli.BoolFlag{
+		Name:  "experimental.inmem-kv",
+		Usage: "EXPERIMENTAL: replace MDBX with a pure-Go in-memory kv.RwDB at every OpenDatabase / memdb.NewTestDB call site. Volatile — all data is lost on restart. Equivalent to setting USE_IN_MEMORY_KV=1 in env.",
+	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
@@ -1986,6 +1990,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 	if ctx.IsSet(ExecStateCacheFlag.Name) {
 		dbg.SetUseStateCache(ctx.Bool(ExecStateCacheFlag.Name))
+	}
+	if ctx.IsSet(ExperimentalInMemKVFlag.Name) {
+		dbg.SetUseInMemoryKV(ctx.Bool(ExperimentalInMemKVFlag.Name))
 	}
 	if ctx.IsSet(ExecWorkersFlag.Name) {
 		n := ctx.Int(ExecWorkersFlag.Name)

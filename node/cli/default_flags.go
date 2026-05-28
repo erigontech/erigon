@@ -27,6 +27,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DataDirFlag,
 	&utils.EthashDatasetDirFlag,
 	&utils.ExternalConsensusFlag,
+	&utils.ExperimentalInMemKVFlag,
 	&utils.TxPoolDisableFlag,
 	&utils.TxPoolPriceLimitFlag,
 	&utils.TxPoolPriceBumpFlag,

@@ -114,7 +114,10 @@ var (
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead             = EnvBool("READ_AHEAD", true)
+	// UseInMemoryKV swaps MDBX for a pure-Go, in-memory kv.RwDB at every
+	// OpenDatabase / memdb.NewTestDB call site. Volatile; experimental.
+	UseInMemoryKV = EnvBool("USE_IN_MEMORY_KV", false)
+	ReadAhead     = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -143,6 +146,7 @@ func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 // calls these at node startup only when the user explicitly set the flag.
 func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
 func SetUseStateCache(b bool)           { UseStateCache = b }
+func SetUseInMemoryKV(b bool)           { UseInMemoryKV = b }
 func SetReadAhead(b bool)               { ReadAhead = b }
 func SetExec3Workers(n int)             { Exec3Workers = n }
 func SetNoPrune(b bool)                 { noPrune = b }

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/memstoredb"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
@@ -306,6 +307,11 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		}
 	default:
 		name = "test"
+	}
+	if dbg.UseInMemoryKV {
+		key := filepath.Join(config.Dirs.DataDir, name)
+		logger.Info("Opening pure-Go in-memory database (--experimental.inmem-kv)", "label", label, "key", key)
+		return memstoredb.OpenForPath(key, label, nil), nil
 	}
 
 	var db kv.RwDB
