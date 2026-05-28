@@ -328,6 +328,32 @@ func TestNewBlockHashes66_AtCapNotKicked(t *testing.T) {
 	}
 }
 
+// TestPeekNewBlockHashesCount_StopsAtCap verifies the helper bails out once
+// the entry count exceeds the cap so an oversized DoS packet is rejected
+// after bounded work, instead of walking every pair prefix in a ~10 MiB
+// payload.
+func TestPeekNewBlockHashesCount_StopsAtCap(t *testing.T) {
+	const overshoot = 4 * maxBlockHashesPerMsg
+	announces := make(eth.NewBlockHashesPacket, overshoot)
+	for i := range announces {
+		announces[i].Hash = common.Hash{byte(i), byte(i >> 8), byte(i >> 16)}
+		announces[i].Number = uint64(i + 1)
+	}
+	payload, err := rlp.EncodeToBytes(&announces)
+	if err != nil {
+		t.Fatalf("encode packet: %v", err)
+	}
+
+	count, err := peekNewBlockHashesCount(payload)
+	if err != nil {
+		t.Fatalf("peekNewBlockHashesCount: %v", err)
+	}
+	if count != maxBlockHashesPerMsg+1 {
+		t.Fatalf("expected count to bail at %d, got %d (helper walked past the cap)",
+			maxBlockHashesPerMsg+1, count)
+	}
+}
+
 // TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
 // BlockRangeUpdate (e.g. Earliest > Latest) causes the peer to be penalized.
 // This mirrors the Hive `TestBlockRangeUpdateInvalid` simulator check.

@@ -68,9 +68,10 @@ import (
 // and unbounded heap growth.
 const maxBlockHashesPerMsg = 4096
 
-// peekNewBlockHashesCount returns the number of [hash, number] pairs in an
-// RLP-encoded NewBlockHashes packet by walking pair prefixes without
-// decoding or allocating entry contents.
+// peekNewBlockHashesCount counts [hash, number] pairs in an RLP-encoded
+// NewBlockHashes packet without decoding entry contents, bailing out once
+// the count exceeds maxBlockHashesPerMsg so oversized DoS packets are
+// rejected after bounded work.
 func peekNewBlockHashesCount(payload []byte) (int, error) {
 	pos, outerLen, err := rlp.ParseList(payload, 0)
 	if err != nil {
@@ -86,6 +87,9 @@ func peekNewBlockHashesCount(payload []byte) (int, error) {
 		}
 		pos += pairLen
 		count++
+		if count > maxBlockHashesPerMsg {
+			return count, nil
+		}
 	}
 	return count, nil
 }
