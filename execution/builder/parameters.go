@@ -33,6 +33,7 @@ type Parameters struct {
 	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
 	SlotNumber            *uint64             // added in Amsterdam (EIP-7843)
+	TargetGasLimit        *uint64             // added in Amsterdam PayloadAttributesV4
 	// CustomTxnProvider overrides the block's transaction source when non-nil.
 	// nil → use the injected TxnProvider (normal mempool path)
 	CustomTxnProvider txnprovider.TxnProvider
