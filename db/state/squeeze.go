@@ -443,6 +443,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
 	a.DisableInterDomainDependencies()
 
+	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
+	// the squeeze gate below uses the captured value, not process-global schema state.
+	wantsReferencesInBranches := a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+
 	// Disable ReferencesInCommitmentBranches before main loop; will be re-enabled for squeeze pass
 	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
@@ -781,7 +785,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	// Squeeze pass: re-compress commitment files with ReferencesInCommitmentBranches
-	if !squeeze && !statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches {
+	if !squeeze && !wantsReferencesInBranches {
 		return latestRoot, nil
 	}
 	logger.Info("[rebuild_commitment_history] squeeze starting")
@@ -827,6 +831,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()
+
+	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
+	// the squeeze gate below uses the captured value, not process-global schema state.
+	wantsReferencesInBranches := a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
 
 	// Disable ReferencesInCommitmentBranches during rebuild. The merge loop after each range would
 	// otherwise shorten keys in commitment branch data, embedding file-range references
@@ -1060,7 +1068,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
-	if !squeeze && !statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches {
+	if !squeeze && !wantsReferencesInBranches {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")

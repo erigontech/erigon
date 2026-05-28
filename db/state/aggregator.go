@@ -129,9 +129,10 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 
 	// Domain configuration state: ConfigureDomains() is a no-op once configured is true.
-	configured   bool
-	savedSalt    *uint32
-	disableFsync bool
+	configured             bool
+	savedSalt              *uint32
+	disableFsync           bool
+	commitmentRefsOverride *bool
 
 	// nil = no cap. See #20701.
 	frozenBlocks FrozenBlocksProvider
@@ -281,12 +282,14 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 	a.d[domain].ReferencesInCommitmentBranches = v
 }
 
-// applyReferencesInCommitmentBranches threads the resolved flag into statecfg.Schema and the live commitment domain.
+// applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
+// consumes it via a local Schema copy) and updates the live commitment domain post-configure.
 func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
-	if statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches != refs {
-		statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches = refs
+	if !a.configured {
+		a.commitmentRefsOverride = &refs
+		return
 	}
-	if a.configured && a.d[kv.CommitmentDomain] != nil &&
+	if a.d[kv.CommitmentDomain] != nil &&
 		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches != refs {
 		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches = refs
 	}
@@ -366,7 +369,13 @@ func (a *Aggregator) ConfigureDomains() error {
 	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(a.dirs, a.logger); err != nil {
 		return err
 	}
-	if err := statecfg.Configure(statecfg.Schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
+	// Local Schema copy with the per-datadir override: avoids racing global mutation
+	// with concurrent opens that resolve a different erigondb.toml value.
+	schema := statecfg.Schema
+	if a.commitmentRefsOverride != nil {
+		schema.CommitmentDomain.ReferencesInCommitmentBranches = *a.commitmentRefsOverride
+	}
+	if err := statecfg.Configure(schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
 	a.configured = true

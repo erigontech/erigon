@@ -1202,7 +1202,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.stepsInFrozenFile)
 	fi.frozen = false
-	fi.version = d.kvWriteVersion()
+	fi.version, _ = version.ParseVersion(filepath.Base(sf.valuesDecomp.FilePath()))
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt

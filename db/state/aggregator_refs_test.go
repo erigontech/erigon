@@ -31,16 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 )
-
-// saveGlobalCommitmentRefs records the current global schema commitment-refs flag and
-// registers a cleanup that restores it, so a test may mutate global state safely.
-func saveGlobalCommitmentRefs(t *testing.T) {
-	t.Helper()
-	restore := statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches
-	t.Cleanup(func() { statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches = restore })
-}
 
 func writeRefsToml(t *testing.T, dirs datadir.Dirs, refs bool) {
 	t.Helper()
@@ -60,10 +51,8 @@ func openTestAggForRefs(t *testing.T, dirs datadir.Dirs, settings *ErigonDBSetti
 }
 
 // ReloadErigonDBSettings is the primary runtime path; a toml that says false must
-// land on both the global schema and the live commitment domain.
+// land on the live commitment domain.
 func TestReloadErigonDBSettingsAppliesCommitmentRefsFlag(t *testing.T) {
-	saveGlobalCommitmentRefs(t)
-
 	dirs := datadir.New(t.TempDir())
 	writeRefsToml(t, dirs, false)
 
@@ -76,14 +65,11 @@ func TestReloadErigonDBSettingsAppliesCommitmentRefsFlag(t *testing.T) {
 	require.NoError(t, agg.ReloadErigonDBSettings(true))
 
 	require.False(t, agg.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches, "live commitment domain reflects toml false")
-	require.False(t, statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches, "global schema reflects toml false")
 }
 
 // The builder path (WithErigonDBSettings → Open) is used by every standalone entry point;
-// the resolved flag must reach the live commitment domain and the global schema there too.
+// the resolved flag must reach the live commitment domain.
 func TestOpenAppliesCommitmentRefsFlagFalse(t *testing.T) {
-	saveGlobalCommitmentRefs(t)
-
 	dirs := datadir.New(t.TempDir())
 	writeRefsToml(t, dirs, false)
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
@@ -93,12 +79,9 @@ func TestOpenAppliesCommitmentRefsFlagFalse(t *testing.T) {
 	agg := openTestAggForRefs(t, dirs, settings)
 
 	require.False(t, agg.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches, "live commitment domain reflects resolved false")
-	require.False(t, statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches, "global schema reflects resolved false")
 }
 
 func TestOpenAppliesCommitmentRefsFlagTrue(t *testing.T) {
-	saveGlobalCommitmentRefs(t)
-
 	dirs := datadir.New(t.TempDir())
 	writeRefsToml(t, dirs, true)
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
@@ -108,5 +91,4 @@ func TestOpenAppliesCommitmentRefsFlagTrue(t *testing.T) {
 	agg := openTestAggForRefs(t, dirs, settings)
 
 	require.True(t, agg.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches, "live commitment domain reflects resolved true")
-	require.True(t, statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches, "global schema reflects resolved true")
 }
