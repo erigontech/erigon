@@ -29,8 +29,7 @@ type Buffer struct {
 	// include all the intermediate reads and write that happened. For example, if the storage of some contract has
 	// been modified, and then the contract has subsequently self-destructed, this structure will not contain any
 	// keys related to the storage of this contract, because they are irrelevant for the final state
-	storageUpdates     map[common.Hash]map[common.Hash][]byte
-	storageIncarnation map[common.Hash]uint64
+	storageUpdates map[common.Hash]map[common.Hash][]byte
 	// storageReads structure collects all the keys of items that have been modified (or also just read, if the
 	// tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
 	// Even if the final results of the execution do not include some items, they will still be present in this structure.
@@ -45,10 +44,9 @@ type Buffer struct {
 	accountUpdates map[common.Hash]witnesstypes.AccountWithAddress
 	// accountReads structure collects all the address hashes of the accounts that have been modified (or also just read,
 	// if tds.resolveReads flag is turned on, which happens during the generation of block witnesses).
-	accountReads            map[common.Hash]accounts.Address
-	accountReadsIncarnation map[common.Hash]uint64
-	deleted                 map[common.Hash]accounts.Address
-	created                 map[common.Hash]accounts.Address
+	accountReads map[common.Hash]accounts.Address
+	deleted      map[common.Hash]accounts.Address
+	created      map[common.Hash]accounts.Address
 }
 
 // Prepares buffer for work or clears previous data
@@ -57,11 +55,9 @@ func (b *Buffer) initialise() {
 	b.codeSizeReads = make(map[common.Hash]common.Hash)
 	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
-	b.storageIncarnation = make(map[common.Hash]uint64)
 	b.storageReads = make(map[common.StorageKey][]byte)
 	b.accountUpdates = make(map[common.Hash]witnesstypes.AccountWithAddress)
 	b.accountReads = make(map[common.Hash]accounts.Address)
-	b.accountReadsIncarnation = make(map[common.Hash]uint64)
 	b.deleted = make(map[common.Hash]accounts.Address)
 	b.created = make(map[common.Hash]accounts.Address)
 }
@@ -88,13 +84,11 @@ func (b *Buffer) merge(other *Buffer) {
 	for addrHash := range other.deleted {
 		b.deleted[addrHash] = other.deleted[addrHash]
 		delete(b.storageUpdates, addrHash)
-		delete(b.storageIncarnation, addrHash)
 		delete(b.codeUpdates, addrHash)
 	}
 	for addrHash := range other.created {
 		b.created[addrHash] = other.created[addrHash]
 		delete(b.storageUpdates, addrHash)
-		delete(b.storageIncarnation, addrHash)
 	}
 	for addrHash, om := range other.storageUpdates {
 		m, ok := b.storageUpdates[addrHash]
@@ -104,7 +98,6 @@ func (b *Buffer) merge(other *Buffer) {
 		}
 		maps.Copy(m, om)
 	}
-	maps.Copy(b.storageIncarnation, other.storageIncarnation)
 	for storageKey := range other.storageReads {
 		b.storageReads[storageKey] = other.storageReads[storageKey]
 	}
@@ -112,7 +105,6 @@ func (b *Buffer) merge(other *Buffer) {
 	for addrHash := range other.accountReads {
 		b.accountReads[addrHash] = other.accountReads[addrHash]
 	}
-	maps.Copy(b.accountReadsIncarnation, other.accountReadsIncarnation)
 }
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
@@ -785,7 +777,6 @@ func (tsw *TrieStateWriter) DeleteAccount(address accounts.Address, original *ac
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: addressValue, Account: original} // TODO: might be needed to use *AccountWithAddress to point to nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
-	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	delete(tsw.tds.currentBuffer.codeUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = address
 	return nil
@@ -873,7 +864,6 @@ func (tsw *TrieStateWriter) CreateContract(address accounts.Address) error {
 	tsw.tds.currentBuffer.created[addrHash] = address
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
-	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	return nil
 }
 
