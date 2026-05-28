@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -114,7 +113,7 @@ func TestGetBlobsV1(t *testing.T) {
 	require := require.New(t)
 	oneBlockStep(mockSentry, require)
 
-	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
+	wrappedTxn := types.MakeWrappedBlobTxn(mockSentry.ChainConfig.ChainID)
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 	dt := &wrappedTxn.Tx.DynamicFeeTransaction
@@ -169,7 +168,7 @@ func TestGetBlobsV2(t *testing.T) {
 	require := require.New(t)
 	oneBlockStep(mockSentry, require)
 
-	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
+	wrappedTxn := types.MakeV1WrappedBlobTxn(mockSentry.ChainConfig.ChainID)
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 	dt := &wrappedTxn.Tx.DynamicFeeTransaction
@@ -233,7 +232,7 @@ func TestGetBlobsV3(t *testing.T) {
 	require := require.New(t)
 	oneBlockStep(mockSentry, require)
 
-	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
+	wrappedTxn := types.MakeV1WrappedBlobTxn(mockSentry.ChainConfig.ChainID)
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
 	dt := &wrappedTxn.Tx.DynamicFeeTransaction

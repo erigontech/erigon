@@ -663,8 +663,15 @@ func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
 
 		return
 	}
+	if td == nil {
+		s.logger.Warn(syncLogPrefix("td missing when publishing new block"),
+			"blockNum", block.NumberU64(),
+			"blockHash", block.Hash(),
+		)
+		return
+	}
 
-	s.p2pService.PublishNewBlock(block, td)
+	s.p2pService.PublishNewBlock(block, *td)
 }
 
 func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChainBuilder, oldTip *types.Header) error {

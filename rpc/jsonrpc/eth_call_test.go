@@ -809,16 +809,57 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	err = rawdb.PruneTableDupSort(tx, kv.TblAccountVals, "", pruneTo, logEvery, ctx)
 	require.NoError(t, err)
 
-	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
-	require.NoError(t, err)
+	// kv.StorageChangeSetDeprecated is no longer part of the active
+	// schema (drop_legacy_e2_tables migration drops it), so there is
+	// nothing to prune from that table.
 
 	//err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	//require.NoError(t, err)
 
 	err = tx.Commit()
 	require.NoError(t, err)
+}
+
+func TestOptimizeWarmAddrAndAdjustGas(t *testing.T) {
+	addr := common.HexToAddress("0xbeefbabeea323f07c59926295205d3b7a17e8638")
+	other := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	slot := common.HexToHash("0x01")
+	const baseGas = hexutil.Uint64(50000)
+
+	t.Run("zero_slots_removed_gas_adjusted", func(t *testing.T) {
+		al := types.AccessList{{Address: addr, StorageKeys: []common.Hash{}}}
+		res := &accessListResult{Accesslist: &al, GasUsed: baseGas}
+		optimizeWarmAddrAndAdjustGas(res, addr)
+		require.Empty(t, *res.Accesslist)
+		require.Equal(t, baseGas-hexutil.Uint64(params.TxAccessListAddressGas), res.GasUsed)
+	})
+
+	t.Run("with_slots_not_removed", func(t *testing.T) {
+		al := types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot}}}
+		res := &accessListResult{Accesslist: &al, GasUsed: baseGas}
+		optimizeWarmAddrAndAdjustGas(res, addr)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, baseGas, res.GasUsed)
+	})
+
+	t.Run("addr_not_in_list_noop", func(t *testing.T) {
+		al := types.AccessList{{Address: other, StorageKeys: []common.Hash{}}}
+		res := &accessListResult{Accesslist: &al, GasUsed: baseGas}
+		optimizeWarmAddrAndAdjustGas(res, addr)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, baseGas, res.GasUsed)
+	})
+
+	t.Run("gas_no_underflow", func(t *testing.T) {
+		al := types.AccessList{{Address: addr, StorageKeys: []common.Hash{}}}
+		res := &accessListResult{Accesslist: &al, GasUsed: hexutil.Uint64(100)}
+		optimizeWarmAddrAndAdjustGas(res, addr)
+		require.Empty(t, *res.Accesslist)
+		require.Equal(t, hexutil.Uint64(100), res.GasUsed) // 100 < 2400, no underflow
+	})
 }

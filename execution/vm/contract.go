@@ -53,6 +53,14 @@ type Contract struct {
 	CodeHash accounts.CodeHash
 
 	value uint256.Int
+
+	// selfBalance memoizes SELFBALANCE for the lifetime of this frame.
+	// Invalidated after opcodes that return control to this frame and may have
+	// changed the account's balance via a nested execution (CALL, CALLCODE,
+	// DELEGATECALL, CREATE, CREATE2). STATICCALL is exempt (whole subtree is
+	// read-only). SELFDESTRUCT is exempt because the frame halts.
+	selfBalance       uint256.Int
+	selfBalanceCached bool
 }
 
 // around 64MB cache in the worst case.
