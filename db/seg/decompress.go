@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -197,6 +198,7 @@ type Decompressor struct {
 	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+	closeOnce       sync.Once
 }
 
 const (
@@ -575,23 +577,28 @@ func (d *Decompressor) checkFileLenChange() {
 }
 
 func (d *Decompressor) Close() {
-	if d == nil || d.f == nil {
+	if d == nil {
 		return
 	}
-	d.checkFileLenChange()
-	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
-		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
-	}
-	if err := d.f.Close(); err != nil {
-		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
-	}
+	d.closeOnce.Do(func() {
+		if d.f == nil {
+			return
+		}
+		d.checkFileLenChange()
+		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+		}
+		if err := d.f.Close(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+		}
 
-	d.f = nil
-	d.data = nil
-	d.posDict = nil
-	d.dict = nil
-	d.patArena = nil
-	d.posArena = nil
+		d.f = nil
+		d.data = nil
+		d.posDict = nil
+		d.dict = nil
+		d.patArena = nil
+		d.posArena = nil
+	})
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
