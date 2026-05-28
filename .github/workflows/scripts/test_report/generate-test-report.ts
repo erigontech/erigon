@@ -161,7 +161,7 @@ function mapChain(chain: string | null): string {
 const CHAIN_WORDS = new Set([
     'bor', 'mainnet', 'polygon', 'lighthouse', 'prysm', 'ethereum',
     'sepolia', 'hoodi', 'amoy', 'chiado', 'gnosis',
-    'externalcl', 'test', 'integ', 'Benchmark',
+    'externalcl', 'test', 'integ', 'benchmark',
 ]);
 
 // Transforms a job name by replacing chain references with the mapChain emoji and
