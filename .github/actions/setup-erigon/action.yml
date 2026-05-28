@@ -120,10 +120,7 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        hash=$( {
-          git ls-tree -r HEAD | awk '$2 == "commit" {print $3}'
-          git lfs ls-files --long 2>/dev/null | awk '{print $1}'
-        } | sort | sha256sum | cut -d' ' -f1)
+        hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule git objects cache
@@ -133,7 +130,6 @@ runs:
       with:
         path: |
           .git/modules
-          .git/lfs
         key: gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}
         restore-keys: |
           gitobjects|${{ runner.os }}|
