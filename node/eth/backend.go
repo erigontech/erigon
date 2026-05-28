@@ -852,6 +852,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
+			backend.chainConfig,
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
