@@ -51,7 +51,7 @@ func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 		PrivateKey  *hexutil.Bytes              `json:"secretKey,omitempty"`
 	}
 	var dec GenesisAccount
-	if err := json.Unmarshal(input, &dec); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(input, &dec); err != nil {
 		return err
 	}
 	if dec.Constructor != nil {
