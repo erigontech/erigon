@@ -14,10 +14,6 @@ inputs:
     description: "Clone submodules (recursive shallow clone)"
     required: false
     default: 'false'
-  lfs:
-    description: "'false' to skip, 'tests' for test fixtures only"
-    required: false
-    default: 'false'
   cleanup-space:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
@@ -138,9 +134,9 @@ runs:
         path: |
           .git/modules
           .git/lfs
-        key: gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}
+        key: gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}
         restore-keys: |
-          gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|
+          gitobjects|${{ runner.os }}|
 
     - name: Warn on submodule cache miss
       if: ${{ inputs.submodules == 'true' && steps.restore-submodules.outputs.cache-hit != 'true' }}
@@ -152,12 +148,6 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
-
-    - name: Pull LFS test fixtures
-      if: ${{ inputs.lfs == 'tests' }}
-      shell: bash
-      run: |
-        time git lfs pull --include='execution/tests/test-corners/**'
 
     - name: Install git-restore-mtime
       shell: bash

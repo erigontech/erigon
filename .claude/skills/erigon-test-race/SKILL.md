@@ -15,14 +15,13 @@ If you want race coverage on the EEST blocktests, use the dedicated race shards 
 
 **Pitfall: stale `evm.race` binary.** `make eest-spec-<race-shard>` lists `evm.race` as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt. Calling `bash tools/run-eest-spec-test.sh <shard>` directly with `EVM_BIN=build/bin/evm.race` **bypasses** the rebuild and silently runs an old race-instrumented binary against current fixtures — race reports against code that no longer exists, missed races against code that does. After pulling or switching branches: `rm -f build/bin/evm.race && make evm.race` before re-running.
 
-Two side prerequisites still apply for tests `make test-all-race` does run:
+One side prerequisite still applies for tests `make test-all-race` does run:
 
 ```bash
 git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
-git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
 ```
 
-The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
+The CI workflow handles this in `setup-erigon`; locally you must do it yourself.
 
 ## Prerequisite: Create RAM Disk
 

@@ -31,7 +31,6 @@ jobs:
           # A full clone (filter: '') ensures all blobs are present upfront.
           filter: ''
           submodules: true
-          lfs: tests
           cleanup-space: true
           ramdisk: true
 
