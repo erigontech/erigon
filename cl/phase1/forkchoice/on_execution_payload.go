@@ -432,10 +432,6 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
 
-	if !elBehind {
-		f.verifiedExecutionPayload.Add(beaconBlockRoot, struct{}{})
-	}
-
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
 	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
 	f.headHash = common.Hash{}
