@@ -587,7 +587,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			panic(err)
 		}
 	}
-	mock.sentriesClient.IsMock = true
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 

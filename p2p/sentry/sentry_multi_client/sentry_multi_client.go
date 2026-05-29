@@ -194,16 +194,14 @@ type StatusGetter interface {
 // MultiClient - does handle request/response/subscriptions to multiple sentries
 // each sentry may support same or different p2p protocol
 type MultiClient struct {
-	IsMock                            bool
-	sentries                          []sentryproto.SentryClient
-	ChainConfig                       *chain.Config
-	db                                kv.TemporalRoDB
-	WitnessBuffer                     *stagedsync.WitnessBuffer
-	Engine                            rules.Engine
-	blockReader                       services.FullBlockReader
-	statusDataProvider                StatusGetter
-	logPeerInfo                       bool
-	sendHeaderRequestsToMultiplePeers bool
+	sentries           []sentryproto.SentryClient
+	ChainConfig        *chain.Config
+	db                 kv.TemporalRoDB
+	WitnessBuffer      *stagedsync.WitnessBuffer
+	Engine             rules.Engine
+	blockReader        services.FullBlockReader
+	statusDataProvider StatusGetter
+	logPeerInfo        bool
 
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
@@ -236,19 +234,18 @@ func NewMultiClient(
 	}
 
 	cs := &MultiClient{
-		sentries:                          sentries,
-		ChainConfig:                       chainConfig,
-		db:                                db,
-		WitnessBuffer:                     witnessBuffer,
-		Engine:                            engine,
-		blockReader:                       blockReader,
-		statusDataProvider:                statusDataProvider,
-		logPeerInfo:                       logPeerInfo,
-		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
-		logger:                            logger,
-		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
-		balFetcher:                        NewBALFetcher(),
+		sentries:                         sentries,
+		ChainConfig:                      chainConfig,
+		db:                               db,
+		WitnessBuffer:                    witnessBuffer,
+		Engine:                           engine,
+		blockReader:                      blockReader,
+		statusDataProvider:               statusDataProvider,
+		logPeerInfo:                      logPeerInfo,
+		logger:                           logger,
+		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
+		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balFetcher:                       NewBALFetcher(),
 	}
 
 	return cs, nil
