@@ -134,44 +134,6 @@ func (cs *MultiClient) RecvMessageLoop(
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
-// waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
-//
-// Parameters:
-//   - ctx: context for cancellation
-//   - pollFrequency: the time interval between checking if a header is available
-//   - isHeaderAvailable: function that checks if a header is available in the database
-//
-// Returns:
-//   - nil when both blockReader is ready and a header is available
-//   - error if blockReader fails to become ready or context is cancelled
-func (cs *MultiClient) waitForPrerequisites(ctx context.Context, pollFrequency time.Duration, isHeaderAvailable func() bool) error {
-	cs.logger.Info("Waiting for blockreader to be ready")
-	if err := <-cs.blockReader.Ready(ctx); err != nil {
-		return err
-	}
-	cs.logger.Info("Blockreader ready")
-
-	if isHeaderAvailable() {
-		cs.logger.Info("Header already available.")
-		return nil
-	}
-
-	timer := time.NewTicker(pollFrequency)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			cs.logger.Info("Context cancelled while waiting for header.")
-			return ctx.Err()
-		case <-timer.C:
-			if isHeaderAvailable() {
-				return nil
-			}
-		}
-	}
-}
-
 func (cs *MultiClient) PeerEventsLoop(
 	ctx context.Context,
 	sentry sentryproto.SentryClient,
