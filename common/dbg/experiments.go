@@ -116,7 +116,7 @@ var (
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 	// UseInMemoryKV swaps MDBX for a pure-Go, in-memory kv.RwDB at every
 	// OpenDatabase / memdb.NewTestDB call site. Volatile; experimental.
-	UseInMemoryKV = EnvBool("USE_IN_MEMORY_KV", false)
+	UseInMemoryKV = EnvBool("USE_IN_MEMORY_KV", true)
 	ReadAhead     = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
