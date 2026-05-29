@@ -116,11 +116,24 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), logger); err != nil {
-		return err
-	}
+	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
+		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
+	})
+}
 
-	return nil
+// importFiles imports each file in order; with more than one file, per-file
+// failures are logged and skipped (matching go-ethereum) rather than aborting.
+func importFiles(files []string, logger log.Logger, importOne func(fn string) error) error {
+	var importErr error
+	for _, fn := range files {
+		if err := importOne(fn); err != nil {
+			importErr = err
+			if len(files) > 1 {
+				logger.Error("Import error", "file", fn, "err", err)
+			}
+		}
+	}
+	return importErr
 }
 
 func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
