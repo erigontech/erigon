@@ -253,13 +253,13 @@ no lost wakeup.
 **Files:**
 - Modify: `execution/commitment/commitment_test.go` (if any cleanup needed)
 
-- [ ] confirm the 3 stale barrier-contract tests are gone (deleted in Task 1) and no
+- [x] confirm the 3 stale barrier-contract tests are gone (deleted in Task 1) and no
       reference to `WaitForInFlightKeysThenRun`/`warmupBarrier` remains in tests
-- [ ] confirm the `WaitBufferFree` contract tests (Task 3) and the integrated lap test
+- [x] confirm the `WaitBufferFree` contract tests (Task 3) and the integrated lap test
       (Task 4) are present and green
-- [ ] ensure helpers (`gatedCtxFactory`, `slowCtxFactory`, `gatedPatriciaContext`) are all
+- [x] ensure helpers (`gatedCtxFactory`, `slowCtxFactory`, `gatedPatriciaContext`) are all
       still used (no dead-code / unused-symbol lint)
-- [ ] run `go test -race ./execution/commitment/` — full package must pass
+- [x] run `go test -race ./execution/commitment/` — full package must pass
 
 ### Task 6: Lint, build, verify acceptance criteria
 
