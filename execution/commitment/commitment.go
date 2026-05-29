@@ -621,7 +621,7 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-const maxDeferredUpdates = 50_000
+const maxDeferredUpdates = 8_000
 
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
