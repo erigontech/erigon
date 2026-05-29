@@ -273,10 +273,10 @@ no lost wakeup.
 
 ### Task 7: Commit, push, move plan
 
-- [ ] commit the ring implementation:
-      `commitment: replace warmup in-flight barrier with arena buffer ring`
-- [ ] `git push` to `origin awskii/warmup-inflight-barrier` (updates PR #21432)
-- [ ] move this plan to `docs/plans/completed/` (`mkdir -p docs/plans/completed`)
+- [x] commit the ring implementation (landed across the Task 1–6 commits:
+      `63734f3e3e`/`6efe263dbd`/`bea60ed2f8`/`cbfcecca00`/`55646a3de4`; working tree clean)
+- [x] `git push` to `origin awskii/warmup-inflight-barrier` (updates PR #21432)
+- [x] move this plan to `docs/plans/completed/` (`mkdir -p docs/plans/completed`)
 
 ## Post-Completion
 *Items requiring external action — no checkboxes.*
