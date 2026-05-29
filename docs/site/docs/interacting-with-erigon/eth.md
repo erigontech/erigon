@@ -24,7 +24,7 @@ For API usage refer to the below official resources:
 
 To enable historical proof support, activate commitment history storage at startup:
 
-```
+```text
 --prune.include-commitment-history=true
 ```
 
