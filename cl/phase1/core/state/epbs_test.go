@@ -40,6 +40,35 @@ func TestIsBuilderWithdrawalCredential_NotBuilder(t *testing.T) {
 	}
 }
 
+func TestGetProposerDependentRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.SlotsPerHistoricalRoot = 8192
+	cfg.MinSeedLookahead = 1
+	s := state2.New(&cfg)
+	s.SetSlot(100)
+	want := common.Hash{0x42}
+	s.SetBlockRootAt(63, want)
+
+	got, err := state2.GetProposerDependentRoot(s, 3)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.MinSeedLookahead = 1
+	s := state2.New(&cfg)
+	s.SetSlot(100)
+
+	_, err := state2.GetProposerDependentRoot(s, 0)
+	require.Error(t, err)
+
+	_, err = state2.GetProposerDependentRoot(s, 1)
+	require.Error(t, err)
+}
+
 // TestApplyDepositForBuilder_NewBuilder_WithValidSignature verifies that a
 // new builder deposit with 0x03 credentials and a valid signature creates
 // a builder entry in the state registry.
