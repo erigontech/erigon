@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -620,7 +621,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(estimate.AlmostAllCPUs(), ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
