@@ -199,6 +199,16 @@ func (w *Warmuper) Start() {
 			}
 		})
 	}
+
+	// Wake any WaitBufferFree waiter on shutdown so it observes cancellation rather than
+	// blocking on items that workers exiting on ctx.Done() left undrained.
+	w.g.Go(func() error {
+		<-w.ctx.Done()
+		w.mu.Lock()
+		w.cond.Broadcast()
+		w.mu.Unlock()
+		return nil
+	})
 }
 
 // warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
@@ -306,17 +316,22 @@ func (w *Warmuper) releaseGen(gen uint64) {
 	}
 }
 
-// WaitBufferFree blocks until every in-flight warm item for ring slot has completed.
-// The common path (slot already drained) is a single atomic load.
-func (w *Warmuper) WaitBufferFree(slot int) {
+// WaitBufferFree blocks until every in-flight warm item for slot completes, returning the
+// warmuper's context error if it is canceled first so callers abort instead of hanging on
+// items that workers exiting on ctx.Done() left undrained.
+func (w *Warmuper) WaitBufferFree(slot int) error {
 	if w.outstanding[slot].Load() == 0 {
-		return
+		return nil
 	}
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	for w.outstanding[slot].Load() != 0 {
+		if err := w.ctx.Err(); err != nil {
+			return err
+		}
 		w.cond.Wait()
 	}
-	w.mu.Unlock()
+	return nil
 }
 
 // Wait waits for all warmup work to complete.

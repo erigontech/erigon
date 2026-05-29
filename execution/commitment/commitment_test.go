@@ -243,6 +243,90 @@ func TestHashSort_WarmupLap(t *testing.T) {
 	}
 }
 
+// gatedStragglerFactory makes the first worker block inside Branch on release (holding its
+// first key) while every other worker runs fast, so exactly one ring slot stays occupied.
+func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
+	var n atomic.Int32
+	return func() (PatriciaContext, func()) {
+		if n.Add(1) == 1 {
+			return &gatedPatriciaContext{entered: entered, release: release}, nil
+		}
+		return &gatedPatriciaContext{}, nil
+	}
+}
+
+// TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant forces the boundary WaitBufferFree to
+// fail via context cancellation while a straggler still pins the slot, and asserts the
+// gen/curArena invariant (curArena == gen % arenaRingSize) survives the error return. If gen
+// were advanced before the fallible wait, a later reuse would charge warmups to the wrong slot.
+func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 30_000 // ≥3 batch boundaries so a ring slot is reused (lapped)
+	const keyLen = 64
+	const lapFnCall = 2 * hashSortBatchSize // fn calls for gen 0 + gen 1, completing right before boundary 2
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			warmuper := NewWarmuper(ctx, WarmupConfig{
+				Enabled:    true,
+				CtxFactory: gatedStragglerFactory(entered, release),
+				NumWorkers: 4,
+				MaxDepth:   64,
+				LogPrefix:  "test",
+			})
+			warmuper.Start()
+			defer warmuper.CloseAndWait()
+			defer close(release)
+
+			// fn runs only on the single producer goroutine, so this counter is race-free.
+			// The boundary-2 fn-loop completing (lapFnCall calls) is the last point before the
+			// gen++/WaitBufferFree block, and there is no ctx.Done check in between — so canceling
+			// only after this signal guarantees the cancellation is observed inside WaitBufferFree.
+			fnCalls := 0
+			reachedLap := make(chan struct{})
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+					fnCalls++
+					if fnCalls == lapFnCall {
+						close(reachedLap)
+					}
+					return nil
+				})
+			}()
+
+			<-entered // the straggler holds a gen-0 key, pinning slot 0
+			require.GreaterOrEqual(t, warmuper.outstanding[0].Load(), int64(1))
+
+			<-reachedLap // batch-2 fn-loop done; producer heads into WaitBufferFree(0), which slot 0 pins
+			cancel()
+
+			select {
+			case err := <-errCh:
+				require.Error(t, err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("HashSort did not return after cancellation")
+			}
+
+			require.Equal(t, int(ut.gen%arenaRingSize), ut.curArena)
+		})
+	}
+}
+
 // TestUpdates_ArenaAlloc verifies that sequential allocations within a ring buffer return
 // non-overlapping sub-slices, and that an over-capacity request falls back to an independent
 // allocation that leaves prior sub-slices intact.
@@ -298,7 +382,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		warmuper.WaitBufferFree(0)
+		_ = warmuper.WaitBufferFree(0)
 		close(done)
 	}()
 
@@ -318,6 +402,50 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	require.Equal(t, int64(0), warmuper.outstanding[0].Load())
 }
 
+// TestWarmuper_WaitBufferFree_UnblocksOnCancel verifies that a producer parked in
+// WaitBufferFree wakes and returns the context error when the warmuper's context is
+// canceled while a counted item is stuck, instead of hanging on a slot counter that
+// workers exiting on ctx.Done() left non-zero.
+func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	warmuper := NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	warmuper.Start()
+	defer warmuper.CloseAndWait()
+	defer close(release)
+
+	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
+	<-entered // worker is inside Branch holding the gen-0 item; slot 0 counter is 1
+	require.Equal(t, int64(1), warmuper.outstanding[0].Load())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- warmuper.WaitBufferFree(0) }()
+
+	select {
+	case <-errCh:
+		t.Fatal("WaitBufferFree returned before cancellation while the slot is in-flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitBufferFree did not return after the context was canceled")
+	}
+}
+
 // TestWarmuper_WaitBufferFree_FastPath verifies WaitBufferFree returns immediately when
 // the slot is already drained.
 func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
@@ -335,8 +463,8 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		warmuper.WaitBufferFree(0)
-		warmuper.WaitBufferFree(1)
+		_ = warmuper.WaitBufferFree(0)
+		_ = warmuper.WaitBufferFree(1)
 		close(done)
 	}()
 	select {

@@ -1821,7 +1821,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
 		t.arenaEnsureCap(hashSortBatchSize * 192)
 		if warmuper != nil {
-			warmuper.WaitBufferFree(t.curArena)
+			if err := warmuper.WaitBufferFree(t.curArena); err != nil {
+				return err
+			}
 		}
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
@@ -1862,11 +1864,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				t.batchSlab = t.batchSlab[:0]
-				t.gen++
-				slot := int(t.gen % arenaRingSize)
+				nextGen := t.gen + 1
+				slot := int(nextGen % arenaRingSize)
 				if warmuper != nil {
-					warmuper.WaitBufferFree(slot)
+					if err := warmuper.WaitBufferFree(slot); err != nil {
+						return err
+					}
 				}
+				t.gen = nextGen
 				t.arenas[slot] = t.arenas[slot][:0]
 				t.curArena = slot
 			}
@@ -1894,7 +1899,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		t.batchSlab = t.batchSlab[:0]
 		t.arenaEnsureCap(hashSortBatchSize * 144)
 		if warmuper != nil {
-			warmuper.WaitBufferFree(t.curArena)
+			if err := warmuper.WaitBufferFree(t.curArena); err != nil {
+				return err
+			}
 		}
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
@@ -1937,11 +1944,15 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				t.batchSlab = t.batchSlab[:0]
-				t.gen++
-				slot := int(t.gen % arenaRingSize)
+				nextGen := t.gen + 1
+				slot := int(nextGen % arenaRingSize)
 				if warmuper != nil {
-					warmuper.WaitBufferFree(slot)
+					if err := warmuper.WaitBufferFree(slot); err != nil {
+						processErr = err
+						return false
+					}
 				}
+				t.gen = nextGen
 				t.arenas[slot] = t.arenas[slot][:0]
 				t.curArena = slot
 			}
