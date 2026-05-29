@@ -82,7 +82,11 @@ jobs:
     if: ${{ !inputs.cache-warming-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
         # step. Observed happy-path durations are roughly:

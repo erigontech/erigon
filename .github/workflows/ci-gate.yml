@@ -30,11 +30,14 @@ concurrency:
 
 # actions: write lets merge-queue runs call `gh run cancel` on a leaf
 # failure so the gate doesn't stall waiting for still-running siblings.
+# pull-requests: write lets the gate call the `dequeuePullRequest` GraphQL
+# mutation on its own merge-group PR when a required check actually fails,
+# since GitHub does not auto-remove UNMERGEABLE entries from the queue.
 # Reusable leaves inherit these from the caller.
 permissions:
   actions: write
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   # Fast path: detect whether any non-docs files changed.
@@ -196,3 +199,52 @@ jobs:
             exit 1
           fi
           echo "All required jobs passed or were skipped."
+
+      # GitHub does not auto-remove UNMERGEABLE entries from the merge queue
+      # when their required checks fail — they sit at the queue position with
+      # state UNMERGEABLE until someone manually dequeues. This step does that
+      # automatically on real failures (not queue-reshuffle cancellations,
+      # where all needs come back as `cancelled` and GitHub re-creates a fresh
+      # merge_group event for us).
+      - name: Dequeue failed merge-queue PR
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS: ${{ toJSON(needs) }}
+          REF: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          if ! echo "$NEEDS" | jq -e 'to_entries[] | select(.value.result == "failure")' > /dev/null; then
+            echo "No gate need failed (only cancellations) — likely a queue reshuffle, skipping dequeue."
+            exit 0
+          fi
+          pr_number=$(echo "$REF" | grep -oE 'pr-[0-9]+' | head -1 | cut -d- -f2)
+          if [ -z "$pr_number" ]; then
+            echo "::warning::Could not parse PR number from ref $REF"
+            exit 0
+          fi
+          # $owner/$name/$number/$id in the query strings are GraphQL variables, not shell.
+          # shellcheck disable=SC2016
+          pr_id=$(gh api graphql \
+            -F owner="$OWNER" \
+            -F name="$REPO_NAME" \
+            -F number="$pr_number" \
+            -f query='query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) { id }
+              }
+            }' --jq '.data.repository.pullRequest.id')
+          if [ -z "$pr_id" ] || [ "$pr_id" = "null" ]; then
+            echo "::warning::Could not resolve PR #$pr_number to a GraphQL node ID"
+            exit 0
+          fi
+          echo "Dequeuing PR #$pr_number ($pr_id) after ci-gate failure"
+          # shellcheck disable=SC2016
+          gh api graphql \
+            -F id="$pr_id" \
+            -f query='mutation($id: ID!) {
+              dequeuePullRequest(input: {id: $id}) {
+                mergeQueueEntry { position }
+              }
+            }' || echo "::warning::dequeuePullRequest mutation failed (already dequeued, or insufficient permissions)"
