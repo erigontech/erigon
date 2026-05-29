@@ -27,6 +27,9 @@ DISABLED_TEST_LIST=(
   eth_getTransactionByHash/test_02.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
+  # tip-dependent: expected values change as chain advances (disabled in main via PR #21348)
+  ots_searchTransactionsAfter/test_11.json
+  ots_searchTransactionsAfter/test_12.json
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
