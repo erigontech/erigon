@@ -1519,7 +1519,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 		if enc == nil {
 			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%s], txNum: %d, stack: %s\n", r.tracePrefix, address, key, res.Hex(), r.txNum, dbg.Stack())
 		}
 	}
 
