@@ -187,6 +187,69 @@ func TestRoTxSnapshotStableAcrossConcurrentCommit(t *testing.T) {
 	}))
 }
 
+// TestRwTxDeleteIsolatedFromRoTx is a regression test for a snapshot-isolation
+// bug: tx.Delete used to mutate master's shared table when called on a RwTx
+// that hadn't yet COW-cloned that table (no prior Put on it), causing
+// concurrent RoTx readers to observe the deletion mid-tx and breaking
+// rollback semantics. Same scenario for ClearTable.
+func TestRwTxDeleteIsolatedFromRoTx(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		require.NoError(t, tx.Put("plain", []byte("a"), []byte("1")))
+		require.NoError(t, tx.Put("plain", []byte("b"), []byte("2")))
+		return nil
+	}))
+	// Concurrent RoTx open BEFORE the RwTx-with-Delete starts.
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// RwTx that ONLY calls Delete (no Put first → no implicit COW).
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	require.NoError(t, rwTx.Delete("plain", []byte("a")))
+	// RoTx must still see "a" — the deletion is uncommitted.
+	v, err := roTx.GetOne("plain", []byte("a"))
+	require.NoError(t, err)
+	require.Equal(t, "1", string(v), "RoTx must not see RwTx's uncommitted Delete")
+	// Rollback the RwTx.
+	rwTx.Rollback()
+	// After rollback master must still have "a".
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		v, _ := tx.GetOne("plain", []byte("a"))
+		require.Equal(t, "1", string(v), "Rollback must undo the Delete")
+		return nil
+	}))
+}
+
+func TestRwTxClearTableIsolatedFromRoTx(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		require.NoError(t, tx.Put("plain", []byte("a"), []byte("1")))
+		require.NoError(t, tx.Put("plain", []byte("b"), []byte("2")))
+		return nil
+	}))
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	require.NoError(t, rwTx.ClearTable("plain"))
+	// RoTx must still see "a" / "b".
+	v, err := roTx.GetOne("plain", []byte("a"))
+	require.NoError(t, err)
+	require.Equal(t, "1", string(v), "RoTx must not see RwTx's uncommitted ClearTable")
+	rwTx.Rollback()
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		v, _ := tx.GetOne("plain", []byte("a"))
+		require.Equal(t, "1", string(v), "Rollback must undo the ClearTable")
+		return nil
+	}))
+}
+
 // --- Sequence helpers ---
 
 func TestSequence(t *testing.T) {
