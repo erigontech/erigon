@@ -105,9 +105,21 @@ func RecomputeAtTxNumWithoutSD(
 		}
 	}
 
-	// State reader composition: commitment branches read from
-	// step-bounded files, plain state reads from history at toTxNum.
-	plainReader := NewHistoryStateReader(tx, toTxNum)
+	// State reader composition.
+	//
+	// Plain state (accounts/storage/code): HistoryStateReader at
+	// toTxNum+1. GetAsOf(key, ts) returns the value JUST BEFORE ts,
+	// so passing toTxNum+1 reads inclusively of writes at
+	// txnum=toTxNum.
+	//
+	// Commitment branches: StepBoundedFilesStateReader at maxStep.
+	// Commitment domain is HistoryDisabled, so we cannot time-travel
+	// via GetAsOf. The writable shadow may hold commitment branches
+	// for post-toBlock state during mode-B unwind, so we read from
+	// files only (bounded to maxStep = the file containing toBlock's
+	// baseline) and rely on the trie's in-memory state (restored from
+	// baseline via SetState + folded by Process) for everything else.
+	plainReader := NewHistoryStateReader(tx, toTxNum+1)
 	commitmentReader := NewStepBoundedFilesStateReader(tx, maxStep)
 	stateReader := NewCommitmentSplitStateReader(commitmentReader, plainReader, true /* withHistory */)
 
