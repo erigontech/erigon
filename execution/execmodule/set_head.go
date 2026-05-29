@@ -81,16 +81,20 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// Check if we can unwind that far back. minUnwindableBlock is the
 	// boundary of the diffset window. Targets inside it ride the
 	// existing incremental path (mode A); targets past it engage the
-	// admin-unwind path (mode B) if and only if the chain is aligned
-	// AND an Unwinder is wired in. See
+	// admin-unwind path (mode B) provided an Unwinder is wired in.
+	// Mode B handles both aligned and non-aligned chains: aligned cuts
+	// trim entire files at step boundaries that coincide with block
+	// boundaries; non-aligned cuts keep the file containing toBlock
+	// and use the writable shadow's boundary-step diff-replay (see
+	// state.WipeWritableShadowPast). See
 	// docs/plans/20260525-admin-sethead-unwind-design.md.
 	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 	if err != nil {
 		return fmt.Errorf("failed to check minimum unwindable block: %w", err)
 	}
 	if targetBlock < minUnwindableBlock {
-		if e.unwinder == nil || !e.unwinder.BlockAligned() {
-			return fmt.Errorf("cannot unwind to block %d: minimum unwindable block is %d", targetBlock, minUnwindableBlock)
+		if e.unwinder == nil {
+			return fmt.Errorf("cannot unwind to block %d: minimum unwindable block is %d (no admin Unwinder wired)", targetBlock, minUnwindableBlock)
 		}
 		return e.setHeadModeB(ctx, tx, targetBlock, currentHead)
 	}

@@ -74,11 +74,13 @@ type UnwindOpts struct {
 // standard Engine API responses are sufficient.
 //
 // Why this method can lift CLAUDE.md's "Unwind beyond data in
-// snapshots not allowed" for aligned chains: that rule was a
-// placeholder for the code that just landed. The rule stands for
-// non-aligned chains because trimming an arbitrary block out of a
-// 1k-rounded file would corrupt it; aligned mode lifts it because
-// the unit of cutting *is* the block.
+// snapshots not allowed": that rule was a placeholder for the code
+// that just landed. The unit of cutting is the block: aligned chains
+// trim entire files at step boundaries that coincide with block
+// boundaries; non-aligned chains keep the file containing toBlock and
+// rely on the writable shadow's boundary-step diff-replay (see
+// WipeWritableShadowPast) to mask the file's excess coverage past
+// toBlock. Either way no in-place file mutation occurs.
 //
 // Concurrency: Provider.Unwind does not synchronise. SetHead has
 // already waited for ExecModule quiescence (no SharedDomains in
@@ -87,9 +89,6 @@ type UnwindOpts struct {
 func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) error {
 	if p == nil {
 		return fmt.Errorf("storage.Provider.Unwind: nil provider")
-	}
-	if !p.BlockAligned() {
-		return fmt.Errorf("storage.Provider.Unwind: chain is not block-aligned (Config.Snapshot.BlockAlignedBoundaries=false); admin arbitrary-block unwind requires --snap.block-aligned-boundaries (the existing exec-stage CanUnwindBeforeBlockNum guard governs non-aligned chains)")
 	}
 	if opts.Tx == nil {
 		return fmt.Errorf("storage.Provider.Unwind: opts.Tx is nil")

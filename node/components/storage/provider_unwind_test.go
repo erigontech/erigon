@@ -30,26 +30,9 @@ import (
 // returns the not-yet-implemented error before any tx work happens.
 type stubRwTx struct{ kv.TemporalRwTx }
 
-// alignedProvider returns a Provider whose BlockAligned() reports true
-// — the minimum state required to clear the mode-B precondition guard
-// inside Provider.Unwind without standing up a real Initialize.
-func alignedProvider() *Provider {
-	return &Provider{blockAlignedBoundaries: true}
-}
-
-func TestProviderUnwind_RejectsNonAlignedChain(t *testing.T) {
-	t.Parallel()
-	// Default Provider has blockAlignedBoundaries == false.
-	p := &Provider{}
-
-	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not block-aligned")
-}
-
 func TestProviderUnwind_RejectsNilTx(t *testing.T) {
 	t.Parallel()
-	p := alignedProvider()
+	p := &Provider{}
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: nil})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "opts.Tx is nil")
@@ -74,7 +57,7 @@ func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 // snapshot fixture.
 func TestProviderUnwind_ValidationOK_ReachesSubOps(t *testing.T) {
 	t.Parallel()
-	p := alignedProvider()
+	p := &Provider{}
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "commitment-anchor")
