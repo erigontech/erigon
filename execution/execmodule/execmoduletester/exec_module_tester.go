@@ -1067,3 +1067,7 @@ func (a testProviderUnwinder) BlockAligned() bool { return a.p.BlockAligned() }
 func (a testProviderUnwinder) Unwind(ctx context.Context, toBlock uint64, args execmodule.UnwindArgs) error {
 	return a.p.Unwind(ctx, toBlock, storage.UnwindOpts{Tx: args.Tx})
 }
+
+func (a testProviderUnwinder) FinalizeUnwind() error { return a.p.FinalizeUnwind() }
+
+func (a testProviderUnwinder) AbortUnwind() { a.p.AbortUnwind() }

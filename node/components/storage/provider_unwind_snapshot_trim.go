@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -89,35 +88,17 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 		paths = append(paths, filepath.Join(p.snapDir, e.Name))
 	}
 
-	for _, name := range names {
-		p.Inventory.RemoveFile(name)
-	}
-
-	for _, path := range paths {
-		_ = dir.RemoveFile(path)
-		_ = dir.RemoveFile(path + ".torrent")
-	}
-
-	if p.downloaderClient != nil {
-		if err := p.downloaderClient.Delete(ctx, names); err != nil && p.logger != nil {
-			// Downloader failures don't abort the trim — the local
-			// filesystem and inventory are already consistent; a
-			// stale torrent on the downloader side is a self-healing
-			// concern (operator restart fixes it).
-			p.logger.Warn("[storage] Provider.Unwind: downloaderClient.Delete failed (continuing)", "err", err, "files", len(names))
-		}
-	}
-
-	if p.republishChainToml != nil {
-		if err := p.republishChainToml(); err != nil && p.logger != nil {
-			// Same reasoning as above — local state is consistent;
-			// peers see the old manifest until the next publish
-			// cycle. Not a wedge.
-			p.logger.Warn("[storage] Provider.Unwind: republishChainToml failed (continuing)", "err", err)
-		}
-	}
-
+	// Stage the FS / inventory / downloader / republish ops for
+	// post-commit execution. None of these are tx-bound, and once
+	// an FS unlink or downloader notify lands it can't be reversed
+	// by the mode-B tx rolling back. Staging here + executing in
+	// FinalizeUnwind (after tx.Commit) means a failed/rolled-back
+	// mode-B leaves the datadir unchanged and retriable. See
+	// Provider.pendingTrim + FinalizeUnwind / AbortUnwind.
 	sort.Strings(names)
+	p.pendingTrimLock.Lock()
+	p.pendingTrim = &pendingTrimState{names: names, paths: paths}
+	p.pendingTrimLock.Unlock()
 	return names, nil
 }
 

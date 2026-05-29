@@ -53,7 +53,35 @@ type Unwinder interface {
 	// Only invoked by SetHead in mode B (toBlock past the diffset
 	// window AND aligned mode on). See
 	// docs/plans/20260525-admin-sethead-unwind-design.md.
+	//
+	// Side effects that are not naturally tx-bound (FS deletions,
+	// Inventory mutations, downloader notifications,
+	// chain.toml republish) are STAGED on the Unwinder and only
+	// executed by a subsequent FinalizeUnwind call. If FinalizeUnwind
+	// is not called (because the tx commit fails or a downstream
+	// caller errors out), AbortUnwind drops the staged ops with no
+	// FS / network mutations. This is what lets a failed/rolled-back
+	// mode-B attempt leave the datadir unchanged and retriable.
 	Unwind(ctx context.Context, toBlock uint64, args UnwindArgs) error
+
+	// FinalizeUnwind executes the side effects staged by a prior
+	// Unwind call: FS deletions, Inventory.RemoveFile, downloader
+	// notifications, chain.toml republish. Caller (setHeadModeB)
+	// invokes this AFTER tx.Commit succeeds. Errors are logged by
+	// the Unwinder but not returned as fatal: at this point the tx
+	// has committed and the chain is at the new head; a stale torrent
+	// or undeleted file is recoverable, not corrupting.
+	//
+	// Safe to call when nothing is staged (no Unwind ran, or Unwind
+	// staged nothing) — returns immediately.
+	FinalizeUnwind() error
+
+	// AbortUnwind drops every side effect staged by a prior Unwind
+	// call without executing any of them. Caller invokes this on
+	// every error path where FinalizeUnwind will not run.
+	//
+	// Safe to call when nothing is staged.
+	AbortUnwind()
 }
 
 // UnwindArgs carries the inputs SetHead supplies to the Unwinder.

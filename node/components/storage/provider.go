@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -199,7 +200,31 @@ type Provider struct {
 	// nodes.
 	republishChainToml func() error
 
+	// pendingTrim holds the FS-side mutations that mode B's
+	// snapshot-trim sub-op deferred to post-commit: inventory
+	// removal, file unlink, downloader notify, chain.toml republish.
+	// Populated by unwindSnapshotsPastBlock during Provider.Unwind;
+	// drained either by FinalizeUnwind (executes the ops, called by
+	// setHeadModeB after tx.Commit succeeds) or AbortUnwind (drops
+	// the list with no FS / network mutations, called on every
+	// error path). The Unwind/Finalize/Abort lifecycle is invariant:
+	// exactly one of Finalize or Abort follows each Unwind.
+	//
+	// Guarded by pendingTrimLock; Provider.Unwind is single-flight
+	// per the setHeadModeB semaphore so contention is structural,
+	// but the lock makes the field safe for any future caller.
+	pendingTrimLock sync.Mutex
+	pendingTrim     *pendingTrimState
+
 	logger log.Logger
+}
+
+// pendingTrimState is the deferred set of FS / inventory / network
+// ops staged by Provider.unwindSnapshotsPastBlock for execution after
+// the mode-B tx commits. See Provider.pendingTrim.
+type pendingTrimState struct {
+	names []string // inventory names (relative to snapDir)
+	paths []string // absolute paths on disk
 }
 
 // Deps holds all external dependencies needed by Initialize.

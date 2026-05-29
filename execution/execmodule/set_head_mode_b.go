@@ -55,30 +55,42 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	defer e.adminUnwindInProgress.Store(false)
 
 	if err := e.waitForQuiescence(ctx); err != nil {
+		// Quiescence failure: Unwind never ran, nothing was staged,
+		// AbortUnwind is a no-op but called for symmetry.
+		e.unwinder.AbortUnwind()
 		return fmt.Errorf("SetHead mode B: %w", err)
 	}
 
-	// Build args for the storage-layer admin unwind. Mode B as it
-	// stands (commit 2b) does not require a SharedDomains handle or
-	// pre-encoded trie state — the sub-ops in this commit are
-	// snapshot-trim + DB-reset, neither of which writes commitment.
-	// Commit 2c (commitment recompute path) will add the fields it
-	// needs back into UnwindArgs.
 	args := UnwindArgs{Tx: tx}
 
 	if err := e.unwinder.Unwind(ctx, targetBlock, args); err != nil {
+		// Unwind staged FS / inventory / network ops up to the point
+		// of failure (snapshot-trim runs first, so a failure in
+		// ensureCommitmentAtBlock / WipeWritableShadowPast leaves
+		// trim staged). Abort drops them — no FS or network mutations.
+		e.unwinder.AbortUnwind()
 		return fmt.Errorf("SetHead mode B (unwind %d → %d): %w", currentHead, targetBlock, err)
 	}
 
 	// Commit the unwind. Without this the outer SetHead's deferred
-	// tx.Rollback() reverts every change Provider.Unwind made —
-	// snapshot-trim's filesystem deletions persist (irreversibly),
-	// but the DB-side head pointers, TxNums truncation, canonical-hash
-	// cleanup, and writable-shadow wipe all vanish. Mode A's analog
-	// commit lives at the end of SetHead (set_head.go:164) but mode B
-	// returns from a branch above that, so the commit has to land here.
+	// tx.Rollback reverts every DB change Provider.Unwind made —
+	// head pointers, TxNums truncation, canonical-hash cleanup,
+	// writable-shadow wipe. Mode A's analog commit lives at the end
+	// of SetHead (set_head.go:164) but mode B returns from a branch
+	// above that, so the commit has to land here.
 	if err := tx.Commit(); err != nil {
+		// Commit failed: tx fully rolled back. Drop the staged
+		// trim ops so the datadir is unchanged and retriable.
+		e.unwinder.AbortUnwind()
 		return fmt.Errorf("SetHead mode B (unwind %d → %d): commit: %w", currentHead, targetBlock, err)
+	}
+
+	// Tx is durable. Execute the deferred FS / inventory / network
+	// ops. Errors here are best-effort (chain head has already moved;
+	// a stale torrent or undeleted .seg leftover is recoverable, not
+	// corrupting). The Unwinder logs internally on partial failure.
+	if err := e.unwinder.FinalizeUnwind(); err != nil {
+		e.logger.Warn("SetHead mode B: FinalizeUnwind returned an error (tx already committed)", "err", err, "targetBlock", targetBlock)
 	}
 	return nil
 }

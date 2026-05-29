@@ -51,3 +51,7 @@ func (a providerUnwinderAdapter) Unwind(ctx context.Context, toBlock uint64, arg
 		Tx: args.Tx,
 	})
 }
+
+func (a providerUnwinderAdapter) FinalizeUnwind() error { return a.p.FinalizeUnwind() }
+
+func (a providerUnwinderAdapter) AbortUnwind() { a.p.AbortUnwind() }
