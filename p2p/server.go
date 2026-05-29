@@ -375,7 +375,6 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
 
-	// Mark running before listener/dialer setup so startup connections pass setupConn's running check.
 	srv.running.Store(true)
 	defer func() {
 		if err != nil {
@@ -427,6 +426,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	}
 	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
+	srv.startListenLoop(srv.quitCtx)
 
 	srv.loopWG.Add(1)
 	go srv.run()
@@ -669,14 +669,19 @@ func (srv *Server) setupListening(ctx context.Context) error {
 			}()
 		}
 	}
+	return nil
+}
 
+func (srv *Server) startListenLoop(ctx context.Context) {
+	if srv.listener == nil {
+		return
+	}
 	srv.loopWG.Add(1)
 	go func() {
 		defer dbg.LogPanic()
 		defer srv.loopWG.Done()
 		srv.listenLoop(ctx)
 	}()
-	return nil
 }
 
 // doPeerOp runs fn on the main loop.
