@@ -194,6 +194,37 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 	}
 }
 
+// TestUpdates_ArenaAlloc verifies that sequential allocations within a ring buffer return
+// non-overlapping sub-slices, and that an over-capacity request falls back to an independent
+// allocation that leaves prior sub-slices intact.
+func TestUpdates_ArenaAlloc(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
+	ut.arenaEnsureCap(16)
+
+	a := ut.arenaAlloc([]byte("aaaa"))
+	b := ut.arenaAlloc([]byte("bbbb"))
+	require.Equal(t, []byte("aaaa"), a)
+	require.Equal(t, []byte("bbbb"), b)
+
+	// Sub-slices are contiguous and non-overlapping within the same buffer.
+	require.Equal(t, &ut.arenas[ut.curArena][0], &a[0])
+	require.Equal(t, &ut.arenas[ut.curArena][4], &b[0])
+
+	// Mutating the second slice must not touch the first.
+	b[0] = 'X'
+	require.Equal(t, []byte("aaaa"), a)
+
+	// Over-capacity request falls back to an independent allocation; prior slices stay valid.
+	big := ut.arenaAlloc(bytes.Repeat([]byte("z"), 32))
+	require.Equal(t, bytes.Repeat([]byte("z"), 32), big)
+	require.Equal(t, []byte("aaaa"), a)
+	require.Equal(t, []byte("Xbbb"), b)
+	// The fallback slice is not backed by the current ring buffer.
+	require.NotEqual(t, &ut.arenas[ut.curArena][0], &big[0])
+}
+
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
 

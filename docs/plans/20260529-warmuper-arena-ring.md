@@ -186,20 +186,20 @@ no lost wakeup.
 **Files:**
 - Modify: `execution/commitment/commitment.go`
 
-- [ ] add `const arenaRingSize = 2`
-- [ ] replace the single `byteArena []byte` field with `arenas [arenaRingSize][]byte`,
+- [x] add `const arenaRingSize = 2`
+- [x] replace the single `byteArena []byte` field with `arenas [arenaRingSize][]byte`,
       add `curArena int` and `gen uint64` to `Updates`
-- [ ] update `arenaAlloc` to allocate from `arenas[curArena]` (keep the over-capacity
+- [x] update `arenaAlloc` to allocate from `arenas[curArena]` (keep the over-capacity
       independent-allocation fallback), returning a slice into the current buffer
-- [ ] update `arenaEnsureCap` (1476) to size the relevant ring buffer(s); the two callers
+- [x] update `arenaEnsureCap` (1476) to size the relevant ring buffer(s); the two callers
       at 1807 (`*192`) and 1874 (`*144`) now reserve `K×` total
-- [ ] update all other `byteArena` readers/reset sites to operate on `arenas[curArena]`
+- [x] update all other `byteArena` readers/reset sites to operate on `arenas[curArena]`
       (`grep -n byteArena` → 1469, 1478, 1808, 1850, 1875, 1919, 1963; the `HashSort`
       boundary/entry resets are rewired in Task 4, but `Reset()` at 1963 must reset the
       whole ring here)
-- [ ] write/extend a unit test for `arenaAlloc` proving sequential allocations within a
+- [x] write/extend a unit test for `arenaAlloc` proving sequential allocations within a
       buffer return non-overlapping slices and the overflow fallback still works
-- [ ] run `go test -run 'arena|Updates' ./execution/commitment/` — must pass before Task 3
+- [x] run `go test -run 'arena|Updates' ./execution/commitment/` — must pass before Task 3
       (compiles now that Task 1 removed the stale barrier tests)
 
 ### Task 3: Add generation reclamation to `Warmuper`
