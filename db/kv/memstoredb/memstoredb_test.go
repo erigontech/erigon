@@ -5,6 +5,7 @@ package memstoredb
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -208,6 +209,7 @@ func TestRwTxDeleteIsolatedFromRoTx(t *testing.T) {
 	// RwTx that ONLY calls Delete (no Put first → no implicit COW).
 	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 	require.NoError(t, rwTx.Delete("plain", []byte("a")))
 	// RoTx must still see "a" — the deletion is uncommitted.
 	v, err := roTx.GetOne("plain", []byte("a"))
@@ -237,6 +239,7 @@ func TestRwTxClearTableIsolatedFromRoTx(t *testing.T) {
 
 	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 	require.NoError(t, rwTx.ClearTable("plain"))
 	// RoTx must still see "a" / "b".
 	v, err := roTx.GetOne("plain", []byte("a"))
@@ -269,6 +272,53 @@ func TestSequence(t *testing.T) {
 		cur, err = tx.ReadSequence("seq")
 		require.NoError(t, err)
 		require.EqualValues(t, 100, cur)
+		return nil
+	}))
+}
+
+// TestSaveLoadRoundTrip writes a populated DB to disk, closes it, opens a
+// fresh DB at the same path, and verifies all (k, v) pairs and sequences
+// round-trip exactly. Exercises the on-Close persistence path required by
+// multi-process CLI tooling (erigon init / import / daemon).
+func TestSaveLoadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chaindata")
+	cfg := kv.TableCfg{
+		"plain": {},
+		"dup":   {Flags: kv.DupSort},
+	}
+	ctx := context.Background()
+
+	db := OpenForPath(path, "test", cfg)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		require.NoError(t, tx.Put("plain", []byte("a"), []byte("1")))
+		require.NoError(t, tx.Put("plain", []byte("b"), []byte("2")))
+		for _, v := range []string{"x", "y", "z"} {
+			require.NoError(t, tx.Put("dup", []byte("k"), []byte(v)))
+		}
+		_, err := tx.IncrementSequence("seq1", 42)
+		require.NoError(t, err)
+		return nil
+	}))
+	db.Close()
+	WipePath(path)
+
+	db2 := OpenForPath(path, "test", cfg)
+	t.Cleanup(db2.Close)
+	require.NoError(t, db2.View(ctx, func(tx kv.Tx) error {
+		v, _ := tx.GetOne("plain", []byte("a"))
+		require.Equal(t, "1", string(v))
+		v, _ = tx.GetOne("plain", []byte("b"))
+		require.Equal(t, "2", string(v))
+		seq, _ := tx.ReadSequence("seq1")
+		require.EqualValues(t, 42, seq)
+		c, err := tx.CursorDupSort("dup")
+		require.NoError(t, err)
+		defer c.Close()
+		_, v, _ = c.SeekExact([]byte("k"))
+		require.Equal(t, "x", string(v))
+		n, _ := c.CountDuplicates()
+		require.EqualValues(t, 3, n)
 		return nil
 	}))
 }

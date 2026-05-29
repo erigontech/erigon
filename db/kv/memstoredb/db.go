@@ -33,6 +33,10 @@ type DB struct {
 	label kv.Label
 	cfg   kv.TableCfg
 
+	// persistFile is the dump path written on Close. Empty if the DB wasn't
+	// opened via OpenForPath. See persist.go for the rationale.
+	persistFile string
+
 	// writeMu serialises RwTx: only one writer at a time, matching MDBX.
 	writeMu sync.Mutex
 
@@ -73,7 +77,10 @@ var (
 
 // OpenForPath returns the shared DB for `path`, creating it on first use.
 // A subsequent OpenForPath against the same path returns the same DB,
-// mirroring MDBX where reopening the same file restores its data.
+// mirroring MDBX where reopening the same file restores its data. If a dump
+// file exists alongside the path (`<path>.mem`), its contents are restored —
+// this lets the multi-process CLI tooling (erigon init / import / daemon)
+// round-trip chaindata through separate processes.
 func OpenForPath(path string, label kv.Label, cfg kv.TableCfg) *DB {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -82,6 +89,17 @@ func OpenForPath(path string, label kv.Label, cfg kv.TableCfg) *DB {
 		return db
 	}
 	db := New(label, cfg)
+	if path != "" {
+		db.persistFile = path + ".mem"
+		if err := db.loadFromFile(db.persistFile); err != nil {
+			// Don't crash on a corrupt dump — fall back to a fresh DB and
+			// log via the caller's path. A loud no-op is preferable to a
+			// startup panic when the dump file was written by an older
+			// version or got truncated.
+			db.tables = make(map[string]*table)
+			db.sequences = make(map[string]uint64)
+		}
+	}
 	registry[path] = db
 	return db
 }
@@ -149,7 +167,18 @@ func (db *DB) ReadOnly() bool              { return false }
 // Close marks the handle closed. Mirrors MDBX, where on-disk data outlives
 // the handle: a subsequent OpenForPath against the same path returns the same
 // data. Tests that want a clean slate use WipePath.
-func (db *DB) Close() { db.closed.Store(true) }
+func (db *DB) Close() {
+	if !db.closed.CompareAndSwap(false, true) {
+		return
+	}
+	// Best-effort dump to disk so a subsequent OpenForPath against the same
+	// path restores chaindata (see persist.go for why this is needed). A
+	// failed save is non-fatal: the DB is volatile by design and any caller
+	// that depends on durability is misusing the in-mem backend.
+	if db.persistFile != "" {
+		_ = db.saveToFile(db.persistFile)
+	}
+}
 
 // WipePath fully removes the DB associated with `path` from the registry,
 // discarding its in-memory data. Use only in tests that need a hard reset.
