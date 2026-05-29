@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -473,10 +472,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 200_000
 		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
+		//if s.CurrentSyncCycle.IsInitialCycle {
+		//	pruneDiffsLimitOnChainTip = math.MaxInt
+		//	pruneTimeout = time.Hour
+		//}
 		pruneChangeSetsStartTime := time.Now()
 		if err := rawdb.PruneTable(
 			tx,
@@ -502,10 +501,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
 		pruneBalLimit := 10_000
 		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
-		}
+		//if s.CurrentSyncCycle.IsInitialCycle {
+		//	pruneBalLimit = math.MaxInt
+		//	pruneTimeout = time.Hour
+		//}
 		if err := rawdb.PruneTable(
 			tx,
 			kv.BlockAccessList,
@@ -524,10 +523,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
-	}
-
+	//if s.CurrentSyncCycle.IsInitialCycle {
+	//	pruneTimeout = 12 * time.Hour
+	//}
+	panic(pruneTimeout)
 	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
