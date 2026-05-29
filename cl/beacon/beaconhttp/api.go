@@ -171,6 +171,19 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	}
 }
 
+// WillEncodeSSZ reports whether the given Accept header will cause
+// HandleEndpoint to use SSZ encoding. Mirrors the switch priority above.
+func WillEncodeSSZ(accept string) bool {
+	switch {
+	case accept == "*/*", accept == "", strings.Contains(accept, "text/html"), strings.Contains(accept, "application/json"):
+		return false
+	case strings.Contains(accept, "application/octet-stream"):
+		return true
+	default:
+		return false
+	}
+}
+
 func isNil[T any](t T) bool {
 	v := reflect.ValueOf(t)
 	kind := v.Kind()

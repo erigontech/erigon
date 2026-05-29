@@ -2493,9 +2493,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// addWrites entry is O(len(addWrites)·len(CollectorWrites)) — when
 					// finalize is a full block-end IBS reconstruction both can be ~one
 					// entry per account the block touched (a tx that pays ~100k
-					// accounts — TestInvalidReceiptHashHighMgas), i.e. ~10^10
-					// comparisons. Index CollectorWrites' BalancePath entries by
-					// address once instead.
+					// accounts), i.e. ~10^10 comparisons. Index CollectorWrites'
+					// BalancePath entries by address once instead.
 					if len(txResult.CollectorWrites) > 0 {
 						balIdx := make(map[accounts.Address]int, len(txResult.CollectorWrites))
 						for i, w := range txResult.CollectorWrites {
