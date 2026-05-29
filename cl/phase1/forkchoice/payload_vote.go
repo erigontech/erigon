@@ -28,6 +28,15 @@ import (
 	log "github.com/erigontech/erigon/common/log/v3"
 )
 
+// boolToVote converts a bool to the three-state vote representation:
+// true → 1, false → -1. Zero means unvoted.
+func boolToVote(b bool) int8 {
+	if b {
+		return 1
+	}
+	return -1
+}
+
 func (f *ForkChoiceStore) calculateCommitteeFraction(s *state.CachingBeaconState, committeePercent uint64) uint64 {
 	committeeWeight := s.GetTotalActiveBalance() / f.beaconCfg.SlotsPerEpoch
 	return (committeeWeight * committeePercent) / 100
@@ -48,11 +57,10 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 		return
 	}
 
-	// Pre-compute state and PTC per unique blockRoot to avoid redundant GetState + GetPTC
-	// calls for every attesting validator (PtcSize can be 512).
+	// Pre-compute PTC per unique blockRoot to avoid redundant state lookups
+	// for every attesting validator (PtcSize can be 512).
 	type cachedPTC struct {
-		state *state.CachingBeaconState
-		ptc   []uint64
+		ptc []uint64
 	}
 	ptcCache := make(map[common.Hash]*cachedPTC)
 
@@ -70,125 +78,98 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			if err != nil || blockState == nil {
 				continue
 			}
-			ptc, err := blockState.GetPTC(data.Slot)
-			if err != nil {
-				continue
-			}
 			if data.Slot != blockState.Slot() {
 				continue
 			}
-			cached = &cachedPTC{state: blockState, ptc: ptc}
+			ptc, err := blockState.GetPTCFromWindow(data.Slot)
+			if err != nil {
+				continue
+			}
+			cached = &cachedPTC{ptc: ptc}
 			ptcCache[blockRoot] = cached
 		}
 
-		indexedPayloadAttestation, err := s.GetIndexedPayloadAttestation(payloadAttestation)
-		if err != nil {
+		if payloadAttestation.AggregationBits == nil {
 			continue
 		}
 
-		attestingIndices := indexedPayloadAttestation.AttestingIndices
-		for j := 0; j < attestingIndices.Length(); j++ {
-			idx := attestingIndices.Get(j)
-			f.applyPayloadAttestationVote(idx, data, blockRoot, cached.ptc)
+		for j := range cached.ptc {
+			if payloadAttestation.AggregationBits.GetBitAt(j) {
+				f.applyPayloadAttestationVote(j, data, blockRoot)
+			}
 		}
 	}
 }
 
-// applyPayloadAttestationVote updates PTC vote tracking for a single validator.
-// Used by notifyPtcMessages with pre-computed PTC to avoid redundant GetState/GetPTC calls.
+// applyPayloadAttestationVote updates PTC vote tracking for a single PTC position.
+// ptcIndex is the position in the PTC (the aggregation bit index).
 func (f *ForkChoiceStore) applyPayloadAttestationVote(
-	validatorIndex uint64,
+	ptcIndex int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
-	ptc []uint64,
 ) {
-	// Find the validator's position in the PTC
-	ptcIndex := -1
-	for i, idx := range ptc {
-		if idx == validatorIndex {
-			ptcIndex = i
-			break
-		}
-	}
-	if ptcIndex == -1 {
-		return
-	}
-
 	// Atomically update PTC vote arrays under mutex to prevent concurrent
 	// Load→modify→Store from losing votes. See also OnPayloadAttestationMessage.
 	f.ptcVoteMu.Lock()
 
-	var timelinessVotes [clparams.PtcSize]bool
+	var timelinessVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
-		timelinessVotes = existing.([clparams.PtcSize]bool)
+		timelinessVotes = existing.([clparams.PtcSize]int8)
 	}
-	timelinessVotes[ptcIndex] = data.PayloadPresent
-	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
-
-	var dataAvailabilityVotes [clparams.PtcSize]bool
+	var dataAvailabilityVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
-		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
+		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
-	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
+	timelinessVotes[ptcIndex] = boolToVote(data.PayloadPresent)
+	dataAvailabilityVotes[ptcIndex] = boolToVote(data.BlobDataAvailable)
+	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 
 	f.ptcVoteMu.Unlock()
 }
 
-// isPayloadTimely returns whether the execution payload for the beacon block with root
-// was voted as present by the PTC, and was locally determined to be available.
+// payloadTimeliness returns whether the PTC voted the payload as timely (timely=true)
+// or not timely (timely=false) for the given beacon block root.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) isPayloadTimely(root common.Hash) bool {
-	// The beacon block root must be known in payload_timeliness_vote
+func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool {
 	voteRaw, ok := f.payloadTimelinessVote.Load(root)
 	if !ok {
 		return false
 	}
-
-	// If the payload is not locally available, the payload
-	// is not considered available regardless of the PTC vote
 	if !f.forkGraph.HasEnvelope(root) {
 		return false
 	}
-
-	// Count PTC votes for payload present
-	votes := voteRaw.([clparams.PtcSize]bool)
-	presentCount := uint64(0)
+	votes := voteRaw.([clparams.PtcSize]int8)
+	target := boolToVote(timely)
+	count := uint64(0)
 	for i := range votes {
-		if votes[i] {
-			presentCount++
+		if votes[i] == target {
+			count++
 		}
 	}
-
-	return presentCount > f.beaconCfg.PtcSize/2
+	return count > f.beaconCfg.PtcSize/2
 }
 
-// isPayloadDataAvailable returns whether the blob data for the beacon block with root
-// was voted as present by the PTC, and was locally determined to be available.
+// payloadDataAvailability returns whether the PTC voted blob data as available (available=true)
+// or unavailable (available=false) for the given beacon block root.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) isPayloadDataAvailable(root common.Hash) bool {
-	// The beacon block root must be known in payload_data_availability_vote
+func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bool) bool {
 	voteRaw, ok := f.payloadDataAvailabilityVote.Load(root)
 	if !ok {
 		return false
 	}
-
-	// If the payload is not locally available, the blob data
-	// is not considered available regardless of the PTC vote
 	if !f.forkGraph.HasEnvelope(root) {
 		return false
 	}
-
-	// Count PTC votes for data available
-	votes := voteRaw.([clparams.PtcSize]bool)
-	availableCount := uint64(0)
+	votes := voteRaw.([clparams.PtcSize]int8)
+	target := boolToVote(available)
+	count := uint64(0)
 	for i := range votes {
-		if votes[i] {
-			availableCount++
+		if votes[i] == target {
+			count++
 		}
 	}
-
-	return availableCount > f.beaconCfg.PtcSize/2
+	return count > f.beaconCfg.PtcSize/2
 }
 
 // getParentPayloadStatus returns the payload status of the parent block.
@@ -291,7 +272,7 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 	}
 
 	// Check if payload is timely AND blob data is available
-	if f.isPayloadTimely(root) && f.isPayloadDataAvailable(root) {
+	if f.payloadTimeliness(root, true) && f.payloadDataAvailability(root, true) {
 		return true
 	}
 
@@ -316,6 +297,17 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 
 	// Check if parent node is full
 	return f.isParentNodeFull(proposerBlock.Block)
+}
+
+// ShouldBuildOnFull returns whether the proposer should build on the full payload
+// for the given head node. Returns false for EMPTY heads. For FULL heads, returns
+// true unless the PTC voted blob data as unavailable.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode) bool {
+	if head.PayloadStatus == cltypes.PayloadStatusEmpty {
+		return false
+	}
+	return !f.payloadDataAvailability(head.Root, false)
 }
 
 // getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.

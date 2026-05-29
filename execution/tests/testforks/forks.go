@@ -21,9 +21,9 @@ package testforks
 
 import (
 	"fmt"
-	"math/big"
 	"slices"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
@@ -60,7 +60,7 @@ var blobSchedule = map[string]*params.BlobConfig{
 var Forks = map[string]*chain.Config{}
 
 func init() {
-	c := &chain.Config{ChainID: big.NewInt(1)}
+	c := &chain.Config{ChainID: uint256.NewInt(1)}
 	Forks["Frontier"] = c
 
 	c = configCopy(c)
@@ -142,7 +142,7 @@ func init() {
 	Forks["ArrowGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = big.NewInt(0xC00000)
+	c.TerminalTotalDifficulty = uint256.NewInt(0xC00000)
 	Forks["ArrowGlacierToParisAtDiffC0000"] = c
 
 	c = configCopy(c)
@@ -151,7 +151,7 @@ func init() {
 	Forks["GrayGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = big.NewInt(0)
+	c.TerminalTotalDifficulty = uint256.NewInt(0)
 	Forks["Merge"] = c
 	Forks["Paris"] = c
 
@@ -237,7 +237,9 @@ func init() {
 
 func configCopy(c *chain.Config) *chain.Config {
 	cpy := new(chain.Config)
-	copier.Copy(cpy, c)
+	if err := copier.CopyWithOption(cpy, c, copier.Option{DeepCopy: true}); err != nil {
+		panic(fmt.Sprintf("testforks: failed to deep-copy chain.Config: %s", err))
+	}
 	return cpy
 }
 

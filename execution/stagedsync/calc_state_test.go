@@ -310,7 +310,7 @@ func (r *preBlockReader) TracePrefix() string                                   
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
 //	  → those land in blockIO.WriteSet → rawWrites
-//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader)
+//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader, nil, true)
 //	  → calcState.ApplyWrites(normalized)
 //	  → calcState.FlushToUpdates(updates)
 //
@@ -378,7 +378,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true)
 
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
 	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
@@ -487,7 +487,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	}
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true)
 
 	// Sanity: normalizeWriteSet should have appended one StoragePath=0
 	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing

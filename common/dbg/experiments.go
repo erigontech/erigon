@@ -38,12 +38,13 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	noMemstat            = EnvBool("NO_MEMSTAT", false)
-	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
-	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency        = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	noMemstat                   = EnvBool("NO_MEMSTAT", false)
+
+	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -79,7 +80,7 @@ var (
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
 	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers           = runtime.NumCPU() / 2
+	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
@@ -240,10 +241,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		opt(&options)
 	}
 
-	var logger log.Logger
-	if options.logger != nil {
-		logger = *options.logger
-	}
+	logger := common.Deref(options.logger)
 
 	var memStats runtime.MemStats
 	if options.memStats != nil {
@@ -253,14 +251,19 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	totalMemory := estimate.TotalMemory()
+	threshold := (totalMemory / 100) * heapProfileThresholdPercent
+	aboveThreshold := memStats.Alloc >= threshold
 	if logger != nil {
 		logger.Info(
-			"[Experiment] heap profile threshold check",
+			"[Experiment] heap check",
+			"threshold", common.ByteCount(threshold),
 			"alloc", common.ByteCount(memStats.Alloc),
+			"aboveThreshold", aboveThreshold,
+			"sys", common.ByteCount(memStats.Sys),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
+	if !aboveThreshold {
 		return
 	}
 

@@ -10,7 +10,7 @@ defaults:
 
 jobs:
   # Matrix entries (shard / workers / max-allowed-failures) come from
-  # tools/eest-spec-shards.json so this workflow and tools/run-eest-spec-test.sh
+  # tools/eest-spec-shards.yml so this workflow and tools/run-eest-spec-test.sh
   # share a single source of truth. enginextests-devnet is intentionally absent
   # from the manifest (the devnet tarball doesn't yet ship
   # blockchain_tests_engine_x/); re-add it there when the fixture lands.
@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 1
       - id: load
-        run: echo "matrix=$(jq -c . tools/eest-spec-shards.json)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(yq -o=json -I=0 '.' tools/eest-spec-shards.yml)" >> "$GITHUB_OUTPUT"
 
   eest-spec-tests:
     needs: load-matrix
@@ -50,13 +50,12 @@ jobs:
         id: erigon
         with:
           submodules: false
-          lfs: false
           cleanup-space: true
           ramdisk: true
           build-cache-extra-key: eest-spec-${{ matrix.shard }}
 
       - name: Cache EEST tarballs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Only cache the .tar.gz files; extracted dirs are recreated by
           # tools/test-fixtures.sh on each run from the cached tarballs.
@@ -86,4 +85,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
