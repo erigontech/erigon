@@ -892,7 +892,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("Writer: acc %x: {Balance: %s, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
@@ -1483,7 +1483,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %s, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, acc.Balance.String(), acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
 }
@@ -1630,7 +1630,7 @@ func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Ac
 			return nil, nil
 		}
 		if r.reader.Trace() {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, &data.Balance, data.CodeHash)
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %s, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, data.Balance.String(), data.CodeHash)
 		}
 
 		result := *data

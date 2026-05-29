@@ -971,9 +971,9 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			amount := amount // avoid capture allocation unless we're tracing
 			expected := (&uint256.Int{}).Add(&prev, &amount)
 			if bal.Cmp(expected) != 0 {
-				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
+				panic(fmt.Sprintf("add failed: expected: %d got: %s", expected, bal.String()))
 			}
-			fmt.Printf("%d (%d.%d) AddBalance %x, %d+%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
+			fmt.Printf("%d (%d.%d) AddBalance %x, %s+%s=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, prev.String(), amount.String(), bal.String())
 		}()
 	}
 
@@ -1174,7 +1174,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 			bal, _ := sdb.GetBalance(addr)
 			prev := prev     // avoid capture allocation unless we're tracing
 			amount := amount // avoid capture allocation unless we're tracing
-			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
+			fmt.Printf("%d (%d.%d) SubBalance %x, %s-%s=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, prev.String(), amount.String(), bal.String())
 		}()
 	}
 
@@ -1194,7 +1194,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 func (sdb *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		amount := amount
-		fmt.Printf("%d (%d.%d) SetBalance %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &amount)
+		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, amount.String())
 	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
@@ -1766,7 +1766,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				if previous != nil {
 					bal = previous.data.Balance
 				}
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, &bal)
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, bal.String())
 			}
 		}()
 	}
@@ -2065,7 +2065,7 @@ func printAccount(EIP161Enabled bool, addr accounts.Address, stateObject *stateO
 			fmt.Printf("CreateContract: %x\n", addr)
 		}
 		stateObject.printTrie()
-		fmt.Printf("UpdateAccountData: %x, balance=%d, nonce=%d\n", addr, &stateObject.data.Balance, stateObject.data.Nonce)
+		fmt.Printf("UpdateAccountData: %x, balance=%s, nonce=%d\n", addr, stateObject.data.Balance.String(), stateObject.data.Nonce)
 	}
 }
 
@@ -2224,9 +2224,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 				dirty = " (dirty)"
 			}
 			if updated != nil {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %d (%d)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, &stateObject.data.Balance, updated)
+				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s (%d)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, stateObject.data.Balance.String(), updated)
 			} else {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, &stateObject.data.Balance)
+				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, stateObject.data.Balance.String())
 			}
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
