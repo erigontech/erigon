@@ -82,16 +82,18 @@ type DebugAPIImpl struct {
 	ethBackend        rpchelper.ApiBackend
 	GasCap            uint64
 	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
+	witnessGethCompat bool // Geth-compatible debug_executionWitness response format
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.ApiBackend, gascap uint64, gethCompatibility bool) *DebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.ApiBackend, gascap uint64, gethCompatibility bool, witnessGethCompat bool) *DebugAPIImpl {
 	return &DebugAPIImpl{
 		BaseAPI:           base,
 		db:                db,
 		ethBackend:        ethBackend,
 		GasCap:            gascap,
 		gethCompatibility: gethCompatibility,
+		witnessGethCompat: witnessGethCompat,
 	}
 }
 

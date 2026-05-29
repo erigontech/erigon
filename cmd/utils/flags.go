@@ -448,6 +448,10 @@ var (
 		Name:  "rpc.gethcompat",
 		Usage: "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.",
 	}
+	RpcWitnessCompatFlag = cli.BoolFlag{
+		Name:  "rpc.witness.gethcompat",
+		Usage: "Use Geth-compatible debug_executionWitness response format (JSON headers). Default: Reth-compatible format (RLP-encoded headers).",
+	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.txsync.defaulttimeout",
 		Usage: "Default timeout for eth_sendRawTransactionSync (default: 25 secs).",

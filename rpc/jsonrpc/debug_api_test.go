@@ -91,7 +91,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
-	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -142,7 +142,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -173,7 +173,7 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -202,7 +202,7 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNotFound(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 
 	var buf bytes.Buffer
 	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -212,7 +212,7 @@ func TestTraceTransactionNotFound(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -242,7 +242,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
 		var err error
@@ -336,7 +336,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 func TestStorageRangeAtGethCompat(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, true) // gethCompatibility=true
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, true, false) // gethCompatibility=true
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
@@ -402,7 +402,7 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 
 func TestAccountRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -461,7 +461,7 @@ func TestAccountRange(t *testing.T) {
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
@@ -576,7 +576,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
@@ -639,7 +639,7 @@ func TestAccountAt(t *testing.T) {
 
 func TestGetBadBlocks(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -712,7 +712,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 func TestGetRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -760,7 +760,7 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false, false)
 	ctx := context.Background()
 
 	// Write the DB flag so that debug_executionWitness accepts the request.
@@ -799,8 +799,8 @@ func TestExecutionWitness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.Nil(t, result.Keys, "Keys must remain nil (Geth compatibility)")
-		if len(result.Headers) > 0 {
+		require.NotNil(t, result.Keys, "Keys must be set in Reth-compatible mode")
+		if len(result.headerByNumber) > 0 {
 			require.Contains(t, result.headerByNumber, uint64(0), "parent header (block 0) must be present in lookup map when Headers is non-empty")
 		}
 	})
@@ -917,7 +917,7 @@ func TestSetHead(t *testing.T) {
 		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
+		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false, false)
 	}
 
 	// Rewinding one block below the current head is the simplest valid rewind.

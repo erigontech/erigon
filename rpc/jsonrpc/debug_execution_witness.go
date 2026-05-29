@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -460,6 +461,26 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 	return result
 }
 
+func witnessHeadersToJSON(headers []*types.Header) []map[string]any {
+	result := make([]map[string]any, len(headers))
+	for i, h := range headers {
+		result[i] = marshalWitnessHeader(h)
+	}
+	return result
+}
+
+func witnessHeadersToRLP(headers []*types.Header) ([]hexutil.Bytes, error) {
+	result := make([]hexutil.Bytes, len(headers))
+	for i, h := range headers {
+		encoded, err := rlp.EncodeToBytes(h)
+		if err != nil {
+			return nil, fmt.Errorf("failed to RLP-encode header %d: %w", h.Number.Uint64(), err)
+		}
+		result[i] = encoded
+	}
+	return result, nil
+}
+
 // marshalWitnessHeader converts a block header to the JSON map format used in
 // debug_executionWitness responses, matching Geth's output format.
 func marshalWitnessHeader(h *types.Header) map[string]any {
@@ -501,14 +522,15 @@ type ExecutionWitnessResult struct {
 	Codes []hexutil.Bytes `json:"codes"`
 	// Keys is always null (reserved for future use, included for Geth compatibility)
 	Keys []hexutil.Bytes `json:"keys"`
-	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
-	// For blocks that touch state, always includes the parent block header plus any blocks accessed
-	// via BLOCKHASH. Omitted (nil) for empty-touch blocks, where ExecutionWitness returns early
-	// before headers are collected.
-	Headers []map[string]any `json:"headers,omitempty"`
+	// Headers is a list of block headers needed for BLOCKHASH opcode support.
+	// Format depends on the --rpc.witness.gethcompat flag: JSON objects (Geth) or RLP-encoded bytes (Reth).
+	// Omitted for empty-touch blocks where ExecutionWitness returns early.
+	Headers any `json:"headers,omitempty"`
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
+	// allCodes holds all accessed + newly deployed code (unfiltered) for stateless verification
+	allCodes []hexutil.Bytes
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
@@ -640,12 +662,16 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
-	accessed := collectAccessedState(recordingState)
+	accessed := collectAccessedState(recordingState, api.witnessGethCompat)
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
 		Codes:          accessed.SortedCodes,
+		allCodes:       accessed.AllCodes,
 		headerByNumber: make(map[uint64]*types.Header),
+	}
+	if !api.witnessGethCompat {
+		result.Keys = accessed.SortedKeys
 	}
 
 	// Build merkle proofs for all accessed accounts
@@ -694,12 +720,19 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	result.State = nodes
 
-	headers, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
+	ordered, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
 	if err != nil {
 		return nil, err
 	}
-	result.Headers = headers
 	result.headerByNumber = byNumber
+	if api.witnessGethCompat {
+		result.Headers = witnessHeadersToJSON(ordered)
+	} else {
+		result.Headers, err = witnessHeadersToRLP(ordered)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
 		return nil, err
@@ -711,14 +744,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 // accessedState summarizes everything the witness needs from a recorded execution:
 // the deduplicated set of accessed accounts/storage/code addresses, the sorted code
 // blobs that go into result.Codes, and the pre-state code reads that feed witness
-// trie generation. SortedKeys is built for symmetry with PR #21227 but currently
-// vestigial — result.Keys is intentionally always null per Geth compatibility.
+// trie generation.
 type accessedState struct {
 	SortedKeys  []hexutil.Bytes
 	Addresses   map[common.Address]struct{}
 	Storage     map[common.Address]map[common.Hash]struct{}
 	CodeAddrs   map[common.Address]struct{}
-	SortedCodes []hexutil.Bytes
+	SortedCodes []hexutil.Bytes // code for accounts in the witness, filtered by state access (Reth semantics)
+	AllCodes    []hexutil.Bytes // all accessed + newly deployed, unfiltered (for stateless verification)
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
 }
 
@@ -748,21 +781,18 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 }
 
 // collectAccessedState rolls the RecordingState read/write maps and the three
-// code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
-// bytecode that existed at the start of the block, not code created in-block.
-// A stateless verifier re-derives in-block-created code by replaying the
-// transactions, so emitting it would be redundant over-inclusion.
+// code-tracking maps into a single accessedState.
 //
 // SortedCodes is initialized to an empty (non-nil) slice so callers can assign
 // result.Codes = accessed.SortedCodes without risking a "codes": null JSON
 // regression for empty-touch blocks; the Codes field has no omitempty.
-func collectAccessedState(rs *RecordingState) *accessedState {
+func collectAccessedState(rs *RecordingState, gethCompat bool) *accessedState {
 	out := &accessedState{
 		Addresses:   make(map[common.Address]struct{}),
 		Storage:     make(map[common.Address]map[common.Hash]struct{}),
 		CodeAddrs:   make(map[common.Address]struct{}),
 		SortedCodes: []hexutil.Bytes{},
+		AllCodes:    []hexutil.Bytes{},
 		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
 	}
 
@@ -822,10 +852,9 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	for addr := range out.Addresses {
 		sortedKeys = append(sortedKeys, addr[:])
 	}
-	for addr, keys := range out.Storage {
+	for _, keys := range out.Storage {
 		for key := range keys {
-			composite := append(addr[:], key[:]...)
-			sortedKeys = append(sortedKeys, composite)
+			sortedKeys = append(sortedKeys, key[:])
 		}
 	}
 	slices.SortFunc(sortedKeys, func(a, b hexutil.Bytes) int {
@@ -838,25 +867,49 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		hash common.Hash
 	}
 
-	preStateCode := rs.GetPreStateCode()
+	accessedCode := rs.GetAccessedCode()
+	modCode := rs.GetModifiedCode()
+
+	sortedCodesSlice := func(m map[common.Hash][]byte) []hexutil.Bytes {
+		items := make([]codeWithHash, 0, len(m))
+		for h, code := range m {
+			items = append(items, codeWithHash{code: code, hash: h})
+		}
+		slices.SortFunc(items, func(a, b codeWithHash) int {
+			return bytes.Compare(a.hash[:], b.hash[:])
+		})
+		result := make([]hexutil.Bytes, 0, len(items))
+		for _, c := range items {
+			result = append(result, c.code)
+		}
+		return result
+	}
+
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range preStateCode {
+	filteredCodesByHash := make(map[common.Hash][]byte)
+	for addr, code := range accessedCode {
+		if len(code) > 0 {
+			h := crypto.Keccak256Hash(code)
+			allCodesByHash[h] = code
+			if _, inState := out.Addresses[addr]; inState {
+				filteredCodesByHash[h] = code
+			}
+		}
+	}
+
+	out.SortedCodes = sortedCodesSlice(filteredCodesByHash)
+	if !gethCompat {
+		out.SortedCodes = filterEIP7702Codes(out.SortedCodes, accessedCode)
+	}
+
+	// AllCodes: add newly deployed code into allCodesByHash, then sort
+	for _, code := range modCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			allCodesByHash[h] = code
 		}
 	}
-
-	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
-	for h, code := range allCodesByHash {
-		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
-	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
-	for _, c := range uniqueCodes {
-		out.SortedCodes = append(out.SortedCodes, c.code)
-	}
+	out.AllCodes = sortedCodesSlice(allCodesByHash)
 
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
@@ -870,7 +923,6 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
-	modCode := rs.GetModifiedCode()
 	for addr := range preCode {
 		out.CodeAddrs[addr] = struct{}{}
 	}
@@ -879,6 +931,32 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	}
 
 	return out
+}
+
+// filterEIP7702Codes removes EIP-7702 delegation designator codes (0xef0100||address)
+// and their corresponding target contract codes from the given codes slice.
+func filterEIP7702Codes(codes []hexutil.Bytes, accessedCode map[common.Address][]byte) []hexutil.Bytes {
+	excluded := make(map[common.Hash]struct{})
+	for _, code := range accessedCode {
+		if len(code) == 23 && code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00 {
+			excluded[crypto.Keccak256Hash(code)] = struct{}{}
+			var target common.Address
+			copy(target[:], code[3:23])
+			if targetCode, ok := accessedCode[target]; ok && len(targetCode) > 0 {
+				excluded[crypto.Keccak256Hash(targetCode)] = struct{}{}
+			}
+		}
+	}
+	if len(excluded) == 0 {
+		return codes
+	}
+	filtered := make([]hexutil.Bytes, 0, len(codes))
+	for _, code := range codes {
+		if _, skip := excluded[crypto.Keccak256Hash(code)]; !skip {
+			filtered = append(filtered, code)
+		}
+	}
+	return filtered
 }
 
 // detectCollapseSiblings runs STEP 1 of witness construction: compute the full
@@ -1049,8 +1127,7 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 	tx kv.TemporalTx,
 	parentNum uint64,
 	accessedBlockNums []uint64,
-) (headers []map[string]any, byNumber map[uint64]*types.Header, err error) {
-	headers = []map[string]any{}
+) (ordered []*types.Header, byNumber map[uint64]*types.Header, err error) {
 	byNumber = make(map[uint64]*types.Header)
 
 	addHeader := func(bn uint64) error {
@@ -1065,7 +1142,7 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 		if h == nil {
 			return fmt.Errorf("missing header for block %d", bn)
 		}
-		headers = append(headers, marshalWitnessHeader(h))
+		ordered = append(ordered, h)
 		byNumber[h.Number.Uint64()] = h
 
 		return nil
@@ -1080,7 +1157,7 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 		}
 	}
 
-	return headers, byNumber, nil
+	return ordered, byNumber, nil
 }
 
 // verifyWitnessStateless optionally re-executes the block statelessly against the
@@ -1354,9 +1431,9 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 		return nil, fmt.Errorf("failed to decode witness trie: %w", err)
 	}
 
-	// Build code map from codes list
+	// Build code map from all accessed codes (pre-existing + newly deployed)
 	codeMap := make(map[common.Hash][]byte)
-	for _, code := range result.Codes {
+	for _, code := range result.allCodes {
 		codeHash := crypto.Keccak256Hash(code)
 		codeMap[codeHash] = code
 	}

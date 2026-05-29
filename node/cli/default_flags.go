@@ -96,6 +96,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGethCompatFlag,
+	&utils.RpcWitnessCompatFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
 	&utils.RpcGetLogsMaxResults,
