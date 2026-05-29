@@ -439,7 +439,7 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	hash := crypto.Keccak256Hash(hashData)
 
 	// Sign the hash
-	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	sig, err := crypto.Sign(hash[:], privateKey)
 	require.NoError(t, err)
 
 	// Separate signature components

@@ -259,7 +259,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
-	require.NotEqual(t, empty.RootHash.Bytes(), root)
+	require.NotEqual(t, empty.RootHash[:], root)
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
@@ -331,7 +331,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
+	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
 }
@@ -712,7 +712,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Validate
 	require.NotEmpty(t, lastRoot, "final root must be non-empty")
-	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "final root must differ from empty trie root")
+	require.NotEqual(t, empty.RootHash[:], lastRoot, "final root must differ from empty trie root")
 
 	t.Logf("Done. Final root: %x", lastRoot)
 	t.Logf("Output datadir: %s", dirs.DataDir)

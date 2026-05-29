@@ -87,8 +87,10 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 		t.Fatal("not equal", keyAcc)
 	}
 
-	value1 := common.HexToHash("0x3").Bytes()
-	value2 := common.HexToHash("0x5").Bytes()
+	value1Hash := common.HexToHash("0x3")
+	value2Hash := common.HexToHash("0x5")
+	value1 := value1Hash[:]
+	value2 := value2Hash[:]
 
 	storageKey1 := common.HexToHash("0x1")
 	storageKey2 := common.HexToHash("0x5")
@@ -100,10 +102,10 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	trie.Update(fullStorageKey2, value2)
 
 	expectedTrie := newEmpty()
-	expectedTrie.Update(storageKey1.Bytes(), value1)
-	expectedTrie.Update(storageKey2.Bytes(), value2)
+	expectedTrie.Update(storageKey1[:], value1)
+	expectedTrie.Update(storageKey2[:], value2)
 
-	_, h1 := trie.DeepHash(addrHash.Bytes())
+	_, h1 := trie.DeepHash(addrHash[:])
 	h2 := expectedTrie.Hash()
 	if h1 != h2 {
 		t.Fatal("not equals", h1.String(), h2.String())
@@ -138,9 +140,9 @@ func TestHash(t *testing.T) {
 	trie := New(common.Hash{})
 	trie2 := NewTestRLPTrie(common.Hash{})
 
-	trie.UpdateAccount(addr1.Bytes(), acc1)
-	trie.UpdateAccount(addr2.Bytes(), acc2)
-	trie.UpdateAccount(addr3.Bytes(), acc3)
+	trie.UpdateAccount(addr1[:], acc1)
+	trie.UpdateAccount(addr2[:], acc2)
+	trie.UpdateAccount(addr3[:], acc3)
 
 	b1 := make([]byte, acc1.EncodingLengthForHashing())
 	b2 := make([]byte, acc2.EncodingLengthForHashing())
@@ -148,9 +150,9 @@ func TestHash(t *testing.T) {
 	acc1.EncodeForHashing(b1)
 	acc2.EncodeForHashing(b2)
 	acc3.EncodeForHashing(b3)
-	trie2.Update(addr1.Bytes(), b1)
-	trie2.Update(addr2.Bytes(), b2)
-	trie2.Update(addr3.Bytes(), b3)
+	trie2.Update(addr1[:], b1)
+	trie2.Update(addr2[:], b2)
+	trie2.Update(addr3[:], b3)
 
 	if trie.Hash().String() != trie2.Hash().String() {
 		t.FailNow()

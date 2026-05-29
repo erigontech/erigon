@@ -1273,7 +1273,10 @@ func concat(s1 []byte, s2 ...byte) []byte {
 // Root returns the root hash of the trie.
 //
 // Deprecated: use Hash instead.
-func (t *Trie) Root() []byte { return t.Hash().Bytes() }
+func (t *Trie) Root() []byte {
+	h := t.Hash()
+	return h[:]
+}
 
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.

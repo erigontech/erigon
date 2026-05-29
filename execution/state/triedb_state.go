@@ -371,7 +371,7 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 			panic("could not reproduce addrHash found in the map")
 		}
 		accountAddresses = append(accountAddresses, addressValue[:])
-		accountAddressHashes = append(accountAddressHashes, addrHash.Bytes())
+		accountAddressHashes = append(accountAddressHashes, addrHash[:])
 	}
 
 	// Create a slice of indices to track original positions

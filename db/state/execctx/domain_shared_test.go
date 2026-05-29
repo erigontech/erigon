@@ -1226,14 +1226,14 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
+	storageK1 := append(append([]byte{}, acc1[:]...), acc1slot1[:]...)
 	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
 	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-	storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
+	storageK2 := append(append([]byte{}, acc2[:]...), acc2slot2[:]...)
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -1246,10 +1246,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx1)
@@ -1266,7 +1266,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(c1.Close)
 		k, v, err := c1.Next()
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
 		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
@@ -1286,14 +1286,14 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx1)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 
 		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc2.Bytes(), roTtx1)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc2[:], roTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -1311,10 +1311,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx2)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx2)
@@ -1345,7 +1345,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(c2.Close)
 		k, v, err := c2.Next() // acc2 storage from step 2 will be there
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc2[:]...), acc2slot2[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
 		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
@@ -1362,10 +1362,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx2)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
 		roTtx2.Rollback()
 	}
@@ -1375,10 +1375,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx4.Rollback)
-		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
+		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1[:], 3)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx4)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx4)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -1392,7 +1392,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx3, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx3)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx3)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -1408,10 +1408,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx5)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx5)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 		// check after flush
 		err = sd.Flush(ctx, rwTtx5)
@@ -1422,10 +1422,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx4, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx4)
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], roTtx4)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 		roTtx4.Rollback()
 	}
@@ -1613,7 +1613,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 
 	acc1Addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1Slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1Addr.Bytes()...), acc1Slot.Bytes()...)
+	storageK1 := append(append([]byte{}, acc1Addr[:]...), acc1Slot[:]...)
 	storageV1 := []byte{1}
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(1)
@@ -1621,24 +1621,24 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 
 	// --- check 1: non-existing account & storage and empty commitment trie ---
 	{
-		acc1Value, _, err := sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr.Bytes())
+		acc1Value, _, err := sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr[:])
 		require.NoError(t, err)
 		require.Nil(t, acc1Value)
 
-		acc1SlotValue, _, err := sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot.Bytes())
+		acc1SlotValue, _, err := sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot[:])
 		require.NoError(t, err)
 		require.Nil(t, acc1SlotValue)
 
 		rootHash, err := sd1.GetCommitmentContext().Trie().RootHash()
 		require.NoError(t, err)
-		require.Equal(t, empty.RootHash.Bytes(), rootHash)
+		require.Equal(t, empty.RootHash[:], rootHash)
 	}
 
 	// --- check 2: write state in db1 and verify is present in history ---
 	txNum := uint64(1)
 	{
 		// write account and storage in db1
-		err = sd1.DomainPut(kv.AccountsDomain, db1RwTx, acc1Addr.Bytes(), acc1Encoded, txNum, nil)
+		err = sd1.DomainPut(kv.AccountsDomain, db1RwTx, acc1Addr[:], acc1Encoded, txNum, nil)
 		require.NoError(t, err)
 		err = sd1.DomainPut(kv.StorageDomain, db1RwTx, storageK1, storageV1, txNum, nil)
 		require.NoError(t, err)
@@ -1658,7 +1658,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		t.Cleanup(c1.Close)
 		k, v, err := c1.Next()
 		require.NoError(t, err)
-		require.Equal(t, acc1Addr.Bytes(), k)
+		require.Equal(t, acc1Addr[:], k)
 		wantValueBytes := make([]byte, 8)                       // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1))  // step num
 		wantValueBytes = append(wantValueBytes, acc1Encoded...) // value we wrote to the account
@@ -1672,7 +1672,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		t.Cleanup(c2.Close)
 		k, v, err = c2.Next()
 		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc1Addr.Bytes()...), acc1Slot.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc1Addr[:]...), acc1Slot[:]...), k)
 		wantValueBytes = make([]byte, 8)                       // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
 		wantValueBytes = append(wantValueBytes, storageV1...)  // value we wrote to the storage slot
@@ -1712,7 +1712,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		// check that the initial commitment trie is empty in db2
 		initialRootHash, err := sd2.GetCommitmentContext().Trie().RootHash()
 		require.NoError(t, err)
-		require.Equal(t, empty.RootHash.Bytes(), initialRootHash)
+		require.Equal(t, empty.RootHash[:], initialRootHash)
 
 		// double-check: if we try to compute the initial commitment trie root in db2, it is empty
 		initialRootHash, err = sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
@@ -1720,7 +1720,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 			return
 		}
 		require.NoError(t, err)
-		require.Equal(t, empty.RootHash.Bytes(), initialRootHash)
+		require.Equal(t, empty.RootHash[:], initialRootHash)
 
 		// test core: touch in sd2 the changed keys in [fromTxNum, toTxNum+1) using historical state changes from db1
 		accountChanges, storageChanges, err := sd2.TouchChangedKeysFromHistory(db1RoTx, fromTxNum, toTxNum+1)

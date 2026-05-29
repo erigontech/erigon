@@ -318,7 +318,8 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
-	got := lookupKeyUpdate(t, updates, string(addr.Value().Bytes()))
+	addrVal := addr.Value()
+	got := lookupKeyUpdate(t, updates, string(addrVal[:]))
 
 	// EIP-161-style DeleteUpdate (matches serial's DomainDel for a pure SD).
 	assert.Equal(t, commitment.DeleteUpdate, got.Flags,

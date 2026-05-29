@@ -83,7 +83,7 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	trie.Update(key1, val)
 	trie.Update(key2, val)
 
-	trie.DeleteSubtree(addrHash1.Bytes())
+	trie.DeleteSubtree(addrHash1[:])
 
 	v, ok := trie.Get(key2)
 	if ok == false || bytes.Equal(v, val) == false {
@@ -376,13 +376,14 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	addrHash, err := common.HashData(crypto.PubkeyToAddress(key.PublicKey).Bytes())
+	pubAddr := crypto.PubkeyToAddress(key.PublicKey)
+	addrHash, err := common.HashData(pubAddr[:])
 	if err != nil {
 		t.Fatal(err)
 	}
-	trie.UpdateAccount(addrHash.Bytes(), acc)
+	trie.UpdateAccount(addrHash[:], acc)
 
-	accRes1, _ := trie.GetAccount(addrHash.Bytes())
+	accRes1, _ := trie.GetAccount(addrHash[:])
 	if reflect.DeepEqual(acc, accRes1) == false {
 		t.Fatal("not equal", addrHash)
 	}
@@ -405,9 +406,9 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	trie.Update(ck1, val1)
 	trie.Update(ck2, val2)
 
-	trie.DeleteSubtree(addrHash.Bytes())
+	trie.DeleteSubtree(addrHash[:])
 
-	accRes2, _ := trie.GetAccount(addrHash.Bytes())
+	accRes2, _ := trie.GetAccount(addrHash[:])
 	if reflect.DeepEqual(acc, accRes2) == false {
 		t.Fatal("account was deleted", addrHash)
 	}
