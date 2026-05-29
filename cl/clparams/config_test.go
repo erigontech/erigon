@@ -80,11 +80,12 @@ GLOAS_FORK_VERSION: 0x80000038
 GLOAS_FORK_EPOCH: 1
 
 # GLOAS-specific
+PAYLOAD_DUE_BPS: 7500
 MAX_PAYLOAD_ATTESTATIONS: 4
 BUILDER_REGISTRY_LIMIT: 1099511627776
 BUILDER_PENDING_WITHDRAWALS_LIMIT: 1048576
 MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: 16384
-MIN_BUILDER_WITHDRAWABILITY_DELAY: 64
+MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
@@ -107,9 +108,10 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 64
 	require.NotEqual(t, uint64(math.MaxUint64), beaconCfg.GloasForkEpoch)
 
 	// Verify GLOAS-specific parameters.
+	require.Equal(t, uint64(7500), beaconCfg.PayloadDueBps)
 	require.Equal(t, uint64(4), beaconCfg.MaxPayloadAttestations)
 	require.Equal(t, uint64(1099511627776), beaconCfg.BuilderRegistryLimit)
-	require.Equal(t, uint64(64), beaconCfg.MinBuilderWithdrawabilityDelay)
+	require.Equal(t, uint64(8192), beaconCfg.MinBuilderWithdrawabilityDelay)
 
 	// Verify MinSeedLookahead is 1 (inherited from mainnet defaults or overridden).
 	require.Equal(t, uint64(1), beaconCfg.MinSeedLookahead)
