@@ -37,7 +37,7 @@ import (
 func pushAddrSelfdestruct(addr common.Address) []byte {
 	out := make([]byte, 0, 22)
 	out = append(out, 0x73)
-	out = append(out, addr.Bytes()...)
+	out = append(out, addr[:]...)
 	out = append(out, 0xff)
 	return out
 }

@@ -571,7 +571,8 @@ func fillForkables(t *testing.T, rwtx kv.RwTx, headerTx, bodyTx MarkedTxI, amoun
 			// just use different value
 			HEADER_M, BODY_M = 200, 201
 		}
-		hash := tr.RandHash().Bytes()
+		rh := tr.RandHash()
+		hash := rh[:]
 		err := headerTx.Put(Num(i), hash, Num(i*HEADER_M).EncTo8Bytes(), rwtx)
 		require.NoError(t, err)
 

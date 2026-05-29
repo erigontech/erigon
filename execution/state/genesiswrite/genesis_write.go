@@ -439,7 +439,7 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		}
 		var slotVal uint256.Int
 		for key, value := range account.Storage {
-			slotVal.SetBytes(value.Bytes())
+			slotVal.SetBytes(value[:])
 			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
 			if err != nil {
 				return nil, nil, err
@@ -580,7 +580,7 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	keys := make([]string, len(m))
 	i := 0
 	for k := range m {
-		keys[i] = string(k.Bytes())
+		keys[i] = string(k[:])
 		i++
 	}
 	slices.Sort(keys)

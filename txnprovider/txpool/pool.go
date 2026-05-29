@@ -857,7 +857,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		if mt.TxnSlot.TxType() != types.BlobTxType {
 			txns.ParsedTxn[count] = mt.TxnSlot.Txn
 		}
-		copy(txns.Senders.At(count), sender.Bytes())
+		copy(txns.Senders.At(count), sender[:])
 		txns.IsLocal[count] = isLocal
 		if yielded != nil {
 			yielded.Add(mt.TxnSlot.IDHash)
@@ -2601,7 +2601,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 			continue
 		}
 
-		copy(v[:20], addr.Bytes())
+		copy(v[:20], addr[:])
 		copy(v[20:], metaTx.TxnSlot.Rlp)
 
 		has, err := tx.Has(kv.PoolTransaction, []byte(txHash))
