@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
-// do not use e.g. SetInt() on the numbers. For testing only
 func copyConfig(original *chain.Config) *chain.Config {
 	var copy chain.Config
-	copier.Copy(&copy, original)
+	if err := copier.CopyWithOption(&copy, original, copier.Option{DeepCopy: true}); err != nil {
+		panic(err)
+	}
 	return &copy
 }
 

@@ -116,7 +116,7 @@ func TestTableScanningPrune_Basic(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "txlookup",
-		5, 15, 0, 1, logEvery, log.New(),
+		5, 15, 1, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
 	)
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	cur := openPseudoCursor(t, tx)
 	stat1, err := prune.TableScanningPrune(
 		t.Context(), "test", "txlookup",
-		0, 8, 0, 1, logEvery, log.New(),
+		0, 8, 1, logEvery, log.New(),
 		nil, cur, false, prevStat, prune.ValueOffset8StorageMode,
 	)
 	cur.Close()
@@ -188,7 +188,7 @@ func TestTableScanningPrune_RollingCursor(t *testing.T) {
 	cur = openPseudoCursor(t, tx)
 	stat2, err := prune.TableScanningPrune(
 		t.Context(), "test", "txlookup",
-		0, 10, 0, 1, logEvery, log.New(),
+		0, 10, 1, logEvery, log.New(),
 		nil, cur, false, newRotStat, prune.ValueOffset8StorageMode,
 	)
 	cur.Close()
@@ -228,7 +228,7 @@ func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		ctx, "test", "txlookup",
-		0, 5, 0, 1, logEvery, log.New(),
+		0, 5, 1, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
 	)
 	require.NoError(t, err)
@@ -322,7 +322,7 @@ func TestDupSortPrune_SingleDupAllInRange(t *testing.T) {
 	// txTo = 64 → prune steps 0,1,2,3.
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
-		0, 64, 0, stepSize, logEvery, log.New(),
+		0, 64, stepSize, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
@@ -367,7 +367,7 @@ func TestDupSortPrune_MultipleDupsAllInRange(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
-		0, 64, 0, stepSize, logEvery, log.New(),
+		0, 64, stepSize, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
@@ -409,7 +409,7 @@ func TestDupSortPrune_MixedDupsPartialRange(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "dup",
-		0, 64, 0, stepSize, logEvery, log.New(),
+		0, 64, stepSize, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
@@ -468,7 +468,7 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 
 	_, err = prune.TableScanningPrune(
 		t.Context(), "test", "dup",
-		0, txTo, 0, stepSize, logEvery, log.New(),
+		0, txTo, stepSize, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
@@ -514,7 +514,7 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 		cur := openPseudoCursor(b, tx)
 		prune.TableScanningPrune( //nolint:errcheck
 			b.Context(), "bench", "txlookup",
-			0, N/2, 0, 1, logEvery, logger,
+			0, N/2, 1, logEvery, logger,
 			nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
 		)
 		cur.Close()

@@ -271,9 +271,10 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	monitor.ObserveNewPayloadTime(timeStartExec)
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 
-	// Track payload status by execution block hash for parent payload validation
+	// Track payload status and gas limit by execution block hash for parent payload validation
 	executionBlockHash := envelope.Payload.BlockHash
 	f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+	f.executionPayloadGasLimit.Add(executionBlockHash, envelope.Payload.GasLimit)
 
 	switch payloadStatus {
 	case execution_client.PayloadStatusNone:

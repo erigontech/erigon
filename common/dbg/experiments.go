@@ -38,12 +38,13 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	noMemstat            = EnvBool("NO_MEMSTAT", false)
-	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
-	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency        = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	noMemstat                   = EnvBool("NO_MEMSTAT", false)
+
+	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -254,14 +255,19 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	totalMemory := estimate.TotalMemory()
+	threshold := (totalMemory / 100) * heapProfileThresholdPercent
+	aboveThreshold := memStats.Alloc >= threshold
 	if logger != nil {
 		logger.Info(
-			"[Experiment] heap profile threshold check",
+			"[Experiment] heap check",
+			"threshold", common.ByteCount(threshold),
 			"alloc", common.ByteCount(memStats.Alloc),
+			"aboveThreshold", aboveThreshold,
+			"sys", common.ByteCount(memStats.Sys),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
+	if !aboveThreshold {
 		return
 	}
 
