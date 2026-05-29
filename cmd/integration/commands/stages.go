@@ -1102,7 +1102,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
-		_aggSingleton.SetFrozenBlocksProvider(blockReader)
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
