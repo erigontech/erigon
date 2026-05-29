@@ -230,22 +230,22 @@ no lost wakeup.
 **Files:**
 - Modify: `execution/commitment/commitment.go`
 
-- [ ] pass `t.gen` to both `WarmKey` submission sites (1830, 1898)
-- [ ] **batch-boundary** sites **1850** (ModeDirect) and **1919** (ModeUpdate): replace the
+- [x] pass `t.gen` to both `WarmKey` submission sites (1830, 1898)
+- [x] **batch-boundary** sites **1850** (ModeDirect) and **1919** (ModeUpdate): replace the
       placeholder `DrainPending()` + `byteArena=[:0]` reset with
       `t.gen++; slot := int(t.gen % arenaRingSize); if warmuper != nil {
       warmuper.WaitBufferFree(slot) }; t.arenas[slot] = t.arenas[slot][:0];
       t.curArena = slot`
-- [ ] **entry** sites **1808** (ModeDirect) and **1875** (ModeUpdate): before resetting the
+- [x] **entry** sites **1808** (ModeDirect) and **1875** (ModeUpdate): before resetting the
       entry buffer, `if warmuper != nil { warmuper.WaitBufferFree(t.curArena) }`, then reset
       `t.arenas[t.curArena]` (so a prior HashSort's stragglers can't hold the entry buffer)
-- [ ] DO NOT remove `DrainPending` — it is still called by `hex_patricia_hashed.go:2885`;
+- [x] DO NOT remove `DrainPending` — it is still called by `hex_patricia_hashed.go:2885`;
       leave that call and the method intact
-- [ ] confirm `TestHashSort_WarmupArenaNoRace` (kept) still passes under `-race`
-- [ ] add an integrated **lap test** (≥30 000 keys → ≥3 generations with K=2 + a slow
+- [x] confirm `TestHashSort_WarmupArenaNoRace` (kept) still passes under `-race`
+- [x] add an integrated **lap test** (≥30 000 keys → ≥3 generations with K=2 + a slow
       straggler via `slowCtxFactory`) that forces a buffer reuse and proves the producer
       blocks until the straggler drains; assert no race and correct visited count
-- [ ] run `go test -race -run 'HashSort_WarmupArena|HashSort_WarmupLap' ./execution/commitment/`
+- [x] run `go test -race -run 'HashSort_WarmupArena|HashSort_WarmupLap' ./execution/commitment/`
       — must pass
 
 ### Task 5: Consolidate and run the full test suite

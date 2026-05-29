@@ -194,6 +194,54 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 	}
 }
 
+// TestHashSort_WarmupLap drives enough keys to cross at least three batch boundaries
+// (≥3 generations with K=2), forcing a ring slot to be reused while a slow straggler
+// still holds an arena-backed key from the slot's previous occupant generation. The
+// producer must block in WaitBufferFree until the straggler drains; -race is the signal
+// that no arena overwrite races an in-flight read.
+func TestHashSort_WarmupLap(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 30_000 // three batch boundaries → gen reaches 3, so each ring slot is reused
+	const keyLen = 64
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+			require.EqualValues(t, numKeys, ut.Size())
+
+			ctx := context.Background()
+			warmuper := NewWarmuper(ctx, WarmupConfig{
+				Enabled:    true,
+				CtxFactory: slowCtxFactory(2 * time.Millisecond),
+				NumWorkers: 4,
+				MaxDepth:   64,
+				LogPrefix:  "test",
+			})
+			warmuper.Start()
+
+			visited := 0
+			err := ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+				visited++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, numKeys, visited)
+			// gen advances once per batch boundary; ≥3 means at least one ring slot was
+			// reused (lapped) — the path WaitBufferFree guards.
+			require.GreaterOrEqual(t, ut.gen, uint64(3))
+			require.NoError(t, warmuper.Wait())
+		})
+	}
+}
+
 // TestUpdates_ArenaAlloc verifies that sequential allocations within a ring buffer return
 // non-overlapping sub-slices, and that an over-capacity request falls back to an independent
 // allocation that leaves prior sub-slices intact.

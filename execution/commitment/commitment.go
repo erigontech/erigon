@@ -1820,6 +1820,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		// Worst case: storage keys produce 128-byte nibblized hashed keys +
 		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
 		t.arenaEnsureCap(hashSortBatchSize * 192)
+		if warmuper != nil {
+			warmuper.WaitBufferFree(t.curArena)
+		}
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 
@@ -1858,11 +1861,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return err
 					}
 				}
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
 				t.batchSlab = t.batchSlab[:0]
-				t.arenas[t.curArena] = t.arenas[t.curArena][:0]
+				t.gen++
+				slot := int(t.gen % arenaRingSize)
+				if warmuper != nil {
+					warmuper.WaitBufferFree(slot)
+				}
+				t.arenas[slot] = t.arenas[slot][:0]
+				t.curArena = slot
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1887,6 +1893,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
 		t.arenaEnsureCap(hashSortBatchSize * 144)
+		if warmuper != nil {
+			warmuper.WaitBufferFree(t.curArena)
+		}
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 		var processErr error
@@ -1927,11 +1936,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					}
 				}
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
 				t.batchSlab = t.batchSlab[:0]
-				t.arenas[t.curArena] = t.arenas[t.curArena][:0]
+				t.gen++
+				slot := int(t.gen % arenaRingSize)
+				if warmuper != nil {
+					warmuper.WaitBufferFree(slot)
+				}
+				t.arenas[slot] = t.arenas[slot][:0]
+				t.curArena = slot
 			}
 			return true
 		})
