@@ -821,8 +821,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-		TargetGasLimit:        (*uint64)(payloadAttributes.TargetGasLimit),
 	}
 
 	if version >= clparams.CapellaVersion {
@@ -831,6 +829,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	if version >= clparams.DenebVersion {
 		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
+	}
+
+	if version >= clparams.GloasVersion {
+		assembleParams.SlotNumber = (*uint64)(payloadAttributes.SlotNumber)
+		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
 	}
 
 	var assembled execmodule.AssembleBlockResult

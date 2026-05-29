@@ -45,10 +45,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # No submodules or LFS needed: benchmark functions only use
-      # in-memory or local testdata/ files. Space cleanup is needed
-      # for the cache-warming path (go test -run=^$ ./...) which
-      # compiles test binaries for every package.
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:

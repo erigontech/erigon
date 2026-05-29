@@ -33,6 +33,7 @@ const StatusTopic = "/status"
 const GoodbyeTopic = "/goodbye"
 const BeaconBlocksByRangeTopic = "/beacon_blocks_by_range"
 const BeaconBlocksByRootTopic = "/beacon_blocks_by_root"
+const BeaconBlocksByHeadTopic = "/beacon_blocks_by_head"
 const BlobSidecarByRootTopic = "/blob_sidecars_by_root"
 const BlobSidecarByRangeTopic = "/blob_sidecars_by_range"
 const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
@@ -63,6 +64,8 @@ var (
 
 	BeaconBlocksByRootProtocolV1 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
 	BeaconBlocksByRootProtocolV2 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema2 + EncodingProtocol
+
+	BeaconBlocksByHeadProtocolV1 = ProtocolPrefix + BeaconBlocksByHeadTopic + Schema1 + EncodingProtocol
 
 	BlobSidecarByRootProtocolV1  = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
 	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
