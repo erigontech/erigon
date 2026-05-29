@@ -1129,19 +1129,15 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 			break
 		}
 
-		select {
-		case <-logEvery.C:
-			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
-		default:
-		}
-
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if i%100 == 0 {
+		if i%1000 == 0 {
 			select {
 			case <-ctx.Done():
 				return common.ErrStopped
+			case <-logEvery.C:
+				logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
 			default:
 			}
 			if time.Since(t) > timeout {
