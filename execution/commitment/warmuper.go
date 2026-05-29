@@ -341,14 +341,16 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// DrainPending drains all pending work items from the work channel without processing them.
+// DrainPending drains all pending work items from the work channel without processing them,
+// releasing each drained item's ring-slot counter so WaitBufferFree never blocks on it.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
 	}
 	for {
 		select {
-		case <-w.work:
+		case item := <-w.work:
+			w.releaseGen(item.gen)
 		default:
 			return
 		}

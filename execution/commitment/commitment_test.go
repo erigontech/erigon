@@ -120,8 +120,9 @@ func genNibbleKeys(n, keyLen int) [][]byte {
 }
 
 // TestHashSort_WarmupArenaNoRace reproduces the arena data race: at a batch boundary
-// HashSort resets t.byteArena while async warmup workers still read key slices that alias
-// it. The -race detector is the signal — red before the barrier fix, clean after.
+// HashSort resets the arena buffer while async warmup workers still read key slices that
+// alias it. The -race detector is the signal: clean only while the arena ring keeps an
+// in-flight read off a buffer being reset.
 func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	t.Parallel()
 
