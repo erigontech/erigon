@@ -217,7 +217,7 @@ func valueString(path AccountPath, value any) string {
 		return (&num).String()
 	case StoragePath:
 		num := value.(uint256.Int)
-		return fmt.Sprintf("%x", &num)
+		return num.Hex()[2:]
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
