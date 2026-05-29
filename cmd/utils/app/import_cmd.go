@@ -111,6 +111,11 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	// stack.Close() only closes databases when the node has been Start()ed,
+	// which import_cmd never does. Explicit Close ensures pure-Go backends
+	// (memstoredb) get their on-Close persistence hook even on the
+	// init-only path.
+	defer ethereum.ChainDB().Close()
 	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return err
