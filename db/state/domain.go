@@ -402,7 +402,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 	}
 	if !discard {
 		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(false)
 	}
 	return w
 }
