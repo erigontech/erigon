@@ -27,10 +27,20 @@ import (
 //go:embed testdata/mainnet_preverified.toml
 var mainnetPreverifiedFixture []byte
 
-// TestMain seeds the snapcfg registry with a minimal mainnet preverified fixture
-// so MergeLimit-dependent tests (TestFindMergeRange, TestMergeSnapshots) see the
-// historical 500K-wide segment layout. Production code populates the registry via
-// LoadSnapshotsHashes during node startup; tests bypass that path.
+// TestMain seeds the snapcfg registry with a mainnet preverified fixture so
+// tests that consult snapcfg.KnownCfg(mainnet) see real-world file layout.
+//
+// Historically these tests pulled this data implicitly through the bundled
+// github.com/erigontech/erigon-snapshot Go module, which embedded the
+// then-current mainnet.toml. That coupling was fragile: a refresh of the
+// module could change the empirical thresholds the tests asserted against
+// (lowest state-history step, tx-segment boundaries, maxStep) and break
+// unrelated logic tests with no code change.
+//
+// After dropping the erigon-snapshot dependency, this PR freezes a copy of
+// mainnet.toml as testdata at the version that was pinned on main when the
+// dependency was removed (erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd).
+// Production code populates the registry at startup via LoadRemotePreverified.
 func TestMain(m *testing.M) {
 	snapcfg.SetToml(networkname.Mainnet, mainnetPreverifiedFixture, false)
 	m.Run()
