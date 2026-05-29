@@ -526,7 +526,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//if s.CurrentSyncCycle.IsInitialCycle {
 	//	pruneTimeout = 12 * time.Hour
 	//}
-	panic(pruneTimeout)
 	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
