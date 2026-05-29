@@ -206,26 +206,41 @@ func (c *cursor) NextNoDup() ([]byte, []byte, error) {
 		// MDBX behaviour: NextNoDup with no current position behaves like First.
 		return c.First()
 	}
-	// Walk forward from the current position until the key changes. Using
-	// Seek(NextSubtree(curKey)) is only safe with fixed-length keys; with
-	// variable-length keys (e.g. CommitmentVals nibble paths), entries
-	// lexicographically between curKey and NextSubtree(curKey) — like
-	// "aab" between "aa" and "ab" — would be skipped.
 	curKey := c.current.k
 	iter := c.table.tree.Iter()
 	defer iter.Release()
+	// Non-DupSort fast path: each key has exactly one entry, so Seek(curKey)
+	// + Next is correct and O(log N).
+	if !c.table.dupSort {
+		if !iter.Seek(entry{k: curKey}) {
+			k, v := c.clearPos()
+			return k, v, nil
+		}
+		if !iter.Next() {
+			k, v := c.clearPos()
+			return k, v, nil
+		}
+		k, v := c.setPos(iter.Item())
+		return k, v, nil
+	}
+	// DupSort: walk forward past every dup of curKey. Can't use
+	// Seek(NextSubtree(curKey)) as a shortcut because variable-length keys
+	// admit entries lexicographically between curKey and NextSubtree(curKey)
+	// (e.g. "aa" < "aab" < "ab") that would be missed.
 	if !iter.Seek(entry{k: curKey, v: c.current.v}) {
 		k, v := c.clearPos()
 		return k, v, nil
 	}
 	for {
-		if !iter.Next() {
-			k, v := c.clearPos()
-			return k, v, nil
-		}
 		it := iter.Item()
 		if !bytes.Equal(it.k, curKey) {
+			// Seek already landed past curKey's dups (no dup at >=
+			// c.current.v existed, or every match was returned earlier).
 			k, v := c.setPos(it)
+			return k, v, nil
+		}
+		if !iter.Next() {
+			k, v := c.clearPos()
 			return k, v, nil
 		}
 	}
