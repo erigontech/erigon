@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"maps"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -82,9 +83,10 @@ var (
 // OpenForPath returns the shared DB for `path`, creating it on first use.
 // A subsequent OpenForPath against the same path returns the same DB,
 // mirroring MDBX where reopening the same file restores its data. If a dump
-// file exists alongside the path (`<path>.mem`), its contents are restored —
-// this lets the multi-process CLI tooling (erigon init / import / daemon)
-// round-trip chaindata through separate processes.
+// file exists inside the path directory (`<path>/inmem.dat`), its contents are
+// restored — this lets the multi-process CLI tooling (erigon init / import /
+// daemon) round-trip chaindata through separate processes, while still being
+// wiped when a caller removes the data directory.
 func OpenForPath(path string, label kv.Label, cfg kv.TableCfg) *DB {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -94,7 +96,7 @@ func OpenForPath(path string, label kv.Label, cfg kv.TableCfg) *DB {
 	}
 	db := New(label, cfg)
 	if path != "" {
-		db.persistFile = path + ".mem"
+		db.persistFile = filepath.Join(path, "inmem.dat")
 		if err := db.loadFromFile(db.persistFile); err != nil {
 			// Don't crash on a corrupt dump — fall back to a fresh DB and
 			// log via the caller's path. A loud no-op is preferable to a
@@ -168,20 +170,30 @@ func (db *DB) CHandle() unsafe.Pointer     { return nil }
 func (db *DB) Path() string                { return "memstoredb:" + string(db.label) }
 func (db *DB) ReadOnly() bool              { return false }
 
-// Close marks the handle closed. Mirrors MDBX, where on-disk data outlives
-// the handle: a subsequent OpenForPath against the same path returns the same
-// data. Tests that want a clean slate use WipePath.
+// Close marks the handle closed. Mirrors MDBX: data survives on disk; a
+// subsequent OpenForPath rehydrates from the dump file. Tests that want a
+// clean slate use WipePath.
 func (db *DB) Close() {
 	if !db.closed.CompareAndSwap(false, true) {
 		return
 	}
-	// Best-effort dump to disk so a subsequent OpenForPath against the same
-	// path restores chaindata (see persist.go for why this is needed). A
-	// failed save is non-fatal: the DB is volatile by design and any caller
-	// that depends on durability is misusing the in-mem backend.
+	// Best-effort dump to disk so a subsequent OpenForPath restores chaindata
+	// (see persist.go). A failed save is non-fatal: the DB is volatile by
+	// design.
 	if db.persistFile != "" {
 		_ = db.saveToFile(db.persistFile)
 	}
+	// Drop the registry entry so a later OpenForPath rehydrates from disk
+	// (or starts empty), matching MDBX which holds no in-memory state for a
+	// closed handle.
+	registryMu.Lock()
+	for k, v := range registry {
+		if v == db {
+			delete(registry, k)
+			break
+		}
+	}
+	registryMu.Unlock()
 }
 
 // WipePath fully removes the DB associated with `path` from the registry,
