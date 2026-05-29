@@ -75,9 +75,11 @@ jobs:
             max-allowed-failures: 0
             exec_mode: parallel
           - sim: devp2p
-            sim-limit: eth|discv5
+            sim-limit: eth
             max-allowed-failures: 0
             exec_mode: serial
+          # discv5 exercises peer discovery, not the EL exec path, so it runs in
+          # just one exec mode — duplicating it in the serial leg adds no signal.
           - sim: devp2p
             sim-limit: eth|discv5
             max-allowed-failures: 0
