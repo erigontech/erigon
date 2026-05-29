@@ -435,7 +435,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v[:])
 			statedb.SetState(address, key, *val)
 		}
 

@@ -172,7 +172,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
 			}
-			if !bytes.Equal(o1.Hash.Bytes(), o2.Hash.Bytes()) {
+			if !bytes.Equal(o1.Hash[:], o2.Hash[:]) {
 				fmt.Fprintf(output, "o1[%d].Hash = %s; o2[%d].Hash = %s\n", i, o1.Hash.Hex(), i, o2.Hash.Hex())
 			}
 		case *OperatorCode:
