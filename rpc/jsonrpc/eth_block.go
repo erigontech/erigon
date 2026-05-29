@@ -202,12 +202,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txHash := txn.Hash().String()
+		txHash := txn.Hash()
 		jsonResult := map[string]any{
-			"txHash":  txHash,
+			"txHash":  txHash.String(),
 			"gasUsed": result.ReceiptGasUsed,
 		}
-		bundleHash.Write(txn.Hash().Bytes())
+		bundleHash.Write(txHash[:])
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
