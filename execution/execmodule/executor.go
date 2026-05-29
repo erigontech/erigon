@@ -220,7 +220,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
+		InitialCycle: false,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
