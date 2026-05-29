@@ -378,28 +378,43 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		unwindTarget := currentParentNumber
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if unwindTarget < minUnwindableBlock {
-			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				LatestValidHash: common.Hash{},
-				Status:          ExecutionStatusReorgTooDeep,
-			}, false)
+
+		// Determine current canonical tip from TxNums. If unwindTarget is at or
+		// above the canonical tip, there's nothing above to roll back — skip the
+		// unwind path entirely and proceed straight to forward-filling new
+		// canonicals. This is the recovery path when chaindata canonical lags
+		// state's commitBlock (e.g. after a snapshot/state misalignment), where
+		// the conservative minUnwindable check would otherwise reject the FCU
+		// as ReorgTooDeep even though no state actually needs unwinding.
+		lastCanonicalBlock, _, errLast := rawdbv3.TxNums.Last(tx)
+		if errLast != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errLast, false)
 		}
 
-		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		// Run the unwind
-		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if unwindTarget < lastCanonicalBlock {
+			minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if unwindTarget < minUnwindableBlock {
+				e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusReorgTooDeep,
+				}, false)
+			}
+
+			if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			// Run the unwind
+			if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
+				err = fmt.Errorf("updateForkChoice: %w", err)
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
 		}
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
