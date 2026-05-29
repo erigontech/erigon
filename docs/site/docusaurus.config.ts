@@ -59,9 +59,6 @@ export default async function createConfig(): Promise<Config> {
     onBrokenAnchors: 'throw',
     i18n: {defaultLocale: 'en', locales: ['en']},
 
-    markdown: {mermaid: true},
-    themes: ['@docusaurus/theme-mermaid'],
-
     customFields: {latestVersion},
 
     headTags: [
