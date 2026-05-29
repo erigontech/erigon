@@ -233,8 +233,8 @@ func (t *tx) Put(table string, k, v []byte) error {
 }
 
 func (t *tx) Delete(table string, k []byte) error {
-	tab, ok := t.lookupTable(table)
-	if !ok {
+	tab := t.cowIfShared(table)
+	if tab == nil {
 		return nil
 	}
 	if !tab.dupSort {
@@ -261,6 +261,27 @@ func (t *tx) Delete(table string, k []byte) error {
 		tab.tree.Delete(it)
 	}
 	return nil
+}
+
+// cowIfShared returns a tx-private (COW-cloned-if-needed) table for the named
+// table, or nil if the table doesn't exist in master. MUST be used by every
+// mutator (Delete, Clear, etc.) on existing tables instead of lookupTable:
+// lookupTable returns master's shared pointer when the RwTx hasn't yet
+// touched that table via Put/getOrCreateTable, so mutating its tree would
+// corrupt master and break snapshot isolation for concurrent RoTx readers.
+func (t *tx) cowIfShared(name string) *table {
+	tab, ok := t.tables[name]
+	if !ok {
+		return nil
+	}
+	if t.rw {
+		if _, private := t.privateTables[name]; !private {
+			tab = tab.cloneShallow()
+			t.tables[name] = tab
+			t.privateTables[name] = struct{}{}
+		}
+	}
+	return tab
 }
 
 func (t *tx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
@@ -321,9 +342,11 @@ func (t *tx) ExistsTable(table string) (bool, error) {
 }
 
 func (t *tx) ClearTable(table string) error {
-	if tab, ok := t.tables[table]; ok {
-		tab.tree.Clear()
+	tab := t.cowIfShared(table)
+	if tab == nil {
+		return nil
 	}
+	tab.tree.Clear()
 	return nil
 }
 
