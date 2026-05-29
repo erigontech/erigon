@@ -501,7 +501,10 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 
 		mu.Lock()
 		collectors = append(collectors, collector)
+		nColl := len(collectors)
 		mu.Unlock()
+		log.Warn("[commitment] concurrent_branch collector created",
+			"count", nColl, "bufLimit", common.ByteCount(uint64(etl.BufferOptimalSize/16)), "txNum", txNum)
 
 		warmupCtx := &TrieContext{
 			getter:         sdc.sharedDomains.AsGetter(roTx),
@@ -526,6 +529,8 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		defer mu.Unlock()
 		c := collectors
 		collectors = nil
+		log.Warn("[commitment] concurrent_branch collectors drained",
+			"total", len(c), "peakRAMIfAllFull", common.ByteCount(uint64(len(c)*int(etl.BufferOptimalSize/16))))
 		return c
 	}
 
