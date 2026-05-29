@@ -225,6 +225,78 @@ func TestUpdates_ArenaAlloc(t *testing.T) {
 	require.NotEqual(t, &ut.arenas[ut.curArena][0], &big[0])
 }
 
+// TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone verifies that WaitBufferFree
+// blocks while a warm item for the slot's generation is still in-flight, and returns
+// once that item completes (slot drains to zero).
+func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	warmuper := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	warmuper.Start()
+	defer func() { require.NoError(t, warmuper.Wait()) }()
+
+	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
+	<-entered // worker is now inside Branch, key for gen 0 in-flight
+	require.Equal(t, int64(1), warmuper.outstanding[0].Load())
+
+	done := make(chan struct{})
+	go func() {
+		warmuper.WaitBufferFree(0)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("WaitBufferFree returned while a gen-0 item is still in-flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release) // let the worker finish
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitBufferFree did not return after the straggler drained")
+	}
+	require.Equal(t, int64(0), warmuper.outstanding[0].Load())
+}
+
+// TestWarmuper_WaitBufferFree_FastPath verifies WaitBufferFree returns immediately when
+// the slot is already drained.
+func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
+	t.Parallel()
+
+	warmuper := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	warmuper.Start()
+	defer func() { require.NoError(t, warmuper.Wait()) }()
+
+	done := make(chan struct{})
+	go func() {
+		warmuper.WaitBufferFree(0)
+		warmuper.WaitBufferFree(1)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitBufferFree did not fast-path return on an already-drained slot")
+	}
+}
+
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
 

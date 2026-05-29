@@ -207,21 +207,23 @@ no lost wakeup.
 **Files:**
 - Modify: `execution/commitment/warmuper.go`
 
-- [ ] add `outstanding [arenaRingSize]atomic.Int64`, a `sync.Mutex`, and a `*sync.Cond`
+- [x] add `outstanding [arenaRingSize]atomic.Int64`, a `sync.Mutex`, and a `*sync.Cond`
       (initialized in `NewWarmuper`) to `Warmuper`; share the `arenaRingSize` const
-- [ ] add `gen uint64` to `warmupWorkItem`
-- [ ] change `WarmKey` signature to `WarmKey(hashedKey []byte, startDepth int, gen uint64)`;
+- [x] add `gen uint64` to `warmupWorkItem`
+- [x] change `WarmKey` signature to `WarmKey(hashedKey []byte, startDepth int, gen uint64)`;
       `outstanding[gen%arenaRingSize].Add(1)` before the enqueue `select`
-- [ ] in the worker loop, after `warmupKey` returns, `outstanding[item.gen%arenaRingSize]
+- [x] in the worker loop, after `warmupKey` returns, `outstanding[item.gen%arenaRingSize]
       .Add(-1)`; when it reaches 0, lock the mutex and `Broadcast` the cond
-- [ ] add `WaitBufferFree(slot int)`: fast-path atomic `Load()==0` returns; else lock and
+      (factored into `releaseGen`, also called on the `ctx.Done()` enqueue-abort path so the
+      counter never leaks)
+- [x] add `WaitBufferFree(slot int)`: fast-path atomic `Load()==0` returns; else lock and
       `for Load()!=0 { cond.Wait() }`
-- [ ] write a contract test `TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone` using
+- [x] write a contract test `TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone` using
       `gatedCtxFactory`: submit one key for gen 0, gate the worker inside `Branch`, assert
       `WaitBufferFree(0)` does not return; release; assert it returns and `outstanding[0]==0`
-- [ ] write a test that `WaitBufferFree(slot)` returns immediately when the slot is already
+- [x] write a test that `WaitBufferFree(slot)` returns immediately when the slot is already
       drained (fast path)
-- [ ] run `go test -race -run 'WaitBufferFree' ./execution/commitment/` — must pass
+- [x] run `go test -race -run 'WaitBufferFree' ./execution/commitment/` — must pass
 
 ### Task 4: Wire the ring into `HashSort` batch boundaries
 

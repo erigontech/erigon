@@ -1842,7 +1842,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						startDepth++
 					}
 				}
-				warmuper.WarmKey(hk, startDepth)
+				warmuper.WarmKey(hk, startDepth, t.gen)
 				prevKey = append(prevKey[:0], hk...)
 			}
 
@@ -1910,7 +1910,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						startDepth++
 					}
 				}
-				warmuper.WarmKey(hk, startDepth)
+				warmuper.WarmKey(hk, startDepth, t.gen)
 				prevKey = append(prevKey[:0], hk...)
 			}
 
