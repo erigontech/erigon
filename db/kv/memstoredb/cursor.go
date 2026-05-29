@@ -206,20 +206,29 @@ func (c *cursor) NextNoDup() ([]byte, []byte, error) {
 		// MDBX behaviour: NextNoDup with no current position behaves like First.
 		return c.First()
 	}
-	// Seek directly to the next key prefix instead of walking dups linearly.
-	nextKey, ok := kv.NextSubtree(c.current.k)
-	if !ok {
-		k, v := c.clearPos()
-		return k, v, nil
-	}
+	// Walk forward from the current position until the key changes. Using
+	// Seek(NextSubtree(curKey)) is only safe with fixed-length keys; with
+	// variable-length keys (e.g. CommitmentVals nibble paths), entries
+	// lexicographically between curKey and NextSubtree(curKey) — like
+	// "aab" between "aa" and "ab" — would be skipped.
+	curKey := c.current.k
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	if !iter.Seek(entry{k: nextKey}) {
+	if !iter.Seek(entry{k: curKey, v: c.current.v}) {
 		k, v := c.clearPos()
 		return k, v, nil
 	}
-	k, v := c.setPos(iter.Item())
-	return k, v, nil
+	for {
+		if !iter.Next() {
+			k, v := c.clearPos()
+			return k, v, nil
+		}
+		it := iter.Item()
+		if !bytes.Equal(it.k, curKey) {
+			k, v := c.setPos(it)
+			return k, v, nil
+		}
+	}
 }
 
 func (c *cursor) PrevDup() ([]byte, []byte, error) {
@@ -328,26 +337,32 @@ func (c *cursor) LastDup() ([]byte, error) {
 	curKey := common.Copy(c.current.k)
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	nextKey, ok := kv.NextSubtree(curKey)
-	var positioned bool
-	if ok {
-		if iter.Seek(entry{k: nextKey}) {
-			positioned = iter.Prev()
-		} else {
-			positioned = iter.Last()
+	// Walk forward from the first dup of curKey, tracking the last entry
+	// whose key still matches. Using Seek({k: NextSubtree(curKey)}) + Prev
+	// is unsafe with variable-length keys (a key strictly between curKey
+	// and NextSubtree(curKey) — e.g. curKey="aa" admits "aab" before "ab" —
+	// would make Prev land outside curKey and produce a nil return).
+	if !iter.Seek(entry{k: curKey}) {
+		return nil, nil
+	}
+	var last entry
+	var found bool
+	for {
+		it := iter.Item()
+		if !bytes.Equal(it.k, curKey) {
+			break
 		}
-	} else {
-		positioned = iter.Last()
+		last = it
+		found = true
+		if !iter.Next() {
+			break
+		}
 	}
-	if !positioned {
+	if !found {
 		return nil, nil
 	}
-	it := iter.Item()
-	if !bytes.Equal(it.k, curKey) {
-		return nil, nil
-	}
-	c.setPos(it)
-	return common.Copy(it.v), nil
+	c.setPos(last)
+	return common.Copy(last.v), nil
 }
 
 func (c *cursor) CountDuplicates() (uint64, error) {
