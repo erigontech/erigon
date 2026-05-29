@@ -275,8 +275,14 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 
 	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
 	endNum := uint64(endNumber.Int64()) // forces negative numbers to fail (too large)
-	if endNum > latestBlock {
+	// Allow endNum == latestBlock+1 for compatibility: callers may pass latest+1 to mean
+	// "up to and including the latest block" (mirrors old half-open [startNum, endNum) semantics).
+	if endNum > latestBlock+1 {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	}
+	if endNum > latestBlock {
+		// Clamp to latestBlock so downstream txNum lookups succeed.
+		endNum = latestBlock
 	}
 	if startNum >= endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
