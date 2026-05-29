@@ -54,6 +54,8 @@ const (
 	importBatchSize = 2500
 )
 
+var errInterrupted = errors.New("interrupted")
+
 var importCommand = cli.Command{
 	Action:    MigrateFlags(importChain),
 	Name:      "import",
@@ -123,12 +125,16 @@ func importChain(cliCtx *cli.Context) error {
 }
 
 // importFiles imports each file in order; with more than one file, per-file
-// failures are logged and skipped (matching go-ethereum) rather than aborting.
+// failures are logged and skipped (matching go-ethereum), except a user
+// interrupt aborts the whole command.
 func importFiles(files []string, logger log.Logger, importOne func(fn string) error) error {
 	var importErr error
 	for _, fn := range files {
 		if err := importOne(fn); err != nil {
 			importErr = err
+			if errors.Is(err, errInterrupted) {
+				return err
+			}
 			if len(files) > 1 {
 				logger.Error("Import error", "file", fn, "err", err)
 			}
@@ -183,7 +189,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 	for batch := 0; ; batch++ {
 		// Load a batch of RLP blocks.
 		if checkInterrupt() {
-			return errors.New("interrupted")
+			return errInterrupted
 		}
 		i := 0
 		for ; i < importBatchSize; i++ {
@@ -206,7 +212,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 		// Import the batch.
 		if checkInterrupt() {
-			return errors.New("interrupted")
+			return errInterrupted
 		}
 
 		br, _ := ethereum.BlockIO()

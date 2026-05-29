@@ -58,3 +58,17 @@ func TestImportFilesSingleFileSurfacesError(t *testing.T) {
 	})
 	require.ErrorIs(t, err, badBlock)
 }
+
+func TestImportFilesStopsOnInterrupt(t *testing.T) {
+	files := []string{"0001.rlp", "0002.rlp", "0003.rlp"}
+	var imported []string
+	err := importFiles(files, log.Root(), func(fn string) error {
+		imported = append(imported, fn)
+		if fn == "0002.rlp" {
+			return errInterrupted
+		}
+		return nil
+	})
+	require.ErrorIs(t, err, errInterrupted)
+	require.Equal(t, []string{"0001.rlp", "0002.rlp"}, imported, "user interrupt must abort the whole import, not just skip the current file")
+}
