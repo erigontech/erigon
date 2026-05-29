@@ -87,6 +87,7 @@ func importChain(cliCtx *cli.Context) error {
 		utils.NATFlag.Name:               "none",
 		utils.NoDownloaderFlag.Name:      "true",
 		utils.ExternalConsensusFlag.Name: "true",
+		utils.MCPDisableFlag.Name:        "true",
 	} {
 		if err := cliCtx.Set(flag, value); err != nil {
 			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
