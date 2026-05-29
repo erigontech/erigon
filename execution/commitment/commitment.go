@@ -449,30 +449,25 @@ func ApplyDeferredBranchUpdates(
 	}
 
 	sequential := numWorkers == 1 || len(deferred) <= numWorkers
-	if log.Root().Enabled(log.LvlDebug) {
-		var totalCells, encodedBytes, prevBytes, prefixBytes int
-		for _, upd := range deferred {
-			totalCells += bits.OnesCount16(upd.bitmap)
-			encodedBytes += len(upd.encoded)
-			prevBytes += len(upd.prev)
-			prefixBytes += len(upd.prefix)
-		}
-		structBytes := len(deferred) * 3440 // sizeof(DeferredBranchUpdate), cells[16] dominates
-		log.Debug("[commitment] ApplyDeferredBranchUpdates",
-			"deferred", len(deferred), "numWorkers", numWorkers, "sequential", sequential,
-			"encoders(goroutines)", func() int {
-				if sequential {
-					return 0
-				}
-				return numWorkers
-			}(),
-			"etlCollectors", 0, // ApplyDeferred creates NO collectors; see concurrentTrieContextFactory
-			"liveCells", totalCells,
-			"structRAM", common.ByteCount(uint64(structBytes)),
-			"encodedRAM", common.ByteCount(uint64(encodedBytes)),
-			"prevRAM", common.ByteCount(uint64(prevBytes)),
-			"prefixRAM", common.ByteCount(uint64(prefixBytes)))
+	encoders := numWorkers
+	if sequential {
+		encoders = 0
 	}
+	var encodedBytes, prevBytes, prefixBytes int
+	for _, upd := range deferred {
+		encodedBytes += len(upd.encoded)
+		prevBytes += len(upd.prev)
+		prefixBytes += len(upd.prefix)
+	}
+	structBytes := len(deferred) * 3440 // sizeof(DeferredBranchUpdate), cells[16] dominates
+	log.Warn("[commitment] ApplyDeferredBranchUpdates",
+		"deferred", len(deferred), "numWorkers", numWorkers, "sequential", sequential,
+		"encoders(goroutines)", encoders,
+		"etlCollectors", 0, // ApplyDeferred creates NO collectors; see concurrentTrieContextFactory
+		"structRAM", common.ByteCount(uint64(structBytes)),
+		"encodedRAM", common.ByteCount(uint64(encodedBytes)),
+		"prevRAM", common.ByteCount(uint64(prevBytes)),
+		"prefixRAM", common.ByteCount(uint64(prefixBytes)))
 
 	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if sequential {
