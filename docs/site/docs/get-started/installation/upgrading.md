@@ -70,7 +70,7 @@ Follow the below instructions depending on your installation method:
 * [Docker](#docker)
 * [Compiled source code](#compiled-from-source)
 
-### Pre-built Binaries (only Linux and MacOS)
+### Pre-built Binaries (only Linux and macOS)
 
 Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#install-prebuilt) and reinstall it, no other operation needed.
 
