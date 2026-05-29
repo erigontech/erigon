@@ -1183,7 +1183,7 @@ func CopyHeader(h *Header) *Header {
 	}
 	if h.WithdrawalsHash != nil {
 		cpy.WithdrawalsHash = new(common.Hash)
-		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
+		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash[:])
 	}
 	if h.BlobGasUsed != nil {
 		blobGasUsed := *h.BlobGasUsed
@@ -1195,15 +1195,15 @@ func CopyHeader(h *Header) *Header {
 	}
 	if h.ParentBeaconBlockRoot != nil {
 		cpy.ParentBeaconBlockRoot = new(common.Hash)
-		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot.Bytes())
+		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
 		cpy.RequestsHash = new(common.Hash)
-		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
+		cpy.RequestsHash.SetBytes(h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
 		cpy.BlockAccessListHash = new(common.Hash)
-		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash.Bytes())
+		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
 		slotNumber := *h.SlotNumber

@@ -79,9 +79,11 @@ func TestSideChainInsert(t *testing.T) {
 	// Same side chain (in terms of number and difficulty) but different hash
 	chain7 := createTestChain(2, genesis.Hash(), 5, []byte("side7"))
 
-	finalExpectedHash := chain5[len(chain5)-1].Hash()
-	if bytes.Compare(chain5[len(chain5)-1].Hash().Bytes(), chain7[len(chain7)-1].Hash().Bytes()) < 0 {
-		finalExpectedHash = chain7[len(chain7)-1].Hash()
+	chain5Last := chain5[len(chain5)-1].Hash()
+	chain7Last := chain7[len(chain7)-1].Hash()
+	finalExpectedHash := chain5Last
+	if bytes.Compare(chain5Last[:], chain7Last[:]) < 0 {
+		finalExpectedHash = chain7Last
 	}
 
 	testCases := []struct {

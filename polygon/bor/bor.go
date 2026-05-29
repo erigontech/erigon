@@ -360,7 +360,8 @@ func New(
 		accounts.ZeroAddress,
 		func(_ accounts.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: common.Address{}.Bytes()}
+			zeroAddr := common.Address{}
+			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: zeroAddr[:]}
 		},
 	})
 

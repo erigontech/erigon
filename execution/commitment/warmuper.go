@@ -81,12 +81,6 @@ type Warmuper struct {
 type warmupWorkItem struct {
 	hashedKey  []byte
 	startDepth int
-	barrier    *warmupBarrier // non-nil ⇒ barrier marker, not a real key
-}
-
-type warmupBarrier struct {
-	reached chan struct{} // worker signals it has finished its in-flight key
-	resume  chan struct{} // closed to release all parked workers
 }
 
 // NewWarmuper creates a new Warmuper instance.
@@ -181,26 +175,18 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			for item := range w.work {
+			for {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
-				default:
-				}
-
-				if item.barrier != nil {
-					item.barrier.reached <- struct{}{}
-					select {
-					case <-item.barrier.resume:
-					case <-w.ctx.Done():
+				case item, ok := <-w.work:
+					if !ok {
+						return nil
 					}
-					continue
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.keysProcessed.Add(1)
 				}
-
-				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
-				w.keysProcessed.Add(1)
 			}
-			return nil
 		})
 	}
 }
@@ -332,43 +318,6 @@ func (w *Warmuper) DrainPending() {
 			return
 		}
 	}
-}
-
-// WaitForInFlightKeysThenRun parks every worker once it has finished its in-flight key,
-// runs fn at that safe point (no worker still references a submitted key slice), then
-// releases the workers; on context cancellation it releases the workers without running
-// fn, since the arena cannot be reset while a worker may still be reading it.
-// Call only from the single HashSort producer goroutine; not safe to call concurrently with Close.
-func (w *Warmuper) WaitForInFlightKeysThenRun(fn func()) {
-	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
-		fn()
-		return
-	}
-	w.DrainPending() // drop queued keys (fn has already processed them)
-	b := &warmupBarrier{
-		reached: make(chan struct{}, w.numWorkers),
-		resume:  make(chan struct{}),
-	}
-	sent := 0
-	for range w.numWorkers {
-		select {
-		case w.work <- warmupWorkItem{barrier: b}:
-			sent++
-		case <-w.ctx.Done():
-			close(b.resume)
-			return
-		}
-	}
-	for range sent {
-		select {
-		case <-b.reached:
-		case <-w.ctx.Done():
-			close(b.resume)
-			return
-		}
-	}
-	fn()            // SAFE POINT: all workers parked
-	close(b.resume) // release; workers resume the range loop and pick up the next batch
 }
 
 // CloseAndWait cancel and waits for all warmup work

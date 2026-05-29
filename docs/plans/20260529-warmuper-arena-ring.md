@@ -156,30 +156,30 @@ no lost wakeup.
 - Modify: `execution/commitment/commitment.go` (placeholder call sites)
 - Modify: `execution/commitment/commitment_test.go` (delete 3 stale barrier tests)
 
-- [ ] from the clean HEAD, run `git merge --no-edit origin/main`; expect ONE conflict in
+- [x] from the clean HEAD, run `git merge --no-edit origin/main`; expect ONE conflict in
       `execution/commitment/warmuper.go` (the `Start` worker loop)
-- [ ] resolve the worker-loop conflict by taking origin/main's version: `warmupKey` is
+- [x] resolve the worker-loop conflict by taking origin/main's version: `warmupKey` is
       called directly inside the `case item, ok := <-w.work:` select arm; delete the old
       post-select barrier block (the `if item.barrier != nil { ... }` + second `warmupKey`
       that sits between the conflict markers)
-- [ ] remove the barrier entirely (the ring replaces it): delete the `barrier
+- [x] remove the barrier entirely (the ring replaces it): delete the `barrier
       *warmupBarrier` field from `warmupWorkItem`, the `warmupBarrier` struct, and the
       `WaitForInFlightKeysThenRun` method from `warmuper.go`
-- [ ] delete the three barrier-contract tests in `commitment_test.go` (~190/242/281:
+- [x] delete the three barrier-contract tests in `commitment_test.go` (~190/242/281:
       `TestWarmuper_WaitForInFlightKeysThenRun`, `_CtxCancel`, `_ParksAllWorkers`) so the
       test binary compiles for Tasks 2–4 (new `WaitBufferFree` tests arrive in Task 3)
-- [ ] switch the two `HashSort` call sites (`commitment.go` ~1846/1919) from
+- [x] switch the two `HashSort` call sites (`commitment.go` ~1846/1919) from
       `WaitForInFlightKeysThenRun(func(){ reset })` to placeholder `if warmuper != nil {
       warmuper.DrainPending() }` followed by the plain `t.batchSlab=…[:0]` /
       `t.byteArena=…[:0]` reset (Tasks 2–4 replace this with the ring)
-- [ ] confirm no conflict markers remain and `git diff --name-only --diff-filter=U` is empty
-- [ ] sanity build + vet + test-compile: `go build ./execution/commitment/`,
+- [x] confirm no conflict markers remain and `git diff --name-only --diff-filter=U` is empty
+- [x] sanity build + vet + test-compile: `go build ./execution/commitment/`,
       `go vet ./execution/commitment/`, `go test -run xxxNONExxx ./execution/commitment/`
       (compile-only)
-- [ ] stage all and commit the merge with a neutral message
+- [x] stage all and commit the merge with a neutral message
       `merge origin/main into awskii/warmup-inflight-barrier` (merge touches the whole repo;
       the package-prefix convention is for change commits, not merges)
-- [ ] (no new behavior tests this task; ring tests come in Tasks 2–4)
+- [x] (no new behavior tests this task; ring tests come in Tasks 2–4)
 
 ### Task 2: Introduce the K-buffer arena ring in `Updates`
 
