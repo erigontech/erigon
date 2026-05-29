@@ -62,6 +62,17 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	if err := e.unwinder.Unwind(ctx, targetBlock, args); err != nil {
 		return fmt.Errorf("SetHead mode B (unwind %d → %d): %w", currentHead, targetBlock, err)
 	}
+
+	// Commit the unwind. Without this the outer SetHead's deferred
+	// tx.Rollback() reverts every change Provider.Unwind made —
+	// snapshot-trim's filesystem deletions persist (irreversibly),
+	// but the DB-side head pointers, TxNums truncation, canonical-hash
+	// cleanup, and writable-shadow wipe all vanish. Mode A's analog
+	// commit lives at the end of SetHead (set_head.go:164) but mode B
+	// returns from a branch above that, so the commit has to land here.
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("SetHead mode B (unwind %d → %d): commit: %w", currentHead, targetBlock, err)
+	}
 	return nil
 }
 

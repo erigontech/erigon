@@ -253,43 +253,30 @@ func TestSetHead_E2E_WithinDB_ExecutesPastNewHead(t *testing.T) {
 		"re-executed head hash must match the original — proves identical block content was replayed")
 }
 
-// TestSetHead_E2E_ModeB_RoutesToProviderUnwind — Scenario 3 (focused).
+// TestSetHead_E2E_ModeB_SnapshotsAlignedCut — Scenario 3a.
 //
-// Pins the *dispatch + sub-op-chain wiring* for the admin past-diffset
-// SetHead path:
+// Mode B (past-diffset) WITH snapshot file trim, aligned cut: target
+// block whose lastTxNum lands exactly on a step boundary. Some
+// snapshot files cover steps past toBlock's stepBoundary and must be
+// trimmed; the commitment record at toBlock's step boundary already
+// exists in the file containing toBlock, so the recompute primitive
+// finds an exact-match baseline and folds in zero touches.
 //
-//   - SetHead routes to setHeadModeB when targetBlock < CanUnwindToBlockNum
-//     AND an Unwinder is wired with BlockAligned()==true. The legacy
-//     "minimum unwindable block" rejection is bypassed.
-//   - setHeadModeB invokes the Unwinder which delegates to
-//     *storage.Provider.Unwind, exercising the snapshot-trim + DB-reset +
-//     commitment-anchor sub-op chain on a real temporal DB.
-//   - The error surface — when one of the sub-ops can't satisfy its
-//     contract on the small fixture — is a mode-B-prefixed error
-//     containing the offending sub-op name, not a generic panic / wedge
-//     / legacy rejection.
+// End-to-end happy-path assertion:
+//   - SetHead returns no error;
+//   - dispatch routed through mode B (the Inventory.RecentTrims log,
+//     not visible to the test, would show 1+ files trimmed);
+//   - post-state: HeadHeaderHash == targetHash;
+//     GetLatestBlockNumber == target;
+//     stale canonical hashes above target cleared.
 //
-// What this scenario *does not* assert: full cold-start equivalence
-// after a successful Unwind. That needs sub-op #1 (snapshot-trim) to
-// actually delete state files past toBlock's step boundary. In this
-// fixture the Provider is built via NewProviderForUnwindTest with
-// Inventory==nil, so snapshot-trim is a no-op even though the test
-// aggregator built state-domain files during execution (one .kv per
-// step). The wipe correctly empties the writable shadow past
-// toBlock, but sub-op #3's LatestBlockNumWithCommitment then falls
-// through to getLatestFromFiles which returns the over-step file's
-// internally-encoded blockNum — a value past toBlock — and the
-// commitment-anchor verify fails with "latest commitment is at
-// block N, expected toBlock". That's the controlled failure surface
-// this test pins.
-//
-// Closing the loop end-to-end requires either (a) populating
-// Inventory in NewProviderForUnwindTest so sub-op #1 removes the
-// over-step files, or (b) the parked recompute-into-file primitive
-// (see post-compact handoff "Full E2E scenario 3 deferred") that
-// rewrites the bordering file's commitment entry to encode toBlock.
-// Both are tracked follow-ups.
-func TestSetHead_E2E_ModeB_RoutesToProviderUnwind(t *testing.T) {
+// Pins the wiring of: dispatch → setHeadModeB → Provider.Unwind →
+// snapshot-trim + ensureCommitmentAtBlock (SD-less recompute) +
+// WipeWritableShadowPast + DB-reset. The recompute primitive
+// (commitmentdb.RecomputeAtTxNumWithoutSD) replaces the earlier
+// "controlled failure" because the writable-shadow override no longer
+// depends on the over-step file's stale commitment record.
+func TestSetHead_E2E_ModeB_SnapshotsAlignedCut(t *testing.T) {
 	const stepSize uint64 = 8
 
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -368,57 +355,247 @@ func TestSetHead_E2E_ModeB_RoutesToProviderUnwind(t *testing.T) {
 	}
 
 	api := newSetHeadE2EAPI(t, m)
-	setHeadErr := api.SetHead(ctx, hexutil.Uint64(targetBlock))
 
-	// On this fixture mode B must engage and reach Provider.Unwind's
-	// sub-op chain. Acceptable outcomes:
-	//   (a) full success — every sub-op satisfies its contract.
-	//   (b) a chain-malformed err with the mode-B prefix containing
-	//       which sub-op couldn't satisfy its contract.
-	//
-	// What's NOT acceptable: the legacy "minimum unwindable block"
-	// rejection. That would mean dispatch failed to route to mode B.
-	require.Error(t, setHeadErr,
-		"on this small fixture (no snapshot files past toBlock; writable shadow holds entries past stepBoundary "+
-			"from continued execution) sub-op #3 cannot satisfy its anchor invariant — the err is the wiring evidence")
-	require.NotContains(t, setHeadErr.Error(), "minimum unwindable block",
-		"dispatch must route to mode B (Provider.Unwind), not the legacy mode-A rejection")
-	require.Contains(t, setHeadErr.Error(), "SetHead mode B",
-		"mode-B errors must carry the mode-B prefix so operators see which path ran")
-	require.Contains(t, setHeadErr.Error(), "storage.Provider.Unwind",
-		"the mode-B dispatch must delegate into *storage.Provider.Unwind, not some other Unwinder")
-	require.Contains(t, setHeadErr.Error(), "commitment-anchor",
-		"snapshot-trim (no Inventory) is a no-op and DB-reset succeeds on this fixture; the controlled failure point is sub-op #3 ensureCommitmentAtBlock")
+	// Snapshot pre-state hashes so the post-state check can verify
+	// canonical-chain cleanup.
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, targetHash)
+	staleHashes := make(map[uint64]common.Hash, head-targetBlock)
+	for b := targetBlock + 1; b <= head; b++ {
+		h, err := rawdb.ReadCanonicalHash(roTx, b)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, h)
+		staleHashes[b] = h
+	}
+	roTx.Rollback()
+
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)),
+		"mode B end-to-end (snapshot-trim + SD-less recompute + shadow-wipe + DB-reset) must succeed at an aligned cut")
+
+	// Verify the rewind landed:
+	//   - HeadHeaderHash points at target's hash
+	//   - GetLatestBlockNumber == target
+	//   - canonical hashes above target are cleared
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	require.Equal(t, targetHash, rawdb.ReadHeadHeaderHash(roTx),
+		"HeadHeaderHash must point at target hash after successful mode B")
+	latest, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, targetBlock, latest,
+		"GetLatestBlockNumber must return target after mode B (= the dispatched head movement landed)")
+	for b := range staleHashes {
+		h, err := rawdb.ReadCanonicalHash(roTx, b)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, h,
+			"canonical hash at %d must be cleared by DB-reset", b)
+	}
 }
 
-// Scenario 3's success-path E2E remains a known follow-up. Closing
-// it requires resolving the aggregator-RoTx-refresh constraint: mode
-// B runs in a single transaction; snapshot-trim removes files from
-// disk + Inventory, but the open tx's aggregator catalog still
-// serves the deleted files via their surviving mmap (POSIX inode
-// kept alive until handles close). LatestBlockNumWithCommitment
-// then reads the over-step file's internal blockNum, fails the
-// anchor verify, and surfaces the same controlled error this
-// focused test pins — even with the Inventory now populated by
-// RescanAdminUnwindInventory.
+// TestSetHead_E2E_ModeB_NoSnapshotTrim — Scenario 2 (mode B, db-only).
 //
-// Two reasonable paths forward (each substantial):
+// Mode B engages, but target's stepBoundary equals (or exceeds) the
+// highest snapshot file's end-step, so no files need trimming. The
+// state diff lives entirely in the writable shadow; WipeWritableShadowPast
+// + ensureCommitmentAtBlock + DB-reset are exercised without
+// snapshot-trim doing real work.
 //
-//  1. Split mode B across two transactions: tx A wipes the shadow +
-//     verifies anchor; tx B runs after Aggregator.OpenFolder() to
-//     trim files and republish. Atomicity becomes a journaled
-//     two-step. This contradicts the design doc's "single MDBX
-//     transaction" line, so the design needs revisiting.
+// This is the "between snapshot tip and diffset horizon" case for
+// real chains where blocks past the snapshot tip still have writable
+// shadow + diffsets, and the operator unwinds past the diffset
+// horizon but stays above the snapshot tip.
+func TestSetHead_E2E_ModeB_NoSnapshotTrim(t *testing.T) {
+	const stepSize uint64 = 8
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithAdminUnwindWired(),
+	)
+	ctx := m.Ctx
+	require.NotNil(t, m.AdminUnwindProvider)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 16, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	head := canonicalHead(t, m)
+	require.Equal(t, uint64(16), head)
+	m.RescanAdminUnwindInventory(t)
+
+	// Find max file end-step + a target whose stepBoundary >= that.
+	// "No snapshot trim" means no file has endStep > target.stepBoundary
+	// (= (target.lastTxNum / stepSize) + 1).
+	//
+	// Probe per-block lastTxNum + pick the first whose stepBoundary
+	// matches/exceeds the highest existing file's endStep. With 16
+	// blocks at stepSize=8 the aggregator produces files at endStep=1
+	// and endStep=2; any target with lastTxNum/stepSize >= 1 (=
+	// stepBoundary >= 2) means no file at endStep > 2 needs trimming.
+	var targetBlock uint64
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		for b := uint64(1); b < head; b++ {
+			lastTxNum, err := rawdbv3.TxNums.Max(ctx, roTx, b)
+			require.NoError(t, err)
+			if lastTxNum/stepSize >= 1 && targetBlock == 0 {
+				targetBlock = b
+				break
+			}
+		}
+		roTx.Rollback()
+		require.NotZero(t, targetBlock, "fixture must produce a block whose lastTxNum is past step 0")
+	}
+
+	m.TruncateChangeSetsBelow(t, targetBlock+2)
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		minUnwindable, err := rawtemporaldb.CanUnwindToBlockNum(roTx)
+		require.NoError(t, err)
+		require.Greater(t, minUnwindable, targetBlock,
+			"mode-B dispatch must engage (target < minUnwindable)")
+	}
+
+	api := newSetHeadE2EAPI(t, m)
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	roTx.Rollback()
+
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)),
+		"mode B without snapshot trim must succeed (state diff lives in writable shadow)")
+
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	require.Equal(t, targetHash, rawdb.ReadHeadHeaderHash(roTx))
+	latest, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, targetBlock, latest)
+}
+
+// TestSetHead_E2E_ModeB_NonAlignedCut — Scenario 3b (non-aligned cut).
 //
-//  2. Recompute the commitment at toBlock via integrity.RecomputeCommitmentAtBlock
-//     (just landed in db/integrity) and write it into the writable
-//     shadow as an explicit override. ensureCommitmentAtBlock then
-//     reads the just-written entry, anchor verify passes, the
-//     over-step file's stale entry is no longer load-bearing. Trim
-//     can happen post-commit.
+// Mode B WITH snapshot file trim AT A NON-ALIGNED CUT: target's
+// lastTxNum is mid-step. The boundary step contains writes at txnum >
+// lastTxNum that don't belong in the post-unwind state. The
+// WipeWritableShadowPast diff-replay path must surface those, look up
+// each key's as-of-lastTxNum value from history, and rewrite the
+// shadow entries in-place.
 //
-// Path 2 is the lighter-touch closure and uses the recompute
-// primitive RecomputeCommitmentAtBlock that landed for fork-from. It's
-// the natural next step; landing it requires opening a SharedDomains
-// against the in-tx aggregator state without mutating the parent's
-// commitment domain — needs careful design of the writer target.
+// Pins the non-aligned mode-B path landed in b4741d0920
+// (state, storage: mode-B non-aligned cuts via boundary-step
+// diff-replay) + the off-by-one fix in 85f4fbf884 (commitmentdb,
+// state: fix plain-reader off-by-one in RecomputeAtTxNumWithoutSD).
+func TestSetHead_E2E_ModeB_NonAlignedCut(t *testing.T) {
+	const stepSize uint64 = 8
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithAdminUnwindWired(),
+	)
+	ctx := m.Ctx
+	require.NotNil(t, m.AdminUnwindProvider)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 16, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	head := canonicalHead(t, m)
+	require.Equal(t, uint64(16), head)
+	m.RescanAdminUnwindInventory(t)
+
+	// Find a target whose lastTxNum does NOT land on a step boundary
+	// AND whose stepBoundary < max existing file endStep (so some
+	// files past stepBoundary need trimming). The "(lastTxNum+1)%stepSize
+	// != 0" guard surfaces a non-aligned cut.
+	var targetBlock uint64
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		for b := uint64(1); b < head; b++ {
+			lastTxNum, err := rawdbv3.TxNums.Max(ctx, roTx, b)
+			require.NoError(t, err)
+			if (lastTxNum+1)%stepSize != 0 && lastTxNum/stepSize == 0 && targetBlock == 0 {
+				targetBlock = b
+				break
+			}
+		}
+		roTx.Rollback()
+		require.NotZero(t, targetBlock, "fixture must produce a non-aligned cut whose stepBoundary is past step 0")
+	}
+
+	m.TruncateChangeSetsBelow(t, targetBlock+2)
+
+	api := newSetHeadE2EAPI(t, m)
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	roTx.Rollback()
+
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)),
+		"mode B at a non-aligned cut must succeed (boundary-step diff-replay folds in the post-toBlock writes)")
+
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	require.Equal(t, targetHash, rawdb.ReadHeadHeaderHash(roTx))
+	latest, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, targetBlock, latest)
+}
