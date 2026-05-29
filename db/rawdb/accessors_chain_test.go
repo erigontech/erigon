@@ -808,8 +808,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
+	receipt2PostState := common.Hash{2}
 	receipt2 := &types.Receipt{
-		PostState:         common.Hash{2}.Bytes(),
+		PostState:         receipt2PostState[:],
 		CumulativeGasUsed: 2,
 		Logs: []*types.Log{
 			{Address: common.BytesToAddress([]byte{0x22})},

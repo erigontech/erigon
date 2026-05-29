@@ -155,10 +155,10 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 		if request {
 			var bodyHashes BodyHashes
-			copy(bodyHashes[:], header.UncleHash.Bytes())
-			copy(bodyHashes[length.Hash:], header.TxHash.Bytes())
+			copy(bodyHashes[:], header.UncleHash[:])
+			copy(bodyHashes[length.Hash:], header.TxHash[:])
 			if header.WithdrawalsHash != nil {
-				copy(bodyHashes[2*length.Hash:], header.WithdrawalsHash.Bytes())
+				copy(bodyHashes[2*length.Hash:], header.WithdrawalsHash[:])
 			}
 			bd.requestedMap[bodyHashes] = blockNum
 			blockNums = append(blockNums, blockNum)
@@ -295,12 +295,12 @@ Loop:
 		for i := range txs {
 			var bodyHashes BodyHashes
 			uncleHash := types.CalcUncleHash(uncles[i])
-			copy(bodyHashes[:], uncleHash.Bytes())
+			copy(bodyHashes[:], uncleHash[:])
 			txHash := types.DeriveSha(RawTransactions(txs[i]))
-			copy(bodyHashes[length.Hash:], txHash.Bytes())
+			copy(bodyHashes[length.Hash:], txHash[:])
 			if withdrawals[i] != nil {
 				withdrawalsHash := types.DeriveSha(withdrawals[i])
-				copy(bodyHashes[2*length.Hash:], withdrawalsHash.Bytes())
+				copy(bodyHashes[2*length.Hash:], withdrawalsHash[:])
 			}
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
