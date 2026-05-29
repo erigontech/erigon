@@ -216,4 +216,11 @@ type ExecutionModule interface {
 	// and whether there is a gap between the snapshot tip and the live
 	// database.
 	FrozenBlocks(ctx context.Context) (frozenBlocks uint64, hasGap bool, err error)
+
+	// IsAdminUnwindInProgress reports whether an admin SetHead (mode B)
+	// is currently mid-flight inside Provider.Unwind. EngineServer
+	// queries this in newPayload + forkchoiceUpdated and returns
+	// SyncingStatus to the CL when true, so Caplin holds off pushing
+	// fresh FCU events while the unwind runs.
+	IsAdminUnwindInProgress() bool
 }

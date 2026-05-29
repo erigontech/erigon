@@ -180,3 +180,4 @@ func (s *getPayloadStubModule) GetTD(_ context.Context, _ *common.Hash, _ *uint6
 func (s *getPayloadStubModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	panic("not implemented")
 }
+func (s *getPayloadStubModule) IsAdminUnwindInProgress() bool { return false }

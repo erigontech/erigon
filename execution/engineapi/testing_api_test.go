@@ -55,6 +55,7 @@ type stubExecutionModule struct {
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	adminUnwindInProgress bool
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -131,6 +132,7 @@ func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return tr
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (s *stubExecutionModule) IsAdminUnwindInProgress() bool { return s.adminUnwindInProgress }
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -967,6 +969,54 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Error(t, err)
 		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
+}
+
+// TestEngineServer_AdminUnwindShortCircuitsToSyncing pins the gate
+// that makes admin SetHead mode B viable on a live chain: while
+// IsAdminUnwindInProgress() is true, both forkchoiceUpdated and
+// HandleNewPayload return SyncingStatus immediately, before any
+// other validation runs. Without this short-circuit, fresh FCU
+// events from the CL hold a SharedDomains context and mode B's
+// waitForQuiescence times out at 2 minutes.
+func TestEngineServer_AdminUnwindShortCircuitsToSyncing(t *testing.T) {
+	t.Parallel()
+
+	cfg := allForksChainConfig()
+
+	t.Run("forkchoiceUpdated returns SYNCING when admin unwind is in progress", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{adminUnwindInProgress: true}
+		srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, 0, 0)
+		srv.test = true
+		resp, err := srv.forkchoiceUpdated(context.Background(),
+			&engine_types.ForkChoiceState{
+				HeadHash:           common.Hash{0x1},
+				SafeBlockHash:      common.Hash{0x2},
+				FinalizedBlockHash: common.Hash{0x3},
+			},
+			nil, clparams.CapellaVersion)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, resp.PayloadStatus)
+		require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status,
+			"forkchoiceUpdated must short-circuit to SYNCING while admin unwind holds the DB tx")
+	})
+
+	t.Run("HandleNewPayload returns SYNCING when admin unwind is in progress", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{adminUnwindInProgress: true}
+		srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, 0, 0)
+		srv.test = true
+		header := &types.Header{}
+		header.Number.SetUint64(42)
+		blk := types.NewBlockFromStorage(common.Hash{0xab}, header, nil, nil, nil)
+		ps, err := srv.HandleNewPayload(context.Background(), "test", blk, nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, ps)
+		require.Equal(t, engine_types.SyncingStatus, ps.Status,
+			"HandleNewPayload must short-circuit to SYNCING while admin unwind holds the DB tx")
+	})
+
 }
 
 // TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing pins the engine-api spec

@@ -702,6 +702,18 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, errCaplinEnabled
 	}
 
+	// Admin SetHead mode B holds an in-flight DB transaction that
+	// will rewrite the chain head. Tell the CL we're SYNCING so it
+	// stops pushing fresh fork-choice updates until the unwind
+	// commits. Without this short-circuit, forward execution from
+	// continued FCU events holds a SharedDomains context and mode
+	// B's waitForQuiescence times out at 2 minutes.
+	if s.executionService.IsAdminUnwindInProgress() {
+		return &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}, nil
+	}
+
 	s.engineLogSpamer.RecordRequest()
 	newReqLogInfoArgs := []any{"head", forkchoiceState.HeadHash}
 	if payloadAttributes != nil {
@@ -896,6 +908,12 @@ func (e *EngineServer) HandleNewPayload(
 	versionedHashes []common.Hash,
 	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
+	// Admin SetHead mode B short-circuit: same rationale as the
+	// matching gate in forkchoiceUpdated — see that comment.
+	if e.executionService.IsAdminUnwindInProgress() {
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+
 	e.engineLogSpamer.RecordRequest()
 
 	header := block.Header()

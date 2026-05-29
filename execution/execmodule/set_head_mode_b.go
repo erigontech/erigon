@@ -47,6 +47,13 @@ const modeBQuiescencePoll = 50 * time.Millisecond
 // commit it (the Unwinder owns the commit for now). The caller
 // (SetHead) returns the Unwinder's error verbatim.
 func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targetBlock, currentHead uint64) error {
+	// Tell engine-API consumers (Caplin / external CL) we're SYNCING
+	// for the duration of the unwind so they hold off pushing fresh
+	// FCU events. The flag is cleared on every exit path — success
+	// (after tx.Commit) and every error before it.
+	e.adminUnwindInProgress.Store(true)
+	defer e.adminUnwindInProgress.Store(false)
+
 	if err := e.waitForQuiescence(ctx); err != nil {
 		return fmt.Errorf("SetHead mode B: %w", err)
 	}

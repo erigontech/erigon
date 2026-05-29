@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -236,6 +237,17 @@ type ExecModule struct {
 	// for the interface contract. SetHead's call site lands in a
 	// follow-up commit alongside snapshot-trim + trie-state extraction.
 	unwinder Unwinder
+
+	// adminUnwindInProgress is the engine-API SYNCING gate: set by
+	// setHeadModeB before it starts the irreversible mode-B sub-op
+	// chain, cleared after tx.Commit succeeds (or on early return).
+	// EngineServer consults it via IsAdminUnwindInProgress() and
+	// returns SyncingStatus from newPayload/forkchoiceUpdated when
+	// set, so Caplin holds off pushing fresh FCU events while
+	// Provider.Unwind runs. Without this, forward execution keeps
+	// holding a SharedDomains context and mode B's waitForQuiescence
+	// times out at 2 minutes.
+	adminUnwindInProgress atomic.Bool
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
@@ -643,6 +655,16 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}); err != nil {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
+}
+
+// IsAdminUnwindInProgress reports whether a setHeadModeB call is
+// currently mid-flight inside Provider.Unwind. EngineServer queries
+// this in HandleNewPayload + forkchoiceUpdated to return SyncingStatus
+// to the CL — that's what halts forward execution so mode B's
+// waitForQuiescence can succeed. Cleared by setHeadModeB after
+// tx.Commit (success) or on every early return (failure).
+func (e *ExecModule) IsAdminUnwindInProgress() bool {
+	return e.adminUnwindInProgress.Load()
 }
 
 func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
