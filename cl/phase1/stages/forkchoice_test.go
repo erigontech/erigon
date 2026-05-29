@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -16,19 +15,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
-// TestUpdateCanonicalChainReorgEvent verifies that the chain_reorg SSE event
-// emitted by updateCanonicalChainInTheDatabase has the correct Depth and
-// OldHeadBlock fields.
-//
-// Scenario (2-slot reorg, same length):
-//
-//	slot 100 (root_100) -- slot 101a (root_101a) -- slot 102a (root_102a)  <- old canonical
-//	                   \-- slot 101b (root_101b) -- slot 102b (root_102b)  <- new head
-//
-// Expected reorg event:
-//
-//	Depth        = 2   (old head 102a minus fork point 100)
-//	OldHeadBlock = root_102a  (the previous canonical tip, NOT the common ancestor)
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
@@ -77,18 +63,6 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	require.Equal(t, state102b, reorg.NewHeadState, "NewHeadState")
 }
 
-// TestUpdateCanonicalChainReorgShorterFork verifies the reorg event when a
-// shorter fork wins — the old canonical chain extends past the new head slot.
-//
-// Scenario:
-//
-//	slot 100 (root_100) -- slot 101a -- slot 102a -- slot 103a  <- old canonical (tip at 103)
-//	                   \-- slot 101b -- slot 102b               <- new head (tip at 102)
-//
-// Expected reorg event:
-//
-//	OldHeadBlock = root_103a  (the actual old tip, NOT root_102a)
-//	Depth        = 3          (old head 103 minus fork point 100)
 func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
@@ -119,13 +93,11 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 		}
 	}
 
-	// Old canonical chain: 100 → 101a → 102a → 103a
 	writeBlock(root100, common.Hash{0x99}, state100, 100, true)
 	writeBlock(root101a, root100, common.Hash{0xa1}, 101, true)
 	writeBlock(root102a, root101a, common.Hash{0xa2}, 102, true)
 	writeBlock(root103a, root102a, state103a, 103, true)
 
-	// New fork (shorter): 100 → 101b → 102b
 	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
@@ -139,18 +111,6 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	require.Equal(t, state102b, reorg.NewHeadState, "NewHeadState")
 }
 
-// TestUpdateCanonicalChainReorgLongerFork verifies the reorg event when the
-// new fork extends past the old canonical tip.
-//
-// Scenario:
-//
-//	slot 100 (root_100) -- slot 101a -- slot 102a               <- old canonical (tip at 102)
-//	                   \-- slot 101b -- slot 102b -- slot 103b  <- new head (tip at 103)
-//
-// Expected reorg event:
-//
-//	OldHeadBlock = root_102a  (the old canonical tip)
-//	Depth        = 2          (old head 102 minus fork point 100)
 func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
@@ -180,12 +140,10 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 		}
 	}
 
-	// Old canonical chain: 100 -> 101a -> 102a
 	writeBlock(root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
 	writeBlock(root101a, root100, common.Hash{0xa1}, 101, true)
 	writeBlock(root102a, root101a, state102a, 102, true)
 
-	// New fork (longer): 100 -> 101b -> 102b -> 103b
 	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
 	writeBlock(root102b, root101b, common.Hash{0xb2}, 102, false)
 	writeBlock(root103b, root102b, state103b, 103, false)
@@ -200,12 +158,6 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	require.Equal(t, state103b, reorg.NewHeadState, "NewHeadState")
 }
 
-// TestUpdateCanonicalChainNoReorg verifies that extending the canonical chain
-// (new head is a child of the current tip) does NOT emit a chain_reorg event.
-//
-// Scenario:
-//
-//	slot 100 -- slot 101 -- slot 102 (new head, child of 101)
 func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
@@ -229,25 +181,15 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 		}
 	}
 
-	// Existing canonical chain: 100 -> 101
 	writeBlock(root100, common.Hash{0x99}, common.Hash{0xa0}, 100, true)
 	writeBlock(root101, root100, common.Hash{0xa1}, 101, true)
 
-	// New block extends the chain: 101 -> 102
 	writeBlock(root102, root101, common.Hash{0xa2}, 102, false)
 
 	reorg := drainReorgEvent(t, ctx, tx, 102, root102)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
 }
 
-// TestUpdateCanonicalChainReorgOneSlot verifies a minimal 1-slot reorg.
-//
-// Scenario:
-//
-//	slot 100 -- slot 101a  <- old canonical
-//	        \-- slot 101b  <- new head
-//
-// Expected: Depth = 1, OldHeadBlock = root_101a
 func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
@@ -288,8 +230,6 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	require.Equal(t, state101b, reorg.NewHeadState, "NewHeadState")
 }
 
-// drainReorgEvent calls updateCanonicalChainInTheDatabase and returns the
-// first ChainReorgData event emitted, or nil if none arrives within 1 second.
 func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
 	emitter := beaconevents.NewEventEmitter()
@@ -305,14 +245,13 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 	err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
 
-	timeout := time.After(time.Second)
 	for {
 		select {
 		case evt := <-ch:
 			if evt.Event == beaconevents.StateChainReorg {
 				return evt.Data.(*beaconevents.ChainReorgData)
 			}
-		case <-timeout:
+		default:
 			return nil
 		}
 	}
