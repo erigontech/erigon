@@ -520,6 +520,15 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 			return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
 		}
 	}
+	// UpdateForkChoice returns before the background flush+commit finishes
+	// (per #21444). The next semaphore-acquiring op blocks until the prior
+	// FCU's commit defers complete — so do one more idempotent FCU for the
+	// last block to ensure commitBlock has settled before the caller reads it.
+	if len(blocks) > 0 {
+		if _, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
