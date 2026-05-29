@@ -155,6 +155,16 @@ func writeStateWithStepCommits(t *testing.T, ctx context.Context, rwTx kv.Tempor
 	storKey := make([]byte, length.Addr+length.Hash)
 	for txNum := from; txNum < to; txNum++ {
 		for i, addr := range addrs {
+			// Periodically SELFDESTRUCT-style delete the account (cascades
+			// into storage + code domains via DomainDel) to exercise the
+			// tombstone path mainnet hits on contract destruction.
+			if (txNum+uint64(i))%37 == 0 && txNum > from+1 {
+				prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, addr)
+				require.NoError(t, err)
+				if len(prev) > 0 {
+					require.NoError(t, domains.DomainDel(kv.AccountsDomain, rwTx, addr, txNum, prev))
+				}
+			}
 			acc := accounts.Account{
 				Nonce:    txNum + uint64(i),
 				Balance:  *uint256.NewInt((txNum + 1) * (uint64(i) + 1)),
@@ -175,9 +185,18 @@ func writeStateWithStepCommits(t *testing.T, ctx context.Context, rwTx kv.Tempor
 				for b := 0; b < 8; b++ {
 					storKey[length.Addr+length.Hash-1-b] = byte(slotIdx >> (b * 8))
 				}
-				val := []byte{byte(txNum), byte(s), byte(i), 0xab}
 				prevVal, _, err := domains.GetLatest(kv.StorageDomain, rwTx, storKey)
 				require.NoError(t, err)
+				// 1 in 5 storage writes is SET-to-zero (DomainDel) — the
+				// storage-trie tombstone path. Mainnet has these every time
+				// a contract clears a slot back to its zero default.
+				if (slotIdx+txNum+uint64(i))%5 == 0 {
+					if len(prevVal) > 0 {
+						require.NoError(t, domains.DomainDel(kv.StorageDomain, rwTx, storKey, txNum, prevVal))
+					}
+					continue
+				}
+				val := []byte{byte(txNum), byte(s), byte(i), 0xab}
 				require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storKey, val, txNum, prevVal))
 			}
 		}
