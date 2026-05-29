@@ -284,11 +284,19 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bool, error) {
-	var hasMore bool
+func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (hasMore bool, err error) {
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
+
+	// See Run: reset currentStage on every exit so the next invocation
+	// starts at stages[0] regardless of which error-return path we took.
+	defer func() {
+		if resetErr := s.SetCurrentStage(s.stages[0].ID); resetErr != nil && err == nil {
+			err = resetErr
+		}
+		s.currentStage = 0
+	}()
 
 	var errBadBlock error
 	for !s.IsDone() {
@@ -346,11 +354,6 @@ func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bo
 		s.NextStage()
 	}
 
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return false, err
-	}
-
-	s.currentStage = 0
 	return hasMore, errBadBlock
 }
 
@@ -374,6 +377,17 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
+
+	// Reset currentStage on every exit so the next invocation starts at
+	// stages[0]. Sync.Run is contracted to run a full pipeline per call;
+	// without this defer, an error return from a stage leaves currentStage
+	// at the failed stage and the next caller starts mid-pipeline.
+	defer func() {
+		if resetErr := s.SetCurrentStage(s.stages[0].ID); resetErr != nil && err == nil {
+			err = resetErr
+		}
+		s.currentStage = 0
+	}()
 
 	var errBadBlock error
 	for !s.IsDone() {
@@ -441,11 +455,6 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 		s.NextStage()
 	}
 
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return false, err
-	}
-
-	s.currentStage = 0
 	return more, errBadBlock
 }
 
