@@ -29,23 +29,25 @@ import (
 )
 
 // unwindSnapshotsPastBlock removes every snapshot file whose content
-// extends past toBlock. Mode-B sub-op #1; runs under aligned-mode and
-// post-quiescence preconditions both established by Provider.Unwind's
-// caller.
+// extends past toBlock. Mode-B sub-op #1; runs under the
+// post-quiescence precondition established by Provider.Unwind's caller.
 //
-// Aligned-mode invariant: TxNums.Max(toBlock)+1 lands on a step
-// boundary (i.e. (lastTxNum+1) % stepSize == 0). Violation surfaces
-// as an error — that signals a chain that claims aligned mode but has
-// step boundaries misaligned from block boundaries, which is a
-// configuration bug, not something SetHead should silently paper
-// over.
+// Works for both aligned cuts (lastTxNum at a step boundary; the file
+// containing lastTxNum ends exactly at that boundary, so trimming
+// leaves the file's coverage matching the new tip) and non-aligned
+// cuts (lastTxNum mid-step; the file containing lastTxNum keeps its
+// excess coverage past lastTxNum, which is masked at read time by the
+// writable shadow's boundary-step diff-replay — see
+// WipeWritableShadowPast).
 //
 // Files removed:
 //
-//   - block files where ToBlock > toBlock (mechanical, ToBlock is a
-//     literal block number in aligned mode);
+//   - block files where ToBlock > toBlock;
 //   - domain / history / idx files (all step-indexed) where
-//     ToStep > stepBoundary, where stepBoundary == (lastTxNum+1)/stepSize.
+//     ToStep > stepBoundary, where stepBoundary == (lastTxNum/stepSize)+1
+//     — that is, files extending strictly past the boundary step (the
+//     step containing lastTxNum). The boundary step's own file stays
+//     and contributes its in-range entries to reads.
 //
 // Caplin / meta / salt files are intentionally out of scope here:
 // caplin lives on a slot axis (separate aligned-mode workstream);
@@ -119,11 +121,21 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 	return names, nil
 }
 
-// computeStepBoundaryForBlock validates the aligned-mode invariant for
-// toBlock and returns the step boundary that ends at toBlock's last
-// txNum. Errors out if the invariant is violated. Returns 0 with no
-// error when the Provider has no Aggregator (state-file trim is
-// skipped in that case; the caller checks Aggregator-nil separately).
+// computeStepBoundaryForBlock returns the first step that must be
+// trimmed entirely — i.e. files whose ToStep > stepBoundary cover only
+// txnums past lastTxNum and must go; files whose ToStep == stepBoundary
+// (the file containing lastTxNum) stay.
+//
+// The boundary = `(lastTxNum / stepSize) + 1`. For aligned cuts
+// (lastTxNum is the last txnum of step stepContaining), this collapses
+// to `(lastTxNum + 1) / stepSize`; for non-aligned cuts the file
+// containing lastTxNum has excess coverage past lastTxNum that is
+// handled at read time by the writable shadow's boundary-step
+// diff-replay (see WipeWritableShadowPast).
+//
+// Returns 0 with no error when the Provider has no Aggregator
+// (state-file trim is skipped; the caller checks Aggregator-nil
+// separately).
 func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) (uint64, error) {
 	if p.Aggregator == nil {
 		return 0, nil
@@ -136,10 +148,7 @@ func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.Tempor
 	if stepSize == 0 {
 		return 0, fmt.Errorf("aggregator StepSize() == 0 — chain misconfigured")
 	}
-	if (lastTxNum+1)%stepSize != 0 {
-		return 0, fmt.Errorf("aligned-mode invariant violated: toBlock=%d last-txNum=%d does not land on a step boundary (stepSize=%d, remainder=%d) — chain claims block-aligned but step boundaries don't align to block boundaries", toBlock, lastTxNum, stepSize, (lastTxNum+1)%stepSize)
-	}
-	return (lastTxNum + 1) / stepSize, nil
+	return (lastTxNum / stepSize) + 1, nil
 }
 
 // collectFilesPastBlock walks the inventory and returns every file

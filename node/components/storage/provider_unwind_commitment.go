@@ -30,32 +30,42 @@ import (
 // ensureCommitmentAtBlock is mode-B sub-op #3 — anchor the commitment
 // trie at toBlock.
 //
+// Works for both aligned and non-aligned cuts. The recompute primitive
+// (commitmentdb.RecomputeAtTxNumWithoutSD) takes any toTxNum. The
+// maxStep parameter bounds the file-side baseline lookup: a file is a
+// valid baseline candidate iff its endTxNum ≤ maxStep*stepSize (so its
+// commitment record's internal txnum ≤ lastTxNum).
+//
 // Algorithm (SD-free, single-tx):
 //
-//  1. stepBoundary = (toBlockLastTxNum+1) / stepSize. Files whose end
-//     step ≤ stepBoundary may carry a usable baseline commitment;
-//     anything beyond is the over-step file the wipe in sub-op #2
-//     deliberately superseded.
+//  1. maxStep = (lastTxNum+1) / stepSize. For aligned cuts (lastTxNum =
+//     K*stepSize - 1), this is K, so the file ending at endTxNum =
+//     K*stepSize stays a candidate — its commitment is exactly at
+//     lastTxNum and history-range to fold is empty. For non-aligned cuts
+//     (lastTxNum mid-step), this is K-1, so the file containing
+//     lastTxNum (endTxNum = K*stepSize, commitment past lastTxNum) is
+//     excluded; baseline comes from an earlier file ending at endTxNum
+//     ≤ (K-1)*stepSize, and history covers the gap up to lastTxNum.
 //
 //  2. commitmentdb.RecomputeAtTxNumWithoutSD reads a file-side
-//     baseline via GetLatestFromFilesUpToStep(stepBoundary), restores
+//     baseline via GetLatestFromFilesUpToStep(maxStep), restores
 //     the patricia trie state, replays accounts/storage/code touches
-//     in (baselineTxNum, toBlockLastTxNum+1] via HistoryKeyTxNumRange
-//     (those domains have history; the range query is well-defined),
-//     calls trie.Process to fold them in, and returns the new root +
-//     encoded trie state. No SharedDomains is opened — the
-//     behind-commitment guard in NewSharedDomains is structurally
-//     incompatible with mode B's mid-tx wiped-shadow state.
+//     in (baselineTxNum, lastTxNum+1] via HistoryKeyTxNumRange (those
+//     domains have history; the range query is well-defined), calls
+//     trie.Process to fold them in, and returns the new root + encoded
+//     trie state. No SharedDomains is opened — the behind-commitment
+//     guard in NewSharedDomains is structurally incompatible with mode
+//     B's mid-tx wiped-shadow state.
 //
 //  3. Validate the recomputed root against the block header's
 //     stateRoot. A mismatch means the snapshot/history data couldn't
 //     reproduce consensus — refuse loudly.
 //
 //  4. Write the new commitment entry into the writable shadow at
-//     toBlockLastTxNum via TemporalMemBatch.DomainPut → Flush. After
-//     this write the writable shadow holds the canonical commitment
-//     at toBlock, surviving the next forward execution's
-//     NewSharedDomains seek.
+//     lastTxNum via TemporalMemBatch.DomainPut → Flush. After this
+//     write the writable shadow holds the canonical commitment at
+//     toBlock, surviving the next forward execution's NewSharedDomains
+//     seek.
 func (p *Provider) ensureCommitmentAtBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) error {
 	if p.BlockReader == nil {
 		return fmt.Errorf("ensureCommitmentAtBlock: nil BlockReader")
@@ -79,9 +89,6 @@ func (p *Provider) ensureCommitmentAtBlock(ctx context.Context, tx kv.TemporalRw
 	stepSize := p.Aggregator.StepSize()
 	if stepSize == 0 {
 		return fmt.Errorf("aggregator StepSize() == 0")
-	}
-	if (lastTxNum+1)%stepSize != 0 {
-		return fmt.Errorf("ensureCommitmentAtBlock: aligned-mode invariant violated: toBlock=%d lastTxNum=%d does not land on a step boundary (stepSize=%d)", toBlock, lastTxNum, stepSize)
 	}
 	stepBoundary := kv.Step((lastTxNum + 1) / stepSize)
 

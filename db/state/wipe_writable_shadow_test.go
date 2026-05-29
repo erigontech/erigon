@@ -29,25 +29,78 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestWipeWritableShadowPast_NotAtStepBoundary pins the precondition
-// check: lastTxNum must land on a step boundary. Aligned-mode SetHead
-// enforces this via the snapshot-trim invariant; the primitive's own
-// guard makes the file-vs-DB layering contract explicit for any future
-// caller (fork-from CLI, tooling) that constructs a wipe call directly.
-func TestWipeWritableShadowPast_NotAtStepBoundary(t *testing.T) {
+// TestWipeWritableShadowPast_NonAligned_BoundaryStepReplay pins the
+// non-aligned wipe path: when lastTxNum sits mid-step, the boundary
+// step's shadow entries that reflect writes at txnum > lastTxNum must
+// be replayed from history back to their as-of-lastTxNum values
+// (deleted if the key didn't exist as of lastTxNum, restored to the
+// earlier value if it did).
+//
+// Setup (stepSize=8 → boundary step 0 covers txnums 0..7):
+//   - acc1 written at txnum 3 (in boundary step, ≤ lastTxNum=5 → must
+//     survive the wipe)
+//   - acc2 written at txnum 6 (in boundary step, > lastTxNum=5 → must
+//     be removed since it didn't exist as of lastTxNum)
+//
+// Action: WipeWritableShadowPast(lastTxNum=5). Non-aligned ((5+1)%8 ==
+// 6 ≠ 0), so the boundary-step diff-replay path fires.
+//
+// Assertion: acc1 survives, acc2 is gone. The whole-step wipe alone
+// wouldn't remove acc2 (it shares step 0 with acc1); the boundary-step
+// diff-replay is what surfaces acc2 via HistoryKeyTxNumRange and
+// removes it via the as-of-lastTxNum GetAsOf returning nil.
+func TestWipeWritableShadowPast_NonAligned_BoundaryStepReplay(t *testing.T) {
 	t.Parallel()
 
 	const stepSize uint64 = 8
 	db, agg := newWipeTestDB(t, stepSize)
 
-	rwTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
+	acc1Addr := [20]byte{1}
+	acc2Addr := [20]byte{2}
 
-	// lastTxNum=5: (5+1)%8 = 6, not on step boundary.
-	err = agg.WipeWritableShadowPast(t.Context(), rwTx, 5)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "step boundary")
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+
+		writeAcc := func(addr [20]byte, txNum uint64, nonce uint64) {
+			acc := accounts.Account{
+				Nonce:    nonce,
+				Balance:  *uint256.NewInt(nonce * 100),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			domains.SetTxNum(txNum)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], buf, txNum, nil))
+		}
+
+		writeAcc(acc1Addr, 3, 1) // step 0, txnum 3 ≤ lastTxNum=5
+		writeAcc(acc2Addr, 6, 2) // step 0, txnum 6 > lastTxNum=5
+
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 5))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		require.NotEmpty(t, getLatestAccount(t, roTx, acc1Addr), "acc1 (txnum 3 ≤ lastTxNum=5) must survive non-aligned wipe")
+		require.Empty(t, getLatestAccount(t, roTx, acc2Addr), "acc2 (txnum 6 > lastTxNum=5) must be removed by boundary-step diff-replay")
+	}
 }
 
 // TestWipeWritableShadowPast_ClearsValuesPastBoundary pins the per-tx
