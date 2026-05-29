@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -176,6 +178,174 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(t.Context(), m.ExecModule, longerFork2.Blocks)
 	require.NoError(t, err)
+}
+
+// Regression for PR #21415: when state's commitBlock is ahead of TxNums.Last
+// (e.g. after a snapshot/state misalignment + chaindata wipe), an FCU to a
+// block beyond the canonical tip must not be rejected as ReorgTooDeep.
+// The forkchoice should detect that unwindTarget equals the canonical tip,
+// skip the unwind path, write the new canonicals, and let AppendCanonicalTxNums
+// re-extend TxNums past commitBlock.
+func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 10)
+
+	// Drive the full chain in (insert + validate + UFC). State commitBlock and
+	// TxNums.Last are now both at block 10.
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks))
+
+	const truncateTo uint64 = 5
+	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
+	// extend to a frozen tip but the snapshot/state files commit to a later
+	// block. We truncate canonical+TxNums down to block 5 while leaving the
+	// commitment domain at block 10, and clear the changeset table (which a
+	// chaindata wipe would empty). With no changesets, CanUnwindToBlockNum
+	// falls back to the commitment block (10) — so an unwind to block 5 looks
+	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
+	var commitBlock uint64
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(v), 16)
+		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
+		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		return nil
+	}))
+	require.Equal(t, uint64(10), commitBlock, "commitBlock should be at block 10 after the initial chain")
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
+		return nil
+	}))
+
+	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
+	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
+	// so the no-unwind branch fires. The handler then writes canonical entries
+	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
+	//
+	// Because the domain was ahead of blocks when the FCU started, the handler
+	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
+	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
+	// handle by inserting the missing canonical blocks and retrying.
+	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
+
+	// After the FCU, TxNums must have caught up to (or past) commitBlock so
+	// the next NewSharedDomains() will not return ErrBehindCommitment.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
+}
+
+// Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also
+// exercises forward execution: state lags the chain tip (executed to block 10,
+// chain extends to 15). The first FCU repairs the canonical/TxNums index and
+// signals TooFarAway; the second FCU then drives execution forward 10 -> 15.
+// The committed state at block 10 stays in the domain tables (the base for
+// forward execution) — only the index tables are truncated.
+func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 15)
+
+	// Execute only the first 10 blocks: state/commitBlock/execProgress at 10.
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:10]))
+	// Insert headers/bodies for 11..15 so the forkchoice walk-back can traverse
+	// them, but do not UFC — they are neither canonical nor executed yet.
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[10:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+
+	const truncateTo uint64 = 5
+	var commitBlock uint64
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(v), 16)
+		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
+		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		return nil
+	}))
+	require.Equal(t, uint64(10), commitBlock)
+
+	tip := chainPack.Blocks[len(chainPack.Blocks)-1].Header()
+
+	// First FCU to the tip (block 15). Index is repaired (canonical + TxNums
+	// extended to 15) and, since the domain was behind, we get TooFarAway.
+	res, err := updateForkChoice(ctx, m.ExecModule, tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "first FCU should repair index and signal domain-ahead")
+	var execProgAfter1 uint64
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(15), lastBlock, "TxNums must be re-extended to the tip")
+		execProgAfter1, err = stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		return nil
+	}))
+	require.Equal(t, commitBlock, execProgAfter1, "execution should not have advanced yet (state still at commitBlock)")
+
+	// Second FCU to the same tip: domain is no longer ahead (TxNums caught up),
+	// so execution is driven forward from commitBlock to the tip.
+	res2, err := updateForkChoice(ctx, m.ExecModule, tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res2.Status, "second FCU should execute forward to the tip")
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(15), execProg, "execution must have advanced to the tip")
+		return nil
+	}))
 }
 
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
@@ -348,6 +518,15 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 		}
 		if ur.Status != execmodule.ExecutionStatusSuccess {
 			return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
+		}
+	}
+	// UpdateForkChoice returns before the background flush+commit finishes
+	// (per #21444). The next semaphore-acquiring op blocks until the prior
+	// FCU's commit defers complete — so do one more idempotent FCU for the
+	// last block to ensure commitBlock has settled before the caller reads it.
+	if len(blocks) > 0 {
+		if _, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header()); err != nil {
+			return err
 		}
 	}
 	return nil
