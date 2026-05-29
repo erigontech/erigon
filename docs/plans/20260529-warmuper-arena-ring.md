@@ -263,13 +263,13 @@ no lost wakeup.
 
 ### Task 6: Lint, build, verify acceptance criteria
 
-- [ ] `make lint` — run repeatedly until clean (non-deterministic scanner)
-- [ ] `make erigon integration` — must build
-- [ ] verify the Overview race scenario is closed: keys never overwritten while in-flight
+- [x] `make lint` — run repeatedly until clean (non-deterministic scanner)
+- [x] `make erigon integration` — must build
+- [x] verify the Overview race scenario is closed: keys never overwritten while in-flight
       (acceptance = `TestHashSort_WarmupArenaNoRace` green under `-race`)
-- [ ] verify no `WaitForInFlightKeysThenRun` / `warmupBarrier` references remain
+- [x] verify no `WaitForInFlightKeysThenRun` / `warmupBarrier` references remain
       (`grep -rn 'WaitForInFlightKeysThenRun\|warmupBarrier' execution/commitment/`)
-- [ ] `go test -race ./execution/commitment/` full-package green
+- [x] `go test -race ./execution/commitment/` full-package green
 
 ### Task 7: Commit, push, move plan
 
