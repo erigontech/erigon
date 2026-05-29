@@ -132,6 +132,8 @@ func NewConsensusHandlers(
 		// execution payload envelopes
 		hm[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = c.executionPayloadEnvelopesByRangeHandler
 		hm[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = c.executionPayloadEnvelopesByRootHandler
+		// blocks by head (consensus-specs PR #5181, Fulu)
+		hm[communication.BeaconBlocksByHeadProtocolV1] = c.beaconBlocksByHeadHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
