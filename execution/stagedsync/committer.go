@@ -338,7 +338,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	// Check against expected root from the block header.
-	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
+	if !bytes.Equal(rh, br.StateRoot[:]) {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
 	}
 
@@ -438,7 +438,7 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.hasComputed = true
 
 	// Only publish on mismatch — success is silent.
-	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
+	if mismatch := !bytes.Equal(rh, br.StateRoot[:]); mismatch {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,
