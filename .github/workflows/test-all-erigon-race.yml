@@ -38,7 +38,11 @@ jobs:
     needs: load-matrix
     timeout-minutes: 90
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-latest

@@ -734,16 +734,16 @@ func (a *accessedState) isEmpty() bool {
 // first, then storage, then code.
 func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
 	for addr := range a.Addresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			storageKey := string(append(addr[:], key[:]...))
 			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
 }
 
@@ -818,11 +818,11 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 
 	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
 	for addr := range out.Addresses {
-		sortedKeys = append(sortedKeys, addr.Bytes())
+		sortedKeys = append(sortedKeys, addr[:])
 	}
 	for addr, keys := range out.Storage {
 		for key := range keys {
-			composite := append(addr.Bytes(), key.Bytes()...)
+			composite := append(addr[:], key[:]...)
 			sortedKeys = append(sortedKeys, composite)
 		}
 	}
@@ -860,7 +860,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	for addr, code := range preCode {
 		if len(code) > 0 {
 			codeHash := crypto.Keccak256Hash(code)
-			addrHash := crypto.Keccak256Hash(addr.Bytes())
+			addrHash := crypto.Keccak256Hash(addr[:])
 			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
 				CodeHash: accounts.InternCodeHash(codeHash),
@@ -1154,11 +1154,11 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 
 	// Touch all modified accounts and storage keys for the post-state trie
 	for _, addr := range writeAddresses {
-		postSdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		postSdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range writeStorageKeys {
 		for _, key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			storageKey := string(append(addr[:], key[:]...))
 			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
@@ -1170,7 +1170,8 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 
 	// Verify the post-state root matches the block's state root
-	if !bytes.Equal(postRoot, block.Root().Bytes()) {
+	blockRoot := block.Root()
+	if !bytes.Equal(postRoot, blockRoot[:]) {
 		// only warn, so we can see comparison later
 		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
 	}
@@ -1178,12 +1179,12 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	// Read account data from the post-state trie (with correct storage roots)
 	// Include both read and write addresses
 	for _, addr := range readAddresses {
-		addrHash := crypto.Keccak256(addr.Bytes())
+		addrHash := crypto.Keccak256(addr[:])
 		acc, _ := postTrie.GetAccount(addrHash)
 		expectedState[addr] = acc
 	}
 	for _, addr := range writeAddresses {
-		addrHash := crypto.Keccak256(addr.Bytes())
+		addrHash := crypto.Keccak256(addr[:])
 		acc, _ := postTrie.GetAccount(addrHash)
 		expectedState[addr] = acc
 	}
