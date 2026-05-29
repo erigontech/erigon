@@ -110,7 +110,8 @@ func TestMarked_PutToDb(t *testing.T) {
 	defer rwtx.Rollback()
 
 	num := Num(1)
-	hash := common.HexToHash("0x1234").Bytes()
+	hashVal := common.HexToHash("0x1234")
+	hash := hashVal[:]
 	value := []byte{1, 2, 3, 4, 5}
 
 	err = ma_tx.Put(num, hash, value, rwtx)
@@ -161,7 +162,8 @@ func TestPrune(t *testing.T) {
 				err = header.EncodeRLP(buffer)
 				require.NoError(t, err)
 
-				return Num(i), header.Hash().Bytes(), buffer.Bytes()
+				headerHash := header.Hash()
+				return Num(i), headerHash[:], buffer.Bytes()
 			}
 
 			for i := range int(entries_count) {
@@ -250,7 +252,8 @@ func TestBuildFiles_Marked(t *testing.T) {
 		err = header.EncodeRLP(buffer)
 		require.NoError(t, err)
 
-		return Num(i), header.Hash().Bytes(), buffer.Bytes()
+		headerHash := header.Hash()
+		return Num(i), headerHash[:], buffer.Bytes()
 	}
 
 	for i := range int(entries_count) {

@@ -1196,8 +1196,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 				return err
 			}
 			h := rawdb.ReadCurrentHeader(tx)
-			if b.Hash() != h.Hash() {
-				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			bHash := b.Hash()
+			hHash := h.Hash()
+			if bHash != hHash {
+				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), bHash[:4], h.Number, hHash[:4])
 			}
 			if err := m2.InsertChain(forks[i]); err != nil {
 				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
@@ -1207,8 +1209,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 				return err
 			}
 			h = rawdb.ReadCurrentHeader(tx)
-			if b.Hash() != h.Hash() {
-				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			bHash2 := b.Hash()
+			hHash2 := h.Hash()
+			if bHash2 != hHash2 {
+				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), bHash2[:4], h.Number, hHash2[:4])
 			}
 			return nil
 		}); err != nil {
