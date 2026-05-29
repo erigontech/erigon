@@ -46,6 +46,10 @@ type DB struct {
 	tables    map[string]*table
 	sequences map[string]uint64
 
+	// viewIDSeq is a monotonic counter assigned to each tx; mirrors MDBX's
+	// transaction ID. Must be unique across distinct Begin* calls.
+	viewIDSeq atomic.Uint64
+
 	closed atomic.Bool
 }
 
@@ -226,6 +230,7 @@ func (db *DB) newRwTxLocked() *tx {
 	t := &tx{
 		db:            db,
 		rw:            true,
+		viewID:        db.viewIDSeq.Add(1),
 		tables:        maps.Clone(db.tables),
 		privateTables: make(map[string]struct{}),
 		sequences:     maps.Clone(db.sequences),
@@ -264,6 +269,7 @@ func (db *DB) beginRoTx() *tx {
 	t := &tx{
 		db:        db,
 		rw:        false,
+		viewID:    db.viewIDSeq.Add(1),
 		tables:    db.tables,
 		sequences: db.sequences,
 	}

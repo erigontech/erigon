@@ -23,6 +23,8 @@ type tx struct {
 	db     *DB
 	rw     bool
 	closed bool
+	// viewID is the per-Begin monotonic counter surfaced via ViewID().
+	viewID uint64
 	// tables is master's tables map.
 	//   - RoTx: shared by reference (never mutated). Reads of missing tables
 	//     are satisfied from roLocal.
@@ -112,7 +114,7 @@ func (t *tx) Rollback() {
 	}
 }
 
-func (t *tx) ViewID() uint64          { return 0 }
+func (t *tx) ViewID() uint64          { return t.viewID }
 func (t *tx) CHandle() unsafe.Pointer { return nil }
 
 // --- kv.Getter (read methods) ---
