@@ -87,6 +87,7 @@ func importChain(cliCtx *cli.Context) error {
 		utils.NATFlag.Name:               "none",
 		utils.NoDownloaderFlag.Name:      "true",
 		utils.ExternalConsensusFlag.Name: "true",
+		utils.MCPDisableFlag.Name:        "true",
 	} {
 		if err := cliCtx.Set(flag, value); err != nil {
 			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
@@ -116,10 +117,23 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), logger); err != nil {
-		return err
-	}
+	return importFiles(cliCtx.Args().Slice(), func(fn string) error {
+		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
+	}, logger)
+}
 
+// importFiles imports each file via importOne, reusing one node for the whole
+// batch; with several files a per-file failure is logged and skipped, with a
+// single file it is fatal.
+func importFiles(files []string, importOne func(string) error, logger log.Logger) error {
+	for _, fn := range files {
+		if err := importOne(fn); err != nil {
+			if len(files) == 1 {
+				return err
+			}
+			logger.Warn("import: skipping file after error", "file", fn, "err", err)
+		}
+	}
 	return nil
 }
 
