@@ -265,7 +265,7 @@ func TestGetProof(t *testing.T) {
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
 		result[31] = b
-		return result.Bytes()
+		return result[:]
 	}
 	_ = bankAddr
 
