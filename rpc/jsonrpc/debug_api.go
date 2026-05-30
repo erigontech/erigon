@@ -280,11 +280,28 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	if endNum > latestBlock+1 {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
+	originalEndNum := endNum
 	if endNum > latestBlock {
 		// Clamp to latestBlock so downstream txNum lookups succeed.
 		endNum = latestBlock
 	}
 	if startNum >= endNum {
+		// Special case: caller passed startNum+1 as endNum (e.g. startNum=latestBlock,
+		// endNum=latestBlock+1). After clamping, startNum == endNum. Treat as single-block.
+		if startNum == endNum && originalEndNum > latestBlock {
+			if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
+				return nil, err
+			}
+			startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
+			if err != nil {
+				return nil, err
+			}
+			endTxNum, err := api._txNumReader.Max(ctx, tx, startNum)
+			if err != nil {
+				return nil, err
+			}
+			return getModifiedAccounts(tx, startTxNum, endTxNum+1)
+		}
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
