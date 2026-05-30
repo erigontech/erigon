@@ -43,7 +43,8 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 	fmt.Printf("Last block: %d\n", lastBlock)
 	// Go back 256 blocks
 	bn := uint64(lastBlock) - 256
-	page := common.Hash{}.Bytes()
+	zeroHash := common.Hash{}
+	page := zeroHash[:]
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {

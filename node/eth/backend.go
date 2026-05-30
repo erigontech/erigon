@@ -852,6 +852,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
+			backend.chainConfig,
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
@@ -1355,7 +1356,6 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-	agg.SetFrozenBlocksProvider(blockReader)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {

@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -331,6 +332,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 }
 
 func (rw *Worker) Run() (err error) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("exec.Worker panic: %s, %s", rec, dbg.Stack())

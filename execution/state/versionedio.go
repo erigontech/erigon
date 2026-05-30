@@ -217,7 +217,7 @@ func valueString(path AccountPath, value any) string {
 		return (&num).String()
 	case StoragePath:
 		num := value.(uint256.Int)
-		return fmt.Sprintf("%x", &num)
+		return num.Hex()[2:]
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
@@ -728,12 +728,31 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
 	}
 
+	// First pass: if a Balance entry exists for this addr, just update value.
+	// Tracks whether ANY entry for this addr exists — if yes we MUST NOT
+	// re-emit Nonce/Incarnation/CodeHash from the pre-block snapshot acc,
+	// because the worker has already written some fields with the correct
+	// post-execution values; appending pre-block field entries after the
+	// worker's writes would clobber them under last-wins downstream merge.
+	addrHasAnyWrite := false
 	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
+		if w.Address != addr {
+			continue
+		}
+		addrHasAnyWrite = true
+		if w.Path == BalancePath {
 			w.Val = val
 			w.BalanceChangeReason = reason
 			return writes
 		}
+	}
+	if addrHasAnyWrite {
+		// Worker already wrote some other field (e.g. Nonce on a miner
+		// self-send where sender == coinbase). Append only the Balance
+		// write; the other fields are correct in the existing entries.
+		return append(writes,
+			&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
+		)
 	}
 	// Account not in writes — emit complete account fields.
 	return append(writes,

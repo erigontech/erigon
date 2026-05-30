@@ -1,19 +1,19 @@
 ---
-title: "Sync Modes"
-description: "Full, minimal, blocks, and archive sync explained — choose the right mode for your use case."
+title: "Prune Modes"
+description: "Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case."
 sidebar_position: 2
 ---
 
 
-# Sync Modes
+# Prune Modes
 
 Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| <p>* <a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | Retains latest state, necessary blocks, and prunes ancient blocks and state (EIP-4444 enabled)      | General users, DApp interaction, fastest sync.                                           |
-| \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | Only recent blocks and latest state                                                                 | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
-| Historical Blocks                                                     | `--prune.mode=blocks`  | Retains the full block/transaction history, but still prunes the historical state before the merge. | Users needing historical block data for research or indexing.                            |
+| <p>* <a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
+| \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
+| Historical Blocks                                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the EIP-8252 window                                | Users needing historical block data for research or indexing.                            |
 | [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
 
 By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
@@ -34,7 +34,7 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It achieves this by maintaining all essential data while intelligently pruning old, unnecessary historical data (blocks and receipts prior to The Merge, in line with [EIP-4444](https://eips.ethereum.org/EIPS/eip-4444)).
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
 
 We strongly recommend running a Full Node whenever possible, as its reduced disk space requirements make it suitable for the majority of users. By running a Full Node, you directly support the network's **decentralization, resilience, and robustness**, aligning with Ethereum's distributed ethos.
 

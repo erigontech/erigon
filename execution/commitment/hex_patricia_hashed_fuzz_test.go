@@ -172,6 +172,48 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 	})
 }
 
+func Fuzz_HexPatriciaHashed_DeferredMatchesEager(f *testing.F) {
+	f.Add(uint8(8), int64(1))
+	f.Add(uint8(16), int64(42))
+
+	f.Fuzz(func(t *testing.T, keysCount uint8, seed int64) {
+		if keysCount == 0 || keysCount > 64 {
+			t.Skip()
+		}
+
+		rnd := rand.New(rand.NewSource(seed))
+		builder := NewUpdateBuilder()
+		for i := 0; i < int(keysCount); i++ {
+			addr := make([]byte, length.Addr)
+			_, err := rnd.Read(addr)
+			require.NoError(t, err)
+			addrHex := hex.EncodeToString(addr)
+
+			switch i % 4 {
+			case 0:
+				builder.Balance(addrHex, rnd.Uint64())
+			case 1:
+				builder.Nonce(addrHex, uint64(i)+rnd.Uint64()%1024)
+			case 2:
+				loc := make([]byte, length.Hash)
+				value := make([]byte, 8)
+				_, err = rnd.Read(loc)
+				require.NoError(t, err)
+				_, err = rnd.Read(value)
+				require.NoError(t, err)
+				builder.Storage(addrHex, hex.EncodeToString(loc), hex.EncodeToString(value))
+			default:
+				codeHash := make([]byte, length.Hash)
+				_, err = rnd.Read(codeHash)
+				require.NoError(t, err)
+				builder.CodeHash(addrHex, hex.EncodeToString(codeHash))
+			}
+		}
+
+		requireDeferredMatchesEager(t, builder)
+	})
+}
+
 func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 	if testing.Short() {
 		f.Skip("slow test")

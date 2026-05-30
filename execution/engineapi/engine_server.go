@@ -257,6 +257,7 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -572,12 +573,23 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}
 	}
 	if bad {
-		errMsg := cachedErr
-		if errMsg == "" {
-			errMsg = "previously known bad block"
+		if cachedErr == "" {
+			// An earlier ReportBadHeader stored this block (or an ancestor)
+			// without a validation message — the original rejection
+			// category was lost. Returning the generic "previously known
+			// bad block" string here strips the category that downstream
+			// callers (eest's ErigonExceptionMapper, Lighthouse, etc.)
+			// rely on to bucket the failure, and rewriting the cache with
+			// that fallback permanently degrades the entry. Drop the
+			// useless entry and fall through to re-validation so the
+			// pipeline re-derives the specific error; the proper string
+			// will be re-cached via ReportBadHeader on the BadBlock path
+			// below (issues #21363 + #21364 Mode A).
+			s.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
+		} else {
+			s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
 		}
-		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, errMsg)
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(errMsg)}, nil
 	}
 
 	currentHeader := s.chainRW.CurrentHeader(ctx)
@@ -711,6 +723,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	defer engineForkchoiceUpdatedDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -808,8 +821,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-		TargetGasLimit:        (*uint64)(payloadAttributes.TargetGasLimit),
 	}
 
 	if version >= clparams.CapellaVersion {
@@ -818,6 +829,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	if version >= clparams.DenebVersion {
 		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
+	}
+
+	if version >= clparams.GloasVersion {
+		assembleParams.SlotNumber = (*uint64)(payloadAttributes.SlotNumber)
+		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
 	}
 
 	var assembled execmodule.AssembleBlockResult

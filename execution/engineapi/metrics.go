@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,16 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package services
+package engineapi
 
 import (
-	"context"
-
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// MaxCollatableTxNum: upper bound txNum that state collation may target.
-// Aggregator enforces this internally via SetFrozenBlocksProvider.
-func MaxCollatableTxNum(ctx context.Context, tx kv.Tx, blockReader FullBlockReader) (uint64, error) {
-	return blockReader.TxnumReader().Max(ctx, tx, blockReader.FrozenBlocks())
-}
+var (
+	engineNewPayloadDuration        = metrics.NewSummary(`engine_new_payload{type="execution_duration"}`)
+	engineForkchoiceUpdatedDuration = metrics.NewSummary(`engine_forkchoice_updated{type="execution_duration"}`)
+)
