@@ -75,34 +75,33 @@ func RecomputeAtTxNumWithoutSD(
 		return nil, nil, 0, fmt.Errorf("RecomputeAtTxNumWithoutSD: stepSize == 0")
 	}
 
-	// Look for a baseline commitment ≤ maxStep, preferring the DB
-	// (writable shadow) over files: after sub-op #2's wipe (entries
-	// with step ≥ stepBoundary removed), the shadow holds only
-	// step-aligned commitments ≤ maxStep, and the latest of those is
-	// the exact baseline at toBlock (the wipe is precisely calibrated
-	// to leave it intact). Falls back to GetLatestFromFilesUpToStep
-	// for the case where the wipe cleared everything (or this is a
-	// post-merge node without a writable-shadow commitment at this
-	// step).
+	// Baseline lookup: files only, bounded by maxStep.
+	//
+	// We deliberately skip the writable shadow's commitment record:
+	// ensureCommitmentAtBlock runs BEFORE WipeWritableShadowPast in
+	// the current mode-B sub-op chain, so the shadow holds every
+	// post-target commitment record from forward execution
+	// (saveStateAfter=true writes one per block). The shadow's
+	// "latest" record's cs.txNum is at the chain head — past
+	// toTxNum — and even older shadow records may straddle a step
+	// boundary with cs.txNum > toTxNum that the broken step-only
+	// filter would mistake for a valid baseline.
+	//
+	// The file at endTxNum ≤ maxStep*stepSize always has a
+	// commitment record at endTxNum-1, which is by construction
+	// ≤ toTxNum. Touches in (baselineTxNum, toTxNum+1] cover the
+	// rest. For aligned cuts the file containing lastTxNum is
+	// directly the baseline; for non-aligned cuts an earlier file
+	// is the baseline and history covers the gap.
 	var baselineBytes []byte
 	var baselineFound bool
-	dbVal, dbStep, dbHas, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, KeyCommitmentState)
+	filesVal, _, filesHas, err := tx.Debug().GetLatestFromFilesUpToStep(kv.CommitmentDomain, KeyCommitmentState, maxStep)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("GetLatestFromDB(commitment): %w", err)
+		return nil, nil, 0, fmt.Errorf("GetLatestFromFilesUpToStep(commitment, maxStep=%d): %w", maxStep, err)
 	}
-	if dbHas && dbStep <= maxStep {
-		baselineBytes = dbVal
+	if filesHas {
+		baselineBytes = filesVal
 		baselineFound = true
-	}
-	if !baselineFound {
-		filesVal, _, filesHas, ferr := tx.Debug().GetLatestFromFilesUpToStep(kv.CommitmentDomain, KeyCommitmentState, maxStep)
-		if ferr != nil {
-			return nil, nil, 0, fmt.Errorf("GetLatestFromFilesUpToStep(commitment, maxStep=%d): %w", maxStep, ferr)
-		}
-		if filesHas {
-			baselineBytes = filesVal
-			baselineFound = true
-		}
 	}
 
 	// State reader composition.
