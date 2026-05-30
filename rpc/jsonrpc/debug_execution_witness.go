@@ -837,16 +837,34 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	}
 
 	accessedCode := rs.GetAccessedCode()
+	// Bytecode from a contract created and destroyed inside the same block is
+	// not part of the canonical end-state; only emit codes that have at least
+	// one source address still live after the block.
+	transient := func(addr common.Address) bool {
+		if _, deleted := rs.DeletedAccounts[addr]; !deleted {
+			return false
+		}
+		_, inPreState := rs.PreStateCode[addr]
+		return !inPreState
+	}
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range accessedCode {
-		if len(code) > 0 {
-			h := crypto.Keccak256Hash(code)
-			allCodesByHash[h] = code
+	codeHasLiveSource := make(map[common.Hash]bool)
+	for addr, code := range accessedCode {
+		if len(code) == 0 {
+			continue
+		}
+		h := crypto.Keccak256Hash(code)
+		allCodesByHash[h] = code
+		if !transient(addr) {
+			codeHasLiveSource[h] = true
 		}
 	}
 
 	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
 	for h, code := range allCodesByHash {
+		if !codeHasLiveSource[h] {
+			continue
+		}
 		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
 	}
 	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
