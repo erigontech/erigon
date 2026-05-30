@@ -1447,16 +1447,14 @@ type Updates struct {
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
 
-	// Ring of grow-only byte arenas for HashSort key copies. Each batch generation
-	// writes into arenas[curArena]; a slot is reused only after every warm item from
-	// its previous occupant generation has drained (see Warmuper.WaitBufferFree).
+	// Ring of byte arenas for HashSort key copies; a slot is reused only after its previous
+	// generation's warm items drain (see Warmuper.WaitBufferFree).
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
 }
 
-// arenaRingSize is the number of arena buffers cycled by HashSort. Bumping it only
-// changes memory headroom and producer-stall frequency, not correctness.
+// arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
 const arenaRingSize = 2
 
 // arenaAlloc appends b to the byte arena and returns the sub-slice.
@@ -1483,9 +1481,7 @@ func (t *Updates) arenaAlloc(b []byte) []byte {
 	return arena[off:needed]
 }
 
-// arenaEnsureCap ensures every ring buffer has at least c bytes of capacity, reserving
-// arenaRingSize×c total. Must be called before each batch to prevent mid-batch
-// reallocation that would invalidate returned sub-slices.
+// arenaEnsureCap reserves at least c bytes in every ring buffer; call before a batch so a mid-batch grow can't reallocate and invalidate returned sub-slices.
 func (t *Updates) arenaEnsureCap(c int) {
 	for i := range t.arenas {
 		if cap(t.arenas[i]) < c {

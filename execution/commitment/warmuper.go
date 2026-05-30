@@ -74,8 +74,8 @@ type Warmuper struct {
 	keysProcessed atomic.Uint64
 	startTime     time.Time
 
-	// Per-slot count of in-flight warm items for each arena ring buffer. The per-key
-	// path is lock-free; mu/cond are used only on the drain-to-zero / WaitBufferFree paths.
+	// Per-slot in-flight warm-item counts; the per-key path stays lock-free, mu/cond engage
+	// only on the drain-to-zero and WaitBufferFree paths.
 	outstanding [arenaRingSize]atomic.Int64
 	mu          sync.Mutex
 	cond        *sync.Cond
@@ -200,8 +200,7 @@ func (w *Warmuper) Start() {
 		})
 	}
 
-	// Wake any WaitBufferFree waiter on shutdown so it observes cancellation rather than
-	// blocking on items that workers exiting on ctx.Done() left undrained.
+	// Wake any WaitBufferFree waiter on shutdown so it observes cancellation instead of blocking on undrained items.
 	w.g.Go(func() error {
 		<-w.ctx.Done()
 		w.mu.Lock()
@@ -306,8 +305,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	}
 }
 
-// releaseGen decrements the in-flight counter for gen's ring slot and wakes any
-// WaitBufferFree waiter once the slot drains to zero.
+// releaseGen decrements gen's ring-slot counter and wakes WaitBufferFree when the slot drains to zero.
 func (w *Warmuper) releaseGen(gen uint64) {
 	if w.outstanding[gen%arenaRingSize].Add(-1) == 0 {
 		w.mu.Lock()
@@ -316,9 +314,7 @@ func (w *Warmuper) releaseGen(gen uint64) {
 	}
 }
 
-// WaitBufferFree blocks until every in-flight warm item for slot completes, returning the
-// warmuper's context error if it is canceled first so callers abort instead of hanging on
-// items that workers exiting on ctx.Done() left undrained.
+// WaitBufferFree blocks until every in-flight warm item for slot completes, or returns the context error if canceled first.
 func (w *Warmuper) WaitBufferFree(slot int) error {
 	if slot < 0 || slot >= arenaRingSize {
 		return fmt.Errorf("invalid arena slot %d", slot)
@@ -359,8 +355,7 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// DrainPending drains all pending work items from the work channel without processing them,
-// releasing each drained item's ring-slot counter so WaitBufferFree never blocks on it.
+// DrainPending discards queued work items, releasing each one's ring-slot counter so WaitBufferFree won't block on it.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return

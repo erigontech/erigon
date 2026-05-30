@@ -119,10 +119,8 @@ func genNibbleKeys(n, keyLen int) [][]byte {
 	return keys
 }
 
-// TestHashSort_WarmupArenaNoRace reproduces the arena data race: at a batch boundary
-// HashSort resets the arena buffer while async warmup workers still read key slices that
-// alias it. The -race detector is the signal: clean only while the arena ring keeps an
-// in-flight read off a buffer being reset.
+// TestHashSort_WarmupArenaNoRace reproduces the arena data race: at a batch boundary HashSort
+// resets a buffer while warmup workers still read key slices aliasing it. -race is the signal.
 func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	t.Parallel()
 
@@ -195,11 +193,9 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 	}
 }
 
-// TestHashSort_WarmupLap drives enough keys to cross at least three batch boundaries
-// (≥3 generations with K=2), forcing a ring slot to be reused while a slow straggler
-// still holds an arena-backed key from the slot's previous occupant generation. The
-// producer must block in WaitBufferFree until the straggler drains; -race is the signal
-// that no arena overwrite races an in-flight read.
+// TestHashSort_WarmupLap crosses ≥3 batch boundaries (K=2) so a ring slot is reused while a slow
+// straggler still holds a key from that slot's previous generation; the producer must block in
+// WaitBufferFree until it drains. -race is the signal.
 func TestHashSort_WarmupLap(t *testing.T) {
 	t.Parallel()
 
@@ -255,10 +251,9 @@ func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	}
 }
 
-// TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant forces the boundary WaitBufferFree to
-// fail via context cancellation while a straggler still pins the slot, and asserts the
-// gen/curArena invariant (curArena == gen % arenaRingSize) survives the error return. If gen
-// were advanced before the fallible wait, a later reuse would charge warmups to the wrong slot.
+// TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant cancels the context during a boundary
+// WaitBufferFree while a straggler pins the slot, asserting the curArena == gen % arenaRingSize
+// invariant survives the error return.
 func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 	t.Parallel()
 
@@ -292,10 +287,8 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 			defer warmuper.CloseAndWait()
 			defer close(release)
 
-			// fn runs only on the single producer goroutine, so this counter is race-free.
-			// The boundary-2 fn-loop completing (lapFnCall calls) is the last point before the
-			// gen++/WaitBufferFree block, and there is no ctx.Done check in between — so canceling
-			// only after this signal guarantees the cancellation is observed inside WaitBufferFree.
+			// fn runs only on the producer goroutine, so this counter is race-free. Signaling at
+			// lapFnCall (right before the gen++/WaitBufferFree block) makes the cancel land inside the wait.
 			fnCalls := 0
 			reachedLap := make(chan struct{})
 			errCh := make(chan error, 1)
@@ -402,10 +395,8 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	require.Equal(t, int64(0), warmuper.outstanding[0].Load())
 }
 
-// TestWarmuper_WaitBufferFree_UnblocksOnCancel verifies that a producer parked in
-// WaitBufferFree wakes and returns the context error when the warmuper's context is
-// canceled while a counted item is stuck, instead of hanging on a slot counter that
-// workers exiting on ctx.Done() left non-zero.
+// TestWarmuper_WaitBufferFree_UnblocksOnCancel verifies a producer parked in WaitBufferFree wakes
+// and returns the context error when the warmuper is canceled while a counted item is stuck.
 func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 	t.Parallel()
 
