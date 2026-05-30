@@ -17,7 +17,6 @@
 package existence
 
 import (
-	"bufio"
 	"fmt"
 	"hash"
 	"os"
@@ -32,7 +31,8 @@ import (
 )
 
 type Filter struct {
-	filter             *bloomfilter.Filter
+	filter             *bloomfilter.Filter // writer path; reader path uses mmapBloom instead
+	mmapBloom          *mmapBloom          // reader path: mmap'd bits, no in-heap copy
 	fuseWriter         *fusefilter.Writer
 	fuseReader         *fusefilter.Reader
 	useFuse            bool
@@ -86,12 +86,17 @@ func (b *Filter) ContainsHash(hashedKey uint64) bool {
 	if b.useFuse {
 		return b.fuseReader.ContainsHash(hashedKey)
 	}
-
+	if b.mmapBloom != nil {
+		return b.mmapBloom.ContainsHash(hashedKey)
+	}
 	return b.filter.ContainsHash(hashedKey)
 }
 func (b *Filter) Contains(v hash.Hash64) bool {
 	if b.empty {
 		return true
+	}
+	if b.mmapBloom != nil {
+		return b.mmapBloom.ContainsHash(v.Sum64())
 	}
 	return b.filter.Contains(v)
 }
@@ -183,18 +188,20 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	stat, err := f.Stat()
 	if err != nil {
+		f.Close()
 		return nil, err
 	}
 	idx.empty = stat.Size() == 0
 	if idx.empty {
+		f.Close()
 		validationPassed = true
 		return idx, nil
 	}
 
 	if idx.useFuse {
+		f.Close()
 		idx.fuseReader, err = fusefilter.NewReader(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
@@ -202,12 +209,14 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 		validationPassed = true
 		return idx, nil
 	}
-	filter := new(bloomfilter.Filter)
-	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
+	// Reader path: mmap the bloom file so the bit array lives in the OS page
+	// cache instead of pinning multiple GB of Go heap across all .kvei files.
+	f.Close()
+	mb, err := openMmapBloom(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 	}
-	idx.filter = filter
+	idx.mmapBloom = mb
 	validationPassed = true
 	return idx, nil
 }
@@ -217,4 +226,8 @@ func (b *Filter) Close() {
 		return
 	}
 	b.fuseReader.Close()
+	if b.mmapBloom != nil {
+		_ = b.mmapBloom.Close()
+		b.mmapBloom = nil
+	}
 }
