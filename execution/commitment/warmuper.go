@@ -320,6 +320,9 @@ func (w *Warmuper) releaseGen(gen uint64) {
 // warmuper's context error if it is canceled first so callers abort instead of hanging on
 // items that workers exiting on ctx.Done() left undrained.
 func (w *Warmuper) WaitBufferFree(slot int) error {
+	if slot < 0 || slot >= arenaRingSize {
+		return fmt.Errorf("invalid arena slot %d", slot)
+	}
 	if w.outstanding[slot].Load() == 0 {
 		return nil
 	}
