@@ -499,8 +499,9 @@ type ExecutionWitnessResult struct {
 	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
 	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
-	// Keys is always null (reserved for future use, included for Geth compatibility)
-	Keys []hexutil.Bytes `json:"keys"`
+	// Keys is reserved for future use; omitted while empty so the response matches
+	// the canonical {state, codes, headers} shape.
+	Keys []hexutil.Bytes `json:"keys,omitempty"`
 	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
 	// For blocks that touch state, always includes the parent block header plus any blocks accessed
 	// via BLOCKHASH. Omitted (nil) for empty-touch blocks, where ExecutionWitness returns early
@@ -1109,12 +1110,9 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 			oldest = bn
 		}
 	}
-	for bn := parentNum; ; bn-- {
+	for bn := oldest; bn <= parentNum; bn++ {
 		if err := addHeader(bn); err != nil {
 			return nil, nil, err
-		}
-		if bn == oldest {
-			break
 		}
 	}
 
