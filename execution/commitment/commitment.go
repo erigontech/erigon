@@ -128,9 +128,10 @@ type CommitProgress struct {
 }
 
 type PatriciaContext interface {
-	// GetBranch load branch node and fill up the cells
-	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
-	// and for the extension, account, and leaf type, the `l` and `k`
+	// Branch loads branch-node bytes for a hex-compact prefix.
+	// The returned slice is BORROWED and valid only for the current
+	// ComputeCommitment scope — callers must not retain or mutate it.
+	// To keep the bytes past that scope, clone before storing.
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
