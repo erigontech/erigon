@@ -3,7 +3,6 @@
 package types
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
