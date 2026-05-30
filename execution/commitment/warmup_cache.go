@@ -56,12 +56,14 @@ func NewWarmupCache() *WarmupCache {
 }
 
 // PutBranch stores branch data in the cache.
+//
+// `data` is stored by reference. The cache is scoped to a single
+// ComputeCommitment call (created by Warmuper at hph.Process start, torn
+// down by `defer warmuper.CloseAndWait()` at scope exit), and the
+// PatriciaContext.Branch slices it's fed are valid for exactly that same
+// scope, so a defensive copy here is redundant.
 func (c *WarmupCache) PutBranch(prefix []byte, data []byte) {
-	// Make a copy of the data to avoid issues with buffer reuse
-	dataCopy := make([]byte, len(data))
-	copy(dataCopy, data)
-
-	c.branches.Set(prefix, &branchEntry{data: dataCopy})
+	c.branches.Set(prefix, &branchEntry{data: data})
 }
 
 // GetBranch retrieves branch data from the cache.
