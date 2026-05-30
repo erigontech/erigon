@@ -74,17 +74,14 @@ jobs:
             sim-limit: ".*"
             max-allowed-failures: 0
             exec_mode: parallel
-          # devp2p/eth: regression guard for eth wire protocol handlers
-          # (GetBlockHeaders skip traversal, BlockRangeUpdate invalid-packet kick,
-          # blob-sidecar commitment check, eth/68 announcement size/type check).
-          # The sibling devp2p suites (snap, discv4, discv5) are intentionally
-          # excluded — they have unrelated pre-existing failures.
           - sim: devp2p
             sim-limit: eth
             max-allowed-failures: 0
             exec_mode: serial
+          # discv5 exercises peer discovery, not the EL exec path, so it runs in
+          # just one exec mode — duplicating it in the serial leg adds no signal.
           - sim: devp2p
-            sim-limit: eth
+            sim-limit: eth|discv5
             max-allowed-failures: 0
             exec_mode: parallel
     steps:

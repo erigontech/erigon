@@ -749,8 +749,10 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 
 // collectAccessedState rolls the RecordingState read/write maps and the three
 // code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetAccessedCode() to match Geth's witness.AddCode semantics (only code
-// reached via GetCode/GetCodeSize, not all deployed code).
+// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
+// bytecode that existed at the start of the block, not code created in-block.
+// A stateless verifier re-derives in-block-created code by replaying the
+// transactions, so emitting it would be redundant over-inclusion.
 //
 // SortedCodes is initialized to an empty (non-nil) slice so callers can assign
 // result.Codes = accessed.SortedCodes without risking a "codes": null JSON
@@ -836,9 +838,9 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		hash common.Hash
 	}
 
-	accessedCode := rs.GetAccessedCode()
+	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range accessedCode {
+	for _, code := range preStateCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			allCodesByHash[h] = code

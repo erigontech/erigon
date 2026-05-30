@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
@@ -153,6 +154,22 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
+	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	var (
+		outHeader *types.Header
+		outTx     kv.TemporalRwTx
+		outErr    error
+	)
+	pprof.Do(ctx, pprof.Labels("phase", "pe-exec"), func(lctx context.Context) {
+		outHeader, outTx, outErr = pe.execImpl(lctx, execStage, u, startBlockNum, offsetFromBlockBeginning,
+			maxBlockNum, blockLimit, initialTxNum, inputTxNum, initialCycle, rwTx, stepsInDb, accumulator, readAhead, logEvery)
+	})
+	return outHeader, outTx, outErr
+}
+
+func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
@@ -348,7 +365,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			if cr.err != nil {
 				// Lazy-load / ComputeCommitment errors from the calculator
 				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
-				// would mark a valid block as bad (ReportBadHeaderPoS) and
+				// would mark a valid block as bad and
 				// trigger an unwind that throws away valid state. Fail fast
 				// instead and preserve the original error in the message.
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
@@ -359,7 +376,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}
-				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, lastBlockResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
+				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, rwTx, pe.cfg, execStage, pe.logger, u)
 			}
 			pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
 			pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
@@ -682,9 +699,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
 			}
 			if errors.Is(execErr, rules.ErrInvalidBlock) {
-				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
-					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
-				}
 				if pe.cfg.badBlockHalt {
 					return nil, rwTx, execErr
 				}
@@ -792,6 +806,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 }
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
 	// The exec loop is the owner of shutdown sequencing. On exit it
 	// closes commitResults then applyResults, causing the calculator
 	// and apply loop to drain and exit.
