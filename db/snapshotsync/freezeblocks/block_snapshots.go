@@ -144,6 +144,8 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cf
 type BlockRetire struct {
 	maxScheduledBlock atomic.Uint64
 	working           atomic.Bool
+	merging           atomic.Bool
+	mergeWg           sync.WaitGroup
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -323,8 +325,7 @@ func (br *BlockRetire) retireBlocks(
 		}
 	}
 
-	merged, err := br.MergeBlocks(ctx, lvl, seeder)
-	return ok || merged, err
+	return ok, nil
 }
 
 func (br *BlockRetire) MergeBlocks(
@@ -442,16 +443,18 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		defer onDone()
 		defer br.working.Store(false)
 
-		if br.snBuildAllowed != nil {
-			//we are inside own goroutine - it's fine to block here
-			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
-				return
+		// Dump under the shared semaphore: the build phase is fast and is
+		// serialized against state-snapshot building to bound concurrent I/O.
+		err := func() error {
+			if br.snBuildAllowed != nil {
+				//we are inside own goroutine - it's fine to block here
+				if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
+					return err
+				}
+				defer br.snBuildAllowed.Release(1)
 			}
-			defer br.snBuildAllowed.Release(1)
-		}
-
-		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
+			return br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
+		}()
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
 			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
@@ -461,10 +464,35 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
+
+		// Merge runs without the semaphore: it is slow and expensive, and
+		// holding the semaphore across it stalls state-snapshot collation/prune
+		// (which bounds chaindata size). Mirrors the aggregator's MergeLoop.
+		br.mergeBlocksInBackground(ctx, lvl, seeder)
 	}()
 
 	return true
 }
+
+// mergeBlocksInBackground runs block-snapshot merges off the shared build
+// semaphore. At most one merge runs at a time; a request arriving while one is
+// in flight is dropped and picked up by a later retire cycle.
+func (br *BlockRetire) mergeBlocksInBackground(ctx context.Context, lvl log.Lvl, seeder downloader.SeederClient) {
+	if !br.merging.CompareAndSwap(false, true) {
+		return
+	}
+	br.mergeWg.Add(1)
+	go func() {
+		defer br.mergeWg.Done()
+		defer br.merging.Store(false)
+		if _, err := br.MergeBlocks(ctx, lvl, seeder); err != nil {
+			br.logger.Error("[snapshots] merge blocks", "err", err)
+		}
+	}()
+}
+
+// WaitForMerges blocks until in-flight background block merges complete.
+func (br *BlockRetire) WaitForMerges() { br.mergeWg.Wait() }
 
 func (br *BlockRetire) RetireBlocks(
 	ctx context.Context,
