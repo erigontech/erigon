@@ -469,8 +469,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// Run the forkchoice.
 	// TODO: rename initialCycle → atTip (inverted polarity) across stage/prune APIs.
 	const smallBlockJumpThreshold = 16
-	headNum := fcuHeader.Number.Uint64()
-	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
+	//headNum := fcuHeader.Number.Uint64()
+	initialCycle := false //headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,

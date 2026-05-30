@@ -80,7 +80,7 @@ func StageLoop(
 	}
 
 	logger.Debug("[stageloop] Starting iteration")
-	initialCycle := true
+	initialCycle := false
 	for {
 		start := time.Now()
 		select {
