@@ -30,6 +30,12 @@ DISABLED_TEST_LIST=(
   # tip-dependent: expected values change as chain advances (disabled in main via PR #21348)
   ots_searchTransactionsAfter/test_11.json
   ots_searchTransactionsAfter/test_12.json
+  # debug_getModifiedAccounts test_08/09 use old [startBlock, endBlock) semantics; expected data
+  # needs regeneration after Geth-semantics fix lands (backport PR #21507)
+  debug_getModifiedAccountsByHash/test_08.json
+  debug_getModifiedAccountsByHash/test_09.json
+  debug_getModifiedAccountsByNumber/test_08.json
+  debug_getModifiedAccountsByNumber/test_09.json
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
