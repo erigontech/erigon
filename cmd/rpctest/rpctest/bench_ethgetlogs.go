@@ -263,20 +263,30 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				if res.Err != nil {
 					if failFast {
 						return fmt.Errorf("could not get logs by topics pos %d (Erigon): %v", pos, res.Err)
-					} else {
-						log.Error("[ethGetLogsInvariants] could not get logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", res.Err.Error())
 					}
+					log.Error("[ethGetLogsInvariants] could not get logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", res.Err.Error())
+					continue
 				}
 				if resp.Error != nil {
 					if failFast {
 						return fmt.Errorf("error getting logs by topics pos %d (Erigon): %d %s", pos, resp.Error.Code, resp.Error.Message)
-					} else {
-						log.Error("[ethGetLogsInvariants] error getting logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", resp.Error.Code, "message", resp.Error.Message)
+					}
+					log.Error("[ethGetLogsInvariants] error getting logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", resp.Error.Code, "message", resp.Error.Message)
+					continue
+				}
+
+				logsByTopic := make(map[common.Hash][]Log, len(topicsAtPos))
+				for _, l := range resp.Result {
+					if pos < len(l.Topics) {
+						t := l.Topics[pos]
+						if _, ok := topicsAtPos[t]; ok {
+							logsByTopic[t] = append(logsByTopic[t], l)
+						}
 					}
 				}
 
 				for k := range topicsAtPos {
-					logs := filterLogsByTopicAtPos(resp.Result, k, pos)
+					logs := logsByTopic[k]
 					if len(logs) == 0 {
 						if failFast {
 							return fmt.Errorf("eth_getLogs: at blockNum=%d topic %x pos %d not indexed", bn, k, pos)
@@ -424,15 +434,6 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 func filterLogsByAddr(logs []Log, addr common.Address) (filtered []Log) {
 	for _, log := range logs {
 		if log.Address == addr {
-			filtered = append(filtered, log)
-		}
-	}
-	return
-}
-
-func filterLogsByTopicAtPos(logs []Log, topic common.Hash, pos int) (filtered []Log) {
-	for _, log := range logs {
-		if pos < len(log.Topics) && log.Topics[pos] == topic {
 			filtered = append(filtered, log)
 		}
 	}
