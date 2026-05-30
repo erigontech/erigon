@@ -280,7 +280,6 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		t,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
-		execmoduletester.WithBlockBufferSize(chainSize),
 		execmoduletester.WithPruneMode(prune.DefaultMode),
 	)
 

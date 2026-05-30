@@ -14,10 +14,6 @@ inputs:
     description: "Clone submodules (recursive shallow clone)"
     required: false
     default: 'false'
-  lfs:
-    description: "'false' to skip, 'tests' for test fixtures only"
-    required: false
-    default: 'false'
   cleanup-space:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
@@ -101,9 +97,6 @@ runs:
         filter: ${{ inputs.filter }}
         clean: false
         submodules: false
-        lfs: false
-      env:
-        GIT_LFS_SKIP_SMUDGE: 1
 
     - name: Unshallow current commit
       shell: bash
@@ -124,10 +117,7 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        hash=$( {
-          git ls-tree -r HEAD | awk '$2 == "commit" {print $3}'
-          git lfs ls-files --long 2>/dev/null | awk '{print $1}'
-        } | sort | sha256sum | cut -d' ' -f1)
+        hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule git objects cache
@@ -137,10 +127,9 @@ runs:
       with:
         path: |
           .git/modules
-          .git/lfs
-        key: gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}
+        key: gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}
         restore-keys: |
-          gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|
+          gitobjects|${{ runner.os }}|
 
     - name: Warn on submodule cache miss
       if: ${{ inputs.submodules == 'true' && steps.restore-submodules.outputs.cache-hit != 'true' }}
@@ -151,13 +140,7 @@ runs:
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
-      run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
-
-    - name: Pull LFS test fixtures
-      if: ${{ inputs.lfs == 'tests' }}
-      shell: bash
-      run: |
-        time git lfs pull --include='execution/tests/test-corners/**'
+      run: time git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
 
     - name: Install git-restore-mtime
       shell: bash
@@ -312,7 +295,7 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
         echo "ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
 
     - name: Display free disk space after setup

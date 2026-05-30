@@ -107,6 +107,9 @@ type ForkChoiceStore struct {
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
+	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
+	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
 	// childrens
 	childrens sync.Map
 
@@ -162,8 +165,8 @@ type ForkChoiceStore struct {
 
 	// [New in Gloas:EIP7732]
 	ptcVoteMu                   sync.Mutex // protects read-modify-write on payloadTimelinessVote and payloadDataAvailabilityVote
-	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]bool
-	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]bool
+	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -314,6 +317,12 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](checkpointsPerCache)
+	if err != nil {
+		return nil, err
+	}
+
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
@@ -368,6 +377,7 @@ func NewForkChoiceStore(
 		pendingEnvelopes:               pendingEnvelopes,
 		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
 		executionPayloadStatus:         executionPayloadStatus,
+		executionPayloadGasLimit:       executionPayloadGasLimit,
 		db:                             db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
@@ -386,11 +396,11 @@ func NewForkChoiceStore(
 
 	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
 	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
-	var anchorTimelinessVotes [clparams.PtcSize]bool
-	var anchorDataAvailabilityVotes [clparams.PtcSize]bool
+	var anchorTimelinessVotes [clparams.PtcSize]int8
+	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
 	for i := range anchorTimelinessVotes {
-		anchorTimelinessVotes[i] = true
-		anchorDataAvailabilityVotes[i] = true
+		anchorTimelinessVotes[i] = 1
+		anchorDataAvailabilityVotes[i] = 1
 	}
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
@@ -415,6 +425,11 @@ func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
 	return f.executionPayloadStatus.Get(executionBlockHash)
+}
+
+// GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.
+func (f *ForkChoiceStore) GetExecutionPayloadGasLimit(executionBlockHash common.Hash) (uint64, bool) {
+	return f.executionPayloadGasLimit.Get(executionBlockHash)
 }
 
 // IsBlobDataAvailable returns the local node's assessment of blob data availability
@@ -552,6 +567,21 @@ func (f *ForkChoiceStore) Engine() execution_client.ExecutionEngine {
 func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	ret, _ := f.eth2Roots.Get(eth2Root)
+	return ret
+}
+
+// GetFinalizedExecutionHash returns the EL block hash for a finalized/justified checkpoint.
+// For Gloas+ blocks, uses parent_block_hash from the bid instead of the payload header hash.
+func (f *ForkChoiceStore) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	block, ok := f.forkGraph.GetBlock(eth2Root)
+	if ok && block != nil && block.Block.Body.Version >= clparams.GloasVersion {
+		if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
+			return bid.Message.ParentBlockHash
+		}
+	}
 	ret, _ := f.eth2Roots.Get(eth2Root)
 	return ret
 }

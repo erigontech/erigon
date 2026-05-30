@@ -324,7 +324,7 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 
 		// start from something, limited
-		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey[:], 2)
 		require.NoError(t, err)
 		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
 		if !reflect.DeepEqual(result, expect) {
@@ -384,7 +384,7 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		}
 
 		// start from nextKey (hashed), limited — pagination
-		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey[:], 2)
 		require.NoError(t, err)
 		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
 		if !reflect.DeepEqual(result, expect) {

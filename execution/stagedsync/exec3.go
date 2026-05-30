@@ -312,7 +312,7 @@ func ExecV3(ctx context.Context,
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
-						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, logger, u)
+						lastHeader.Number.Uint64(), lastHeader.Hash(), applyTx, cfg, execStage, logger, u)
 				default:
 					return execErr
 				}
@@ -349,8 +349,7 @@ func ExecV3(ctx context.Context,
 		// is to freeze process state at the bad block. Returning would run deferred
 		// rollback/commit/flush paths and overwrite the very state we want to
 		// inspect. Mirrors the design documented in PR #19803. Applies to both
-		// serial and parallel paths uniformly — pe.exec / se.executeBlock already
-		// call ReportBadHeaderPoS internally before returning ErrInvalidBlock.
+		// serial and parallel paths uniformly.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
 			os.Exit(1)
@@ -694,12 +693,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	return nil
 }
 
-func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
+func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
-	}
-	if cfg.hd != nil && cfg.hd.POSSync() {
-		cfg.hd.ReportBadHeaderPoS(blockHash, parentHash)
 	}
 	minBlockNum := s.BlockNumber
 	if blockNumber <= minBlockNum {
@@ -779,9 +775,9 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
-		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
+	if !bytes.Equal(computedRootHash, header.Root[:]) {
+		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root[:], header.Hash()))
+		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), applyTx, cfg, e, logger, u)
 		return false, times, err
 	}
 	return true, times, nil
