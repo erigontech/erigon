@@ -1073,9 +1073,9 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 }
 
 // collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
-// pre-state and resolve BLOCKHASH lookups. The parent header is always included
-// first; remaining entries come from blocks accessed via the BLOCKHASH opcode and
-// are deduplicated against the parent and each other via byNumber.
+// pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
+// from the parent back to the oldest block reached via the BLOCKHASH opcode, so
+// each header can be validated against the next one's parentHash.
 func (api *DebugAPIImpl) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1103,12 +1103,18 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 		return nil
 	}
 
-	if err := addHeader(parentNum); err != nil {
-		return nil, nil, err
-	}
+	oldest := parentNum
 	for _, bn := range accessedBlockNums {
+		if bn < oldest {
+			oldest = bn
+		}
+	}
+	for bn := parentNum; ; bn-- {
 		if err := addHeader(bn); err != nil {
 			return nil, nil, err
+		}
+		if bn == oldest {
+			break
 		}
 	}
 
