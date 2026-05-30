@@ -20,7 +20,11 @@ jobs:
     runs-on:
       group: hive
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         # Each (sim, sim-limit) pair is run twice — once with serial exec
         # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so engine-API
@@ -70,17 +74,14 @@ jobs:
             sim-limit: ".*"
             max-allowed-failures: 0
             exec_mode: parallel
-          # devp2p/eth: regression guard for eth wire protocol handlers
-          # (GetBlockHeaders skip traversal, BlockRangeUpdate invalid-packet kick,
-          # blob-sidecar commitment check, eth/68 announcement size/type check).
-          # The sibling devp2p suites (snap, discv4, discv5) are intentionally
-          # excluded — they have unrelated pre-existing failures.
           - sim: devp2p
             sim-limit: eth
             max-allowed-failures: 0
             exec_mode: serial
+          # discv5 exercises peer discovery, not the EL exec path, so it runs in
+          # just one exec mode — duplicating it in the serial leg adds no signal.
           - sim: devp2p
-            sim-limit: eth
+            sim-limit: eth|discv5
             max-allowed-failures: 0
             exec_mode: parallel
     steps:
@@ -134,7 +135,16 @@ jobs:
       - name: Build erigon image from local source
         env:
           DOCKER_BUILDKIT: "1"
-        run: docker build -t hive/erigon:cilocal erigon-full
+        run: |
+          retry() {
+            local max=$1 n=1; shift
+            until "$@"; do
+              if (( n >= max )); then echo "::error::'$*' failed after ${max} attempts" >&2; return 1; fi
+              echo "::warning::'$*' failed (attempt ${n}/${max}); retrying in $((n*15))s" >&2
+              sleep $((n*15)); n=$((n+1))
+            done
+          }
+          retry 3 docker build -t hive/erigon:cilocal erigon-full
 
       - name: Get dependencies and build hive
         env:
@@ -145,7 +155,15 @@ jobs:
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
           cd hive
-          go get . >> buildlogs.log
+          retry() {
+            local max=$1 n=1; shift
+            until "$@"; do
+              if (( n >= max )); then echo "::error::'$*' failed after ${max} attempts" >&2; return 1; fi
+              echo "::warning::'$*' failed (attempt ${n}/${max}); retrying in $((n*15))s" >&2
+              sleep $((n*15)); n=$((n+1))
+            done
+          }
+          retry 3 go get . >> buildlogs.log
           # Point hive's default (prebuilt-image) erigon client at the image we
           # built locally above, instead of cloning erigon inside the builder.
           sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=hive/erigon|" clients/erigon/Dockerfile
@@ -173,7 +191,7 @@ jobs:
             echo "Pinning rpc-compat execution-apis ref to ${EXECUTION_APIS_REF}"
             sed -i "s/^ARG branch=main$/ARG branch=${EXECUTION_APIS_REF}/" simulators/ethereum/rpc-compat/Dockerfile
           fi
-          go build . >> buildlogs.log
+          retry 3 go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
       # We also fail if more than half the tests fail
@@ -190,17 +208,25 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            if ! ./hive -docker.auth --sim "${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log; then
-              echo "hive exited non-zero; continuing to parse results from output.log"
-            fi
-            status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
-            suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
-            if [ -z "$suites" ]; then
-              status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+            # Retry only on the "too few tests parsed" signal (a transient
+            # image-build/registry/clone failure); a completed run is judged on its first result.
+            local attempt=1 max_attempts=3
+            while true; do
+              if ! ./hive -docker.auth --sim "${1}" --sim.limit="${2}" --sim.limit.exact=false --sim.parallelism=8 --sim.timelimit 15m --docker.output --client erigon 2>&1 | tee output.log; then
+                echo "hive exited non-zero; continuing to parse results from output.log"
+              fi
+              status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
-            fi
-            tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
-            failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+              if [ -z "$suites" ]; then
+                status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+                suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+              fi
+              tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
+              failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+              if (( ${tests:-0} >= 4 )) || (( attempt >= max_attempts )); then break; fi
+              echo "::warning title=Retrying hive::Only ${tests:-0} tests parsed for ${1}-${2} (attempt ${attempt}/${max_attempts}); likely transient image-build/registry/clone error — retrying in $((attempt*20))s"
+              sleep $((attempt*20)); attempt=$((attempt+1))
+            done
 
             echo -e "\n"
             echo "-----------   Results for ${1}-${2}    -----------"

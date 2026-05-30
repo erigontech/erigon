@@ -13,7 +13,6 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(git status:*)",
       "Bash(gh pr edit:*)",
-      "Bash(git lfs ls-files:*)",
       "Bash(grep:*)",
       "Bash(git add:*)",
       "WebFetch(domain:pypi.org)",

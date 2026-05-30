@@ -766,23 +766,25 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 // first, then storage, then code.
 func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
 	for addr := range a.Addresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			storageKey := string(append(addr[:], key[:]...))
 			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
 }
 
 // collectAccessedState rolls the RecordingState read/write maps and the three
 // code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetAccessedCode() to match Geth's witness.AddCode semantics (only code
-// reached via GetCode/GetCodeSize, not all deployed code).
+// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
+// bytecode that existed at the start of the block, not code created in-block.
+// A stateless verifier re-derives in-block-created code by replaying the
+// transactions, so emitting it would be redundant over-inclusion.
 //
 // SortedCodes is initialized to an empty (non-nil) slice so callers can assign
 // result.Codes = accessed.SortedCodes without risking a "codes": null JSON
@@ -850,11 +852,11 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 
 	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
 	for addr := range out.Addresses {
-		sortedKeys = append(sortedKeys, addr.Bytes())
+		sortedKeys = append(sortedKeys, addr[:])
 	}
 	for addr, keys := range out.Storage {
 		for key := range keys {
-			composite := append(addr.Bytes(), key.Bytes()...)
+			composite := append(addr[:], key[:]...)
 			sortedKeys = append(sortedKeys, composite)
 		}
 	}
@@ -868,9 +870,9 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		hash common.Hash
 	}
 
-	accessedCode := rs.GetAccessedCode()
+	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range accessedCode {
+	for _, code := range preStateCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			allCodesByHash[h] = code
@@ -892,7 +894,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	for addr, code := range preCode {
 		if len(code) > 0 {
 			codeHash := crypto.Keccak256Hash(code)
-			addrHash := crypto.Keccak256Hash(addr.Bytes())
+			addrHash := crypto.Keccak256Hash(addr[:])
 			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
 				CodeHash: accounts.InternCodeHash(codeHash),
@@ -1186,11 +1188,11 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 
 	// Touch all modified accounts and storage keys for the post-state trie
 	for _, addr := range writeAddresses {
-		postSdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		postSdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range writeStorageKeys {
 		for _, key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			storageKey := string(append(addr[:], key[:]...))
 			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
@@ -1202,7 +1204,8 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 
 	// Verify the post-state root matches the block's state root
-	if !bytes.Equal(postRoot, block.Root().Bytes()) {
+	blockRoot := block.Root()
+	if !bytes.Equal(postRoot, blockRoot[:]) {
 		// only warn, so we can see comparison later
 		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
 	}
@@ -1210,12 +1213,12 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	// Read account data from the post-state trie (with correct storage roots)
 	// Include both read and write addresses
 	for _, addr := range readAddresses {
-		addrHash := crypto.Keccak256(addr.Bytes())
+		addrHash := crypto.Keccak256(addr[:])
 		acc, _ := postTrie.GetAccount(addrHash)
 		expectedState[addr] = acc
 	}
 	for _, addr := range writeAddresses {
-		addrHash := crypto.Keccak256(addr.Bytes())
+		addrHash := crypto.Keccak256(addr[:])
 		acc, _ := postTrie.GetAccount(addrHash)
 		expectedState[addr] = acc
 	}
