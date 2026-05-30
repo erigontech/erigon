@@ -36,6 +36,17 @@ type ErrTxNumsAppendWithGap struct {
 	stack          string
 }
 
+// NewErrTxNumsAppendWithGap constructs an ErrTxNumsAppendWithGap.
+// Test-friendly entry point — production code only ever sees the
+// error type via TxNums.Append.
+func NewErrTxNumsAppendWithGap(appendBlockNum, lastBlockNum uint64, stack string) ErrTxNumsAppendWithGap {
+	return ErrTxNumsAppendWithGap{
+		appendBlockNum: appendBlockNum,
+		lastBlockNum:   lastBlockNum,
+		stack:          stack,
+	}
+}
+
 func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
 	return e.lastBlockNum
 }

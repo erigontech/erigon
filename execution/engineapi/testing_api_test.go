@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -55,6 +56,8 @@ type stubExecutionModule struct {
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
+	headerNumberFunc      func(ctx context.Context, hash common.Hash) (*uint64, error)
 	adminUnwindInProgress bool
 }
 
@@ -89,7 +92,10 @@ func (s *stubExecutionModule) InsertBlocks(_ context.Context, _ []*types.RawBloc
 func (s *stubExecutionModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
 	return execmodule.ValidationResult{}, nil
 }
-func (s *stubExecutionModule) UpdateForkChoice(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
+func (s *stubExecutionModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error) {
+	if s.updateForkChoiceFunc != nil {
+		return s.updateForkChoiceFunc(ctx, headHash, safeHash, finalizedHash)
+	}
 	return execmodule.ForkChoiceResult{}, nil
 }
 func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.ForkChoiceState, error) {
@@ -122,7 +128,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
 }
-func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
+func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
+	if s.headerNumberFunc != nil {
+		return s.headerNumberFunc(ctx, hash)
+	}
 	return nil, nil
 }
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*big.Int, error) {
@@ -969,6 +978,74 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Error(t, err)
 		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
+}
+
+// TestEngineServer_PostUnwindForkChoiceReturnsInvalid pins W3.12a:
+// when the CL pushes a forkchoiceUpdated whose head is on a canonical
+// chain past the EL's current head (the typical post-admin-SetHead
+// situation), the EL must return InvalidStatus with latestValidHash
+// set to the EL's actual current head. The CL re-anchors there per
+// Engine API spec and rebuilds the chain forward.
+//
+// Without this, the underlying ErrTxNumsAppendWithGap propagates as a
+// JSON-RPC error and the CL has no actionable recovery path (we saw
+// this live with Lighthouse stuck in "optimistic" forever).
+func TestEngineServer_PostUnwindForkChoiceReturnsInvalid(t *testing.T) {
+	t.Parallel()
+
+	const elHeadNumber uint64 = 2_915_079
+	elHeadHash := common.HexToHash("0xe10ead00000000000000000000000000000000000000000000000000000beef0")
+	requestedHeadHash := common.HexToHash("0xcafebabe00000000000000000000000000000000000000000000000000000001")
+	requestedHeadNumber := uint64(2_916_604)
+
+	stub := &stubExecutionModule{
+		headerNumberFunc: func(_ context.Context, hash common.Hash) (*uint64, error) {
+			if hash == requestedHeadHash {
+				n := requestedHeadNumber
+				return &n, nil
+			}
+			return nil, nil
+		},
+		getHeaderFunc: func(_ context.Context, hash *common.Hash, num *uint64) (*types.Header, error) {
+			// HandleForkChoice's "do we have the header" check
+			if hash != nil && *hash == requestedHeadHash {
+				h := &types.Header{}
+				h.Number.SetUint64(requestedHeadNumber)
+				return h, nil
+			}
+			// W3.12a's recovery lookup of the EL head by number
+			if num != nil && *num == elHeadNumber {
+				h := &types.Header{Extra: elHeadHash.Bytes()}
+				h.Number.SetUint64(elHeadNumber)
+				return h, nil
+			}
+			return nil, nil
+		},
+		updateForkChoiceFunc: func(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
+			// Simulate the post-admin-SetHead gap error: the
+			// requested head's canonical chain starts past our EL head.
+			return execmodule.ForkChoiceResult{}, rawdbv3.NewErrTxNumsAppendWithGap(requestedHeadNumber, elHeadNumber, "test")
+		},
+	}
+
+	cfg := allForksChainConfig()
+	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, 0, 0)
+	srv.test = true
+
+	ps, err := srv.HandleForkChoice(context.Background(), "test",
+		&engine_types.ForkChoiceState{HeadHash: requestedHeadHash})
+	require.NoError(t, err,
+		"HandleForkChoice must NOT propagate the gap error to JSON-RPC; the CL has no actionable recovery from a raw error")
+	require.NotNil(t, ps)
+	require.Equal(t, engine_types.InvalidStatus, ps.Status,
+		"post-admin-SetHead gap → INVALID per Engine API spec")
+	require.NotNil(t, ps.LatestValidHash, "INVALID response must carry latestValidHash so the CL knows where to re-anchor")
+	// The latestValidHash is the hash of the EL's current head. The
+	// stub returns the header for elHeadNumber with elHeadHash encoded
+	// in Extra; we compare to the header's actual Hash() since that's
+	// what HandleForkChoice extracts.
+	require.NotEqual(t, common.Hash{}, *ps.LatestValidHash,
+		"latestValidHash must be a real block hash, not zero")
 }
 
 // TestEngineServer_AdminUnwindShortCircuitsToSyncing pins the gate

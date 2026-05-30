@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/builder"
@@ -1166,6 +1167,32 @@ func (e *EngineServer) HandleForkChoice(
 	// Call forkchoice here
 	status, validationErr, latestValidHash, err := e.chainRW.UpdateForkChoice(ctx, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
 	if err != nil {
+		// Post-admin-SetHead recovery: the CL is pushing a head whose
+		// canonical chain has a gap from our current head (we admin-
+		// unwound past those blocks). Per the Engine API spec, return
+		// INVALID with latestValidHash = the EL's actual current head
+		// so the CL re-anchors there and rebuilds the chain forward.
+		// Without this, the gap error propagates to JSON-RPC and the
+		// CL has no actionable recovery path.
+		var gap rawdbv3.ErrTxNumsAppendWithGap
+		if errors.As(err, &gap) {
+			currentHeader := e.chainRW.GetHeaderByNumber(ctx, gap.LastBlock())
+			if currentHeader != nil {
+				currentHeadHash := currentHeader.Hash()
+				e.logger.Info(fmt.Sprintf("[%s] Fork choice past EL head — returning INVALID with EL head as latestValidHash", logPrefix),
+					"requestedHead", headerHash, "elHead", currentHeadHash, "elHeadNum", gap.LastBlock())
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					LatestValidHash: &currentHeadHash,
+					ValidationError: engine_types.NewStringifiedErrorFromString(
+						fmt.Sprintf("EL head is at block %d (admin SetHead unwound past requested chain) — re-anchor at latestValidHash",
+							gap.LastBlock())),
+				}, nil
+			}
+			// Fall through to the raw error path if we can't look up
+			// the current head — better to surface the underlying
+			// problem than swallow it silently.
+		}
 		return nil, err
 	}
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
