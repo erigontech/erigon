@@ -230,7 +230,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(d.code))
 				}
 				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
+					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
@@ -285,7 +285,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
+						fmt.Printf("%d apply:put storage: %x %x %s\n", blockNum, addr, item.key, item.value.Hex()[2:])
 					}
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, v, txNum)
@@ -892,7 +892,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("Writer: acc %x: {Balance: %s, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
@@ -1483,7 +1483,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %s, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, acc.Balance.String(), acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
 }
@@ -1519,7 +1519,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 		if enc == nil {
 			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%s], txNum: %d, stack: %s\n", r.tracePrefix, address, key, res.Hex()[2:], r.txNum, dbg.Stack())
 		}
 	}
 
@@ -1630,7 +1630,7 @@ func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Ac
 			return nil, nil
 		}
 		if r.reader.Trace() {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, &data.Balance, data.CodeHash)
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %s, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, data.Balance.String(), data.CodeHash)
 		}
 
 		result := *data
@@ -1678,7 +1678,7 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 
 			if ok {
 				if r.reader.Trace() {
-					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.TracePrefix(), address, key, &item.value)
+					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%s]\n", r.reader.TracePrefix(), address, key, item.value.Hex()[2:])
 				}
 				r.bufferedState.accountsMutex.RUnlock()
 				return item.value, true, nil
