@@ -733,7 +733,7 @@ func (a *accessedState) isEmpty() bool {
 // skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
 func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
 	for addr := range a.Addresses {
-		plainKey := addr.Bytes()
+		plainKey := addr[:]
 		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
 		if len(postEnc) == 0 {
 			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
@@ -744,11 +744,11 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			plainKey := append(addr.Bytes(), key.Bytes()...)
+			plainKey := append(addr[:], key[:]...)
 			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
 				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
