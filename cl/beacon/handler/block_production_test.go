@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -40,6 +41,28 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
+
+func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, 123, 456)
+
+	require.Equal(t, "gloas", rr.Header().Get("Eth-Consensus-Version"))
+	require.Equal(t, "123", rr.Header().Get("Eth-Execution-Payload-Value"))
+	require.Equal(t, "456", rr.Header().Get("Eth-Consensus-Block-Value"))
+	require.Equal(t, "false", rr.Header().Get("Eth-Execution-Payload-Blinded"))
+	require.Equal(t, "true", rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
+
+	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
 // against a real Erigon execution layer. A withdrawal request transaction is
@@ -232,6 +255,14 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	elHeader.Time = elHead.Time
 	elHeader.BaseFeePerGas = common.BigToHash(elHead.BaseFee.ToBig())
 	postState.SetLatestExecutionPayloadHeader(elHeader)
+	// GLOAS uses GetLatestBlockHash() instead of LatestExecutionPayloadHeader().BlockHash
+	postState.SetLatestBlockHash(elHead.Hash())
+	// GLOAS deferred payload: set LatestExecutionPayloadBid so that GetHeadPayloadStatus()==FULL &&
+	// ShouldBuildOnFull (both returning true in the mock) select bid.BlockHash as the EL head.
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:       elHead.Hash(),
+		ParentBlockHash: elHead.Hash(),
+	})
 
 	elHeadHash := elHead.Hash()
 	fcu.Eth1Hashes[postState.FinalizedCheckpoint().Root] = elHeadHash
@@ -243,6 +274,14 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+
+	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
+	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
+	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: &cltypes.ExecutionRequests{},
+		},
+	}
 
 	beaconBody, _, err := h.produceBeaconBody(
 		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,

@@ -27,8 +27,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -47,39 +45,17 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
 		return 0
 	}
-
-	minimax := d.History.dirtyFilesEndTxNumMinimax()
-	if _max, ok := d.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return d.dirtyFiles.updateMinimax(d.History.dirtyFilesEndTxNumMinimax())
 }
 
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
-	var minimax uint64
-	if _max, ok := ii.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return ii.dirtyFiles.EndTxNumMax()
 }
 func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.SnapshotsDisabled {
 		return math.MaxUint64
 	}
-	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
-	if _max, ok := h.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return h.dirtyFiles.updateMinimax(h.InvertedIndex.dirtyFilesEndTxNumMinimax())
 }
 
 type DomainRanges struct {
@@ -943,50 +919,47 @@ func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	}
 }
 
-func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem, dryRun bool) (deleted []string) {
-	deleted = append(deleted, dt.ht.cleanAfterMerge(mergedHist, mergedIdx, dryRun)...)
+func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {
+	hNames, hRetired := dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
+	deleted = append(deleted, hNames...)
+	retired = append(retired, hRetired...)
 	outs := dt.garbage(mergedDomain)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
-	if !dryRun {
-		deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)
-	}
-	return deleted
+	retired = append(retired, retireMergeFiles(dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)...)
+	return deleted, retired
 }
 
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem, dryRun bool) (deleted []string) {
-	deleted = append(deleted, ht.iit.cleanAfterMerge(mergedIdx, dryRun)...)
+func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []string, retired []*FilesItem) {
+	iNames, iRetired := ht.iit.cleanAfterMerge(mergedIdx)
+	deleted = append(deleted, iNames...)
+	retired = append(retired, iRetired...)
 	if merged != nil && merged.endTxNum == 0 {
-		return
+		return deleted, retired
 	}
 	outs := ht.garbage(merged)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-
-	if !dryRun {
-		deleteMergeFile(ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)
-	}
-	return deleted
+	retired = append(retired, retireMergeFiles(ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)...)
+	return deleted, retired
 }
 
 // cleanAfterMerge - mark all small files before `f` as `canDelete=true`
-func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem, dryRun bool) (deleted []string) {
+func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) (deleted []string, retired []*FilesItem) {
 	if merged != nil && merged.endTxNum == 0 {
-		return
+		return deleted, retired
 	}
 	outs := iit.garbage(merged)
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	if !dryRun {
-		deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)
-	}
-	return deleted
+	retired = append(retired, retireMergeFiles(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)...)
+	return deleted, retired
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
@@ -1021,7 +994,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged, checker)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
+func garbage(dirtyFiles *DirtyFiles, visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
 	iter := dirtyFiles.Iter()

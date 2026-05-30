@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/spaolacci/murmur3"
-	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -72,7 +71,7 @@ type InvertedIndex struct {
 	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
 	// iiVisible snapshot and published atomically via Aggregator.visible. BeginFilesRo
 	// opens readers against that snapshot in zero-copy way.
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *DirtyFiles
 
 	logger log.Logger
 
@@ -102,7 +101,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		InvIdxCfg:  cfg,
 		dirs:       dirs,
 		salt:       &atomic.Pointer[uint32]{},
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: newDirtyFiles(),
 		logger:     logger,
 
 		stepSize:          stepSize,
@@ -415,7 +414,6 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
@@ -430,22 +428,7 @@ func (iit *InvertedIndexRoTx) Close() {
 	if iit.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	files := iit.files
 	iit.files = nil
-	for i := 0; i < len(files); i++ {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		refCnt := src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && src.canDelete.Load() {
-			if traceFileLife != "" && iit.ii.FilenameBase == traceFileLife {
-				iit.ii.logger.Warn("[agg.dbg] real remove at InvertedIndexRoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
-	}
 
 	for _, r := range iit.readers {
 		r.Close()
@@ -579,7 +562,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		encodedSeq, _ := g.Next(nil)
 
 		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
-		equalOrHigherTxNum, found = iit.reUsableSeq.Seek(txNum)
+		equalOrHigherTxNum, _, found = iit.reUsableSeq.Seek(txNum)
 		if !found {
 			continue
 		}
@@ -686,7 +669,6 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		indexTable:  iit.ii.ValuesTable,
 		orderAscend: asc,
 		limit:       limit,
-		seq:         &multiencseq.SequenceReader{},
 		accessors:   iit.ii.Accessors,
 		ii:          iit,
 	}
@@ -819,7 +801,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 	if txTo == MaxUint64 {
 		return iit.hashSeekingPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
 	}
-	return iit.tableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
+	return iit.tableScanningPrune(ctx, tx, txFrom, txTo, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
 }
 
 func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
@@ -872,7 +854,7 @@ func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx
 	}, nil
 }
 
-func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
@@ -923,7 +905,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	prs.TxFrom = txFrom
 	prs.TxTo = txTo
 
-	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
+	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
 	if err != nil {
 		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)
@@ -1159,9 +1141,9 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
-	versionOfRs := uint8(0)
-	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
-		versionOfRs = 1
+	versionOfRs := version.DataStructureVersion(0)
+	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
+		versionOfRs = recsplit.ExistenceFilterVersion
 	}
 	cfg := recsplit.RecSplitArgs{
 		BucketSize: recsplit.DefaultBucketSize,

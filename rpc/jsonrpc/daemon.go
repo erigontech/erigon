@@ -78,7 +78,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
-	gqlImpl := NewGraphQLAPI(base, db)
+	gqlImpl := NewGraphQLAPI(base, db, ethImpl, cfg.Gascap, cfg.ReturnDataLimit)
 	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
 
 	if cfg.GraphQLEnabled {

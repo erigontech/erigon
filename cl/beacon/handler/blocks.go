@@ -141,6 +141,9 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 	}
 	blinded, err := blk.Blinded()
 	if err != nil {
+		if errors.Is(err, cltypes.ErrGloasCannotBlind) {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
 		return nil, err
 	}
 	return newBeaconResponse(blinded).

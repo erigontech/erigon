@@ -45,7 +45,6 @@ type PersistentBlockCollector struct {
 	beaconChainCfg *clparams.BeaconChainConfig
 	logger         log.Logger
 	engine         execution_client.ExecutionEngine
-	syncBackLoop   uint64
 
 	mu sync.Mutex
 }
@@ -69,7 +68,6 @@ func NewPersistentBlockCollector(
 	logger log.Logger,
 	engine execution_client.ExecutionEngine,
 	beaconChainCfg *clparams.BeaconChainConfig,
-	syncBackLoopAmount uint64,
 	persistDir string,
 ) *PersistentBlockCollector {
 	ctx := context.Background()
@@ -92,7 +90,6 @@ func NewPersistentBlockCollector(
 		beaconChainCfg: beaconChainCfg,
 		logger:         logger,
 		engine:         engine,
-		syncBackLoop:   syncBackLoopAmount,
 	}
 }
 
@@ -124,6 +121,33 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	})
 }
 
+// AddGloasBlock adds a GLOAS (EIP-7732) FULL block with its execution payload envelope to the collector.
+// The execution payload is extracted from the envelope, not the beacon block body.
+func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	payload := envelope.Message.Payload
+	executionRequestsList := cltypes.GetExecutionRequestsList(p.beaconChainCfg, envelope.Message.ExecutionRequests)
+	encodedBlock, err := encodeBlock(payload, block.ParentRoot, executionRequestsList)
+	if err != nil {
+		return fmt.Errorf("failed to encode gloas block: %w", err)
+	}
+
+	key, err := payloadKey(payload)
+	if err != nil {
+		return fmt.Errorf("failed to create payload key: %w", err)
+	}
+
+	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.Headers, key, encodedBlock)
+	})
+}
+
 // Flush loads all collected blocks into the execution engine and clears the database.
 // Keys are block-number + payload SSZ root. Identical execution payloads therefore
 // collide on payloadKey and tx.Put overwrites the existing row, so multiple rows at
@@ -142,6 +166,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 
 	blocksBatch := []*types.Block{}
 	inserted := uint64(0)
+	var lastInsertedBlock *types.Block
 
 	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
 	var pending []*types.Block // variants at pendingHeight, awaiting resolution
@@ -226,7 +251,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				blocksBatch = append(blocksBatch, resolved)
 				lastCommittedHeight = pendingHeight
 				if len(blocksBatch) >= batchSize {
-					if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
+					if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 						return err
 					}
 					blocksBatch = []*types.Block{}
@@ -260,9 +285,17 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 
 	// Insert remaining blocks
 	if len(blocksBatch) > 0 {
-		if err := p.insertBatch(ctx, blocksBatch, &inserted); err != nil {
+		if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 			return err
 		}
+	}
+
+	// Trigger a single ForkChoiceUpdate after all batches are flushed.
+	// Calling FCU inside insertBatch between batches destroys the EL's
+	// in-memory overlay that accumulates TDs across batches, causing
+	// "parent's total difficulty not found" on the next InsertBlocks call.
+	if lastInsertedBlock != nil {
+		p.doForkChoiceUpdate(ctx, lastInsertedBlock)
 	}
 
 	if gapDetected {
@@ -330,12 +363,18 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(v) < 33 {
+		return nil, fmt.Errorf("persistent block value too short: have %d, want at least 33", len(v))
+	}
 
 	version := clparams.StateVersion(v[0])
 	parentRoot := common.BytesToHash(v[1:33])
 	requestsHash := common.Hash{}
 
 	if version >= clparams.ElectraVersion {
+		if len(v) < 65 {
+			return nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least 65", len(v))
+		}
 		requestsHash = common.BytesToHash(v[33:65])
 		v = v[65:]
 	} else {
@@ -366,7 +405,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals), nil
 }
 
-func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64) error {
+func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64, lastInserted **types.Block) error {
 	p.logger.Info("[BlockCollector] Inserting blocks",
 		"from", blocksBatch[0].NumberU64(),
 		"to", blocksBatch[len(blocksBatch)-1].NumberU64())
@@ -377,27 +416,32 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 	}
 
 	*inserted += uint64(len(blocksBatch))
+	*lastInserted = blocksBatch[len(blocksBatch)-1]
 	p.logger.Info("[BlockCollector] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 
-	lastBlockHash := blocksBatch[len(blocksBatch)-1].Hash()
+	return nil
+}
+
+// doForkChoiceUpdate sends a ForkChoiceUpdate to the EL for the given block.
+func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastBlock *types.Block) {
+	lastBlockHash := lastBlock.Hash()
 	currentHeader, err := p.engine.CurrentHeader(ctx)
 	if err != nil {
 		p.logger.Warn("[BlockCollector] Failed to get current header", "err", err)
 	}
 
-	isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
-	if *inserted >= p.syncBackLoop {
-		if isForkchoiceNeeded {
-			// DenebVersion maps to ForkchoiceUpdatedV3 which is valid for Deneb through Fulu.
-			// The block collector only runs during initial sync, not for Gloas+ (Amsterdam) blocks yet.
-			if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, clparams.DenebVersion); err != nil {
-				p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
-			}
-		}
-		*inserted = 0
+	isForkchoiceNeeded := currentHeader == nil || lastBlock.NumberU64() > currentHeader.Number.Uint64()
+	if !isForkchoiceNeeded {
+		return
 	}
 
-	return nil
+	fcuVersion := clparams.DenebVersion
+	if lastBlock.HeaderNoCopy().SlotNumber != nil {
+		fcuVersion = clparams.GloasVersion
+	}
+	if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, fcuVersion); err != nil {
+		p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
+	}
 }
 
 // HasBlock checks if a block with the given number is already in the collector

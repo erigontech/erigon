@@ -27,8 +27,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -44,9 +46,10 @@ import (
 
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
 // per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
-// at construction time. The caller must call Close on the returned runner to
-// release the underlying testers and temp directories.
-func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
+// at construction time. Options may be passed to customise the runner's
+// behaviour (see EngineXTestRunnerOption). The caller must call Close on the
+// returned runner to release the underlying testers and temp directories.
+func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string, opts ...EngineXTestRunnerOption) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
 	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -60,7 +63,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
@@ -76,17 +79,48 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		preAllocs: preAllocs,
 		testers:   make(map[Fork]map[PreAllocHash]testerEntry),
 	}
+	for _, opt := range opts {
+		opt(runner)
+	}
 	return runner, nil
 }
 
-type EngineXTestRunner struct {
-	ctx       context.Context
-	logger    log.Logger
-	preAllocs map[PreAllocHash]*PreAlloc
-	mu        sync.Mutex
-	testers   map[Fork]map[PreAllocHash]testerEntry
-	wg        sync.WaitGroup
+// EngineXTestRunnerOption customises an EngineXTestRunner at construction time.
+type EngineXTestRunnerOption func(*EngineXTestRunner)
+
+// WithRequestProfileHook installs a hook called around each engine API request
+// the runner makes. See RequestProfileHook for the contract.
+func WithRequestProfileHook(hook RequestProfileHook) EngineXTestRunnerOption {
+	return func(r *EngineXTestRunner) {
+		r.profileHook = hook
+	}
 }
+
+func WithWarmupKzgCtxOnInit(warmup bool) EngineXTestRunnerOption {
+	return func(r *EngineXTestRunner) {
+		r.warmupKzgCtxOnInit = warmup
+	}
+}
+
+type EngineXTestRunner struct {
+	ctx                context.Context
+	logger             log.Logger
+	preAllocs          map[PreAllocHash]*PreAlloc
+	mu                 sync.Mutex
+	testers            map[Fork]map[PreAllocHash]testerEntry
+	wg                 sync.WaitGroup
+	profileHook        RequestProfileHook
+	warmupKzgCtxOnInit bool
+}
+
+// RequestProfileHook is invoked immediately before each engine API request the
+// runner makes (NewPayload, FCU). The returned stop function is invoked after
+// the request returns. `kind` is "newpayload" or "fcu"; `id` is a stable
+// per-request suffix (test name + height/hash) suitable for use in a filename.
+// The hook is shared across all goroutines invoking Run on this runner; the
+// hook implementation is responsible for synchronisation if needed (process-
+// global pprof state typically requires serialising profile starts).
+type RequestProfileHook func(kind, id string) (stop func())
 
 // testerEntry pairs a cached EngineApiTester with the temp directory created
 // for it, so eviction can close the tester and remove the directory together.
@@ -162,6 +196,28 @@ func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	return errors.Join(errs...)
 }
 
+// testNameKey is the unexported context key callers use to attach a test name
+// to the ctx passed into Run. The profile hook embeds the name in per-request
+// profile ids so callers can route profiles into named files.
+type testNameKey struct{}
+
+// ContextWithTestName returns a copy of ctx that carries the given test name,
+// retrievable inside Run by the runner's per-request profile hook plumbing.
+// An empty name is treated as "no name" and produces unprefixed profile ids.
+func ContextWithTestName(ctx context.Context, name string) context.Context {
+	if name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, testNameKey{}, name)
+}
+
+func testNameFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(testNameKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
 	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
 	if err != nil {
@@ -177,19 +233,10 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 	return err
 }
 
-// Execute runs the payload execution for a test (NewPayload + FCU)
-// without any tester setup. The tester must already exist.
-func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefinition) error {
-	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
-	if err != nil {
-		return err
-	}
-	return extr.execute(ctx, tester, test)
-}
-
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
+	name := testNameFromContext(ctx)
 	for _, newPayload := range test.NewPayloads {
-		err := processNewPayload(ctx, tester, newPayload)
+		err := processNewPayload(ctx, tester, newPayload, name, extr.profileHook)
 		if err != nil {
 			return err
 		}
@@ -250,7 +297,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
-	err := copier.Copy(&forkConfigCopy, forkConfig)
+	err := copier.CopyWithOption(&forkConfigCopy, forkConfig, copier.Option{DeepCopy: true})
 	if err != nil {
 		return testerEntry{}, err
 	}
@@ -298,9 +345,12 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		EngineApiClientTimeout: &engineApiClientTimeout,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
+			config.WarmupKzgCtxOnInit = extr.warmupKzgCtxOnInit
 		},
 		DisableTxPool: true,
 		DisableSentry: true,
+		// 8 GiB headroom for benchmark fixtures with large pre-alloc bytecode.
+		MdbxDBSizeLimit: 8 * datasize.GB,
 	})
 	if err != nil {
 		// Best-effort: drop the temp dir we just created. The tester wasn't
@@ -312,7 +362,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 	return testerEntry{tester: tester, dataDir: dataDir}, nil
 }
 
-func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
+func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload, testName string, hook RequestProfileHook) error {
 	var enginePayload enginetypes.ExecutionPayload
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
@@ -340,6 +390,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		}
 	}
 	expectFailure := payload.ValidationError != "" || payload.ErrorCode != ""
+	npStop := beginProfile(hook, "newpayload", testName, fmt.Sprintf("h%d_%s", uint64(enginePayload.BlockNumber), enginePayload.BlockHash.Hex()))
 	enginePayloadStatus, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -368,11 +419,13 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		},
 	)
 	if err != nil {
+		npStop()
 		if expectFailure {
 			return nil
 		}
 		return err
 	}
+	npStop()
 	if enginePayloadStatus.Status != enginetypes.ValidStatus {
 		if expectFailure {
 			return nil
@@ -382,15 +435,31 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	if expectFailure {
 		return fmt.Errorf("expected payload to fail (validationError=%q errorCode=%q) but status was Valid", payload.ValidationError, payload.ErrorCode)
 	}
-	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion)
+	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion, testName, hook)
 }
 
-func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string) error {
+// beginProfile invokes the hook (if any) and returns a stop function. When the
+// hook is nil, beginProfile returns a no-op stop so callers can always defer
+// it unconditionally.
+func beginProfile(hook RequestProfileHook, kind, testName, suffix string) func() {
+	if hook == nil {
+		return func() {}
+	}
+	id := suffix
+	if testName != "" {
+		id = testName + "__" + suffix
+	}
+	return hook(kind, id)
+}
+
+func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string, testName string, hook RequestProfileHook) error {
 	fcu := enginetypes.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      common.Hash{},
 		FinalizedBlockHash: common.Hash{},
 	}
+	stop := beginProfile(hook, "fcu", testName, head.Hex())
+	defer stop()
 	r, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},

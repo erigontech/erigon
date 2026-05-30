@@ -74,8 +74,8 @@ type prestateTracer struct {
 	to        accounts.Address
 	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
-	interrupt atomic.Bool // Atomic flag to signal execution interruption
-	reason    error       // Textual reason for the interruption
+	interrupt atomic.Bool           // Atomic flag to signal execution interruption
+	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
 	created   map[accounts.Address]bool
 	deleted   map[accounts.Address]bool
 }
@@ -110,10 +110,11 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnOpcode:  t.OnOpcode,
-			OnExit:    t.OnExit,
+			OnTxStart:           t.OnTxStart,
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
+			OnTxEnd:             t.OnTxEnd,
+			OnOpcode:            t.OnOpcode,
+			OnExit:              t.OnExit,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -251,6 +252,11 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	}
 }
 
+func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
+	t.env = env
+	t.lookupAccount(env.Coinbase)
+}
+
 func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
@@ -310,10 +316,7 @@ func (t *prestateTracer) processDiffState() {
 
 		if !t.config.DisableCode {
 			newCode, _ := t.env.IntraBlockState.GetCode(addr)
-			var prevCode []byte
-			if state.Code != nil {
-				prevCode = *state.Code
-			}
+			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
 				postAccount.Code = &newCode
@@ -365,12 +368,15 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(res), t.reason
+	if p := t.reason.Load(); p != nil {
+		return json.RawMessage(res), *p
+	}
+	return json.RawMessage(res), nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *prestateTracer) Stop(err error) {
-	t.reason = err
+	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 
