@@ -50,6 +50,9 @@ type RecordingState struct {
 	AccessedStorage  map[common.Address]map[common.Hash]struct{}
 	AccessedCode     map[common.Address][]byte // all code seen during execution
 	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
+	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
+	// already created in-block is redundant in the witness (the verifier replays the create).
+	createdCodeHashes map[common.Hash]struct{}
 
 	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
@@ -78,6 +81,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedStorage:       make(map[common.Address]map[common.Hash]struct{}),
 		AccessedCode:          make(map[common.Address][]byte),
 		PreStateCode:          make(map[common.Address][]byte),
+		createdCodeHashes:     make(map[common.Hash]struct{}),
 		accountOverlay:        make(map[common.Address]*accounts.Account),
 		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:           make(map[common.Address][]byte),
@@ -247,7 +251,9 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 	if len(code) > 0 {
 		s.AccessedCode[addr] = code
 		if _, already := s.PreStateCode[addr]; !already {
-			s.PreStateCode[addr] = code
+			if _, created := s.createdCodeHashes[crypto.Keccak256Hash(code)]; !created {
+				s.PreStateCode[addr] = code
+			}
 		}
 	}
 	if s.tracing(addr) {
@@ -328,6 +334,9 @@ func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation
 	s.ModifiedAccounts[addr] = struct{}{}
 	s.codeOverlay[addr] = common.Copy(code)
 	s.ModifiedCode[addr] = common.Copy(code)
+	if len(code) > 0 {
+		s.createdCodeHashes[codeHash.Value()] = struct{}{}
+	}
 	// Keep accountOverlay CodeHash in sync so ReadAccountData returns a
 	// consistent CodeHash even before UpdateAccountData is called.
 	if acc, ok := s.accountOverlay[addr]; ok && acc != nil {
