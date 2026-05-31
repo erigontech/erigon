@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -227,10 +228,10 @@ func TestTouchUpdates_Account(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 
 	writes := VersionedWrites{
-		{Address: addr, Path: BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr, Path: NoncePath, Val: uint64(5)},
-		{Address: addr, Path: IncarnationPath, Val: uint64(1)},
-		{Address: addr, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1000)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: uint64(1)},
+		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
 	}
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
@@ -249,8 +250,8 @@ func TestToTouchKeys_Storage(t *testing.T) {
 	val2 := *uint256.NewInt(0) // zero = delete
 
 	writes := VersionedWrites{
-		{Address: addr, Path: StoragePath, Key: slot1, Val: val1},
-		{Address: addr, Path: StoragePath, Key: slot2, Val: val2},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot1}, Val: val1},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot2}, Val: val2},
 	}
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
@@ -266,7 +267,7 @@ func TestTouchUpdates_Code(t *testing.T) {
 	code := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03}
 
 	writes := VersionedWrites{
-		{Address: addr, Path: CodePath, Val: code},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(code)), Bytes: code}},
 	}
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
@@ -284,13 +285,13 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 
 	writes := VersionedWrites{
 		// Account 1: balance + nonce + code
-		{Address: addr1, Path: BalancePath, Val: *uint256.NewInt(100)},
-		{Address: addr1, Path: NoncePath, Val: uint64(1)},
-		{Address: addr1, Path: IncarnationPath, Val: uint64(0)},
-		{Address: addr1, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{})},
-		{Address: addr1, Path: CodePath, Val: []byte{0x60, 0x00}},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr1, Path: BalancePath}, Val: *uint256.NewInt(100)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr1, Path: NoncePath}, Val: uint64(1)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr1, Path: IncarnationPath}, Val: uint64(0)},
+		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr1, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{})},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr1, Path: CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})), Bytes: []byte{0x60, 0x00}}},
 		// Account 2: storage write
-		{Address: addr2, Path: StoragePath, Key: slot, Val: *uint256.NewInt(999)},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr2, Path: StoragePath, Key: slot}, Val: *uint256.NewInt(999)},
 	}
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
@@ -405,9 +406,9 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 
 	// And it must NOT have emitted spurious StoragePath=0 writes.
 	for _, w := range ibs.VersionedWrites(false) {
-		if w.Address == addr && w.Path == StoragePath {
-			v := w.Val.(uint256.Int)
-			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Key.Value())
+		if w.Header().Address == addr && w.Header().Path == StoragePath {
+			v := w.ValAny().(uint256.Int)
+			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Header().Key.Value())
 		}
 	}
 }

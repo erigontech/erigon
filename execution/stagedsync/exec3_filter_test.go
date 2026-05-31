@@ -18,24 +18,24 @@ func TestFilterWritesByVersionMap_RemovesUnmodifiedFields(t *testing.T) {
 
 	// CollectorWrites has all 4 fields (LightCollector always emits all)
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(5)},
-		{Address: addr, Path: state.IncarnationPath, Val: uint64(0)},
-		{Address: addr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(1000)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: uint64(5)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath}, Val: uint64(0)},
+		&state.VersionedWrite[accounts.CodeHash]{WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath}, Val: accounts.EmptyCodeHash},
 	}
 
 	// versionMap WriteSet only has BalancePath and NoncePath
 	// (the TX modified balance and nonce but not incarnation/codeHash)
 	vmWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(5)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(1000)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: uint64(5)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, vmWrites)
 
 	assert.Len(t, filtered, 2, "Should keep only BalancePath and NoncePath")
-	assert.Equal(t, state.BalancePath, filtered[0].Path)
-	assert.Equal(t, state.NoncePath, filtered[1].Path)
+	assert.Equal(t, state.BalancePath, filtered[0].Header().Path)
+	assert.Equal(t, state.NoncePath, filtered[1].Header().Path)
 }
 
 // TestFilterWritesByVersionMap_KeepsStorageWrites verifies that storage
@@ -45,19 +45,19 @@ func TestFilterWritesByVersionMap_KeepsStorageWrites(t *testing.T) {
 	slot := accounts.InternKey([32]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04})
 
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(500)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(1)},
-		{Address: addr, Path: state.StoragePath, Key: slot, Val: *uint256.NewInt(42)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(500)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: uint64(1)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slot}, Val: *uint256.NewInt(42)},
 	}
 
 	vmWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot, Val: *uint256.NewInt(42)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slot}, Val: *uint256.NewInt(42)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, vmWrites)
 
 	assert.Len(t, filtered, 1, "Should keep only StoragePath")
-	assert.Equal(t, state.StoragePath, filtered[0].Path)
+	assert.Equal(t, state.StoragePath, filtered[0].Header().Path)
 }
 
 // TestFilterWritesByVersionMap_EmptyVMWrites returns all writes when
@@ -66,8 +66,8 @@ func TestFilterWritesByVersionMap_EmptyVMWrites(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x03})
 
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(100)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(1)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(100)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: uint64(1)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, nil)
@@ -83,17 +83,17 @@ func TestFilterWritesByVersionMap_MultipleAddresses(t *testing.T) {
 
 	collectorWrites := state.VersionedWrites{
 		// addr1: balance + nonce (TX modified balance only)
-		{Address: addr1, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr1, Path: state.NoncePath, Val: uint64(5)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr1, Path: state.BalancePath}, Val: *uint256.NewInt(1000)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr1, Path: state.NoncePath}, Val: uint64(5)},
 		// addr2: balance + nonce (TX modified both)
-		{Address: addr2, Path: state.BalancePath, Val: *uint256.NewInt(2000)},
-		{Address: addr2, Path: state.NoncePath, Val: uint64(10)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr2, Path: state.BalancePath}, Val: *uint256.NewInt(2000)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr2, Path: state.NoncePath}, Val: uint64(10)},
 	}
 
 	vmWrites := state.VersionedWrites{
-		{Address: addr1, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr2, Path: state.BalancePath, Val: *uint256.NewInt(2000)},
-		{Address: addr2, Path: state.NoncePath, Val: uint64(10)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr1, Path: state.BalancePath}, Val: *uint256.NewInt(1000)},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr2, Path: state.BalancePath}, Val: *uint256.NewInt(2000)},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr2, Path: state.NoncePath}, Val: uint64(10)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, vmWrites)
@@ -103,7 +103,7 @@ func TestFilterWritesByVersionMap_MultipleAddresses(t *testing.T) {
 	// Verify the correct entries
 	paths := make(map[[20]byte][]state.AccountPath)
 	for _, w := range filtered {
-		paths[w.Address.Value()] = append(paths[w.Address.Value()], w.Path)
+		paths[w.Header().Address.Value()] = append(paths[w.Header().Address.Value()], w.Header().Path)
 	}
 	assert.Equal(t, []state.AccountPath{state.BalancePath}, paths[addr1.Value()])
 	assert.Equal(t, []state.AccountPath{state.BalancePath, state.NoncePath}, paths[addr2.Value()])

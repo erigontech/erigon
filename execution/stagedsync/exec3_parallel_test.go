@@ -57,7 +57,7 @@ type testExecTask struct {
 	ctx          context.Context
 	ops          []Op
 	readMap      state.ReadSet
-	writeMap     state.WriteSet
+	writeMap     map[accounts.Address]map[state.AccountKey]state.AnyVersionedWrite
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
@@ -86,7 +86,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		ctx:          context.Background(),
 		ops:          ops,
 		readMap:      state.ReadSet{},
-		writeMap:     state.WriteSet{},
+		writeMap:     map[accounts.Address]map[state.AccountKey]state.AnyVersionedWrite{},
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -118,7 +118,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	version := t.Version()
 
 	t.readMap = state.ReadSet{}
-	t.writeMap = state.WriteSet{}
+	t.writeMap = map[accounts.Address]map[state.AccountKey]state.AnyVersionedWrite{}
 
 	dep := -1
 
@@ -158,9 +158,18 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 
-			t.readMap.Set(state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
+			vw := &state.VersionedWrite[int]{
+				WriteHeader: state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key, Version: version},
+				Val:         op.val,
+			}
+			inner := t.writeMap[k.addr]
+			if inner == nil {
+				inner = map[state.AccountKey]state.AnyVersionedWrite{}
+				t.writeMap[k.addr] = inner
+			}
+			inner[state.AccountKey{Path: k.path, Key: k.key}] = vw
 		case otherType:
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 		default:
@@ -176,13 +185,16 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 }
 
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
-	writes := make(state.VersionedWrites, 0, t.writeMap.Len())
-
-	t.writeMap.Scan(func(v *state.VersionedWrite) bool {
-		writes = append(writes, v)
-		return true
-	})
-
+	var total int
+	for _, inner := range t.writeMap {
+		total += len(inner)
+	}
+	writes := make(state.VersionedWrites, 0, total)
+	for _, inner := range t.writeMap {
+		for _, v := range inner {
+			writes = append(writes, v)
+		}
+	}
 	return writes
 }
 
@@ -1230,13 +1242,12 @@ func dexPostValidation(pe *parallelExecutor) error {
 		if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
 			for i, inputs := range blockStatus.result.TxIO.Inputs() {
 				var err error
-				inputs.Scan(func(input *state.VersionedRead) bool {
-					if input.Version.TxIndex != i-1 {
-						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
-						return false
+				for hdr := range inputs.AllHeaders() {
+					if hdr.Version.TxIndex != i-1 {
+						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, hdr.Version.TxIndex)
+						break
 					}
-					return true
-				})
+				}
 				if err != nil {
 					return err
 				}

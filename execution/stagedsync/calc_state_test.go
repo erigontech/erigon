@@ -231,8 +231,8 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xc1})
 
 	writes := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: uint64(1)},
-		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath}, Val: uint64(1)},
+		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath}, Val: true},
 	}
 	cs.ApplyWrites(writes)
 
@@ -263,8 +263,8 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xd1})
 
 	writes := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},
-		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(42)},
+		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath}, Val: true},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(42)},
 	}
 	cs.ApplyWrites(writes)
 
@@ -364,9 +364,9 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// sees.
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
 	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: original.Incarnation, Version: ver},
-		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true, Version: ver},
-		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath, Version: ver}, Val: original.Incarnation},
+		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: ver}, Val: true},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: ver}, Val: uint256.Int{}},
 	}
 
 	// Populate vm with the same writes — IBS.Selfdestruct calls versionWritten
@@ -385,9 +385,9 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// writes are dropped, and the completion loop skips this address.
 	pathSeen := map[state.AccountPath]any{}
 	for _, w := range normalized {
-		switch w.Path {
+		switch w.Header().Path {
 		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.IncarnationPath, state.SelfDestructPath:
-			pathSeen[w.Path] = w.Val
+			pathSeen[w.Header().Path] = w.ValAny()
 		}
 	}
 	require.Contains(t, pathSeen, state.SelfDestructPath,
@@ -420,8 +420,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
-	addrVal := addr.Value()
-	got := lookupKeyUpdate(t, updates, string(addrVal[:]))
+	got := lookupKeyUpdate(t, updates, func() string { v := addr.Value(); return string(v[:]) }())
 
 	// EIP-161-style DeleteUpdate (matches serial's DomainDel for a pure SD).
 	assert.Equal(t, commitment.DeleteUpdate, got.Flags,
@@ -482,9 +481,9 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
 	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: original.Incarnation, Version: ver},
-		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true, Version: ver},
-		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath, Version: ver}, Val: original.Incarnation},
+		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: ver}, Val: true},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: ver}, Val: uint256.Int{}},
 	}
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
@@ -497,8 +496,8 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	// here too so a regression points directly at the offending loop.
 	storageZeroCount := 0
 	for _, w := range normalized {
-		if w.Path == state.StoragePath {
-			val := w.Val.(uint256.Int)
+		if w.Header().Path == state.StoragePath {
+			val := w.ValAny().(uint256.Int)
 			assert.True(t, val.IsZero(),
 				"normalizeWriteSet must emit StoragePath=0 for SD'd slots, got %v", val)
 			storageZeroCount++

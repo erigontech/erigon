@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -150,7 +151,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	someWrites := state.VersionedWrites{
 		// Path/value content irrelevant — domainReader is nil so the
 		// lazy-load path skips the real read. We only need len(writes)>0.
-		&state.VersionedWrite{},
+		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{}},
 	}
 
 	// First txResult: txNum jumps from 0 to 12345.
