@@ -21,11 +21,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/secp256k1"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/holiman/uint256"
@@ -433,6 +435,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
+
+	// Parallel sender recovery prefetch. The execution stage's TxTask.Sender
+	// falls back to a serial ECDSA recover on every tx whose `from` is not
+	// already cached — secp256k1_ext_ecdsa_recover is ~6% of total CPU on a
+	// warm rig. Doing the recovery here in parallel (one worker per
+	// secp256k1.ContextForThread slot) caches every sender on the tx, so the
+	// execution path hits the cache for all txs. Sequential fallback for
+	// trivial counts where the goroutine overhead would dominate.
+	prefetchSenders(transactions, s.config, uint64(req.BlockNumber), header.Time)
 
 	if version >= clparams.DenebVersion {
 		err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
@@ -878,6 +889,60 @@ func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []com
 		resp[i] = extractPayloadBodyFromBody(body)
 	}
 	return resp, nil
+}
+
+// prefetchSenders populates tx.from for every transaction in parallel so that
+// the subsequent execution path skips the ECDSA recover step entirely. Each
+// worker uses its own secp256k1.Context to avoid contention on the default
+// context's mutex. Transactions whose sender is already set (e.g. a build-
+// time SetSender from the block builder) are skipped.
+func prefetchSenders(txs []types.Transaction, cfg *chain.Config, blockNum, blockTime uint64) {
+	if len(txs) == 0 {
+		return
+	}
+	signer := types.MakeSigner(cfg, blockNum, blockTime)
+	// Cap workers at NumOfContexts so every worker has a private secp256k1
+	// context, and at len(txs) so we don't spin idle goroutines.
+	numWorkers := runtime.NumCPU()
+	if maxCtx := secp256k1.NumOfContexts(); numWorkers > maxCtx {
+		numWorkers = maxCtx
+	}
+	if numWorkers > len(txs) {
+		numWorkers = len(txs)
+	}
+	if numWorkers <= 1 {
+		// Single tx (or no spare crypto contexts): use the default context
+		// and skip the worker dispatch overhead.
+		for _, tx := range txs {
+			if _, ok := tx.GetSender(); ok {
+				continue
+			}
+			if addr, err := signer.Sender(tx); err == nil {
+				tx.SetSender(addr)
+			}
+		}
+		return
+	}
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+	for w := 0; w < numWorkers; w++ {
+		go func(workerID int) {
+			defer wg.Done()
+			ctx := secp256k1.ContextForThread(workerID)
+			for i := workerID; i < len(txs); i += numWorkers {
+				tx := txs[i]
+				if _, ok := tx.GetSender(); ok {
+					continue
+				}
+				if addr, err := signer.SenderWithContext(ctx, tx); err == nil {
+					tx.SetSender(addr)
+				}
+				// Errors are surfaced later by the standard execution path; we
+				// only prime the cache here.
+			}
+		}(w)
+	}
+	wg.Wait()
 }
 
 func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayloadBody {
