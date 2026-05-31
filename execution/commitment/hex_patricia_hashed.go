@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/state/stateifs"
@@ -1707,7 +1708,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
-		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(estimate.AlmostAllCPUs(), hph.ctx.PutBranch); err != nil {
 			return nil, err
 		}
 		be.ClearDeferred()
@@ -2886,7 +2887,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
-		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+		if err = hph.branchEncoder.ApplyDeferredUpdates(estimate.AlmostAllCPUs(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
 		hph.branchEncoder.ClearDeferred()
@@ -2973,7 +2974,7 @@ func (hph *HexPatriciaHashed) HasPendingDeferredUpdates() bool {
 
 // ApplyAndClearInlineDeferredUpdates applies deferred updates inline via ctx.PutBranch and clears them.
 func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
-	if err := hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+	if err := hph.branchEncoder.ApplyDeferredUpdates(estimate.AlmostAllCPUs(), hph.ctx.PutBranch); err != nil {
 		return fmt.Errorf("apply deferred updates: %w", err)
 	}
 	hph.branchEncoder.ClearDeferred()
