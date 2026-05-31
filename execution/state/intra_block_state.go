@@ -843,6 +843,26 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if sdb.versionMap == nil {
+		// Fast path: serial execution bypasses versionedRead's closure dispatch.
+		// SLOAD is the most frequent state read in EVM — generic+closure
+		// dispatch escapes both closures to the heap on every call. Inline
+		// the body to avoid that allocation. Matches the pattern of
+		// GetBalance / GetNonce above.
+		stateObject, err := sdb.getStateObject(addr, true)
+		if err != nil {
+			return u256.N0, err
+		}
+		var value uint256.Int
+		if stateObject != nil && !stateObject.deleted {
+			value, _ = stateObject.GetState(key)
+		}
+		if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
+			fmt.Printf("%d (%d.%d) GetState (storage) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value.Hex()[2:])
+		}
+		return value, nil
+	}
+
 	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
@@ -865,6 +885,21 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr, true)
+		if err != nil {
+			return u256.N0, err
+		}
+		var value uint256.Int
+		if stateObject != nil && !stateObject.deleted {
+			value, err = stateObject.GetCommittedState(key)
+		}
+		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+			fmt.Printf("%d (%d.%d) GetCommittedState (storage) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value.Hex()[2:])
+		}
+		return value, err
+	}
+
 	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, true, u256.N0,
 		func(v uint256.Int) uint256.Int {
 			return v
@@ -885,6 +920,17 @@ func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 }
 
 func (sdb *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {
+	if sdb.versionMap == nil {
+		s, err := sdb.getStateObject(addr, true)
+		if err != nil {
+			return false, err
+		}
+		if s == nil || s.deleted || s.createdContract {
+			return false, nil
+		}
+		return s.selfdestructed, nil
+	}
+
 	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false,
 		func(v bool) bool { return v },
 		func(s *stateObject) (bool, error) {
