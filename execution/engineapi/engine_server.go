@@ -280,6 +280,17 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		txs = append(txs, transaction)
 	}
 
+	// Spawn the tx-root (DeriveSha) hashing in parallel with the rest of the
+	// entry-path work (withdrawals/requests/blob/fork-version checks). The
+	// computed root is joined just before the header.Hash() check below,
+	// at which point header.TxHash is the only field still missing. txs is
+	// read-only for the lifetime of this function, so the goroutine sees a
+	// stable slice.
+	txRootCh := make(chan common.Hash, 1)
+	go func() {
+		txRootCh <- types.DeriveSha(types.BinaryTransactions(txs))
+	}()
+
 	header := types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
@@ -296,7 +307,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		Difficulty:  *merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: req.ReceiptsRoot,
-		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
+		// TxHash filled in from txRootCh just before header.Hash() is checked.
 	}
 
 	var withdrawals types.Withdrawals
@@ -399,6 +410,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+
+	// Join the tx-root goroutine spawned at function entry. If it hasn't
+	// finished yet this blocks; in the typical case it has already deposited
+	// the result into the buffered channel before we get here.
+	header.TxHash = <-txRootCh
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
