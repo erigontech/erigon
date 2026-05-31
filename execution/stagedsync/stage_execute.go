@@ -483,6 +483,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
 	}
+	println("EXEC CURRENT CYCLE INITIAL?", s.CurrentSyncCycle.IsInitialCycle, dbg.Stack())
 
 	// AlwaysGenerateChangesets disables this prune so the node retains
 	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
