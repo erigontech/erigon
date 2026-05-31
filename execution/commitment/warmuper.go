@@ -165,7 +165,7 @@ func (w *Warmuper) Start() {
 		return
 	}
 
-	w.work = make(chan warmupWorkItem, w.numWorkers*64)
+	w.work = make(chan warmupWorkItem, w.numWorkers*32)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
