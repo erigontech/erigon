@@ -705,6 +705,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
 	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
 		return bytes.Compare(a, b)
 	})
