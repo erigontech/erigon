@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/perfbreakdown"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -260,6 +261,32 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
+	}
+
+	// Per-block perf breakdown (gated by ERIGON_PERF_BREAKDOWN=1).
+	// Installs a per-process active profiler that downstream phase
+	// boundaries and leaf state-read helpers route their timings into.
+	pbProfiler := perfbreakdown.New(req.BlockNumber.Uint64())
+	if pbProfiler != nil {
+		perfbreakdown.SetActive(pbProfiler)
+		defer func() {
+			r := pbProfiler.Finish().Snapshot()
+			s.logger.Info("[perf-breakdown]",
+				"block", r.BlockNum,
+				"total_ms", r.Total.Milliseconds(),
+				"exec_total_ms", r.ExecTotal.Milliseconds(),
+				"exec_io_ms", r.ExecIO.Milliseconds(),
+				"exec_cpu_ms", r.ExecCPU.Milliseconds(),
+				"exec_workers", r.ExecWorkers,
+				"exec_parallel", r.ExecParallel,
+				"commit_total_ms", r.CommitTotal.Milliseconds(),
+				"commit_io_ms", r.CommitIO.Milliseconds(),
+				"commit_cpu_ms", r.CommitCPU.Milliseconds(),
+				"commit_workers", r.CommitWorkers,
+				"commit_parallel", r.CommitParallel,
+				"everything_else_ms", r.EverythingElse.Milliseconds(),
+			)
+		}()
 	}
 
 	if s.caplin {

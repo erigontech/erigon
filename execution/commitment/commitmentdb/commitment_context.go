@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/perfbreakdown"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -802,7 +803,18 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// the only retaining caller (getDeferredUpdate) clones at the queue
 	// boundary, and every other call site consumes the bytes inline
 	// (merger.Merge, unfoldBranchNode, EncodeBranch).
-	return sdc.readDomain(kv.CommitmentDomain, pref)
+	//
+	// perfbreakdown: when active, accumulate the readDomain wall-clock into
+	// the commit-phase IO bucket so commitment IO can be separated from
+	// commitment CPU (trie hashing).
+	pp := perfbreakdown.Active()
+	if pp == nil {
+		return sdc.readDomain(kv.CommitmentDomain, pref)
+	}
+	start := time.Now()
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	pp.AddIO(time.Since(start))
+	return enc, step, err
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

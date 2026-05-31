@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/perfbreakdown"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -1017,6 +1018,24 @@ func (sd *SharedDomains) ComputeCommitmentLocked(ctx context.Context, tx kv.Temp
 }
 
 func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), lockHeld bool) (rootHash []byte, err error) {
+	// perfbreakdown: enter PhaseCommit for the whole commitment computation.
+	// Leaf branch-read helper (TrieContext.Branch) routes its elapsed time
+	// into CommitIO while this phase is active. Worker count = NumCPU when
+	// the concurrent trie variant is selected, else 1.
+	if pp := perfbreakdown.Active(); pp != nil {
+		prev := pp.SetPhase(perfbreakdown.PhaseCommit)
+		workers := 1
+		if statecfg.ExperimentalConcurrentCommitment {
+			workers = runtime.NumCPU()
+		}
+		pp.SetCommitParallelism(workers)
+		phaseStart := time.Now()
+		defer func() {
+			pp.AddPhaseTotal(perfbreakdown.PhaseCommit, time.Since(phaseStart))
+			pp.SetPhase(prev)
+		}()
+	}
+
 	// Flush any pending deferred commitment updates from the previous block
 	// into the CORRECT block's changeset (via the hash-aware lookup in
 	// FlushPendingUpdates). This ensures the branch writes are recorded in

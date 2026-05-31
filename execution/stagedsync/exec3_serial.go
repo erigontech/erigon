@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/perfbreakdown"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -56,6 +57,19 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+
+	// perfbreakdown: enter PhaseExec for the entire serial block-execution loop.
+	// Leaf state-read helpers route their elapsed time into ExecIO while this
+	// phase is active. Serial executor has worker count = 1.
+	if pp := perfbreakdown.Active(); pp != nil {
+		prev := pp.SetPhase(perfbreakdown.PhaseExec)
+		pp.SetExecParallelism(1)
+		phaseStart := time.Now()
+		defer func() {
+			pp.AddPhaseTotal(perfbreakdown.PhaseExec, time.Since(phaseStart))
+			pp.SetPhase(prev)
+		}()
+	}
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 

@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/perfbreakdown"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -1450,11 +1452,25 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	}
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+	if enc, _, err := r.getLatestTimed(kv.AccountsDomain, value[:]); len(enc) == 0 {
 		return false, err
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
+}
+
+// getLatestTimed wraps the underlying getter.GetLatest call with a
+// perfbreakdown IO timer. When the active profiler is nil (the default
+// production path) it falls through with no measurable overhead.
+func (r *ReaderV3) getLatestTimed(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
+	pp := perfbreakdown.Active()
+	if pp == nil {
+		return r.getter.GetLatest(domain, key)
+	}
+	start := time.Now()
+	enc, step, err := r.getter.GetLatest(domain, key)
+	pp.AddIO(time.Since(start))
+	return enc, step, err
 }
 
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -1467,7 +1483,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	if !address.IsNil() {
 		value = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
+	enc, _, err := r.getLatestTimed(kv.AccountsDomain, value[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1504,7 +1520,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 	copy(composite[0:20], addressValue[0:20])
 	copy(composite[20:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
+	enc, _, err := r.getLatestTimed(kv.StorageDomain, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -1531,7 +1547,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getLatestTimed(kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return nil, err
 	}
@@ -1547,7 +1563,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getLatestTimed(kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return 0, err
 	}
