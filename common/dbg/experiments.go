@@ -123,7 +123,8 @@ var (
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
 
-	PerfProfiles = EnvBool("PERF_PROFILES", false)
+	PerfProfiles  = EnvBool("PERF_PROFILES", false)
+	SchedTimeline = EnvBool("SCHED_TIMELINE", false)
 )
 
 func init() {

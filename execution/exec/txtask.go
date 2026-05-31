@@ -119,6 +119,11 @@ type TxResult struct {
 	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
 	// adjustments are applied directly to these writes.
 	CollectorWrites state.VersionedWrites
+
+	// SchedStartedNs / SchedFinishedNs bracket the worker's own execution of this
+	// task in monotonic ns; populated only when dbg.SchedTimeline is enabled.
+	SchedStartedNs  int64
+	SchedFinishedNs int64
 }
 
 func (r *TxResult) compare(other *TxResult) int {

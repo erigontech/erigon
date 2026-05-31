@@ -375,6 +375,16 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 		rw.notifier.Wait()
 	}
 
+	if dbg.SchedTimeline {
+		startNs := time.Now().UnixNano()
+		defer func() {
+			if result != nil {
+				result.SchedStartedNs = startNs
+				result.SchedFinishedNs = time.Now().UnixNano()
+			}
+		}()
+	}
+
 	if rw.metrics != nil && dbg.KVReadLevelledMetrics {
 		rw.metrics.Active.Add(1)
 		start := time.Now()

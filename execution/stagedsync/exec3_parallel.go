@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1497,6 +1498,8 @@ type txResult struct {
 	writes                state.VersionedWrites
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
+	schedStartedNs        int64
+	schedFinishedNs       int64
 }
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
@@ -2854,6 +2857,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: be.blobGasUsed,
+				schedStartedNs:        result.SchedStartedNs,
+				schedFinishedNs:       result.SchedFinishedNs,
 			}
 
 			if tx := result.Tx(); tx != nil {
@@ -3059,6 +3064,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return nil, err
 		}
 
+		if dbg.SchedTimeline && len(be.finalizedResults) > 0 {
+			be.emitSchedTimeline()
+		}
+
 		be.result = &blockResult{
 			BlockNum:        be.blockNum,
 			BlockTime:       txTask.BlockTime(),
@@ -3087,6 +3096,49 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// Block not yet complete — return nil. The caller (processResults)
 	// only acts on complete blockResults (blockResult.complete == true).
 	return nil, nil
+}
+
+// emitSchedTimeline writes one log line per block carrying the per-tx worker
+// start+duration timestamps (relative to the block's min start) so that the
+// concurrency-over-block-time curve can be reconstructed offline.
+func (be *blockExecutor) emitSchedTimeline() {
+	type entry struct {
+		idx        int
+		startDelta int64
+		durNs      int64
+	}
+	entries := make([]entry, 0, len(be.finalizedResults))
+	var base int64 = math.MaxInt64
+	for idx, r := range be.finalizedResults {
+		if r == nil || r.TxResult == nil || r.SchedStartedNs == 0 {
+			continue
+		}
+		if r.SchedStartedNs < base {
+			base = r.SchedStartedNs
+		}
+		entries = append(entries, entry{
+			idx:        idx,
+			startDelta: r.SchedStartedNs,
+			durNs:      r.SchedFinishedNs - r.SchedStartedNs,
+		})
+	}
+	if len(entries) == 0 {
+		return
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].idx < entries[j].idx })
+	var sb strings.Builder
+	sb.Grow(len(entries) * 18)
+	for i, e := range entries {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, "%d:%d:%d", e.idx, e.startDelta-base, e.durNs)
+	}
+	log.Info("[sched_timeline]",
+		"blk", be.blockNum,
+		"base_ns", base,
+		"cnt", len(entries),
+		"data", sb.String())
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
