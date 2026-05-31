@@ -92,7 +92,7 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](/fundamentals/sync-modes)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Prune Modes](/fundamentals/prune-modes)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
@@ -352,7 +352,7 @@ Flags related to consensus mechanisms and network forks.
 
 Flags for configuring the Sentry component.
 
-* `--sentry.api.addr value`: A comma-separated list of sentry addresses.
+* `--sentry.api.addr value`: A comma-separated list of Sentry addresses.
 * `--sentry.log-peer-info`: Logs detailed peer info when a peer connects or disconnects.
   * Default: `false`
 * `--sentinel.addr value`: The address for the sentinel component.
@@ -368,12 +368,12 @@ Here is the rewritten and merged Downloader section, combining the two original 
 
 These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
 
-* `--downloader.api.addr value`: The downloader address.
-* `--downloader.disable.ipv4`: Disables IPv4 for the downloader.
+* `--downloader.api.addr value`: The Downloader address.
+* `--downloader.disable.ipv4`: Disables IPv4 for the Downloader.
   * Default: `false`
-* `--downloader.disable.ipv6`: Disables IPv6 for the downloader.
+* `--downloader.disable.ipv6`: Disables IPv6 for the Downloader.
   * Default: `false`
-* `--no-downloader`: Disables the downloader component.
+* `--no-downloader`: Disables the Downloader component.
   * Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
   * Default: `false`
@@ -562,8 +562,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 When running Erigon in Docker, you can configure user permissions and data directories:
 
-* `DOCKER_UID` - The UID of the docker user
-* `DOCKER_GID` - The GID of the docker user
+* `DOCKER_UID` - The UID of the Docker user
+* `DOCKER_GID` - The GID of the Docker user
 * `XDG_DATA_HOME` - The data directory mounted to containers
 
 ### Usage Examples

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -138,7 +139,7 @@ func newCommitmentCalculator(
 	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
 	// deferred here. Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
 	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
 	// back and the calculator goroutine is gone.
@@ -179,6 +180,7 @@ func (cc *commitmentCalculator) Stop() {
 }
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer cc.wg.Done()
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
@@ -338,7 +340,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	// Check against expected root from the block header.
-	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
+	if !bytes.Equal(rh, br.StateRoot[:]) {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
 	}
 
@@ -438,7 +440,7 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.hasComputed = true
 
 	// Only publish on mismatch — success is silent.
-	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
+	if mismatch := !bytes.Equal(rh, br.StateRoot[:]); mismatch {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,
