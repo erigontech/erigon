@@ -27,15 +27,6 @@ DISABLED_TEST_LIST=(
   eth_getTransactionByHash/test_02.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
-  # tip-dependent: expected values change as chain advances (disabled in main via PR #21348)
-  ots_searchTransactionsAfter/test_11.json
-  ots_searchTransactionsAfter/test_12.json
-  # debug_getModifiedAccounts test_08/09 use old [startBlock, endBlock) semantics; expected data
-  # needs regeneration after Geth-semantics fix lands (backport PR #21507)
-  debug_getModifiedAccountsByHash/test_08.json
-  debug_getModifiedAccountsByHash/test_09.json
-  debug_getModifiedAccountsByNumber/test_08.json
-  debug_getModifiedAccountsByNumber/test_09.json
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
@@ -51,4 +42,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.1.2 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.1.3 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
