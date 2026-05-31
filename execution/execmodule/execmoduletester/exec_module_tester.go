@@ -61,8 +61,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
-	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -311,12 +309,6 @@ func WithPruneMode(pm prune.Mode) Option {
 	}
 }
 
-func WithBlockBufferSize(size int) Option {
-	return func(opts *options) {
-		opts.blockBufferSize = size
-	}
-}
-
 func WithTxPool() Option {
 	return func(opts *options) {
 		opts.withTxPool = true
@@ -355,7 +347,6 @@ type options struct {
 	key                 *ecdsa.PrivateKey
 	engine              rules.Engine
 	pruneMode           *prune.Mode
-	blockBufferSize     int
 	withTxPool          bool
 	enableDomains       []kv.Domain
 	fcuBackgroundCommit bool
@@ -368,7 +359,6 @@ func applyOptions(opts []Option) options {
 	opt := options{
 		key:             defaultKey,
 		pruneMode:       &defaultPruneMode,
-		blockBufferSize: 128,
 		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
 	}
@@ -409,7 +399,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	key := opt.key
 	engine := opt.engine
 	pruneMode := *opt.pruneMode
-	blockBufferSize := opt.blockBufferSize
 	withTxPool := opt.withTxPool
 	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
 	if err != nil {
@@ -534,16 +523,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) ([64]byte, bool) { return [64]byte{}, false }
-	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
-	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
-
 	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
-	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
@@ -585,21 +568,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.BlockReader,
 	)
 
-	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
-
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		mock.Dirs,
 		mock.DB,
 		mock.ChainConfig,
 		mock.Engine,
 		sentries,
-		cfg.Sync,
 		mock.BlockReader,
-		blockBufferSize,
 		statusDataProvider,
 		false,
-		maxBlockBroadcastPeers,
-		false, /* disableBlockDownload */
 		false, /* enableWitProtocol */
 		logger,
 	)
@@ -610,7 +587,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			panic(err)
 		}
 	}
-	mock.sentriesClient.IsMock = true
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
@@ -640,7 +616,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			false, /*badBlockHalt*/
 			dirs,
 			mock.BlockReader,
-			mock.sentriesClient.Hd,
 			gspec,
 			cfg.Sync,
 			false, /*experimentalBAL*/
@@ -662,10 +637,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stagedsync.DefaultStages(
 			mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
-			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
+			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
-			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd, readAheader),
+			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				pruneMode,
@@ -678,7 +653,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				false, /*badBlockHalt*/
 				dirs,
 				mock.BlockReader,
-				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
 				false, /*experimentalBAL*/
@@ -742,8 +716,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		func() error { return nil },
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
-
-	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
@@ -892,14 +864,7 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
-	if emt.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
-		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
-	}
 	return nil
-}
-
-func (emt *ExecModuleTester) HeaderDownload() *headerdownload.HeaderDownload {
-	return emt.sentriesClient.Hd
 }
 
 func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {

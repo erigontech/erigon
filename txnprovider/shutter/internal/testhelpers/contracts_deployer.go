@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -43,7 +44,7 @@ type ContractsDeployer struct {
 	address              common.Address
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
-	chainId              *big.Int
+	chainId              *uint256.Int
 	txnInclusionVerifier engineapitester.TxnInclusionVerifier
 }
 
@@ -51,7 +52,7 @@ func NewContractsDeployer(
 	key *ecdsa.PrivateKey,
 	cb bind.ContractBackend,
 	cl *MockCl,
-	chainId *big.Int,
+	chainId *uint256.Int,
 	txnInclusionVerifier engineapitester.TxnInclusionVerifier,
 ) ContractsDeployer {
 	return ContractsDeployer{

@@ -21,12 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -136,18 +136,9 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		// Cap collation to the max txNum covered by block files.
-		// Without this, collation creates domain files past the block
-		// file boundary, causing "behind commitment" errors.
-		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
-			agg.SetMaxCollationTxNum(maxTxNum)
-		}
-		// Background collation removed from exec code — collation is now managed
-		// by CollateAndPruneIfNeeded in the FCU/stage loop (forkchoice.go).
-		// This avoids background collation db.View() txs overlapping with
-		// commit+prune, which prevented MDBX GC page reclamation.
-	}
+	// Background collation removed from exec code — collation is now managed
+	// by CollateAndPrune in the FCU/stage loop (forkchoice.go).
+	// Block-snapshot boundary gating happens inside readyForCollation.
 
 	var (
 		inputTxNum               uint64
@@ -205,8 +196,12 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(!isApplyingBlocks)
+	// Short-term: keep the trie warmuper's value cache off on the parallel
+	// path. The warmuper reads paraTrieDB (persisted state), so during a
+	// multi-block uncommitted batch (fork validation) it caches values stale
+	// w.r.t. sd.mem and feeds them to the trie, producing wrong roots. The
+	// page-cache warmer above is unaffected; the full fix lands separately.
+	doms.EnableWarmupCache(!isApplyingBlocks && !parallel)
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
@@ -310,15 +305,14 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
-					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
-						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, logger, u)
+						lastHeader.Number.Uint64(), lastHeader.Hash(), applyTx, cfg, execStage, logger, u)
 				default:
 					return execErr
 				}
@@ -355,8 +349,7 @@ func ExecV3(ctx context.Context,
 		// is to freeze process state at the bad block. Returning would run deferred
 		// rollback/commit/flush paths and overwrite the very state we want to
 		// inspect. Mirrors the design documented in PR #19803. Applies to both
-		// serial and parallel paths uniformly — pe.exec / se.executeBlock already
-		// call ReportBadHeaderPoS internally before returning ErrInvalidBlock.
+		// serial and parallel paths uniformly.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
 			os.Exit(1)
@@ -488,7 +481,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	} else {
 		if te.hooks.OnBlockStart != nil {
 			var b *types.Block
-			var td *big.Int
+			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
@@ -700,12 +693,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	return nil
 }
 
-func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
+func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
-	}
-	if cfg.hd != nil && cfg.hd.POSSync() {
-		cfg.hd.ReportBadHeaderPoS(blockHash, parentHash)
 	}
 	minBlockNum := s.BlockNumber
 	if blockNumber <= minBlockNum {
@@ -785,9 +775,9 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
-		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
+	if !bytes.Equal(computedRootHash, header.Root[:]) {
+		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root[:], header.Hash()))
+		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), applyTx, cfg, e, logger, u)
 		return false, times, err
 	}
 	return true, times, nil

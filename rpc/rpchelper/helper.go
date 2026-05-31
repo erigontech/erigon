@@ -236,12 +236,17 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
 		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
 	}
-	return &cachedHistoryReaderV3{asOfView, state.NewHistoryReaderV3(tx, txNum)}, nil
+	return &cachedHistoryReaderV3{
+		cache:     asOfView,
+		reader:    state.NewHistoryReaderV3(tx, txNum),
+		composite: make([]byte, 0, len(common.Address{})+len(common.Hash{})),
+	}, nil
 }
 
 type cachedHistoryReaderV3 struct {
-	cache  asOfView
-	reader *state.HistoryReaderV3
+	cache     asOfView
+	reader    *state.HistoryReaderV3
+	composite []byte
 }
 
 func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -295,7 +300,8 @@ func (hr *cachedHistoryReaderV3) ReadAccountDataForDebug(address accounts.Addres
 func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	enc, ok, err := hr.cache.GetAsOf(append(addressValue[:], keyValue[:]...), hr.reader.GetTxNum())
+	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
+	enc, ok, err := hr.cache.GetAsOf(hr.composite, hr.reader.GetTxNum())
 	if err != nil {
 		return uint256.Int{}, false, err
 	}

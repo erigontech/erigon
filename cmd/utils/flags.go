@@ -549,12 +549,12 @@ var (
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
-		Usage: "Maximum number of network peers per protocol version (network disabled if set to 0)",
+		Usage: "Maximum number of network peers (network disabled if set to 0)",
 		Value: nodecfg.DefaultConfig.P2P.MaxPeers,
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of TCP connections pending to become connected peers (per protocol version)",
+		Usage: "Maximum number of TCP connections pending to become connected peers",
 		Value: nodecfg.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
@@ -566,11 +566,6 @@ var (
 		Name:  "p2p.protocol",
 		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
-	}
-	P2pProtocolAllowedPorts = cli.UintSliceFlag{
-		Name:  "p2p.allowed-ports",
-		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
-		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -1350,7 +1345,6 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port uint,
 	protocol uint,
-	allowedPorts []uint,
 	metricsEnabled, witProtocol bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
@@ -1379,7 +1373,6 @@ func NewP2PConfig(
 		PrivateKey:        serverKey,
 		Name:              nodeName,
 		NodeDatabase:      enodeDBPath,
-		AllowedPorts:      allowedPorts,
 		TmpDir:            dirs.Tmp,
 		MetricsEnabled:    metricsEnabled,
 		EnableWitProtocol: witProtocol,
@@ -1430,26 +1423,6 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = common.CliString2Array(ctx.String(SentryAddrFlag.Name))
-	}
-	// TODO cli lib doesn't store defaults for UintSlice properly so we have to get value directly
-	cfg.AllowedPorts = P2pProtocolAllowedPorts.Value.Value()
-	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
-		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
-	}
-
-	if ctx.IsSet(ListenPortFlag.Name) {
-		// add non-default port to allowed port list
-		lp := ctx.Int(ListenPortFlag.Name)
-		found := false
-		for _, p := range cfg.AllowedPorts {
-			if int(p) == lp {
-				found = true
-				break
-			}
-		}
-		if !found {
-			cfg.AllowedPorts = append([]uint{uint(lp)}, cfg.AllowedPorts...)
-		}
 	}
 }
 
@@ -2110,7 +2083,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
 			}
 		}
-		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
+		cfg.Genesis.Config.TerminalTotalDifficulty = uint256.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
 		zero := uint64(0)
 		cfg.Genesis.Config.ShanghaiTime = &zero
