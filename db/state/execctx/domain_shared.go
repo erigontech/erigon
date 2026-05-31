@@ -158,6 +158,14 @@ type SharedDomains struct {
 	// (now tx-granular) at sd.Flush time, and delete this Mutex + the
 	// SetChangesetAccumulator/GetChangesetAccumulator API entirely.
 	changesetMu sync.Mutex
+
+	// parallelCommitment is true when the trie variant is the concurrent
+	// one — only then does the calculator goroutine run and only then is
+	// changesetMu actually contended. With single-threaded commitment, the
+	// Lock/Unlock in the per-domain-write hot path is pure uncontended
+	// overhead (no other goroutine ever takes the Mutex). We gate the
+	// hot-path Lock/Unlock on this flag.
+	parallelCommitment bool
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -175,8 +183,9 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
-		stepSize: tx.Debug().StepSize(),
+		metrics:            changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
+		stepSize:           tx.Debug().StepSize(),
+		parallelCommitment: tv == commitment.VariantConcurrentHexPatricia,
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -313,7 +322,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return sd.domainPutNoLock(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
 
-	if !lockHeld {
+	if !lockHeld && sd.parallelCommitment {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
@@ -433,6 +442,10 @@ func (sd *SharedDomains) UnlockChangesetAccumulator() { sd.changesetMu.Unlock() 
 // changesetMu internally for the brief write — concurrent apply/calc
 // paths cannot torn-write or torn-read this pointer.
 func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
+	if !sd.parallelCommitment {
+		sd.mem.(accHolder).SetChangesetAccumulator(acc)
+		return
+	}
 	sd.changesetMu.Lock()
 	sd.mem.(accHolder).SetChangesetAccumulator(acc)
 	sd.changesetMu.Unlock()
@@ -450,8 +463,10 @@ func (sd *SharedDomains) SetChangesetAccumulatorLocked(acc *changeset.StateChang
 // none is installed. Locks changesetMu internally — must NOT be called
 // while already holding the lock (use GetChangesetAccumulatorLocked).
 func (sd *SharedDomains) GetChangesetAccumulator() *changeset.StateChangeSet {
-	sd.changesetMu.Lock()
-	defer sd.changesetMu.Unlock()
+	if sd.parallelCommitment {
+		sd.changesetMu.Lock()
+		defer sd.changesetMu.Unlock()
+	}
 	if h, ok := sd.mem.(changesetSwitcher); ok {
 		return h.GetChangesetAccumulator()
 	}
@@ -862,12 +877,12 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// Serialize against the calculator's accumulator-swap window — see
 	// changesetMu doc on the SharedDomains struct. Skipped when the caller
 	// already holds changesetMu (lockHeld=true, the FlushPendingUpdates
-	// path), and currently also for CommitmentDomain — those writes
-	// originate exclusively from the calculator's compute, which holds
-	// changesetMu via LockChangesetAccumulator (re-acquiring would
-	// self-deadlock). All other domains are written by the apply goroutine
-	// and need to serialize against the swap.
-	if !lockHeld && domain != kv.CommitmentDomain {
+	// path), for CommitmentDomain (writes originate exclusively from the
+	// calculator's compute, which holds changesetMu via
+	// LockChangesetAccumulator — re-acquiring would self-deadlock), and
+	// when parallel commitment is disabled (no calculator goroutine, so
+	// the Mutex is uncontended and the cost is pure overhead).
+	if !lockHeld && domain != kv.CommitmentDomain && sd.parallelCommitment {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
@@ -906,9 +921,13 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			sd.stateCache.Delete(kv.AccountsDomain, k)
 			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
-		// AccountsDomain — apply-side. Serialize against swap window.
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
+		// AccountsDomain — apply-side. Serialize against swap window when
+		// parallel commitment is active (otherwise no other goroutine
+		// contends the lock).
+		if sd.parallelCommitment {
+			sd.changesetMu.Lock()
+			defer sd.changesetMu.Unlock()
+		}
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
 		// Remove from state cache when storage is deleted
@@ -927,8 +946,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		//noop
 	}
 	// Serialize against the calculator's swap window for non-commitment
-	// domains; CommitmentDomain skipped — see DomainPut comment.
-	if domain != kv.CommitmentDomain {
+	// domains when parallel commitment is active; CommitmentDomain skipped —
+	// see DomainPut comment.
+	if domain != kv.CommitmentDomain && sd.parallelCommitment {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
