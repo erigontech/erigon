@@ -258,7 +258,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"commitment", times.ComputeCommitment,
 			)
 			stateCache.PrintStatsAndReset()
-			if isBatchFull && blockNum != maxBlockNum {
+			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
 		}
@@ -288,9 +288,11 @@ func (se *serialExecutor) LogExecution() {
 	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	se.committedGas.Add(int64(committedGas))
+	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
 	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	se.progress.LogCommitments(se.rs.StateV3, se, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
@@ -380,6 +382,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
+				if sc := se.doms.GetStateCache(); sc != nil {
+					ibs.SetStateCache(sc)
+				}
 				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -402,6 +407,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
 					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
 					priorIbs := state.New(reader)
+					if sc := se.doms.GetStateCache(); sc != nil {
+						priorIbs.SetStateCache(sc)
+					}
 					defer priorIbs.Release(true)
 					priorGp := protocol.NewGasPool(txTask.Header.GasLimit, se.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
 					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {

@@ -22,8 +22,8 @@ func filterWritesByVersionMap(collectorWrites, vmWrites state.VersionedWrites) s
 	}
 	vmSet := make(map[[20]byte]map[pathKey]struct{}, len(vmWrites))
 	for _, w := range vmWrites {
-		addrVal := w.Address.Value()
-		pk := pathKey{path: w.Path, key: w.Key.Value()}
+		addrVal := w.Header().Address.Value()
+		pk := pathKey{path: w.Header().Path, key: w.Header().Key.Value()}
 		if m, ok := vmSet[addrVal]; ok {
 			m[pk] = struct{}{}
 		} else {
@@ -33,8 +33,8 @@ func filterWritesByVersionMap(collectorWrites, vmWrites state.VersionedWrites) s
 
 	filtered := make(state.VersionedWrites, 0, len(collectorWrites))
 	for _, w := range collectorWrites {
-		addrVal := w.Address.Value()
-		pk := pathKey{path: w.Path, key: w.Key.Value()}
+		addrVal := w.Header().Address.Value()
+		pk := pathKey{path: w.Header().Path, key: w.Header().Key.Value()}
 		if m, ok := vmSet[addrVal]; ok {
 			if _, ok := m[pk]; ok {
 				filtered = append(filtered, w)

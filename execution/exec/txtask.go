@@ -111,9 +111,8 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms        map[accounts.Address]struct{}
-	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses state.AccessSet
+	TraceFroms map[accounts.Address]struct{}
+	TraceTos   map[accounts.Address]struct{}
 
 	// CollectorWrites holds collector-format writes (all 4 account fields per
 	// address) produced by MakeWriteSet during worker execution. Used by the
@@ -388,34 +387,7 @@ func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	if t.gasPool != nil {
-		return t.gasPool
-	}
-	// Parallel exec paths never set the per-task gas pool because workers
-	// cannot safely share the block pool (SubGas is a write — concurrent
-	// workers would race on speculative tx depletion). The shared block
-	// pool is consumed in the post-execution validation loop.
-	//
-	// Returning nil here would make preCheck's CheckBlockGasInclusion
-	// silently no-op (gp==nil short-circuit), so a tx whose gas exceeds
-	// the block limit slips past that check and fails on the next one in
-	// preCheck order (CheckEip1559TxGasFeeCap → ErrFeeCapTooLow when
-	// feeCap < baseFee). Serial returns ErrGasLimitReached for the same
-	// tx; the eest engine matrix asserts the serial error variant and
-	// rejects the parallel one (issue surfaced on PR #21017's
-	// hive-eest parallel legs as GAS_ALLOWANCE_EXCEEDED vs
-	// INSUFFICIENT_MAX_FEE_PER_GAS).
-	//
-	// Hand out a fresh per-invocation pool sized to the block gas limit
-	// so CheckBlockGasInclusion fires for the "tx alone exceeds the block
-	// limit" case (pool depletion across multiple txs is still caught
-	// post-execution by the validation loop against the shared pool).
-	// Each Execute call gets its own pool, so retries at higher
-	// incarnations start with a fresh budget.
-	if t.Header == nil || t.Config == nil {
-		return nil
-	}
-	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
+	return t.gasPool
 }
 
 func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
@@ -621,7 +593,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			panic(err)
 		}
 
-		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}
@@ -681,7 +652,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	if len(result.ValidationResults) == 0 {
 		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
-		return &result
 	}
 
 	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier

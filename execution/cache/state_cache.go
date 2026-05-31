@@ -24,7 +24,15 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// PutCode is a pass-through used by the typed-vio code path: it packages
+// (hash, code) into accounts.Code without caching, so the typed WriteCell[T]
+// for CodePath compiles independently of the weak-pointer code-cache landing.
+func (c *StateCache) PutCode(hash accounts.CodeHash, code []byte) accounts.Code {
+	return accounts.Code{Hash: hash, Bytes: code}
+}
 
 const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (1 GB)

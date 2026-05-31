@@ -471,3 +471,10 @@ func TraceDomain(domain uint16) bool {
 	_, ok := tracedDomains[domain]
 	return ok
 }
+
+// BAL-driven commitment debug knobs — stubbed for the vio restructure that
+// doesn't need them. Real values land with the BAL-commitment work.
+var (
+	BALDrivenCommitment = false
+	BALShadowCompute    = false
+)

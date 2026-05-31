@@ -20,7 +20,6 @@
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -34,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -48,12 +47,6 @@ var stateObjectPool = sync.Pool{
 			dirtyStorage:       make(Storage),
 		}
 	},
-}
-
-type Code []byte
-
-func (c Code) String() string {
-	return string(c) //strings.Join(Disassemble(c), " ")
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
@@ -84,7 +77,7 @@ type stateObject struct {
 
 	// Write caches.
 	//trie Trie // storage trie, which becomes non-nil on first access
-	code Code // contract bytecode, which gets set when code is loaded
+	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
 	// blockOriginStorage keeps the values of storage items at the beginning of the block
@@ -127,7 +120,7 @@ func (so *stateObject) release() {
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
 	so.original = accounts.Account{}
-	so.code = nil
+	so.code = accounts.Code{}
 	clear(so.originStorage)
 	clear(so.blockOriginStorage)
 	clear(so.dirtyStorage)
@@ -237,18 +230,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var source ReadSource
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, source, _, err = versionedRead(so.db, so.address, StoragePath, key, false, u256.N0,
-		func(v uint256.Int) uint256.Int {
-			return v
-		},
-		func(s *stateObject) (uint256.Int, error) {
-			var value uint256.Int
-			if s != nil && !s.deleted {
-				value, commited = s.GetState(key)
-			}
-			return value, nil
-		})
-
+	prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
 	if err != nil {
 		return false, err
 	}
@@ -265,7 +247,21 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	}
 
 	if !force && source != UnknownSource && prev == value {
+		commitment.RecordSstoreNoop()
 		return false, nil
+	}
+
+	// SSTORE classification — measurement scaffolding to size the value of
+	// pushing insert/update/delete information down to the warmer / trie
+	// compute (would let those layers skip xorfilter / verify-by-compare
+	// when the operation is known to be a UPDATE on an existing branch).
+	switch {
+	case prev.IsZero() && !value.IsZero():
+		commitment.RecordSstoreInsert()
+	case !prev.IsZero() && value.IsZero():
+		commitment.RecordSstoreDelete()
+	default:
+		commitment.RecordSstoreUpdate()
 	}
 
 	// New value is different, update and journal the change
@@ -276,9 +272,15 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		wasCommited: commited,
 	})
 
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
-		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
-	}
+	// OnStorageChange is fired by the caller at the actual SSTORE PC
+	// (opSstore in execution/vm/instructions.go), not here.  Firing
+	// here would either misorder (the slot-cache flush path batches
+	// all SSTOREs at outer-frame return — they would appear in a
+	// trace at the end, not at the opcode) or double-fire (with the
+	// in-opcode fire from opSstore).  Other SetState callers
+	// (genesis init, RPC state-overrides, EIP-2935 system write,
+	// debug fake-storage) are pre-EVM or non-traced contexts that
+	// don't expect a tracer hook.
 	so.setState(key, value)
 
 	return true, nil
@@ -407,23 +409,32 @@ func (so *stateObject) Address() accounts.Address {
 
 // Code returns the contract code associated with this object, if any.
 func (so *stateObject) Code() ([]byte, error) {
-	if so.code != nil {
+	c, err := so.CodeTyped()
+	if err != nil {
+		return nil, err
+	}
+	return c.Bytes, nil
+}
+
+// CodeTyped returns the contract code as an accounts.Code carrying the
+// interned CodeHash alongside the bytes. Prefer this over Code() when the
+// caller needs the hash too — saves a Keccak.
+func (so *stateObject) CodeTyped() (accounts.Code, error) {
+	if so.code.Bytes != nil {
 		return so.code, nil
 	}
 	if so.data.CodeHash.IsEmpty() {
-		return nil, nil
+		return accounts.Code{Hash: so.data.CodeHash}, nil
 	}
 
 	// When a versionMap is present (parallel execution), check for CodePath
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		rr := so.db.versionMap.Read(so.address, CodePath, accounts.NilKey, so.db.txIndex)
-		if rr.Status() == MVReadResultDone {
-			if code, ok := rr.Value().([]byte); ok {
-				so.code = code
-				return code, nil
-			}
+		if code, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
+			c := so.db.stateCache.PutCode(so.data.CodeHash, code)
+			so.code = c
+			return c, nil
 		}
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
@@ -441,40 +452,41 @@ func (so *stateObject) Code() ([]byte, error) {
 	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {
-		return nil, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
+		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
-	so.code = code
-	return code, nil
+	c := so.db.stateCache.PutCode(so.data.CodeHash, code)
+	so.code = c
+	return c, nil
 }
 
-func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool, reason tracing.CodeChangeReason) (bool, error) {
-	prevcode, err := so.Code()
+func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) (bool, error) {
+	prev, err := so.CodeTyped()
 	if err != nil {
 		return false, err
 	}
 
-	if bytes.Equal(prevcode, code) {
+	if prev.Hash == code.Hash {
 		return false, nil
 	}
 
 	so.db.journal.append(codeChange{
 		account:     so.address,
 		prevhash:    so.data.CodeHash,
-		prevcode:    prevcode,
+		prevcode:    prev.Bytes,
 		wasCommited: wasCommited,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChangeV2 != nil {
-		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prevcode, codeHash, code, reason)
+		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes, reason)
 	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
-		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
+		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes)
 	}
-	so.setCode(codeHash, code)
+	so.setCode(code)
 	return true, nil
 }
 
-func (so *stateObject) setCode(codeHash accounts.CodeHash, code []byte) {
+func (so *stateObject) setCode(code accounts.Code) {
 	so.code = code
-	so.data.CodeHash = codeHash
+	so.data.CodeHash = code.Hash
 	so.dirtyCode = true
 }
 
