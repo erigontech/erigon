@@ -762,6 +762,38 @@ func (a *accessedState) isEmpty() bool {
 	return len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0
 }
 
+// touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
+// skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
+func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
+	for addr := range a.Addresses {
+		plainKey := addr[:]
+		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
+			if len(preEnc) == 0 {
+				continue
+			}
+		}
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+	}
+	for addr := range a.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			plainKey := append(addr[:], key[:]...)
+			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
+			if len(postEnc) == 0 {
+				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
+				if len(preEnc) == 0 {
+					continue
+				}
+			}
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+		}
+	}
+}
+
 // touchAll touches every accessed account, storage slot, and code address on the
 // commitment context. Order matches the original inline implementation: accounts
 // first, then storage, then code.
@@ -995,10 +1027,10 @@ func detectCollapseSiblings(
 			blockNum, seekBlockNum, parentNum)
 	}
 
-	accessed.touchAll(sdCtx)
+	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -1119,9 +1151,9 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 }
 
 // collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
-// pre-state and resolve BLOCKHASH lookups. The parent header is always included
-// first; remaining entries come from blocks accessed via the BLOCKHASH opcode and
-// are deduplicated against the parent and each other via byNumber.
+// pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
+// from the parent back to the oldest block reached via the BLOCKHASH opcode, so
+// each header can be validated against the next one's parentHash.
 func (api *DebugAPIImpl) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1148,12 +1180,18 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 		return nil
 	}
 
-	if err := addHeader(parentNum); err != nil {
-		return nil, nil, err
-	}
+	oldest := parentNum
 	for _, bn := range accessedBlockNums {
+		if bn < oldest {
+			oldest = bn
+		}
+	}
+	for bn := parentNum; ; bn-- {
 		if err := addHeader(bn); err != nil {
 			return nil, nil, err
+		}
+		if bn == oldest {
+			break
 		}
 	}
 
