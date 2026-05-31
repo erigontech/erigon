@@ -1,11 +1,11 @@
 ---
-title: "Sync Modes"
-description: "Full, minimal, blocks, and archive sync explained — choose the right mode for your use case."
+title: "Prune Modes"
+description: "Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case."
 sidebar_position: 2
 ---
 
 
-# Sync Modes
+# Prune Modes
 
 Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
