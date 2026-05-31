@@ -515,6 +515,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice.
+	// Set by PruneFn when it rolls back roTx (catchup); read by CommitCycle.
+	var pruneRolledBackRoTx bool
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		FirstCycle:   false,
@@ -531,14 +533,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
+			pruneRolledBackRoTx = true
 			if _, pruneErr := e.runForkchoicePrune(fcuBlockNum); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			return nil
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			// Chain tip: post-RunLoop path commits.
-			if !initialCycle {
+			// Chain tip: post-RunLoop path commits. But if the prune path rolled
+			// back roTx (catchup), recreate the overlay here even when initialCycle
+			// is false, otherwise the post-RunLoop reads hit a rolled-back tx.
+			rolledBack := pruneRolledBackRoTx
+			pruneRolledBackRoTx = false
+			if !initialCycle && !rolledBack {
 				return nil, nil
 			}
 			commitRwTx, err := e.db.BeginTemporalRw(ctx)
