@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -259,6 +260,11 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		if slices.Contains(stagesList, stages.Finish) {
+			if err := rawdb.DeleteTipReached(tx); err != nil {
+				return err
+			}
+		}
 		for _, st := range stagesList {
 			if err := backup.ClearTables(ctx, tx, Tables[st]...); err != nil {
 				return err

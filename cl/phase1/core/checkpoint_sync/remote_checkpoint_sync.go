@@ -49,7 +49,7 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		return nil, errors.New("no uris for checkpoint sync")
 	}
 
-	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
+	fetchBeaconState := func(uri string) (_ *state.CachingBeaconState, err error) {
 		uri = normalizeCheckpointURL(uri)
 
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
@@ -67,7 +67,9 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 			return nil, err
 		}
 		defer func() {
-			err = resp.Body.Close()
+			if cerr := resp.Body.Close(); err == nil {
+				err = cerr
+			}
 		}()
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", resp.StatusCode)
@@ -136,6 +138,12 @@ func (r *RemoteCheckpointSync) GetHeadExecutionBlockNumber(ctx context.Context) 
 		return 0, false, errors.New("no uris for checkpoint sync")
 	}
 
+	// Best-effort hint: bound the total time across all endpoints with one
+	// overall deadline so a slow or dead endpoint can't add r.timeout × len(uris)
+	// of latency to startup.
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+
 	var lastErr error
 	for _, checkpointURI := range uris {
 		blockURI, err := headBlockURI(checkpointURI)
@@ -153,11 +161,8 @@ func (r *RemoteCheckpointSync) GetHeadExecutionBlockNumber(ctx context.Context) 
 	return 0, false, lastErr
 }
 
-func (r *RemoteCheckpointSync) fetchHeadExecutionBlockNumber(ctx context.Context, uri string) (uint64, error) {
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctxWithTimeout, http.MethodGet, uri, nil)
+func (r *RemoteCheckpointSync) fetchHeadExecutionBlockNumber(ctx context.Context, uri string) (_ uint64, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -168,7 +173,9 @@ func (r *RemoteCheckpointSync) fetchHeadExecutionBlockNumber(ctx context.Context
 		return 0, err
 	}
 	defer func() {
-		err = resp.Body.Close()
+		if cerr := resp.Body.Close(); err == nil {
+			err = cerr
+		}
 	}()
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("head beacon block request failed, bad status code %d", resp.StatusCode)
@@ -200,6 +207,9 @@ func (r *RemoteCheckpointSync) fetchHeadExecutionBlockNumber(ctx context.Context
 	return 0, errors.New("head beacon block has no execution payload block number")
 }
 
+// headBlockURI derives the head beacon-block URL from a checkpoint-sync state
+// URL on the same server, assuming the standard …/eth/v2/ Beacon API layout
+// (…/eth/v2/debug/beacon/states/finalized → …/eth/v2/beacon/blocks/head).
 func headBlockURI(checkpointURI string) (string, error) {
 	u, err := url.Parse(checkpointURI)
 	if err != nil {

@@ -135,6 +135,6 @@ agentspecs/
 # ralphex progress logs
 .ralphex/progress/
 
-gocache
 .gomodcache
 _artifacts
+gocache

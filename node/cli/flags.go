@@ -121,7 +121,7 @@ var (
 
 	SyncInitialCycleBlockTTLFlag = cli.Uint64Flag{
 		Name:  "sync.initial-cycle-block-ttl",
-		Usage: "Sets the block window for treating a recently synced node as past the initial sync cycle",
+		Usage: "Block window for treating a recently synced node as past the initial sync cycle. Default 1024 (~3h on mainnet) balances not reusing stale fast-pipeline mode after long downtime against not penalizing brief restarts; lower it (e.g. 1) to always furious-prune",
 		Value: ethconfig.Defaults.Sync.InitialCycleBlockTTL,
 	}
 

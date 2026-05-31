@@ -111,8 +111,14 @@ func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
 	if blockNum == 0 {
 		return
 	}
-	if cur := pe.knownTipHint.Load(); blockNum > cur {
-		pe.knownTipHint.Store(blockNum)
+	for {
+		cur := pe.knownTipHint.Load()
+		if blockNum <= cur {
+			return
+		}
+		if pe.knownTipHint.CompareAndSwap(cur, blockNum) {
+			return
+		}
 	}
 }
 
@@ -254,7 +260,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
-		if err := stagedsync.UpdateTipReached(tx, pe.blockReader.FrozenBlocks()); err != nil {
+		if err := stagedsync.UpdateTipReached(tx, pe.blockReader.FrozenBlocks(), pe.KnownTipHint()); err != nil {
 			return err
 		}
 		return tx.Commit()

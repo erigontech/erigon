@@ -518,7 +518,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
-			if _, pruneErr := e.runForkchoicePrune(pruneInitialCycle, fcuBlockNum); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+			if _, pruneErr := e.runForkchoicePrune(fcuBlockNum); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			return nil
@@ -676,7 +676,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
 				// defer is a safety net — Rollback is idempotent.
 				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle, fcuBlockNum)
+				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, fcuBlockNum)
 				if err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}
@@ -702,7 +702,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if !e.fcuBackgroundCommit {
 			if e.fcuBackgroundPrune {
 				go func() {
-					pruneTimings, err := e.runForkchoicePrune(initialCycle, fcuBlockNum)
+					pruneTimings, err := e.runForkchoicePrune(fcuBlockNum)
 					if err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)
 					}
@@ -714,7 +714,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 					}
 				}()
 			} else {
-				pruneTimings, err := e.runForkchoicePrune(initialCycle, fcuBlockNum)
+				pruneTimings, err := e.runForkchoicePrune(fcuBlockNum)
 				if err != nil {
 					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 				}
@@ -739,7 +739,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 // runPostForkchoice runs flush+commit+UpdateHead+prune in a background goroutine.
 // Notifications have already been dispatched inline from the overlay.
-func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.TemporalTx, finishProgressBefore uint64, isSynced bool, initialCycle bool, fcuBlockNum uint64) error {
+func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.TemporalTx, finishProgressBefore uint64, isSynced bool, fcuBlockNum uint64) error {
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
 		commitTimings, err := e.runForkchoiceFlushCommit(sd, bgRoTx, finishProgressBefore, isSynced)
@@ -749,7 +749,7 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.Temp
 		timings = append(timings, commitTimings...)
 	}
 	if e.fcuBackgroundPrune {
-		pruneTimings, err := e.runForkchoicePrune(initialCycle, fcuBlockNum)
+		pruneTimings, err := e.runForkchoicePrune(fcuBlockNum)
 		if err != nil {
 			return err
 		}
@@ -884,10 +884,10 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	return timings, nil
 }
 
-func (e *ExecModule) runForkchoicePrune(initialCycle bool, fcuBlockNum uint64) ([]any, error) {
-	var timings []any
+func (e *ExecModule) runForkchoicePrune(fcuBlockNum uint64) ([]any, error) {
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
+	pruneInitialCycle := false
 
 	// Kick collation (build files) + prune via the same path that
 	// stageloop.StageLoopIteration uses. Without this call from the FCU
@@ -908,22 +908,19 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool, fcuBlockNum uint64) (
 				pruneTimeout = maxTimeout
 			}
 			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
-				pruneInitialCycle, err := stagedsync.IsInitialCycle(tx, e.syncCfg, e.blockReader.FrozenBlocks(), fcuBlockNum)
+				ic, err := stagedsync.IsInitialCycle(tx, e.syncCfg, e.blockReader.FrozenBlocks(), fcuBlockNum)
 				if err != nil {
 					return err
 				}
-				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, pruneInitialCycle, pruneTimeout)
+				pruneInitialCycle = ic
+				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, ic, pruneTimeout)
 			}, e.logger); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
-	if len(timings) > 0 {
-		timings = append(timings, "initialCycle", initialCycle)
-	}
-	return timings, nil
+	return []any{"prune", common.Round(time.Since(pruneStart), 0), "initialCycle", pruneInitialCycle}, nil
 }
 
 func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {

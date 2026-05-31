@@ -86,8 +86,15 @@ func TestRemoteCheckpointSyncHeadExecutionBlockNumber(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
+	prevURLs := clparams.ConfigurableCheckpointsURLs
+	t.Cleanup(func() { clparams.ConfigurableCheckpointsURLs = prevURLs })
 	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL + "/eth/v2/debug/beacon/states/finalized"}
-	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, time.Second}
+
+	syncer := &RemoteCheckpointSync{
+		beaconConfig: &clparams.MainnetBeaconConfig,
+		net:          chainspec.MainnetChainID,
+		timeout:      time.Second,
+	}
 	actualBlockNumber, ok, err := syncer.GetHeadExecutionBlockNumber(context.Background())
 	require.NoError(t, err)
 	require.True(t, ok)

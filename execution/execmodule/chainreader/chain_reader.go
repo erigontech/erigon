@@ -60,7 +60,7 @@ func (c ChainReaderWriterEth1) Config() *chain.Config {
 }
 
 func (c ChainReaderWriterEth1) SetKnownTipHint(blockNum uint64) {
-	if receiver, ok := c.executionModule.(execmodule.KnownTipHintReceiver); ok {
+	if receiver, ok := c.executionModule.(execmodule.ExecKnownTipHintReceiver); ok {
 		receiver.SetKnownTipHint(blockNum)
 	}
 }

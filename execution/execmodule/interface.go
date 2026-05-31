@@ -101,11 +101,11 @@ type AssembledBlockResult struct {
 	BlockValue *uint256.Int
 }
 
-// KnownTipHintReceiver is an optional capability of an ExecutionModule. The
+// ExecKnownTipHintReceiver is an optional capability of an ExecutionModule. The
 // hint is propagated by Caplin at startup via SetKnownTipHint and used to
 // decide IsInitialCycle before the staged sync pipeline has had a chance to
 // advance Headers progress.
-type KnownTipHintReceiver interface {
+type ExecKnownTipHintReceiver interface {
 	SetKnownTipHint(blockNum uint64)
 }
 
