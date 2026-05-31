@@ -3098,9 +3098,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	return nil, nil
 }
 
-// emitSchedTimeline writes one log line per block carrying the per-tx worker
-// start+duration timestamps (relative to the block's min start) so that the
-// concurrency-over-block-time curve can be reconstructed offline.
 func (be *blockExecutor) emitSchedTimeline() {
 	type entry struct {
 		idx        int

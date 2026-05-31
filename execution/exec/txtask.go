@@ -120,8 +120,6 @@ type TxResult struct {
 	// adjustments are applied directly to these writes.
 	CollectorWrites state.VersionedWrites
 
-	// SchedStartedNs / SchedFinishedNs bracket the worker's own execution of this
-	// task in monotonic ns; populated only when dbg.SchedTimeline is enabled.
 	SchedStartedNs  int64
 	SchedFinishedNs int64
 }
