@@ -27,6 +27,10 @@ DISABLED_TEST_LIST=(
   eth_getTransactionByHash/test_02.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
+  # Temporarily disabled: test_11 and test_12 expect behavior from PR #21423 (move coinbase/burnt tip credit)
+  # which has not been backported to release/3.4 yet. Re-enable once backport lands.
+  ots_searchTransactionsAfter/test_11.json
+  ots_searchTransactionsAfter/test_12.json
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
