@@ -103,6 +103,86 @@ func TestWipeWritableShadowPast_NonAligned_BoundaryStepReplay(t *testing.T) {
 	}
 }
 
+// TestWipeWritableShadowPast_NonAligned_RestoresEarlierValue pins
+// G3.15's missing case: a key was written EARLIER in the boundary
+// step (value V1, txnum ≤ lastTxNum) AND modified LATER in the same
+// step (value V2, txnum > lastTxNum). Post-wipe, the latest value
+// must be V1 (as-of lastTxNum), NOT V2 (post-target value), NOT nil
+// (the simpler "didn't-exist-yet" case).
+//
+// Live symptom: forward exec post-mode-B failed with gas mismatch
+// on the first new block. Hypothesis: the boundary-step diff-replay
+// either skipped this category of key, or wrote V2 (or nil) instead
+// of V1, leaving the writable shadow in a state where exec reads the
+// wrong account value.
+//
+// Setup (stepSize=8, lastTxNum=5 → boundary step 0 covers txnums 0..7):
+//   - acc1 written at txnum 3 with nonce=1 (≤ lastTxNum, should be the
+//     "as-of lastTxNum" value)
+//   - acc1 written AGAIN at txnum 6 with nonce=2 (> lastTxNum, should
+//     be undone by the wipe)
+//
+// Expectation: post-wipe, GetLatest(acc1) returns the nonce=1
+// account, not nonce=2 and not empty.
+func TestWipeWritableShadowPast_NonAligned_RestoresEarlierValue(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	acc1Addr := [20]byte{1}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+
+		writeAcc := func(txNum, nonce uint64) {
+			acc := accounts.Account{
+				Nonce:    nonce,
+				Balance:  *uint256.NewInt(nonce * 100),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			domains.SetTxNum(txNum)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, acc1Addr[:], buf, txNum, nil))
+		}
+
+		writeAcc(3, 1) // step 0, txnum 3 ≤ lastTxNum=5 → this is the as-of value
+		writeAcc(6, 2) // step 0, txnum 6 > lastTxNum=5 → must be undone
+
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 5))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		raw := getLatestAccount(t, roTx, acc1Addr)
+		require.NotEmpty(t, raw,
+			"G3.15: acc1 had a value at txnum 3 ≤ lastTxNum=5; the wipe must restore it, not delete it")
+
+		var got accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&got, raw))
+		require.Equal(t, uint64(1), got.Nonce,
+			"G3.15: post-wipe value must be the as-of-lastTxNum value (nonce=1, written at txnum 3), NOT the post-target write (nonce=2, written at txnum 6)")
+	}
+}
+
 // TestWipeWritableShadowPast_ClearsValuesPastBoundary pins the per-tx
 // contract: after wipe past lastTxNum, no writable-shadow entry covers
 // any txnum > lastTxNum, regardless of which step that txnum sits in.

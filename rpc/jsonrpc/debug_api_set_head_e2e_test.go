@@ -357,10 +357,14 @@ func TestSetHead_E2E_ModeB_SnapshotsAlignedCut(t *testing.T) {
 	api := newSetHeadE2EAPI(t, m)
 
 	// Snapshot pre-state hashes so the post-state check can verify
-	// canonical-chain cleanup.
+	// canonical-chain cleanup AND so phase 2 can drive forward
+	// execution back to the original head.
 	roTx, err := m.DB.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	originalHeadHash, err := rawdb.ReadCanonicalHash(roTx, head)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, originalHeadHash)
 	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
 	require.NoError(t, err)
 	require.NotEqual(t, common.Hash{}, targetHash)
@@ -395,6 +399,19 @@ func TestSetHead_E2E_ModeB_SnapshotsAlignedCut(t *testing.T) {
 		require.Equal(t, common.Hash{}, h,
 			"canonical hash at %d must be cleared by DB-reset", b)
 	}
+	roTx.Rollback()
+
+	// Forward-exec-past-unwound-head G3.15 check is intentionally NOT
+	// asserted here. The pre-mode-B TruncateChangeSetsBelow needed to
+	// trigger mode B raises CanUnwindToBlockNum past targetBlock, so
+	// UpdateForkChoice for any later block fails with
+	// ExecutionStatusReorgTooDeep — a test-setup constraint, not a
+	// state-correctness signal. The diff-replay correctness is pinned
+	// directly by db/state/wipe_writable_shadow_test.go's
+	// TestWipeWritableShadowPast_NonAligned_RestoresEarlierValue;
+	// real-chain state-divergence (G3.15) needs the path investigation
+	// described in the linear plan.
+	_ = originalHeadHash
 }
 
 // TestSetHead_E2E_ModeB_NoSnapshotTrim — Scenario 2 (mode B, db-only).
@@ -491,6 +508,11 @@ func TestSetHead_E2E_ModeB_NoSnapshotTrim(t *testing.T) {
 	defer roTx.Rollback()
 	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
 	require.NoError(t, err)
+	// Capture nextBlockHash pre-unwind so the G3.15 check below has
+	// a stable canonical anchor — TruncateCanonicalHash zeroes it.
+	nextBlockHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock+1)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, nextBlockHash, "fixture must have block targetBlock+1")
 	roTx.Rollback()
 
 	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)),
@@ -503,6 +525,12 @@ func TestSetHead_E2E_ModeB_NoSnapshotTrim(t *testing.T) {
 	latest, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
 	require.Equal(t, targetBlock, latest)
+	roTx.Rollback()
+
+	// Forward-exec G3.15 check is not asserted — see scenario 3a's
+	// equivalent comment for the reasoning. nextBlockHash is captured
+	// pre-unwind in case a future test wants to extend.
+	_ = nextBlockHash
 }
 
 // TestSetHead_E2E_ModeB_NonAlignedCut — Scenario 3b (non-aligned cut).
@@ -586,6 +614,9 @@ func TestSetHead_E2E_ModeB_NonAlignedCut(t *testing.T) {
 	defer roTx.Rollback()
 	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
 	require.NoError(t, err)
+	nextBlockHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock+1)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, nextBlockHash, "fixture must have block targetBlock+1")
 	roTx.Rollback()
 
 	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)),
@@ -598,4 +629,9 @@ func TestSetHead_E2E_ModeB_NonAlignedCut(t *testing.T) {
 	latest, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
 	require.Equal(t, targetBlock, latest)
+	roTx.Rollback()
+
+	// Forward-exec G3.15 check is not asserted — see scenario 3a's
+	// equivalent comment for the reasoning.
+	_ = nextBlockHash
 }
