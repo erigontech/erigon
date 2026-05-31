@@ -211,6 +211,22 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.version = sdVersion
 				return
 			}
+			// For StoragePath: the pre-SD storage was wiped — a fresh contract
+			// reads zero. Only fall through if the current tx has its OWN
+			// post-SD storage write for this slot (handled by versionedWriteHit
+			// below). Otherwise the stale pre-SD versionMap value would surface.
+			if path == StoragePath {
+				if _, ok := s.versionedWrites.GetStorage(addr, key); !ok {
+					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
+						Val:        true,
+					})
+					r.outcome = outcomeReturnZero
+					r.source = MapRead
+					r.version = sdVersion
+					return
+				}
+			}
 			if sd, ok := s.versionedWriteSelfDestruct(addr); !ok || sd {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
