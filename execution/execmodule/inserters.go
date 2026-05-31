@@ -55,9 +55,15 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	defer insertBlocksDuration.ObserveDuration(time.Now())
-	if !e.semaphore.TryAcquire(1) {
-		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
-		return ExecutionStatusBusy, nil
+	// Block until the executor's serialization semaphore frees up. The
+	// previous TryAcquire-or-return-Busy pattern relied on the caller's
+	// 100 ms retry loop in InsertBlocksAndWaitWithAccessLists, which added
+	// up to 100 ms of latency every time the executor was briefly busy on
+	// the engine_newPayload hot path. Acquire(ctx, 1) is equivalent to
+	// "channel-notify when the previous insert completes" — the semaphore's
+	// internal wait queue does the wakeup without any sleep / poll.
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
 	e.forkValidator.ClearWithUnwind()

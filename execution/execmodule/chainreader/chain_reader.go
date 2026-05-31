@@ -220,24 +220,18 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 // accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
 func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
 	rawBlocks := blocksToRaw(blocks, accessLists)
-	for {
-		status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
-		if err != nil {
-			return err
-		}
-		if status != execmodule.ExecutionStatusBusy {
-			if status != execmodule.ExecutionStatusSuccess {
-				return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", status)
-			}
-			return nil
-		}
-		const retryDelay = 100 * time.Millisecond
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	// executionModule.InsertBlocks now blocks on its internal semaphore
+	// when the previous insert is still in flight (channel-notify style),
+	// so we no longer need the 100 ms retry-on-Busy loop here. The earlier
+	// busy-wait was the dominant tail-latency spike on a saturated tip.
+	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
+	if err != nil {
+		return err
 	}
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", status)
+	}
+	return nil
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
