@@ -795,6 +795,13 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
+	// rawTransactions caches the on-wire RLP encoding of each transaction
+	// when the Block was constructed from already-encoded bytes (e.g. an
+	// engine_newPayload payload). Lets RawBody() skip the per-tx
+	// rlp.EncodeToBytes round-trip when the bytes are already available.
+	// nil means "no cache" — callers must encode on demand.
+	rawTransactions [][]byte
+
 	// caches
 	size atomic.Uint64
 }
@@ -1131,6 +1138,17 @@ func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, un
 	return b
 }
 
+// NewBlockFromStorageWithRawTxs is NewBlockFromStorage plus a caller-supplied
+// raw-RLP cache of the transactions. RawBody() returns these bytes directly
+// instead of re-encoding the decoded transactions — saves one RLP encode pass
+// on the engine_newPayload entry path where the CL hands us raw-RLP txs that
+// we then decode for validation. The raw-txs slice length must match txs.
+func NewBlockFromStorageWithRawTxs(hash common.Hash, header *Header, txs []Transaction, rawTxs [][]byte, uncles []*Header, withdrawals []*Withdrawal) *Block {
+	header.hash.Store(&hash)
+	b := &Block{header: header, transactions: txs, rawTransactions: rawTxs, uncles: uncles, withdrawals: withdrawals}
+	return b
+}
+
 // NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
@@ -1368,6 +1386,13 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
+	// Use the rawTransactions cache when present (e.g. engine_newPayload
+	// constructed this Block from already-RLP-encoded txs) to skip the
+	// per-tx rlp.EncodeToBytes round-trip.
+	if len(b.rawTransactions) == len(b.transactions) {
+		copy(br.Transactions, b.rawTransactions)
+		return br
+	}
 	for i, txn := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)
