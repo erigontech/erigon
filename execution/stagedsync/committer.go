@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -179,6 +180,7 @@ func (cc *commitmentCalculator) Stop() {
 }
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer cc.wg.Done()
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
