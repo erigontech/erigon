@@ -796,6 +796,17 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 	return &TrieContext{stateReader: reader, stepSize: stepSize}
 }
 
+// NewTrieContextWithBranchCollector creates a TrieContext that
+// captures every branch emitted via PutBranch into the supplied
+// collector instead of writing them to a putter. The
+// stateReader.WithHistory() short-circuit is bypassed when the
+// collector is non-nil — the caller is explicitly opting into branch
+// capture (mode B's SD-less recompute drains the collector after the
+// boundary-step wipe to repopulate commitment branches at lastTxNum).
+func NewTrieContextWithBranchCollector(reader StateReader, stepSize uint64, collector *etl.Collector) *TrieContext {
+	return &TrieContext{stateReader: reader, stepSize: stepSize, localCollector: collector}
+}
+
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {
@@ -810,14 +821,23 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
+	// Collector path takes precedence over WithHistory: explicit
+	// branch-capture callers (mode B's SD-less recompute) need to
+	// drain branches even when reading via a history-shaped
+	// stateReader. The original "do not store branches if explicitly
+	// operate on history" short-circuit applies only when no
+	// collector is wired.
+	if sdc.localCollector != nil {
+		if sdc.trace {
+			fmt.Printf("[SDC] PutBranch(collector): %x: %x\n", prefix, data)
+		}
+		return sdc.localCollector.Collect(prefix, data)
+	}
+	if sdc.stateReader.WithHistory() {
 		return nil
 	}
 	if sdc.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
-	}
-	if sdc.localCollector != nil {
-		return sdc.localCollector.Collect(prefix, data)
 	}
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
 }

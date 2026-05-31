@@ -21,11 +21,33 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
+
+// commitmentRecomputeResult is the in-memory output of mode B's
+// compute phase: the recomputed root + encoded trie state at
+// lastTxNum, plus the branch collector the trie's Process emitted.
+// Drained by ensureCommitmentAtBlockApply after the boundary-step
+// shadow wipe.
+type commitmentRecomputeResult struct {
+	lastTxNum        uint64
+	encodedTrieState []byte
+	branches         *etl.Collector // caller must Close
+}
+
+// Close drains/releases the underlying collector. Safe to call when
+// branches is nil (e.g. on the error path of Compute).
+func (r *commitmentRecomputeResult) Close() {
+	if r == nil || r.branches == nil {
+		return
+	}
+	r.branches.Close()
+	r.branches = nil
+}
 
 // ensureCommitmentAtBlock is mode-B sub-op #3 — anchor the commitment
 // trie at toBlock.
@@ -66,60 +88,115 @@ import (
 //     write the writable shadow holds the canonical commitment at
 //     toBlock, surviving the next forward execution's NewSharedDomains
 //     seek.
-func (p *Provider) ensureCommitmentAtBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) error {
+//
+// ensureCommitmentAtBlockCompute runs the SD-less recompute primitive
+// to obtain the trie state at toBlock's lastTxNum. It validates the
+// root against the block header's stateRoot and returns the captured
+// branches + encoded trie state for a subsequent Apply phase to write
+// to the writable shadow AFTER the boundary-step wipe.
+//
+// Splitting compute from apply lets WipeWritableShadowPast wipe
+// commitment branches at step=stepContaining without losing the
+// recompute's output. The apply phase then writes both the captured
+// branches and KeyCommitmentState at txnum=lastTxNum.
+//
+// Caller MUST call result.Close() (or pass it to Apply which closes
+// internally) to release the etl collector.
+func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) (*commitmentRecomputeResult, error) {
 	if p.BlockReader == nil {
-		return fmt.Errorf("ensureCommitmentAtBlock: nil BlockReader")
+		return nil, fmt.Errorf("ensureCommitmentAtBlockCompute: nil BlockReader")
 	}
 	if p.Aggregator == nil {
-		return fmt.Errorf("ensureCommitmentAtBlock: nil Aggregator")
+		return nil, fmt.Errorf("ensureCommitmentAtBlockCompute: nil Aggregator")
 	}
 
 	header, err := p.BlockReader.HeaderByNumber(ctx, tx, toBlock)
 	if err != nil {
-		return fmt.Errorf("HeaderByNumber(%d): %w", toBlock, err)
+		return nil, fmt.Errorf("HeaderByNumber(%d): %w", toBlock, err)
 	}
 	if header == nil {
-		return fmt.Errorf("ensureCommitmentAtBlock: no header for block %d", toBlock)
+		return nil, fmt.Errorf("ensureCommitmentAtBlockCompute: no header for block %d", toBlock)
 	}
 
 	lastTxNum, err := rawdbv3.TxNums.Max(ctx, tx, toBlock)
 	if err != nil {
-		return fmt.Errorf("TxNums.Max(%d): %w", toBlock, err)
+		return nil, fmt.Errorf("TxNums.Max(%d): %w", toBlock, err)
 	}
 	stepSize := p.Aggregator.StepSize()
 	if stepSize == 0 {
-		return fmt.Errorf("aggregator StepSize() == 0")
+		return nil, fmt.Errorf("aggregator StepSize() == 0")
 	}
 	stepBoundary := kv.Step((lastTxNum + 1) / stepSize)
 
 	tmpDir := p.snapDir
-	root, encodedTrieState, baselineTxNum, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, tx, tmpDir, lastTxNum, stepBoundary, stepSize)
+	root, encodedTrieState, baselineTxNum, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, tx, tmpDir, lastTxNum, stepBoundary, stepSize)
 	if err != nil {
-		return fmt.Errorf("RecomputeAtTxNumWithoutSD(toBlock=%d, lastTxNum=%d, stepBoundary=%d): %w", toBlock, lastTxNum, stepBoundary, err)
+		return nil, fmt.Errorf("RecomputeAtTxNumWithoutSD(toBlock=%d, lastTxNum=%d, stepBoundary=%d): %w", toBlock, lastTxNum, stepBoundary, err)
 	}
 	if common.Hash(root) != header.Root {
-		return fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
+		if branches != nil {
+			branches.Close()
+		}
+		return nil, fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
+	}
+	return &commitmentRecomputeResult{
+		lastTxNum:        lastTxNum,
+		encodedTrieState: encodedTrieState,
+		branches:         branches,
+	}, nil
+}
+
+// ensureCommitmentAtBlockApply drains the branch collector from the
+// Compute phase + writes the new commitment entries into the writable
+// shadow at lastTxNum. Must run AFTER the boundary-step wipe in
+// WipeWritableShadowPast so the writes go in clean (no orphan dups).
+//
+// Uses TemporalMemBatch (a lightweight memctx) — SD's constructor
+// seeks commitment and trips the behind-commitment guard against the
+// over-step file. The memctx writes directly through the
+// domain-writer chain.
+//
+// Always closes result.branches (success or error).
+func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64, result *commitmentRecomputeResult) error {
+	if result == nil {
+		return fmt.Errorf("ensureCommitmentAtBlockApply: nil result")
+	}
+	defer result.Close()
+
+	metrics := &changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}}
+	mem := tx.Debug().NewMemBatch(metrics)
+	defer mem.Close()
+
+	// Drain the branch collector into the writable shadow. Each
+	// branch is written at txnum=lastTxNum (step=stepContaining).
+	// The preceding boundary-step wipe removed any stale forward-
+	// exec branches at the same step, so these go in clean.
+	branchCount := 0
+	if result.branches != nil {
+		if err := result.branches.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			branchCount++
+			return mem.DomainPut(kv.CommitmentDomain, string(k), v, result.lastTxNum, nil)
+		}, etl.TransformArgs{}); err != nil {
+			return fmt.Errorf("drain branches collector: %w", err)
+		}
 	}
 
-	// Write the new commitment entry into the writable shadow at
-	// toBlockLastTxNum. We use TemporalMemBatch (a lightweight
-	// memctx) rather than SharedDomains — SD's constructor seeks
-	// commitment and trips the behind-commitment guard against the
-	// over-step file. The memctx writes directly through the
-	// domain-writer chain.
-	cs := commitmentdb.NewCommitmentState(lastTxNum, toBlock, encodedTrieState)
+	// Write the new commitment-state record (the full encoded trie
+	// state) at lastTxNum. Future ensureCommitmentAtBlock /
+	// SD.SeekCommitment uses this to restore the trie.
+	cs := commitmentdb.NewCommitmentState(result.lastTxNum, toBlock, result.encodedTrieState)
 	encoded, err := cs.Encode()
 	if err != nil {
 		return fmt.Errorf("encode commitment state: %w", err)
 	}
-	metrics := &changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}}
-	mem := tx.Debug().NewMemBatch(metrics)
-	defer mem.Close()
-	if err := mem.DomainPut(kv.CommitmentDomain, string(commitmentdb.KeyCommitmentState), encoded, lastTxNum, nil); err != nil {
+	if err := mem.DomainPut(kv.CommitmentDomain, string(commitmentdb.KeyCommitmentState), encoded, result.lastTxNum, nil); err != nil {
 		return fmt.Errorf("memctx DomainPut(CommitmentDomain, KeyCommitmentState): %w", err)
 	}
 	if err := mem.Flush(ctx, tx); err != nil {
 		return fmt.Errorf("memctx Flush: %w", err)
+	}
+	if p.logger != nil {
+		p.logger.Info("[storage] Provider.Unwind: commitment-anchor applied", "toBlock", toBlock, "lastTxNum", result.lastTxNum, "branches", branchCount)
 	}
 	return nil
 }

@@ -255,8 +255,11 @@ func TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_ShadowAheadOfTarget(t 
 		roTx, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer roTx.Rollback()
-		root, _, btx, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, t.TempDir(), toTxNum, maxStep, stepSize)
+		root, _, btx, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, t.TempDir(), toTxNum, maxStep, stepSize)
 		require.NoError(t, err)
+		if branches != nil {
+			branches.Close()
+		}
 		return append([]byte(nil), root...), btx
 	}()
 
@@ -423,8 +426,11 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		root, _, btx, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, t.TempDir(), tc.ToTxNum, tc.MaxStepForReco, tc.StepSize)
+		root, _, btx, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, t.TempDir(), tc.ToTxNum, tc.MaxStepForReco, tc.StepSize)
 		require.NoError(t, err, "RecomputeAtTxNumWithoutSD failed")
+		if branches != nil {
+			branches.Close()
+		}
 		return append([]byte(nil), root...), btx
 	}()
 

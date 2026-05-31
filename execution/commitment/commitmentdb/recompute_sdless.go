@@ -21,6 +21,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -57,9 +59,16 @@ import (
 // toTxNum (accounts/storage/code's GetAsOf works correctly because
 // those domains DO have history).
 //
-// Returns (root, encodedTrieState, baselineTxNum, error). The
-// baselineTxNum return lets the caller decide whether to also write
-// the new commitment entry into the writable shadow at toTxNum.
+// Returns (root, encodedTrieState, baselineTxNum, branches, error).
+//
+// The branches collector captures every commitment branch recomputed
+// by trie.Process (via PutBranch). Caller drains it after the
+// boundary-step wipe to repopulate commitment branches at lastTxNum
+// — see Provider.Unwind's compute/apply split. branches is non-nil
+// on successful return; caller owns Close().
+//
+// The baselineTxNum return lets the caller decide whether to also
+// write the new commitment entry into the writable shadow at toTxNum.
 func RecomputeAtTxNumWithoutSD(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -67,12 +76,12 @@ func RecomputeAtTxNumWithoutSD(
 	toTxNum uint64,
 	maxStep kv.Step,
 	stepSize uint64,
-) (root []byte, encodedTrieState []byte, baselineTxNum uint64, err error) {
+) (root []byte, encodedTrieState []byte, baselineTxNum uint64, branches *etl.Collector, err error) {
 	if tx == nil {
-		return nil, nil, 0, fmt.Errorf("RecomputeAtTxNumWithoutSD: nil tx")
+		return nil, nil, 0, nil, fmt.Errorf("RecomputeAtTxNumWithoutSD: nil tx")
 	}
 	if stepSize == 0 {
-		return nil, nil, 0, fmt.Errorf("RecomputeAtTxNumWithoutSD: stepSize == 0")
+		return nil, nil, 0, nil, fmt.Errorf("RecomputeAtTxNumWithoutSD: stepSize == 0")
 	}
 
 	// Baseline lookup: files only, bounded by maxStep.
@@ -97,7 +106,7 @@ func RecomputeAtTxNumWithoutSD(
 	var baselineFound bool
 	filesVal, _, filesHas, err := tx.Debug().GetLatestFromFilesUpToStep(kv.CommitmentDomain, KeyCommitmentState, maxStep)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("GetLatestFromFilesUpToStep(commitment, maxStep=%d): %w", maxStep, err)
+		return nil, nil, 0, nil, fmt.Errorf("GetLatestFromFilesUpToStep(commitment, maxStep=%d): %w", maxStep, err)
 	}
 	if filesHas {
 		baselineBytes = filesVal
@@ -122,7 +131,19 @@ func RecomputeAtTxNumWithoutSD(
 	commitmentReader := NewStepBoundedFilesStateReader(tx, maxStep)
 	stateReader := NewCommitmentSplitStateReader(commitmentReader, plainReader, true /* withHistory */)
 
-	trieCtx := NewTrieContextRo(stateReader, stepSize)
+	// Branch collector — captures every commitment branch Process
+	// emits via PutBranch. The caller drains this after wiping
+	// shadow's stale boundary-step branches and writes the captured
+	// branches back at txnum=lastTxNum.
+	branches = etl.NewCollectorWithAllocator("commitment-recompute-branches", tmpDir, etl.SmallSortableBuffers, log.New())
+	defer func() {
+		if err != nil && branches != nil {
+			branches.Close()
+			branches = nil
+		}
+	}()
+
+	trieCtx := NewTrieContextWithBranchCollector(stateReader, stepSize, branches)
 	trie := commitment.NewHexPatriciaHashed(length.Addr, trieCtx)
 	defer trie.Release()
 
@@ -134,12 +155,12 @@ func RecomputeAtTxNumWithoutSD(
 		// what encodeCommitmentState produces: 8B txNum + 8B blockNum
 		// + 2B trieStateLen + trieState.
 		cs := new(commitmentState)
-		if err := cs.Decode(baselineBytes); err != nil {
-			return nil, nil, 0, fmt.Errorf("decode baseline commitment state: %w", err)
+		if err = cs.Decode(baselineBytes); err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("decode baseline commitment state: %w", err)
 		}
 		baselineTxNum = cs.txNum
-		if err := trie.SetState(cs.trieState); err != nil {
-			return nil, nil, 0, fmt.Errorf("restore baseline trie state (txNum=%d): %w", cs.txNum, err)
+		if err = trie.SetState(cs.trieState); err != nil {
+			return nil, nil, 0, nil, fmt.Errorf("restore baseline trie state (txNum=%d): %w", cs.txNum, err)
 		}
 	}
 
@@ -153,7 +174,7 @@ func RecomputeAtTxNumWithoutSD(
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		it, ierr := tx.Debug().HistoryKeyTxNumRange(d, int(touchFromTxNum), int(toTxNum+1), order.Asc, -1)
 		if ierr != nil {
-			return nil, nil, 0, fmt.Errorf("HistoryKeyTxNumRange(%s, [%d, %d)): %w", d, touchFromTxNum, toTxNum+1, ierr)
+			return nil, nil, 0, nil, fmt.Errorf("HistoryKeyTxNumRange(%s, [%d, %d)): %w", d, touchFromTxNum, toTxNum+1, ierr)
 		}
 		touchFn := updates.TouchAccount
 		switch d {
@@ -166,7 +187,7 @@ func RecomputeAtTxNumWithoutSD(
 			k, _, terr := it.Next()
 			if terr != nil {
 				it.Close()
-				return nil, nil, 0, fmt.Errorf("HistoryKeyTxNumRange next(%s): %w", d, terr)
+				return nil, nil, 0, nil, fmt.Errorf("HistoryKeyTxNumRange next(%s): %w", d, terr)
 			}
 			updates.TouchPlainKey(string(k), nil, touchFn)
 		}
@@ -175,12 +196,12 @@ func RecomputeAtTxNumWithoutSD(
 
 	root, err = trie.Process(ctx, updates, "commitment-recompute-no-sd", nil, commitment.WarmupConfig{})
 	if err != nil {
-		return nil, nil, baselineTxNum, fmt.Errorf("trie.Process: %w", err)
+		return nil, nil, baselineTxNum, nil, fmt.Errorf("trie.Process: %w", err)
 	}
 
 	encodedTrieState, err = trie.EncodeCurrentState(nil)
 	if err != nil {
-		return nil, nil, baselineTxNum, fmt.Errorf("EncodeCurrentState: %w", err)
+		return nil, nil, baselineTxNum, nil, fmt.Errorf("EncodeCurrentState: %w", err)
 	}
-	return root, encodedTrieState, baselineTxNum, nil
+	return root, encodedTrieState, baselineTxNum, branches, nil
 }

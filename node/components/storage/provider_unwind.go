@@ -94,6 +94,18 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		return fmt.Errorf("storage.Provider.Unwind: opts.Tx is nil")
 	}
 
+	// 1. Compute the commitment anchor (recompute trie at lastTxNum,
+	//    validate root against header). NO writes to the DB — the
+	//    recompute's branches are captured in a collector that the
+	//    Apply step (5) drains after the wipe. Failure here surfaces
+	//    a consensus mismatch loud and early.
+	recompute, err := p.ensureCommitmentAtBlockCompute(ctx, opts.Tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor compute: %w", err)
+	}
+	defer recompute.Close() // idempotent — Apply also closes
+
+	// 2. Snapshot-trim (staged for post-commit FS deletion).
 	removed, err := p.unwindSnapshotsPastBlock(ctx, opts.Tx, toBlock)
 	if err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: snapshot-trim: %w", err)
@@ -102,20 +114,21 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		p.logger.Info("[storage] Provider.Unwind: snapshot files trimmed past toBlock", "toBlock", toBlock, "files", len(removed))
 	}
 
-	// Recompute + write the commitment anchor BEFORE the writable
-	// shadow wipe. With the SD-free recompute path, the recompute
-	// looks for a baseline commitment via GetLatestFromDB (writable
-	// shadow) and GetLatestFromFilesUpToStep — the writable shadow
-	// still holds forward-execution's commitment writes at this
-	// point, which provides a tight baseline. The recompute's write
-	// lands at toBlock's last txnum (in step (stepBoundary-1)); the
-	// subsequent wipe (step ≥ stepBoundary) leaves it intact.
-	if err := p.ensureCommitmentAtBlock(ctx, opts.Tx, toBlock); err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor: %w", err)
-	}
-
+	// 3. + 4. DB-reset (TxNums/canonicalHash/headPointers truncation)
+	//    + WipeWritableShadowPast (per-domain wipe past lastTxNum +
+	//    boundary-step diff-replay for history-tracked domains +
+	//    whole-step wipe of commitment+RCache at stepContaining).
+	//    unwindDBPastBlock orchestrates both.
 	if err := p.unwindDBPastBlock(ctx, opts.Tx, toBlock); err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: db-reset: %w", err)
+	}
+
+	// 5. Apply the recompute result. Drains the branch collector +
+	//    writes KeyCommitmentState into the now-cleaned writable
+	//    shadow. The wipe's whole-step commitment clear (in step 3+4)
+	//    guarantees these writes land without orphan dups.
+	if err := p.ensureCommitmentAtBlockApply(ctx, opts.Tx, toBlock, recompute); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
 	}
 
 	return nil

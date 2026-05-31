@@ -108,7 +108,23 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 	atRo := a.BeginFilesRo()
 	defer atRo.Close()
 
-	writableDomains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain}
+	// Domain coverage for the wipe falls into two groups:
+	//
+	//   - diffReplayDomains: history-tracked domains where we can
+	//     pull as-of-lastTxNum values for each touched key in the
+	//     boundary step. Accounts/storage/code (always) + receipts
+	//     (history-enabled per config) get this treatment.
+	//   - wholeStepWipeDomains: domains where per-txnum replay isn't
+	//     possible — either because HistoryDisabled (commitment) or
+	//     because the IiCfg is disabled by default (rcache). The
+	//     boundary step is wiped entirely; the caller is expected to
+	//     repopulate (for commitment, via Provider.Unwind's
+	//     ensureCommitmentAtBlockApply step; for rcache, naturally
+	//     rebuilt by subsequent exec).
+	diffReplayDomains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain}
+	wholeStepWipeDomains := []kv.Domain{kv.CommitmentDomain, kv.RCacheDomain}
+	allWritableDomains := append([]kv.Domain{}, diffReplayDomains...)
+	allWritableDomains = append(allWritableDomains, wholeStepWipeDomains...)
 
 	// For non-aligned cuts: snapshot the per-domain (key, target-value)
 	// pairs for the boundary-step replay BEFORE the history prune below
@@ -122,7 +138,7 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 	}
 	var plans []replayPlan
 	if !isAligned {
-		for _, name := range writableDomains {
+		for _, name := range diffReplayDomains {
 			keys, err := collectKeysChangedInRange(tx, name, lastTxNum+1, boundaryStepEndTxNum)
 			if err != nil {
 				return fmt.Errorf("WipeWritableShadowPast: collect replay keys (%s): %w", name, err)
@@ -144,7 +160,10 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 		}
 	}
 
-	for _, name := range writableDomains {
+	// Per-domain wipe (step > stepBoundary, i.e. strictly past the
+	// boundary step) + history prune past lastTxNum. Applies to all
+	// writable domains.
+	for _, name := range allWritableDomains {
 		d := a.d[name]
 		dt := atRo.d[name]
 
@@ -157,6 +176,21 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 		}
 	}
 
+	// Whole-step wipe at stepContaining for non-replayable domains.
+	// Commitment branches written by forward exec during the boundary
+	// step would otherwise survive the per-step wipe above (they're
+	// AT stepBoundary-1, not past it) and corrupt post-mode-B trie
+	// reads (caught live as G3.15). RCacheDomain gets the same
+	// treatment for consistency — its IiCfg.Disable=true default
+	// means per-txnum replay returns nothing anyway.
+	for _, name := range wholeStepWipeDomains {
+		d := a.d[name]
+		if err := wipeDomainValuesAtStep(tx, d, stepContaining); err != nil {
+			return fmt.Errorf("WipeWritableShadowPast: domain=%s boundary-step wipe: %w", d.FilenameBase, err)
+		}
+	}
+
+	// Boundary-step diff-replay for history-tracked domains.
 	if !isAligned {
 		var stepBytes [8]byte
 		binary.BigEndian.PutUint64(stepBytes[:], ^stepContaining)
@@ -308,6 +342,37 @@ func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte,
 //
 // Mirrors the encoding d.unwind uses on its diff-entry write path.
 func wipeDomainValuesPastStep(tx kv.RwTx, d *Domain, stepBoundary uint64) error {
+	return wipeDomainValuesFiltered(tx, d, func(step uint64) bool { return step >= stepBoundary })
+}
+
+// wipeDomainValuesAtStep deletes ValuesTable rows whose step
+// coordinate equals exactly `targetStep`. The whole-step wipe
+// variant used by mode B for HistoryDisabled or
+// IiCfg-disabled-by-default domains (commitment, RCache) where
+// per-txnum diff-replay can't reach boundary-step entries written by
+// forward exec past lastTxNum.
+//
+// Note: this is destructive across the entire step, including
+// pre-lastTxNum entries written in the same step. For commitment
+// this is acceptable because Provider.Unwind's Apply phase
+// repopulates the step from the recompute primitive's branch
+// collector. For RCache the cache rebuilds on subsequent exec.
+func wipeDomainValuesAtStep(tx kv.RwTx, d *Domain, targetStep uint64) error {
+	return wipeDomainValuesFiltered(tx, d, func(step uint64) bool { return step == targetStep })
+}
+
+// wipeDomainValuesFiltered cursor-walks the ValuesTable and deletes
+// every row whose decoded step satisfies the supplied predicate. The
+// step coordinate's location depends on the domain's LargeValues
+// setting (same as the encoder used by d.unwind on diff-entry write):
+//
+//   - LargeValues=true: rows are key=fullKey+stepBytes, value=raw.
+//     stepBytes is the last 8 bytes of the key, encoded as
+//     ^binary.BigEndian.Uint64(step).
+//   - LargeValues=false (DupSort): rows are key=fullKey,
+//     value=stepBytes+raw. stepBytes is the first 8 bytes of the
+//     value, same encoding.
+func wipeDomainValuesFiltered(tx kv.RwTx, d *Domain, predicate func(step uint64) bool) error {
 	if d.LargeValues {
 		c, err := tx.RwCursor(d.ValuesTable)
 		if err != nil {
@@ -323,7 +388,7 @@ func wipeDomainValuesPastStep(tx kv.RwTx, d *Domain, stepBoundary uint64) error 
 			}
 			encodedStep := binary.BigEndian.Uint64(k[len(k)-8:])
 			step := ^encodedStep
-			if step >= stepBoundary {
+			if predicate(step) {
 				if err := c.DeleteCurrent(); err != nil {
 					return err
 				}
@@ -346,7 +411,7 @@ func wipeDomainValuesPastStep(tx kv.RwTx, d *Domain, stepBoundary uint64) error 
 		}
 		encodedStep := binary.BigEndian.Uint64(v[:8])
 		step := ^encodedStep
-		if step >= stepBoundary {
+		if predicate(step) {
 			if err := c.DeleteCurrent(); err != nil {
 				return err
 			}
