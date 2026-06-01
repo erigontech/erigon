@@ -108,7 +108,7 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 	// error here (tracked as a follow-up — see
 	// rebuildBlockStraddles).
 	newTo := chunkAlignedToBlock(toBlock)
-	rebuildPaths, straddleRefs, err := p.rebuildBlockStraddles(ctx, toBlock, newTo)
+	rebuildPaths, straddleRefs, err := p.rebuildBlockStraddles(ctx, tx, toBlock, newTo)
 	if err != nil {
 		return nil, err
 	}

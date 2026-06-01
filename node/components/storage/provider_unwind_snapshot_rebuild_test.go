@@ -18,16 +18,25 @@ package storage
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestChunkAlignedToBlock pins the 1000-boundary rounding semantics.
@@ -114,6 +123,211 @@ func TestSliceStraddleSeg_TruncatesEntries(t *testing.T) {
 		pos++
 	}
 	require.Equal(t, 7_000, pos, "read all 7000 entries; no more")
+}
+
+// makeBlockSnapshotTriple writes a matching triple of block-snapshot
+// .seg files (headers + bodies + transactions) covering blocks
+// [fromBlock, toBlock) into snapDir. The content is deterministic
+// per block:
+//   - Header word: 1-byte sort prefix + RLP-encoded synthetic header
+//     whose Number = N and ParentHash = sha256-ish of N
+//   - Body word: RLP-encoded BodyForStorage with BaseTxnID =
+//     baseTxnID + cumulative tx count and TxCount = txCount (constant
+//     per fixture for simplicity)
+//   - Transaction words: txCount per block, each formatted as
+//     1-byte prefix + 20-byte sender + 5-byte synthetic tx_rlp.
+//     Total tx entries = blockCount * txCount.
+//
+// Returns the three FileInfo records pointing at the produced files.
+//
+// The fixture is structured so seedLeftoverBlocks can read every
+// field it needs without needing a real chain. Used by the leftover-
+// seed regression test.
+func makeBlockSnapshotTriple(t *testing.T, ctx context.Context, snapDir, tmpDir string, fromBlock, toBlock uint64, baseTxnID uint64, txCount uint32) (h, b, tx snaptype.FileInfo) {
+	t.Helper()
+	hFI := snaptype.FileInfo{Version: snaptype2.Headers.Versions().Current, From: fromBlock, To: toBlock, Type: snaptype2.Headers, Ext: ".seg"}
+	hFI = hFI.As(snaptype2.Headers)
+	hFI.Path = filepath.Join(snapDir, hFI.Name())
+
+	bFI := snaptype.FileInfo{Version: snaptype2.Bodies.Versions().Current, From: fromBlock, To: toBlock, Type: snaptype2.Bodies, Ext: ".seg"}
+	bFI = bFI.As(snaptype2.Bodies)
+	bFI.Path = filepath.Join(snapDir, bFI.Name())
+
+	tFI := snaptype.FileInfo{Version: snaptype2.Transactions.Versions().Current, From: fromBlock, To: toBlock, Type: snaptype2.Transactions, Ext: ".seg"}
+	tFI = tFI.As(snaptype2.Transactions)
+	tFI.Path = filepath.Join(snapDir, tFI.Name())
+
+	// Write headers.
+	hc, err := seg.NewCompressor(ctx, "fixture-headers", hFI.Path, tmpDir, seg.DefaultCfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	for n := fromBlock; n < toBlock; n++ {
+		hdr := &types.Header{Number: *uint256.NewInt(n), Difficulty: *uint256.NewInt(1)}
+		var parent common.Hash
+		binary.BigEndian.PutUint64(parent[:8], n)
+		hdr.ParentHash = parent
+		hdrRlp, rerr := rlp.EncodeToBytes(hdr)
+		require.NoError(t, rerr)
+		word := append([]byte{0x42}, hdrRlp...) // 1-byte sort prefix + RLP
+		require.NoError(t, hc.AddUncompressedWord(word))
+	}
+	require.NoError(t, hc.Compress())
+	hc.Close()
+
+	// Write bodies. BaseTxnID accumulates across blocks; TxCount
+	// constant per fixture.
+	bc, err := seg.NewCompressor(ctx, "fixture-bodies", bFI.Path, tmpDir, seg.DefaultCfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	currentBase := baseTxnID
+	for n := fromBlock; n < toBlock; n++ {
+		body := &types.BodyForStorage{
+			BaseTxnID: types.BaseTxnID(currentBase),
+			TxCount:   txCount,
+		}
+		bodyRlp, rerr := rlp.EncodeToBytes(body)
+		require.NoError(t, rerr)
+		require.NoError(t, bc.AddUncompressedWord(bodyRlp))
+		currentBase += uint64(txCount)
+	}
+	require.NoError(t, bc.Compress())
+	bc.Close()
+
+	// Write transactions. Total = blockCount * txCount; format per
+	// entry: 1-byte hash prefix + 20-byte sender + 5-byte fake tx_rlp.
+	tc, err := seg.NewCompressor(ctx, "fixture-txs", tFI.Path, tmpDir, seg.DefaultCfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	totalTx := (toBlock - fromBlock) * uint64(txCount)
+	for i := uint64(0); i < totalTx; i++ {
+		word := make([]byte, 0, 1+20+5)
+		word = append(word, 0xAB) // hash prefix
+		var sender [20]byte
+		binary.BigEndian.PutUint64(sender[:8], i)
+		word = append(word, sender[:]...)
+		// fake tx_rlp: tag(0x80=empty list-like) + 4 byte tx index
+		var txTag [5]byte
+		txTag[0] = 0x80
+		binary.BigEndian.PutUint32(txTag[1:], uint32(i))
+		word = append(word, txTag[:]...)
+		require.NoError(t, tc.AddUncompressedWord(word))
+	}
+	require.NoError(t, tc.Compress())
+	tc.Close()
+
+	return hFI, bFI, tFI
+}
+
+// TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders pins the
+// non-aligned-cut leftover-seed contract: when toBlock+1 isn't a
+// 1000-multiple, blocks [chunkAlignedToBlock(toBlock), toBlock] are
+// seeded from the OLD straddle files into the writable DB so
+// canonical reads resolve post-mode-B.
+//
+// Fixture: 10-block triple covering [2_000_000, 2_000_010), 2
+// txs/block, baseTxnID=1000. Seeds blocks [2_000_005, 2_000_007]
+// (3 blocks → 6 txs). Asserts:
+//   - kv.Headers, kv.HeaderNumber populated for the seeded range
+//   - kv.BlockBody populated
+//   - kv.EthTx populated for txnIDs 1010..1015 (= 1000 + 5*2 to 1000 + 7*2+1)
+//   - kv.Senders populated for each seeded block with the right
+//     concatenated 20-byte senders
+func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	const (
+		fromBlock = uint64(2_000_000)
+		toBlock   = uint64(2_000_010)
+		baseTxn   = uint64(1_000)
+		txPer     = uint32(2)
+	)
+	hFI, bFI, tFI := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, fromBlock, toBlock, baseTxn, txPer)
+
+	// Pre-seed kv.HeaderCanonical for the leftover range — the seed
+	// reads canonical hashes from there. Use simple deterministic
+	// hashes so we can verify HeaderNumber writes later.
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	hashAt := func(n uint64) common.Hash {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[:8], n)
+		copy(h[24:], "canonical-test")
+		return h
+	}
+	for n := fromBlock; n < toBlock; n++ {
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashAt(n), n))
+	}
+
+	const (
+		seedFrom = uint64(2_000_005)
+		seedTo   = uint64(2_000_007)
+	)
+	require.NoError(t, seedLeftoverBlocks(ctx, rwTx, snapDir, hFI, bFI, tFI, seedFrom, seedTo))
+
+	// kv.Headers populated for seeded range; NOT for blocks below seedFrom.
+	for n := seedFrom; n <= seedTo; n++ {
+		key := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(key[:8], n)
+		copy(key[8:], hashAt(n).Bytes())
+		got, err := rwTx.GetOne(kv.Headers, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, got, "seeded block %d must have kv.Headers entry", n)
+	}
+	// Spot-check below the seed range: nothing seeded.
+	belowKey := make([]byte, 8+32)
+	binary.BigEndian.PutUint64(belowKey[:8], fromBlock)
+	copy(belowKey[8:], hashAt(fromBlock).Bytes())
+	got, err := rwTx.GetOne(kv.Headers, belowKey)
+	require.NoError(t, err)
+	require.Empty(t, got, "block %d (below seedFrom) must NOT be seeded", fromBlock)
+
+	// kv.HeaderNumber populated (WriteHeaderRaw with skipIndexing=false).
+	for n := seedFrom; n <= seedTo; n++ {
+		got, err := rwTx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		require.NoError(t, err)
+		require.NotEmpty(t, got, "seeded block %d must have kv.HeaderNumber entry (hash → num)", n)
+	}
+
+	// kv.BlockBody populated.
+	for n := seedFrom; n <= seedTo; n++ {
+		key := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(key[:8], n)
+		copy(key[8:], hashAt(n).Bytes())
+		got, err := rwTx.GetOne(kv.BlockBody, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, got, "seeded block %d must have kv.BlockBody entry", n)
+	}
+
+	// kv.EthTx populated for the right txn IDs. With baseTxn=1000
+	// and txPer=2, block 2_000_005 → txn IDs 1010..1011, block
+	// 2_000_006 → 1012..1013, block 2_000_007 → 1014..1015.
+	for txnID := uint64(1010); txnID <= 1015; txnID++ {
+		var keyBytes [8]byte
+		binary.BigEndian.PutUint64(keyBytes[:], txnID)
+		got, err := rwTx.GetOne(kv.EthTx, keyBytes[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, got, "seeded txnID %d must have kv.EthTx entry", txnID)
+	}
+	// Spot-check below: txn 1009 (last tx of block 2_000_004) must NOT be seeded.
+	var notSeededKey [8]byte
+	binary.BigEndian.PutUint64(notSeededKey[:], 1009)
+	got, err = rwTx.GetOne(kv.EthTx, notSeededKey[:])
+	require.NoError(t, err)
+	require.Empty(t, got, "txnID 1009 (block below seedFrom) must NOT be seeded")
+
+	// kv.Senders populated with 40-byte len (2 senders × 20 bytes per
+	// block) for each seeded block.
+	for n := seedFrom; n <= seedTo; n++ {
+		key := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(key[:8], n)
+		copy(key[8:], hashAt(n).Bytes())
+		got, err := rwTx.GetOne(kv.Senders, key)
+		require.NoError(t, err)
+		require.Equal(t, 40, len(got), "block %d senders entry must be 40 bytes (2 txs × 20 sender bytes)", n)
+	}
 }
 
 // TestRebuildBodiesStraddleFile_RejectsWrongType pins that the

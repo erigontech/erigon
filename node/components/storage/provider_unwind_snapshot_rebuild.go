@@ -18,17 +18,23 @@ package storage
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // chunkAlignedToBlock returns the largest 1000-block-aligned value
@@ -38,12 +44,9 @@ import (
 // toBlock=2,912,999 → 2,913,000), returns 2,913,000.
 //
 // For non-aligned toBlock+1 (e.g. toBlock=2,912,500 → 2,912,501),
-// returns 2,912,000 — the leftover [2,912,000, toBlock] would need
-// to be seeded into the writable DB. This headers-rebuild commit
-// does NOT implement that seed: non-1000-aligned mode-B targets
-// against a block-snapshot straddle return an explicit error from
-// the planner rather than silently producing inconsistent state.
-// Follow-up: leftover-seed for headers + bodies + transactions.
+// returns 2,912,000. The leftover [2,912,000, toBlock] is seeded
+// into the writable DB by seedLeftoverBlocks so canonical reads for
+// those blocks resolve via the DB path post-mode-B.
 func chunkAlignedToBlock(toBlock uint64) uint64 {
 	next := toBlock + 1
 	return next - (next % uint64(snaptype.Erigon2MinSegmentSize))
@@ -98,10 +101,13 @@ func (p *Provider) headersStraddleFile(toBlock uint64) (*snaptype.FileInfo, erro
 //     appended to the caller's `toRemove` list for FinalizeUnwind
 //     deletion post-commit.
 //
-// Non-1000-aligned toBlock returns an error: the leftover blocks
-// [newToBlock, toBlock] would need to be seeded into the writable
-// DB, which is a known follow-up.
-func (p *Provider) rebuildBlockStraddles(ctx context.Context, toBlock, newToBlock uint64) (rebuildPaths []string, toRemoveStraddles []*storageSnapshotFileRef, err error) {
+// Non-1000-aligned toBlock: after the per-type rebuild, the leftover
+// blocks [newToBlock, toBlock] are seeded into the writable DB by
+// seedLeftoverBlocks (reads the OLD straddle files still on disk
+// pre-FinalizeUnwind, writes headers / bodies / tx + senders for
+// each leftover block). Requires headers + bodies + transactions
+// straddles to be present as a matching triple.
+func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBlock, newToBlock uint64) (rebuildPaths []string, toRemoveStraddles []*storageSnapshotFileRef, err error) {
 	// Rebuild order: Headers → Bodies → Transactions. Transactions'
 	// IndexBuilderFunc reads the bodies file at the same range, so
 	// the rebuilt bodies file must exist when transactions is rebuilt.
@@ -114,20 +120,24 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, toBlock, newToBloc
 		{"bodies", snaptype2.Enums.Bodies, rebuildBodiesStraddleFile},
 		{"transactions", snaptype2.Enums.Transactions, rebuildTransactionsStraddleFile},
 	}
+
+	// Capture the straddle FileInfos for each type before any
+	// rebuild runs — seedLeftoverBlocks (the non-aligned-cut path)
+	// reads ALL THREE old files in lockstep, so it needs the
+	// pre-rebuild names of each.
+	straddles := make(map[snaptype.Enum]*snaptype.FileInfo, len(specs))
 	for _, s := range specs {
-		straddle, ferr := p.straddleBlockFileForType(toBlock, s.enum)
+		fi, ferr := p.straddleBlockFileForType(toBlock, s.enum)
 		if ferr != nil {
 			return nil, nil, fmt.Errorf("straddleBlockFileForType(%s, %d): %w", s.name, toBlock, ferr)
 		}
+		straddles[s.enum] = fi
+	}
+
+	for _, s := range specs {
+		straddle := straddles[s.enum]
 		if straddle == nil {
 			continue
-		}
-		// Alignment check applies only when there's an actual
-		// straddle to rebuild. Without a block-snapshot file at this
-		// range, mode-B doesn't touch block files and toBlock can
-		// land at any value.
-		if newToBlock != toBlock+1 {
-			return nil, nil, fmt.Errorf("mode-B %s-straddle rebuild: toBlock+1=%d not aligned to %d-block boundary; leftover-seed for non-aligned cuts is a known follow-up", s.name, toBlock+1, snaptype.Erigon2MinSegmentSize)
 		}
 		if newToBlock <= straddle.From {
 			// "Straddle" actually starts past toBlock — caller's
@@ -147,6 +157,44 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, toBlock, newToBloc
 			toRemoveStraddles = append(toRemoveStraddles, &storageSnapshotFileRef{Name: idxName})
 		}
 	}
+
+	// Non-aligned-cut leftover seed. When toBlock+1 isn't a 1000-
+	// multiple, newToBlock = chunkAlignedToBlock(toBlock) < toBlock+1.
+	// The rebuilt block-snapshot files cover [oldFI.From, newToBlock);
+	// blocks in [newToBlock, toBlock] have NO snapshot source after
+	// FinalizeUnwind deletes the old straddle files. seedLeftoverBlocks
+	// walks the OLD files (still on disk; deletion is staged for
+	// post-commit) and writes the leftover headers / bodies / tx data
+	// + senders into the writable DB so canonical reads for those
+	// blocks resolve via the DB path.
+	//
+	// Requires all three straddle types (headers + bodies + transactions)
+	// to be present in the inventory at the same range — otherwise
+	// the tx file's per-block tx-range cannot be reconstructed in
+	// lockstep. In practice block snapshots are produced as a
+	// matching triple by RetireBlocks; an asymmetric inventory is a
+	// hard-error.
+	if newToBlock < toBlock+1 && len(toRemoveStraddles) > 0 {
+		// At least one block-snapshot straddle was rebuilt. The
+		// non-aligned leftover [newToBlock, toBlock] now has no
+		// snapshot source for those types. Seed them into the
+		// writable DB.
+		//
+		// Require the full triple (headers + bodies + tx) because
+		// the tx file's per-block tx-range is reconstructed in
+		// lockstep with the bodies file at the same range. Block
+		// snapshots are produced as a matching triple by
+		// RetireBlocks; an asymmetric inventory is a hard-error.
+		hFI := straddles[snaptype2.Enums.Headers]
+		bFI := straddles[snaptype2.Enums.Bodies]
+		tFI := straddles[snaptype2.Enums.Transactions]
+		if hFI == nil || bFI == nil || tFI == nil {
+			return nil, nil, fmt.Errorf("mode-B non-aligned cut at toBlock=%d: leftover seed requires headers + bodies + transactions straddle triple; got headers=%v bodies=%v transactions=%v", toBlock, hFI != nil, bFI != nil, tFI != nil)
+		}
+		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, *tFI, newToBlock, toBlock); err != nil {
+			return nil, nil, fmt.Errorf("seedLeftoverBlocks([%d, %d]): %w", newToBlock, toBlock, err)
+		}
+	}
 	return rebuildPaths, toRemoveStraddles, nil
 }
 
@@ -156,6 +204,173 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, toBlock, newToBloc
 // Avoids importing the snapshot package here.
 type storageSnapshotFileRef struct {
 	Name string
+}
+
+// seedLeftoverBlocks writes block-data for [fromBlock, toBlockInclusive]
+// into the writable DB by reading entries from the OLD straddle files
+// still on disk. Used by mode-B's non-aligned-cut path: when toBlock+1
+// isn't a 1000-multiple, the rebuilt block-snapshot files cover only
+// up to chunkAlignedToBlock(toBlock) (the nearest 1000-boundary), and
+// blocks in [chunkAlignedToBlock(toBlock), toBlock] must live in the
+// writable DB instead.
+//
+// Walks the THREE old files (headers + bodies + transactions) in
+// lockstep:
+//   - Skip the first (fromBlock - oldFI.From) entries in headers + bodies
+//   - From `fromBlock` onward, for each block N ≤ toBlockInclusive:
+//   - Header: write the raw header RLP to kv.Headers + kv.HeaderNumber
+//     (via rawdb.WriteHeaderRaw)
+//   - Body: decode BodyForStorage, write to kv.BlockBody
+//     (via rawdb.WriteBodyForStorage)
+//   - Transactions: for each tx in [BaseTxnID, BaseTxnID + TxCount),
+//     extract sender + tx_rlp from the tx file entry, write tx_rlp
+//     to kv.EthTx and accumulate sender bytes for the block's
+//     kv.Senders entry
+//
+// Pre-condition: the OLD straddle files must still be on disk when
+// this runs. The caller (rebuildBlockStraddles) calls seedLeftoverBlocks
+// AFTER the rebuild has written new files (which have different
+// names — straddle was 002910-002920, rebuilt is 002910-002912) but
+// BEFORE FinalizeUnwind deletes the old files. Same-tx writes ensure
+// atomicity with the rest of mode-B.
+//
+// fromBlock + toBlockInclusive must lie within the headers straddle
+// file's range [oldHeadersFI.From, oldHeadersFI.To). Caller validates.
+func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHeadersFI, oldBodiesFI, oldTxFI snaptype.FileInfo, fromBlock, toBlockInclusive uint64) error {
+	if fromBlock > toBlockInclusive {
+		return nil
+	}
+	if fromBlock < oldHeadersFI.From || toBlockInclusive >= oldHeadersFI.To {
+		return fmt.Errorf("seedLeftoverBlocks: range [%d, %d] outside headers file [%d, %d)", fromBlock, toBlockInclusive, oldHeadersFI.From, oldHeadersFI.To)
+	}
+	if oldBodiesFI.From != oldHeadersFI.From || oldBodiesFI.To != oldHeadersFI.To {
+		return fmt.Errorf("seedLeftoverBlocks: bodies range [%d, %d) does not match headers [%d, %d)", oldBodiesFI.From, oldBodiesFI.To, oldHeadersFI.From, oldHeadersFI.To)
+	}
+	if oldTxFI.From != oldHeadersFI.From || oldTxFI.To != oldHeadersFI.To {
+		return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) does not match headers [%d, %d)", oldTxFI.From, oldTxFI.To, oldHeadersFI.From, oldHeadersFI.To)
+	}
+
+	hPath := filepath.Join(snapDir, oldHeadersFI.Name())
+	hdec, err := seg.NewDecompressor(hPath)
+	if err != nil {
+		return fmt.Errorf("open old headers %s: %w", hPath, err)
+	}
+	defer hdec.Close()
+
+	bPath := filepath.Join(snapDir, oldBodiesFI.Name())
+	bdec, err := seg.NewDecompressor(bPath)
+	if err != nil {
+		return fmt.Errorf("open old bodies %s: %w", bPath, err)
+	}
+	defer bdec.Close()
+
+	tPath := filepath.Join(snapDir, oldTxFI.Name())
+	tdec, err := seg.NewDecompressor(tPath)
+	if err != nil {
+		return fmt.Errorf("open old tx %s: %w", tPath, err)
+	}
+	defer tdec.Close()
+
+	hg := hdec.MakeGetter()
+	bg := bdec.MakeGetter()
+	tg := tdec.MakeGetter()
+
+	// Walk headers + bodies sequentially from oldHeadersFI.From. We
+	// must iterate over EVERY entry in [oldHeadersFI.From, fromBlock)
+	// to advance the tx getter to the right starting position (tx
+	// entries aren't per-block, so we can't index-jump). For blocks
+	// in [oldHeadersFI.From, fromBlock) we read bodies (need TxCount
+	// to advance tx getter) but don't write to DB. For blocks in
+	// [fromBlock, toBlockInclusive] we read all three + write.
+	var hBuf, bBuf, tBuf []byte
+	for n := oldHeadersFI.From; n <= toBlockInclusive; n++ {
+		if !hg.HasNext() {
+			return fmt.Errorf("seedLeftoverBlocks: headers source ran out at block %d", n)
+		}
+		hBuf, _ = hg.Next(hBuf[:0])
+		if !bg.HasNext() {
+			return fmt.Errorf("seedLeftoverBlocks: bodies source ran out at block %d", n)
+		}
+		bBuf, _ = bg.Next(bBuf[:0])
+
+		body := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(bBuf, body); err != nil {
+			return fmt.Errorf("seedLeftoverBlocks: decode body at block %d: %w", n, err)
+		}
+
+		writeThisBlock := n >= fromBlock
+
+		// Resolve canonical hash from writable DB (preserved across
+		// mode-B's CanonicalHash truncation — entries ≤ toBlock survive).
+		var hash common.Hash
+		if writeThisBlock {
+			h, err := rawdb.ReadCanonicalHash(tx, n)
+			if err != nil {
+				return fmt.Errorf("seedLeftoverBlocks: ReadCanonicalHash(%d): %w", n, err)
+			}
+			if h == (common.Hash{}) {
+				return fmt.Errorf("seedLeftoverBlocks: no canonical hash for block %d (writable DB truncated below the seed range?)", n)
+			}
+			hash = h
+
+			// Header word format = 1-byte sort-prefix + header RLP.
+			// rawdb.WriteHeaderRaw writes kv.Headers + kv.HeaderNumber
+			// (the hash→num index).
+			if len(hBuf) < 1 {
+				return fmt.Errorf("seedLeftoverBlocks: empty header entry at block %d", n)
+			}
+			if err := rawdb.WriteHeaderRaw(tx, n, hash, hBuf[1:], false /* skipIndexing */); err != nil {
+				return fmt.Errorf("seedLeftoverBlocks: WriteHeaderRaw(%d): %w", n, err)
+			}
+
+			// Body: write the BodyForStorage RLP directly to kv.BlockBody.
+			if err := rawdb.WriteBodyForStorage(tx, hash, n, body); err != nil {
+				return fmt.Errorf("seedLeftoverBlocks: WriteBodyForStorage(%d): %w", n, err)
+			}
+		}
+
+		// Walk this block's tx entries. txCount entries; format per
+		// entry: 1-byte hash-prefix + 20-byte sender + tx_rlp.
+		// Even when !writeThisBlock we MUST advance the tx getter
+		// to keep the lockstep position in sync.
+		txCount := uint64(body.TxCount)
+		var sendersBuf []byte
+		if writeThisBlock {
+			sendersBuf = make([]byte, 0, txCount*20)
+		}
+		txnID := body.BaseTxnID.U64()
+		for i := uint64(0); i < txCount; i++ {
+			if !tg.HasNext() {
+				return fmt.Errorf("seedLeftoverBlocks: tx source ran out at block %d tx %d/%d", n, i, txCount)
+			}
+			tBuf, _ = tg.Next(tBuf[:0])
+			if !writeThisBlock {
+				txnID++
+				continue
+			}
+			if len(tBuf) < 21 {
+				return fmt.Errorf("seedLeftoverBlocks: tx entry at block %d tx %d shorter than sender prefix (len=%d)", n, i, len(tBuf))
+			}
+			// sender = tBuf[1:21]; tx_rlp = tBuf[21:]
+			sendersBuf = append(sendersBuf, tBuf[1:21]...)
+			var txIDBytes [8]byte
+			binary.BigEndian.PutUint64(txIDBytes[:], txnID)
+			if err := tx.Put(kv.EthTx, txIDBytes[:], tBuf[21:]); err != nil {
+				return fmt.Errorf("seedLeftoverBlocks: write EthTx[txnID=%d] (block %d): %w", txnID, n, err)
+			}
+			txnID++
+		}
+		if writeThisBlock && len(sendersBuf) > 0 {
+			// kv.Senders key = block_num_u64 + hash (40 bytes).
+			senderKey := make([]byte, 8+32)
+			binary.BigEndian.PutUint64(senderKey[:8], n)
+			copy(senderKey[8:], hash[:])
+			if err := tx.Put(kv.Senders, senderKey, sendersBuf); err != nil {
+				return fmt.Errorf("seedLeftoverBlocks: write Senders(%d): %w", n, err)
+			}
+		}
+	}
+	return nil
 }
 
 // sliceStraddleSeg writes the first (newToBlock - oldFI.From) entries
