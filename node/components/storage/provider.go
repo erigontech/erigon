@@ -179,6 +179,12 @@ type Provider struct {
 	// admin unwind) is engagable on this chain.
 	blockAlignedBoundaries bool
 
+	// snapTmpDir is config.Dirs.Tmp — passed to seg writers /
+	// recsplit builders during mode-B's straddle-file rebuild.
+	// Stored at Initialize time so the rebuild path doesn't need
+	// the full Config.
+	snapTmpDir string
+
 	// snapDir is the snapshot directory root (config.Dirs.Snap). Stored
 	// so Provider.Unwind's snapshot-trim sub-op can construct absolute
 	// file paths from Inventory entry names (which may include subdirs
@@ -216,6 +222,20 @@ type Provider struct {
 	pendingTrimLock sync.Mutex
 	pendingTrim     *pendingTrimState
 
+	// pendingRebuild tracks block-snapshot files that were rebuilt
+	// from a straddle file during mode-B's snapshot-trim sub-op. The
+	// new files are written to disk INSIDE the tx (writing files
+	// isn't tx-bound) and their paths are recorded here so
+	// AbortUnwind can delete them on the error/rollback path. On
+	// FinalizeUnwind, no FS action is needed for these files — they
+	// stay in place; the corresponding OLD straddle file is deleted
+	// via the regular pendingTrim machinery.
+	//
+	// Guarded by pendingTrimLock — the two pending lists share a
+	// lifecycle (both populated by unwindSnapshotsPastBlock, both
+	// drained by Finalize / Abort).
+	pendingRebuild *pendingRebuildState
+
 	logger log.Logger
 }
 
@@ -225,6 +245,15 @@ type Provider struct {
 type pendingTrimState struct {
 	names []string // inventory names (relative to snapDir)
 	paths []string // absolute paths on disk
+}
+
+// pendingRebuildState lists the absolute paths of every NEW file
+// (.seg + .idx) that mode-B's snapshot-trim rebuild produced from a
+// straddle file. Used by AbortUnwind to delete those files when the
+// mode-B tx rolls back; FinalizeUnwind drops the list since the new
+// files are the post-commit canonical state.
+type pendingRebuildState struct {
+	paths []string // absolute paths to all new files (.seg + .idx + .idx variants)
 }
 
 // Deps holds all external dependencies needed by Initialize.
@@ -337,6 +366,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.Aggregator = deps.Aggregator
 	p.blockAlignedBoundaries = config.Snapshot.BlockAlignedBoundaries
 	p.snapDir = config.Dirs.Snap
+	p.snapTmpDir = config.Dirs.Tmp
 	p.downloaderClient = deps.DownloaderClient
 	p.republishChainToml = deps.RepublishChainToml
 
