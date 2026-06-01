@@ -652,21 +652,25 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 // pipeline to flow typed cells up to consumers (frame-local cache,
 // readSet records) without re-allocating or boxing through ReadResult's
 // any-typed Value.
-func (vm *VersionMap) ReadStorageCell(addr accounts.Address, key accounts.StorageKey, txIdx int) (cell *WriteCell[uint256.Int], res ReadResult, ok bool) {
+// ReadStorageCell returns the cell value (copied under the read lock) and
+// metadata for the storage slot. Returning the value rather than the cell
+// pointer keeps the caller race-free against a concurrent
+// FlushVersionedWrites that mutates cell.Value.
+func (vm *VersionMap) ReadStorageCell(addr accounts.Address, key accounts.StorageKey, txIdx int) (val uint256.Int, res ReadResult, ok bool) {
 	res.depIdx = UnknownDep
 	res.incarnation = -1
 	if vm == nil {
-		return nil, res, false
+		return val, res, false
 	}
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 	e, present := vm.s[addr]
 	if !present {
-		return nil, res, false
+		return val, res, false
 	}
 	cells := e.Storage[key]
 	if cells == nil {
-		return nil, res, false
+		return val, res, false
 	}
 	fk := UnknownDep
 	var fv *WriteCell[uint256.Int]
@@ -675,13 +679,14 @@ func (vm *VersionMap) ReadStorageCell(addr accounts.Address, key accounts.Storag
 		return false
 	})
 	if fk == UnknownDep || fv == nil {
-		return nil, res, false
+		return val, res, false
 	}
 	res.depIdx = fk
 	if fv.flag == FlagDone {
 		res.incarnation = fv.incarnation
 	}
-	return fv, res, true
+	val = fv.Value
+	return val, res, true
 }
 
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {

@@ -120,12 +120,14 @@ type readPathResult struct {
 	mapRes ReadResult   // outcomeMapDone — generic fallback (value via .Value() any)
 	so     *stateObject // outcomeStorageRead / outcomeLegacyStorage
 
-	// mapCellU256 is a typed cell pointer set when versionedReadCore took
-	// the StoragePath fast-path (vm.ReadStorageCell).  When non-nil on
-	// outcomeMapDone, wrappers should prefer cell.Value over the any-typed
-	// mapRes.Value().  Stage-3 probe: eliminates the any box on StoragePath
-	// MapDone hits.  Other paths leave this nil and fall back to mapRes.
-	mapCellU256 *WriteCell[uint256.Int]
+	// mapStorageVal is the typed StoragePath value captured under the
+	// versionmap read lock when versionedReadCore took the StoragePath
+	// fast-path (vm.ReadStorageCell). When mapStorageValOK is true on
+	// outcomeMapDone, wrappers prefer it over the any-typed mapRes.Value().
+	// Storing a value (not a *WriteCell pointer) keeps readers race-free
+	// against a concurrent FlushVersionedWrites that mutates cell.Value.
+	mapStorageVal   uint256.Int
+	mapStorageValOK bool
 
 	// hdr is the skeleton header for the wrapper to record (with its typed
 	// value) via the typed recordX path when recordVR is true.
@@ -249,10 +251,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// captured at write time (legacy boxing tolerated for now).
 	var res ReadResult
 	if path == StoragePath {
-		cell, r2, ok := s.versionMap.ReadStorageCell(addr, key, s.txIndex)
+		val, r2, ok := s.versionMap.ReadStorageCell(addr, key, s.txIndex)
 		if ok {
 			res = r2
-			r.mapCellU256 = cell
+			r.mapStorageVal = val
+			r.mapStorageValOK = true
 		} else {
 			res.depIdx = UnknownDep
 			res.incarnation = -1
@@ -920,8 +923,8 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		var v uint256.Int
-		if r.mapCellU256 != nil {
-			v = r.mapCellU256.Value
+		if r.mapStorageValOK {
+			v = r.mapStorageVal
 		} else {
 			vAny, ok := r.mapRes.Value().(uint256.Int)
 			if !ok {
@@ -970,8 +973,8 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		return tr.Val, r.source, r.version, false, nil
 	case outcomeMapDone:
 		var v uint256.Int
-		if r.mapCellU256 != nil {
-			v = r.mapCellU256.Value
+		if r.mapStorageValOK {
+			v = r.mapStorageVal
 		} else {
 			vAny, ok := r.mapRes.Value().(uint256.Int)
 			if !ok {
@@ -1018,8 +1021,8 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		var v uint256.Int
-		if r.mapCellU256 != nil {
-			v = r.mapCellU256.Value
+		if r.mapStorageValOK {
+			v = r.mapStorageVal
 		} else {
 			vAny, ok := r.mapRes.Value().(uint256.Int)
 			if !ok {
