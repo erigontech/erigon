@@ -466,14 +466,37 @@ func makeP2PServer(
 }
 
 const (
-	// maxBlockHashesPerMsg is the most [hash, number] entries an honest peer packs into one NewBlockHashes packet.
+	// maxBlockHashesPerMsg caps the [hash, number] entries accepted in one NewBlockHashes packet; peers exceeding it are disconnected.
 	maxBlockHashesPerMsg = 4096
-	// maxNewBlockHashesBytes bounds an inbound NewBlockHashes packet (~48B per entry) so oversized ones are dropped before the payload is buffered or forwarded to subscribers.
+	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
 	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
 	// newBlockHashesBurst and newBlockHashesRate bound how frequently one peer may send NewBlockHashes packets before it is disconnected.
 	newBlockHashesBurst            = 30
 	newBlockHashesRate  rate.Limit = 10
 )
+
+// newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
+func newBlockHashesExceedsCap(payload []byte) bool {
+	pos, listLen, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return false
+	}
+	end := pos + listLen
+	count := 0
+	for pos < end {
+		var entryLen int
+		pos, entryLen, err = rlp.ParseList(payload, pos)
+		if err != nil {
+			return false
+		}
+		pos += entryLen
+		count++
+		if count > maxBlockHashesPerMsg {
+			return true
+		}
+	}
+	return false
+}
 
 func runPeer(
 	ctx context.Context,
@@ -628,6 +651,9 @@ func runPeer(
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			if newBlockHashesExceedsCap(b) {
+				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: NewBlockHashes exceeds %d entries", maxBlockHashesPerMsg))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:

@@ -878,6 +878,46 @@ func TestRunPeer_OversizedNewBlockHashesKicksPeer(t *testing.T) {
 	}
 }
 
+// TestRunPeer_TooManyNewBlockHashesEntriesKicksPeer verifies a packet that
+// stays under the byte cap but carries more than maxBlockHashesPerMsg entries
+// is rejected and the peer disconnected.
+func TestRunPeer_TooManyNewBlockHashesEntriesKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	sendCh := make(chan struct{}, 1)
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sendCh <- struct{}{} }
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	msg := freshNewBlockHashesMsg(t, maxBlockHashesPerMsg+1)
+	require.LessOrEqual(t, int(msg.Size), maxNewBlockHashesBytes, "packet must pass the byte cap to exercise the entry cap")
+	rw.readCh <- msg
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	select {
+	case peerErr := <-errCh:
+		require.NotNil(t, peerErr, "expected a PeerError for too many NewBlockHashes entries")
+		assert.Equal(t, p2p.PeerErrorMessageSizeLimit, peerErr.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPeer did not return within timeout")
+	}
+
+	select {
+	case <-sendCh:
+		t.Fatal("over-cap NewBlockHashes must not be forwarded to subscribers")
+	default:
+	}
+}
+
 // TestRunPeer_NewBlockHashesFloodKicksPeer verifies a peer flooding compliant
 // NewBlockHashes packets past the per-peer rate limit is disconnected.
 func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
