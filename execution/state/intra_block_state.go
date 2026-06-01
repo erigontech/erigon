@@ -1201,10 +1201,17 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		return err
 	}
 	if written {
-		if codeHash == baseCodeHash {
+		// Skip when the new code matches either (1) the value seen by THIS
+		// SetCode call (revert to in-tx base), or (2) the pre-tx original
+		// (cumulative net-zero — e.g. EIP-7702 authority that delegates and
+		// then resets within the same tx). Case (2) is disabled for newly
+		// created stateObjects: original holds the pre-creation snapshot,
+		// and deleting CodePath/CodeHashPath writes would corrupt the trie.
+		matchesOriginal := !stateObject.newlyCreated && codeHash == stateObject.original.CodeHash
+		if codeHash == baseCodeHash || matchesOriginal {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x codeLen=%d\n",
-					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, len(code))
+				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
+					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
 			}
 			sdb.versionedWrites.DelCode(addr)
 			sdb.versionedWrites.DelCodeHash(addr)
@@ -2088,6 +2095,15 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
+		}
+		// Per EIP-6780 + EIP-7928: a SELFDESTRUCT against a SAME-TX created
+		// contract clears storage at end-of-tx, so the BAL must record the
+		// dirty slots as reads, not changes. Zero the storage versionedWrite
+		// values so AsBlockAccessList's net-zero check folds them away.
+		if sdb.versionMap != nil && stateObject.selfdestructed && stateObject.newlyCreated {
+			for key := range stateObject.dirtyStorage {
+				sdb.recordWriteStorage(addr, key, uint256.Int{})
+			}
 		}
 	}
 
