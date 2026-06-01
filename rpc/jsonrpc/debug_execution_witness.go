@@ -26,12 +26,12 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -469,25 +469,6 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 	return result
 }
 
-// marshalWitnessHeader converts a block header to the JSON map format used in
-// debug_executionWitness responses, matching Geth's output format.
-func marshalWitnessHeader(h *types.Header) map[string]any {
-	m := ethapi.RPCMarshalHeader(h)
-
-	// Geth always emits these optional fields as null when absent.
-	nullFields := []string{
-		"baseFeePerGas", "blobGasUsed", "blockAccessListHash", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
-
-	for _, field := range nullFields {
-		if _, ok := m[field]; !ok {
-			m[field] = nil
-		}
-	}
-	delete(m, "size")
-
-	return m
-}
-
 // witnessBlockInfo bundles the inputs that downstream witness-building phases need
 // after resolving the target block: the block itself plus its txnum range and the
 // parent block number. BlockNum is stored as a field (rather than recomputed via
@@ -508,13 +489,12 @@ type ExecutionWitnessResult struct {
 	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
 	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
-	// Keys is always null (reserved for future use, included for Geth compatibility)
-	Keys []hexutil.Bytes `json:"keys"`
-	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
-	// For blocks that touch state, always includes the parent block header plus any blocks accessed
-	// via BLOCKHASH. Omitted (nil) for empty-touch blocks, where ExecutionWitness returns early
-	// before headers are collected.
-	Headers []map[string]any `json:"headers,omitempty"`
+	// Keys is reserved for future use; omitted while empty so the response matches
+	// the canonical {state, codes, headers} shape.
+	Keys []hexutil.Bytes `json:"keys,omitempty"`
+	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
+	// back to the oldest block reached via BLOCKHASH.
+	Headers []hexutil.Bytes `json:"headers,omitempty"`
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
@@ -714,6 +694,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
+	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
+
 	return result, nil
 }
 
@@ -874,11 +859,6 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	})
 	out.SortedKeys = sortedKeys
 
-	type codeWithHash struct {
-		code []byte
-		hash common.Hash
-	}
-
 	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
 	for _, code := range preStateCode {
@@ -888,15 +868,13 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
-	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
-	for h, code := range allCodesByHash {
-		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
+	uniqueCodes := make([][]byte, 0, len(allCodesByHash))
+	for _, code := range allCodesByHash {
+		uniqueCodes = append(uniqueCodes, code)
 	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
+	slices.SortFunc(uniqueCodes, bytes.Compare)
 	for _, c := range uniqueCodes {
-		out.SortedCodes = append(out.SortedCodes, c.code)
+		out.SortedCodes = append(out.SortedCodes, c)
 	}
 
 	preCode := rs.GetPreStateCode()
@@ -1090,8 +1068,8 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 	tx kv.TemporalTx,
 	parentNum uint64,
 	accessedBlockNums []uint64,
-) (headers []map[string]any, byNumber map[uint64]*types.Header, err error) {
-	headers = []map[string]any{}
+) (headers []hexutil.Bytes, byNumber map[uint64]*types.Header, err error) {
+	headers = []hexutil.Bytes{}
 	byNumber = make(map[uint64]*types.Header)
 
 	addHeader := func(bn uint64) error {
@@ -1106,7 +1084,11 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 		if h == nil {
 			return fmt.Errorf("missing header for block %d", bn)
 		}
-		headers = append(headers, marshalWitnessHeader(h))
+		encoded, err := rlp.EncodeToBytes(h)
+		if err != nil {
+			return fmt.Errorf("failed to encode header for block %d: %w", bn, err)
+		}
+		headers = append(headers, encoded)
 		byNumber[h.Number.Uint64()] = h
 
 		return nil
@@ -1118,12 +1100,9 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 			oldest = bn
 		}
 	}
-	for bn := parentNum; ; bn-- {
+	for bn := oldest; bn <= parentNum; bn++ {
 		if err := addHeader(bn); err != nil {
 			return nil, nil, err
-		}
-		if bn == oldest {
-			break
 		}
 	}
 
