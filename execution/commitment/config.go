@@ -5,7 +5,7 @@ package commitment
 // TrieConfig is not available.
 const (
 	DefaultMaxDeferredUpdates     = 50_000
-	DefaultRebuildShardMaxSteps   = 16
+	DefaultRebuildShardMaxSteps   = 64
 	DefaultKeyReferencingMinSteps = 2
 	DefaultWarmupNumWorkers       = 16
 )
@@ -27,7 +27,7 @@ type TrieConfig struct {
 
 	// RebuildShardMaxSteps caps the initial shard size (in step count) used when rebuilding
 	// commitment files in db/state/squeeze.go. The actual size is min(largest pow-2 ≤ stepsInShard, this).
-	// 0 = use DefaultRebuildShardMaxSteps (16).
+	// 0 = use DefaultRebuildShardMaxSteps (64).
 	RebuildShardMaxSteps uint64
 
 	// WarmupNumWorkers is the number of parallel workers used by the MDBX page-cache

@@ -605,8 +605,12 @@ func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecM
 		return nil, common.Hash{}, 0, 0, err
 	}
 
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(db)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
+	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
@@ -800,7 +804,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithBlockBufferSize(128), execmoduletester.WithPruneMode(pm))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithPruneMode(pm))
 
 	head := uint64(4)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
@@ -1192,8 +1196,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 				return err
 			}
 			h := rawdb.ReadCurrentHeader(tx)
-			if b.Hash() != h.Hash() {
-				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			bHash := b.Hash()
+			hHash := h.Hash()
+			if bHash != hHash {
+				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), bHash[:4], h.Number, hHash[:4])
 			}
 			if err := m2.InsertChain(forks[i]); err != nil {
 				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
@@ -1203,8 +1209,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 				return err
 			}
 			h = rawdb.ReadCurrentHeader(tx)
-			if b.Hash() != h.Hash() {
-				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			bHash2 := b.Hash()
+			hHash2 := h.Hash()
+			if bHash2 != hHash2 {
+				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), bHash2[:4], h.Number, hHash2[:4])
 			}
 			return nil
 		}); err != nil {

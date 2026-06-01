@@ -297,7 +297,6 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 			execmoduletester.WithKey(validatorKey),
 			execmoduletester.WithPruneMode(prune.DefaultMode),
 			execmoduletester.WithEngine(bor),
-			execmoduletester.WithBlockBufferSize(1024),
 		),
 		testHeimdall,
 		blocks,

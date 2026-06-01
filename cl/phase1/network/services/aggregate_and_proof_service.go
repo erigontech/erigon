@@ -432,7 +432,8 @@ func AggregateAndProofSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot := utils.Sha256(merkle_tree.Uint64Root(slot).Bytes(), domain)
+	slotRoot := merkle_tree.Uint64Root(slot)
+	signingRoot := utils.Sha256(slotRoot[:], domain)
 	return aggregate.SelectionProof[:], signingRoot[:], publicKey[:], nil
 }
 

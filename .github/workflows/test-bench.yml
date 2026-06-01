@@ -8,6 +8,13 @@ on:
         description: "Compile test binaries only; skip test execution (for cache warming runs)"
         type: boolean
         default: false
+  # Auto-fire on PRs that touch this workflow's own YAML so the exec-mode
+  # matrix change can be validated in-PR without a manual dispatch.
+  # Regular PRs that don't touch this file are unaffected — bench is
+  # otherwise dispatch-only because it needs stable conditions.
+  pull_request:
+    paths:
+      - '.github/workflows/test-bench.yml'
 
 defaults:
   run:
@@ -15,7 +22,26 @@ defaults:
 
 jobs:
   benchmarks:
+    name: benchmarks (${{ matrix.exec_mode }})
     runs-on: ubuntu-24.04
+    strategy:
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
+      matrix:
+        # Each entry runs on its own GitHub-hosted runner — wall-clock
+        # unchanged, runner-minutes doubled. Bench numbers are reported
+        # per matrix entry so serial vs parallel can be compared directly.
+        exec_mode:
+          - serial
+          - parallel
+    env:
+      # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+      # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+      # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
       - name: Checkout custom actions
@@ -23,10 +49,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # No submodules or LFS needed: benchmark functions only use
-      # in-memory or local testdata/ files. Space cleanup is needed
-      # for the cache-warming path (go test -run=^$ ./...) which
-      # compiles test binaries for every package.
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
@@ -50,4 +72,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

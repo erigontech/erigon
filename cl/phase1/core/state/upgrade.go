@@ -312,7 +312,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequestsRoot: emptyRequestsRoot,
 		PrevRandao:            common.Hash{},
-		GasLimit:              0,
+		GasLimit:              b.LatestExecutionPayloadHeader().GasLimit,
 		ParentBlockRoot:       common.Hash{},
 	}
 	b.SetLatestExecutionPayloadBid(bid)
@@ -395,30 +395,21 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 			continue
 		}
 
-		// Check if pubkey is associated with an existing builder or has builder credentials
-		// Note: builders list may be mutated by apply_deposit_for_builder, so we check each iteration
 		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
 		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
 
-		if isExistingBuilder || hasBuilderCredentials {
-			// Apply deposit for builder
-			ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
-			continue
+		if !isExistingBuilder {
+			if !hasBuilderCredentials {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
+			if IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
 		}
 
-		// For new validator deposits with valid signature, track pubkey and keep in pending
-		// Deposits with invalid signatures are dropped
-		valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
-		if err != nil {
-			log.Debug("Error validating deposit signature during upgrade", "err", err)
-			continue
-		}
-		if valid {
-			// Track this pubkey so subsequent builder deposits for same pubkey stay pending
-			validatorPubkeys[deposit.PubKey] = struct{}{}
-			newPendingDeposits.Append(deposit)
-		}
-		// Invalid signature deposits are dropped (they would fail in apply_pending_deposit anyway)
+		ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
 	}
 
 	b.SetPendingDeposits(newPendingDeposits)

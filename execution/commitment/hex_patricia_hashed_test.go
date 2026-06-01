@@ -856,6 +856,71 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 	require.Equal(t, stateNormal.cm, stateDeferred.cm, "branch data should match")
 }
 
+func requireDeferredMatchesEager(tb testing.TB, rounds ...*UpdateBuilder) {
+	tb.Helper()
+
+	ctx := context.Background()
+	stateEager := NewMockState(tb)
+	stateDeferred := NewMockState(tb)
+	eagerCfg := DefaultTrieConfig()
+	eagerCfg.DeferBranchUpdates = false
+	deferredCfg := DefaultTrieConfig()
+	deferredCfg.DeferBranchUpdates = true
+	trieEager := NewHexPatriciaHashed(length.Addr, stateEager, eagerCfg)
+	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
+
+	for i, builder := range rounds {
+		plainKeys, updates := builder.Build()
+		require.NoError(tb, stateEager.applyPlainUpdates(plainKeys, updates), "round %d eager state update", i)
+		require.NoError(tb, stateDeferred.applyPlainUpdates(plainKeys, updates), "round %d deferred state update", i)
+
+		eagerUpdates := WrapKeyUpdates(tb, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		rootEager, err := trieEager.Process(ctx, eagerUpdates, "", nil, WarmupConfig{})
+		eagerUpdates.Close()
+		require.NoError(tb, err, "round %d eager process", i)
+
+		deferredUpdates := WrapKeyUpdates(tb, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		rootDeferred, err := trieDeferred.Process(ctx, deferredUpdates, "", nil, WarmupConfig{})
+		deferredUpdates.Close()
+		require.NoError(tb, err, "round %d deferred process", i)
+
+		require.Equal(tb, rootEager, rootDeferred, "round %d root mismatch", i)
+		require.Equal(tb, stateEager.cm, stateDeferred.cm, "round %d branch data mismatch", i)
+	}
+}
+
+func Test_HexPatriciaHashed_DeferredBranchUpdatesDifferential(t *testing.T) {
+	t.Parallel()
+
+	requireDeferredMatchesEager(t,
+		NewUpdateBuilder().
+			Balance("1000000000000000000000000000000000000001", 1).
+			Nonce("1000000000000000000000000000000000000002", 2).
+			Storage(
+				"1000000000000000000000000000000000000001",
+				"0100000000000000000000000000000000000000000000000000000000000000",
+				"0102",
+			),
+		NewUpdateBuilder().
+			Balance("1000000000000000000000000000000000000001", 3).
+			CodeHash(
+				"1000000000000000000000000000000000000003",
+				"0300000000000000000000000000000000000000000000000000000000000000",
+			).
+			DeleteStorage(
+				"1000000000000000000000000000000000000001",
+				"0100000000000000000000000000000000000000000000000000000000000000",
+			),
+		NewUpdateBuilder().
+			Delete("1000000000000000000000000000000000000002").
+			Storage(
+				"1000000000000000000000000000000000000004",
+				"0400000000000000000000000000000000000000000000000000000000000000",
+				"040506",
+			),
+	)
+}
+
 func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 	t.Parallel()
 

@@ -570,7 +570,7 @@ func (sdb *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 		if stateObject != nil && !stateObject.deleted {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 				balance := stateObject.Balance()
-				fmt.Printf("%d (%d.%d) GetBalance %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &balance)
+				fmt.Printf("%d (%d.%d) GetBalance %x: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, balance.String())
 			}
 			return stateObject.Balance(), true, nil
 		}
@@ -589,7 +589,7 @@ func (sdb *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 		})
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-		fmt.Printf("%d (%d.%d) GetBalance %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &balance)
+		fmt.Printf("%d (%d.%d) GetBalance %x: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, balance.String())
 	}
 	return balance, source == StorageRead || source == MapRead, err
 }
@@ -856,7 +856,7 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 		})
 
 	if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
-		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
+		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue.Hex()[2:])
 	}
 
 	return versionedValue, err
@@ -878,7 +878,7 @@ func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 		})
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
+		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue.Hex()[2:])
 	}
 
 	return versionedValue, err
@@ -971,9 +971,9 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			amount := amount // avoid capture allocation unless we're tracing
 			expected := (&uint256.Int{}).Add(&prev, &amount)
 			if bal.Cmp(expected) != 0 {
-				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
+				panic(fmt.Sprintf("add failed: expected: %d got: %s", expected, bal.String()))
 			}
-			fmt.Printf("%d (%d.%d) AddBalance %x, %d+%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
+			fmt.Printf("%d (%d.%d) AddBalance %x, %s+%s=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, prev.String(), amount.String(), bal.String())
 		}()
 	}
 
@@ -1174,7 +1174,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 			bal, _ := sdb.GetBalance(addr)
 			prev := prev     // avoid capture allocation unless we're tracing
 			amount := amount // avoid capture allocation unless we're tracing
-			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)
+			fmt.Printf("%d (%d.%d) SubBalance %x, %s-%s=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, prev.String(), amount.String(), bal.String())
 		}()
 	}
 
@@ -1194,7 +1194,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 func (sdb *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		amount := amount
-		fmt.Printf("%d (%d.%d) SetBalance %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &amount)
+		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, amount.String())
 	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
@@ -1766,7 +1766,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				if previous != nil {
 					bal = previous.data.Balance
 				}
-				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, &bal)
+				fmt.Printf("%d (%d.%d) Create Account%s: %x, balance=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, creatingContract, addr, bal.String())
 			}
 		}()
 	}
@@ -1820,6 +1820,19 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				}
 			}
 
+			// Honour same-block revival (issue #21319): a prior tx's
+			// self-destruct is overridden by a later tx that revived the
+			// account to a non-empty state — a value transfer leaving balance,
+			// nonce or code behind. A value-0 no-op transfer that leaves the
+			// account empty does NOT revive it (EIP-161 removes it again).
+			// account is the version-map-refreshed record, so its emptiness is
+			// the authoritative revival test. Without this, CreateAccount sees
+			// a revived account as still destroyed, keeps previous.selfdestructed
+			// set, and skips the balance carry below — losing the revived funds.
+			if destructed && sdb.versionMap != nil && !account.Empty() {
+				destructed = false
+			}
+
 			if previous == nil {
 				previous = newObject(sdb, addr, account, account)
 				previous.selfdestructed = destructed
@@ -1849,12 +1862,46 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		prevInc = previous.data.PrevIncarnation
 	}
 	// Read IncarnationPath directly from the versionMap to get the
-	// incarnation written by the prior CreateAccount, giving the correct prevInc.
-	if sdb.versionMap != nil && (previous == nil || previous.selfdestructed) {
+	// incarnation written by the prior CreateAccount/Selfdestruct, giving the
+	// correct prevInc. Capture that entry's own version: the synthetic
+	// IncarnationPath read below must be stamped with the IncarnationPath
+	// cell's coordinates, not the account-record version (which
+	// refreshVersionedAccount may have promoted to a sub-read's version vm
+	// never wrote for IncarnationPath) — otherwise validation's checkVersion
+	// mismatches and the recreate tx spins in a non-converging
+	// validator-invalid retry loop.
+	//
+	// This must NOT be gated on previous.selfdestructed (issue #21319): once a
+	// same-block value transfer revives the destroyed account, previous reads
+	// back as alive, but the IncarnationPath cell from the prior tx's destruct
+	// still governs the recreated contract's incarnation and the synthetic
+	// read's version. IncarnationPath is only ever written by
+	// CreateAccount/Selfdestruct, so a present cell always reflects a real
+	// prior in-block create/destruct that the new incarnation must exceed.
+	incSource, incVersion := source, version
+	if sdb.versionMap != nil {
 		if res := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			incSource = MapRead
+			incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 			if inc, ok := res.value.(uint64); ok && inc > prevInc {
 				prevInc = inc
 			}
+		}
+	}
+	// Same fix for BalancePath: a prior tx may have written the address's
+	// Balance (e.g. coinbase tip credit) at a version the account-record
+	// source/version does not reflect. Without this, the synthetic BalancePath
+	// read below is stamped with the account-record version (or default
+	// UnknownVersion when entering via the else-if-deleted-stateObject
+	// branch at line 1842), and a subsequent path-920 dep check sees the
+	// versionMap entry at a different version → ErrDependency panic → the
+	// worker spins in a non-converging dep-abort retry loop ("too many
+	// incarnations"). Mirrors the IncarnationPath treatment above.
+	balSource, balVersion := source, version
+	if sdb.versionMap != nil {
+		if res := sdb.versionMap.Read(addr, BalancePath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			balSource = MapRead
+			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 		}
 	}
 	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
@@ -1900,8 +1947,8 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
-	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
-	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, source, version, prevInc)
+	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, balSource, balVersion, newObj.Balance())
+	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, incSource, incVersion, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
 	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
@@ -2018,7 +2065,7 @@ func printAccount(EIP161Enabled bool, addr accounts.Address, stateObject *stateO
 			fmt.Printf("CreateContract: %x\n", addr)
 		}
 		stateObject.printTrie()
-		fmt.Printf("UpdateAccountData: %x, balance=%d, nonce=%d\n", addr, &stateObject.data.Balance, stateObject.data.Nonce)
+		fmt.Printf("UpdateAccountData: %x, balance=%s, nonce=%d\n", addr, stateObject.data.Balance.String(), stateObject.data.Nonce)
 	}
 }
 
@@ -2177,9 +2224,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 				dirty = " (dirty)"
 			}
 			if updated != nil {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %d (%d)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, &stateObject.data.Balance, updated)
+				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s (%d)\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, stateObject.data.Balance.String(), updated)
 			} else {
-				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, &stateObject.data.Balance)
+				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, stateObject.data.Balance.String())
 			}
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -2428,41 +2475,6 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	}
 }
 
-// SnapshotVersionedReadKeys returns the current set of read keys for addr.
-// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
-// preserving pre-existing legitimate reads.
-func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
-	if sdb.versionedReads == nil {
-		return nil
-	}
-	reads := sdb.versionedReads[addr]
-	if len(reads) == 0 {
-		return nil
-	}
-	snapshot := make(map[AccountKey]struct{}, len(reads))
-	for k := range reads {
-		snapshot[k] = struct{}{}
-	}
-	return snapshot
-}
-
-// MarkNewReadsInternal marks as internal only the reads for addr that were
-// added after the given snapshot. Use this when gas-calculation-only reads
-// were recorded on top of earlier legitimate reads — the legitimate ones
-// must remain non-internal so they appear in the block access list.
-func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
-	if sdb.versionedReads == nil {
-		return
-	}
-	for key, vr := range sdb.versionedReads[addr] {
-		if _, existed := before[key]; existed {
-			continue
-		}
-		vr.internal = true
-		sdb.versionedReads[addr][key] = vr
-	}
-}
-
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {
@@ -2513,6 +2525,17 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 
 func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
 	sdb.MarkAddressAccess(addr, true)
+	if source == WriteSetRead {
+		// A synthetic read satisfied by the tx's own earlier write carries
+		// no cross-transaction dependency — it is internally consistent by
+		// construction. Recording it in the readSet would make the validator
+		// re-check it against the version map (which, floored below the tx's
+		// own writes, returns None) and wrongly invalidate the tx — e.g. a
+		// genesis alloc whose Constructor CREATEs the pre-funded account, so
+		// CreateAccount's synthetic BalancePath read sees its own funding
+		// write (issue #21319).
+		return
+	}
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}

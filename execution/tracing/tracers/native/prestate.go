@@ -316,10 +316,7 @@ func (t *prestateTracer) processDiffState() {
 
 		if !t.config.DisableCode {
 			newCode, _ := t.env.IntraBlockState.GetCode(addr)
-			var prevCode []byte
-			if state.Code != nil {
-				prevCode = *state.Code
-			}
+			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
 				postAccount.Code = &newCode

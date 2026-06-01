@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -261,6 +262,57 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
 		require.Equal(t, big.NewInt(1000), balance) // 10 * 100
+	})
+}
+
+// TestEngineApiV4TargetGasLimitOverridesMinerGasLimit checks that a CL-supplied
+// targetGasLimit in PayloadAttributesV4 (engine_forkchoiceUpdatedV4) overrides
+// the EL's static --miner.gaslimit when building a block — and that the
+// resulting block respects the CL target as a cap.
+//
+// Setup picks numbers so the two values produce distinguishable block contents:
+//   - parent gas limit = 42_000 (room for two 21K-gas transfers)
+//   - static --miner.gaslimit = 21_000 (would cap the block at one transfer)
+//   - CL targetGasLimit = 42_000 (room for two transfers)
+//
+// Three transfers are submitted; only two must fit. If the static target won,
+// the block would gas-limit at ~41_960 and contain a single transfer.
+// See https://github.com/ethereum/execution-apis/pull/796.
+func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	const targetGasLimit uint64 = 42_000
+	const minerGasLimit uint64 = 21_000
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.GasLimit = targetGasLimit
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			gl := minerGasLimit
+			config.Builder.GasLimit = &gl
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		receiver := common.HexToAddress("0x42")
+		// Submit 3 transfers; only 2 should fit under the CL-supplied 42K cap.
+		for i := 0; i < 3; i++ {
+			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(int64(i+1)))
+			require.NoError(t, err)
+		}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		// Block gas limit follows the CL target — not the EL's --miner.gaslimit.
+		require.Equal(t, hexutil.Uint64(targetGasLimit), payload.ExecutionPayload.GasLimit)
+		require.Len(t, payload.ExecutionPayload.Transactions, 2)
 	})
 }
 
