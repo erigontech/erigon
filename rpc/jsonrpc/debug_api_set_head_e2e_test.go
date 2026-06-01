@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"math/big"
 	"testing"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -96,6 +98,71 @@ func newSetHeadE2EAPI(t *testing.T, m *execmoduletester.ExecModuleTester) *Debug
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
+}
+
+// assertNoBlockDataPastTarget pins the cold-start invariant that
+// Provider.Unwind establishes: after mode B, no block-data table in
+// the writable DB carries rows past targetBlock. This is what
+// stage_snapshots.firstNonGenesisCheck reads on the next startup —
+// orphan rows in kv.Headers past targetBlock + snapshots tip cause
+// "Some blocks are not in snapshots and not in db" and refuse to
+// start the execution service.
+//
+// Live repro of the corresponding regression: hoodi datadir post
+// debug_setHead, kv.Headers held forward NewPayloads at 2,914,976+
+// even though stage progress was reset to 2,912,079.
+//
+// Pins the fix from "storage: mode-B unwind wipes orphan block-data
+// past toBlock".
+func assertNoBlockDataPastTarget(t *testing.T, m *execmoduletester.ExecModuleTester, target uint64) {
+	t.Helper()
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// HeaderNumber is hash-keyed (no block-number prefix on the row
+	// key), so it can't participate in a "first row past target" walk.
+	// The other tables are block-number-prefixed and walk cleanly.
+	tables := []string{
+		kv.Headers,
+		kv.BlockBody,
+		kv.HeaderTD,
+		kv.Senders,
+	}
+	for _, table := range tables {
+		c, err := roTx.Cursor(table) //nolint:gocritic // explicit Close inside per-table loop; defer would accumulate cursors
+		require.NoError(t, err)
+		past := 0
+		var firstPast uint64
+		for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
+			if len(k) < 8 {
+				continue
+			}
+			n := binary.BigEndian.Uint64(k[:8])
+			if n > target {
+				if past == 0 {
+					firstPast = n
+				}
+				past++
+			}
+		}
+		c.Close()
+		require.Zero(t, past,
+			"post-mode-B startup invariant: %s must have no rows past target=%d (first leaked=%d, count=%d)",
+			table, target, firstPast, past)
+	}
+
+	// Also pin the actual signal stage_snapshots.firstNonGenesisCheck
+	// reads — SecondKey returns the smallest non-genesis row in
+	// kv.Headers. Must be nil (Headers empty past genesis) for the
+	// startup wedge to be impossible.
+	firstNonGenesis, err := rawdbv3.SecondKey(roTx, kv.Headers)
+	require.NoError(t, err)
+	if firstNonGenesis != nil {
+		n := binary.BigEndian.Uint64(firstNonGenesis[:8])
+		require.LessOrEqual(t, n, target,
+			"post-mode-B: kv.Headers first-non-genesis (%d) must not be past target (%d) — firstNonGenesisCheck would wedge", n, target)
+	}
 }
 
 // canonicalHead reads the current canonical chain head — what every
@@ -412,6 +479,8 @@ func TestSetHead_E2E_ModeB_SnapshotsAlignedCut(t *testing.T) {
 	// real-chain state-divergence (G3.15) needs the path investigation
 	// described in the linear plan.
 	_ = originalHeadHash
+
+	assertNoBlockDataPastTarget(t, m, targetBlock)
 }
 
 // TestSetHead_E2E_ModeB_NoSnapshotTrim — Scenario 2 (mode B, db-only).
@@ -531,6 +600,8 @@ func TestSetHead_E2E_ModeB_NoSnapshotTrim(t *testing.T) {
 	// equivalent comment for the reasoning. nextBlockHash is captured
 	// pre-unwind in case a future test wants to extend.
 	_ = nextBlockHash
+
+	assertNoBlockDataPastTarget(t, m, targetBlock)
 }
 
 // TestSetHead_E2E_ModeB_NonAlignedCut — Scenario 3b (non-aligned cut).
@@ -634,4 +705,410 @@ func TestSetHead_E2E_ModeB_NonAlignedCut(t *testing.T) {
 	// Forward-exec G3.15 check is not asserted — see scenario 3a's
 	// equivalent comment for the reasoning.
 	_ = nextBlockHash
+
+	assertNoBlockDataPastTarget(t, m, targetBlock)
+}
+
+// TestSetHead_E2E_ModeB_WipesOrphanRowsPastTarget pins the orphan-
+// block-data sweep in unwindDBPastBlock. Seeds extra rows in the
+// block-data tables AT BLOCKS PAST THE CHAIN HEAD before triggering
+// mode B (simulating CL NewPayloads that landed in the writable DB
+// between mode B starting + the kill — exactly the live wedge
+// observed on hoodi: snapshots ended at 2,911,999, kv.Headers held
+// 2,914,976+ from forward NewPayloads), then asserts those rows are
+// gone post-unwind.
+//
+// Without the fix, kv.Headers + kv.BlockBody + kv.HeaderTD +
+// kv.Senders retain the seeded forward rows because the pre-fix
+// unwindDBPastBlock only touched stage progress + canonical hashes
+// + TxNums + ChangeSets3 + writable shadow.
+//
+// With the fix (deleteHeaderNumbersPastBlock + rawdb.TruncateBlocks
+// + rawdb.TruncateTd), the seeded rows are wiped — the cold-start
+// invariant holds and the next-startup firstNonGenesisCheck does
+// not wedge.
+func TestSetHead_E2E_ModeB_WipesOrphanRowsPastTarget(t *testing.T) {
+	const stepSize uint64 = 8
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithAdminUnwindWired(),
+	)
+	ctx := m.Ctx
+	require.NotNil(t, m.AdminUnwindProvider)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 16, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	head := canonicalHead(t, m)
+	require.Equal(t, uint64(16), head)
+	m.RescanAdminUnwindInventory(t)
+
+	var targetBlock uint64
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		for b := uint64(1); b < head; b++ {
+			lastTxNum, err := rawdbv3.TxNums.Max(ctx, roTx, b)
+			require.NoError(t, err)
+			if (lastTxNum+1)%stepSize == 0 && targetBlock == 0 {
+				targetBlock = b
+			}
+		}
+		roTx.Rollback()
+		require.NotZero(t, targetBlock, "fixture must produce at least one aligned cut")
+	}
+
+	m.TruncateChangeSetsBelow(t, targetBlock+2)
+
+	// Seed orphan forward rows simulating CL NewPayloads that landed
+	// after mode B started preparing. These would survive a pre-fix
+	// unwind and wedge the next startup.
+	orphanBlocks := []uint64{head + 1, head + 2, head + 3}
+	{
+		rwTx, err := m.DB.BeginRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		// Seed minimal Header + HeaderNumber + TD + Body + Senders for
+		// each orphan block. Values are opaque — the cold-start check
+		// only cares about row presence.
+		for _, n := range orphanBlocks {
+			var hash common.Hash
+			binary.BigEndian.PutUint64(hash[:8], n)
+			copy(hash[8:], "orphan-forward-payload")
+			require.NoError(t, rawdb.WriteHeaderNumber(rwTx, hash, n))
+			require.NoError(t, rawdb.WriteBodyForStorage(rwTx, hash, n, &types.BodyForStorage{
+				BaseTxnID: types.BaseTxnID(n * 16),
+				TxCount:   1,
+			}))
+			require.NoError(t, rawdb.WriteTd(rwTx, hash, n, big.NewInt(int64(n*10))))
+			// Use the standard composite key (num || hash) for Headers / Senders.
+			headerKey := make([]byte, 8+len(hash))
+			binary.BigEndian.PutUint64(headerKey[:8], n)
+			copy(headerKey[8:], hash[:])
+			require.NoError(t, rwTx.Put(kv.Headers, headerKey, []byte{0x80}))
+			require.NoError(t, rwTx.Put(kv.Senders, headerKey, []byte{}))
+		}
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Sanity-check the seeds landed and are visible past the target.
+	{
+		roTx, err := m.DB.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		for _, n := range orphanBlocks {
+			// Headers row by composite key
+			var probeKey [40]byte
+			binary.BigEndian.PutUint64(probeKey[:8], n)
+			c, err := roTx.Cursor(kv.Headers) //nolint:gocritic // explicit Close at end of loop iteration; defer would accumulate cursors across orphanBlocks
+			require.NoError(t, err)
+			found := false
+			for k, _, err := c.Seek(probeKey[:8]); k != nil && err == nil; k, _, err = c.Next() {
+				if binary.BigEndian.Uint64(k[:8]) != n {
+					break
+				}
+				found = true
+				break
+			}
+			c.Close()
+			require.True(t, found, "fixture: orphan kv.Headers row for block %d must be present pre-unwind", n)
+		}
+		roTx.Rollback()
+	}
+
+	api := newSetHeadE2EAPI(t, m)
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)),
+		"mode B must succeed (orphan-row cleanup is part of unwindDBPastBlock)")
+
+	// The fix's core contract: no block-data rows past targetBlock,
+	// including the seeded orphans above the original chain head.
+	assertNoBlockDataPastTarget(t, m, targetBlock)
+}
+
+// TestSetHead_E2E_ModeB_SequentialUnwinds pins the "two debug_setHead
+// calls back-to-back" robustness contract. After mode B unwinds to
+// T1, the post-unwind state is a valid starting point — the next
+// mode B targeting T2 < T1 must either succeed cleanly or fail with
+// a specific, diagnostic error rather than silently corrupting the
+// trie.
+//
+// Live observation: a second mode-B from a post-mode-B state
+// (head=2,912,999) to T2=2,912,500 failed with a commitment-anchor
+// root mismatch (recomputed root ≠ header stateRoot). This test
+// fences the contract in a controlled environment with a small
+// generated chain so the failure mode is reproducible without a
+// hoodi-sized datadir.
+//
+// Two intermediate aligned cuts in the same generated chain so both
+// unwinds dispatch to mode B (target < CanUnwindToBlockNum after the
+// first TruncateChangeSetsBelow). T1 > T2 so the second SetHead
+// targets a state strictly older than the first.
+func TestSetHead_E2E_ModeB_SequentialUnwinds(t *testing.T) {
+	const stepSize uint64 = 8
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithAdminUnwindWired(),
+	)
+	ctx := m.Ctx
+	require.NotNil(t, m.AdminUnwindProvider)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 24, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	head := canonicalHead(t, m)
+	require.Equal(t, uint64(24), head, "fixture must run all 24 blocks for two distinct aligned cuts")
+	m.RescanAdminUnwindInventory(t)
+
+	// Find two aligned cuts: T1 > T2, both with lastTxNum landing on
+	// a step boundary. The first unwind targets T1; the second
+	// targets T2.
+	var t1, t2 uint64
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		var aligned []uint64
+		for b := uint64(1); b < head; b++ {
+			lastTxNum, err := rawdbv3.TxNums.Max(ctx, roTx, b)
+			require.NoError(t, err)
+			if (lastTxNum+1)%stepSize == 0 {
+				aligned = append(aligned, b)
+			}
+		}
+		roTx.Rollback()
+		require.GreaterOrEqual(t, len(aligned), 2, "fixture must produce at least two aligned cuts; got %v", aligned)
+		t2 = aligned[0]
+		t1 = aligned[len(aligned)-1]
+		require.Greater(t, t1, t2, "t1 must be strictly greater than t2 for a meaningful second unwind")
+	}
+
+	// Lift CanUnwindToBlockNum past t1+1 so both targets route to mode B.
+	m.TruncateChangeSetsBelow(t, t1+2)
+
+	api := newSetHeadE2EAPI(t, m)
+
+	// First unwind: head → t1.
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(t1)),
+		"first mode-B unwind (head → t1=%d) must succeed", t1)
+	{
+		roTx, err := m.DB.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		latest, err := rpchelper.GetLatestBlockNumber(roTx)
+		roTx.Rollback()
+		require.NoError(t, err)
+		require.Equal(t, t1, latest, "head must equal t1 after first unwind")
+	}
+	assertNoBlockDataPastTarget(t, m, t1)
+
+	// Second unwind: t1 → t2.
+	//
+	// This is the contract that today's behavior is unclear on. A
+	// success outcome means mode B is fully composable end-to-end:
+	// the post-first-mode-B state (wiped shadow past t1's lastTxNum
+	// + commitment anchor at t1's lastTxNum + truncated block-data
+	// tables) is a clean starting point for the next unwind.
+	//
+	// On live hoodi this second call surfaced a commitment-root
+	// mismatch in RecomputeAtTxNumWithoutSD. This test reproduces
+	// the scenario in-process so the regression can be debugged
+	// without a hoodi-sized datadir.
+	err = api.SetHead(ctx, hexutil.Uint64(t2))
+	if err != nil {
+		t.Fatalf("second mode-B unwind (t1=%d → t2=%d) failed: %v\n\n"+
+			"This is the live-rig issue #2: post-mode-B state must be a valid starting point for the next mode-B.\n"+
+			"Likely cause: writable-shadow's boundary-step diff-replay from the first unwind perturbs the reads "+
+			"the second unwind's RecomputeAtTxNumWithoutSD makes via plainReader.GetAsOf — investigating.",
+			t1, t2, err)
+	}
+	{
+		roTx, err := m.DB.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		latest, err := rpchelper.GetLatestBlockNumber(roTx)
+		roTx.Rollback()
+		require.NoError(t, err)
+		require.Equal(t, t2, latest, "head must equal t2 after second unwind")
+	}
+	assertNoBlockDataPastTarget(t, m, t2)
+}
+
+// TestSetHead_E2E_ModeB_SequentialUnwinds_NonAligned exercises the
+// same sequential contract as the aligned variant above, but with
+// both T1 and T2 at non-aligned cuts (lastTxNum mid-step). This
+// matches the live hoodi failure where both head and target were
+// non-aligned (lastTxNum=103,927,077 and ~103,914,000 against a
+// step size of 390,625).
+//
+// Non-aligned mode B uses the boundary-step diff-replay path in
+// WipeWritableShadowPast — it writes value-as-of-lastTxNum into the
+// boundary step for every key changed in (lastTxNum, boundaryStepEnd).
+// After this rewrite the writable shadow's boundary step holds
+// post-first-unwind values rather than the file-side step contents,
+// so the second mode B's plainReader.GetAsOf reads can hit those
+// shadow values for keys whose history records have NOT been pruned
+// (records ≤ first-unwind's lastTxNum survive). This is exactly the
+// surface where the live divergence could come from.
+func TestSetHead_E2E_ModeB_SequentialUnwinds_NonAligned(t *testing.T) {
+	const stepSize uint64 = 8
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithAdminUnwindWired(),
+	)
+	ctx := m.Ctx
+	require.NotNil(t, m.AdminUnwindProvider)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 24, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	head := canonicalHead(t, m)
+	require.Equal(t, uint64(24), head)
+	m.RescanAdminUnwindInventory(t)
+
+	// Pick two non-aligned cuts T1 > T2 with the constraint that
+	// they sit in DIFFERENT steps — otherwise the second unwind
+	// stays within the same boundary step as the first and the
+	// path being probed (cross-step second-unwind) doesn't engage.
+	var t1, t2 uint64
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		type cut struct {
+			block uint64
+			step  uint64
+		}
+		var nonAligned []cut
+		for b := uint64(1); b < head; b++ {
+			lastTxNum, err := rawdbv3.TxNums.Max(ctx, roTx, b)
+			require.NoError(t, err)
+			if (lastTxNum+1)%stepSize != 0 {
+				nonAligned = append(nonAligned, cut{b, lastTxNum / stepSize})
+			}
+		}
+		roTx.Rollback()
+		require.GreaterOrEqual(t, len(nonAligned), 2,
+			"fixture must produce at least two non-aligned cuts")
+		// t2 = earliest non-aligned cut, t1 = latest non-aligned cut
+		// in a strictly-later step (cross-step pair).
+		t2 = nonAligned[0].block
+		for i := len(nonAligned) - 1; i > 0; i-- {
+			if nonAligned[i].step > nonAligned[0].step {
+				t1 = nonAligned[i].block
+				break
+			}
+		}
+		require.NotZero(t, t1, "fixture must produce a non-aligned cut in a strictly later step than t2; got %v", nonAligned)
+		require.Greater(t, t1, t2)
+	}
+
+	m.TruncateChangeSetsBelow(t, t1+2)
+
+	api := newSetHeadE2EAPI(t, m)
+
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(t1)),
+		"first non-aligned mode-B unwind (head → t1=%d) must succeed", t1)
+	{
+		roTx, err := m.DB.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		latest, err := rpchelper.GetLatestBlockNumber(roTx)
+		roTx.Rollback()
+		require.NoError(t, err)
+		require.Equal(t, t1, latest)
+	}
+	assertNoBlockDataPastTarget(t, m, t1)
+
+	err = api.SetHead(ctx, hexutil.Uint64(t2))
+	if err != nil {
+		t.Fatalf("second non-aligned mode-B unwind (t1=%d → t2=%d) failed: %v\n\n"+
+			"Live-rig issue #2 reproduced. The first unwind's boundary-step diff-replay "+
+			"rewrote the writable shadow at step %d for keys changed in "+
+			"(t1.lastTxNum, t1.boundaryStepEnd). The second unwind's "+
+			"plainReader.GetAsOf(key, t2.lastTxNum+1) walks history; for a key "+
+			"whose only history record in (t2.baselineTxNum, t2.lastTxNum+1] is "+
+			"below the shadow rewrite, the reader should still return the correct "+
+			"value — investigate which read path actually diverges.",
+			t1, t2, err, t1/stepSize)
+	}
+	{
+		roTx, err := m.DB.BeginRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		latest, err := rpchelper.GetLatestBlockNumber(roTx)
+		roTx.Rollback()
+		require.NoError(t, err)
+		require.Equal(t, t2, latest)
+	}
+	assertNoBlockDataPastTarget(t, m, t2)
 }
