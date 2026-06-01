@@ -1053,8 +1053,10 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		}
 
 		if doMerge {
+			a.wg.Add(1)
 			go func() {
-				if err := a.MergeLoop(ctx); err != nil {
+				defer a.wg.Done()
+				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
 			}()
@@ -1097,7 +1099,13 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 	return nil
 }
 
-func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
+func (a *Aggregator) MergeLoop(ctx context.Context) error {
+	a.wg.Add(1)
+	defer a.wg.Done()
+	return a.mergeLoop(ctx)
+}
+
+func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
@@ -1110,8 +1118,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	a.wg.Add(1)
-	defer a.wg.Done()
 	defer a.mergingFiles.Store(false)
 
 	mergeThrottleMs := dbg.MergeThrottleMs
@@ -2149,9 +2155,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !doMerge {
 			return
 		}
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			defer close(fin)
-			if err := a.MergeLoop(a.ctx); err != nil {
+			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
 				}
