@@ -148,7 +148,7 @@ func InitMiner(
 		WithoutHeimdall: withoutHeimdall,
 		RPCGasCap:       50000000,
 		RPCTxFeeCap:     1, // 1 ether
-		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
+		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ProduceE2: true, ProduceE3: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool

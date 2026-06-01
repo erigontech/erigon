@@ -286,6 +286,8 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Dirs: dirs,
 		Snapshot: ethconfig.BlocksFreezing{
 			NoDownloader: true,
+			ProduceE2:    true,
+			ProduceE3:    true,
 		},
 		TxPool: txPoolConfig,
 		Builder: buildercfg.BuilderConfig{
