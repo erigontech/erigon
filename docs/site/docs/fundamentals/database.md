@@ -46,7 +46,7 @@ Once a snapshot file is finalised it is the same bytes on every Erigon node in t
 - **BitTorrent distribution.** New nodes fetch snapshots from peers in parallel rather than re-executing history from genesis. This is what OtterSync does.
 - **Backup / disaster recovery costs ~10× less.** Most of your datadir is content-addressed and can be re-downloaded from any peer if a disk fails. You only need to back up `chaindata/`.
 
-Snapshots come in four flavours, each in its own subdirectory:
+Snapshots are organised into several subdirectories. The main ones are:
 
 | Directory | What it holds | Access pattern |
 |---|---|---|
