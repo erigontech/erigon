@@ -22,16 +22,14 @@ flowchart TB
         Caplin["Caplin (CL)<br/>embedded by default"]
         Datadir[("datadir<br/>MDBX chaindata<br/>+ .seg snapshots")]
 
-        Sentry --> Downloader
-        Downloader --> Execution
+        Caplin -->|new blocks<br/>(Engine API)| Execution
+        Sentry -->|tx gossip| TxPool
         Execution --> RPC
 
-        Downloader -.writes.-> Datadir
+        Downloader -.writes snapshots.-> Datadir
         Execution -.reads/writes.-> Datadir
         RPC -.reads.-> Datadir
-
-        TxPool <-- private gRPC --> Caplin
-        TxPool -.reads.-> Datadir
+        TxPool -.reads/writes.-> Datadir
         Caplin -.reads/writes.-> Datadir
     end
 
@@ -50,17 +48,22 @@ Erigon processes the chain in a series of **stages** rather than the traditional
 A simplified pipeline:
 
 ```
-1. Headers      → download and verify block headers
-2. Bodies       → download block bodies
-3. Snapshots    → fetch immutable history files via BitTorrent
-4. Execution    → re-execute transactions, write account/storage updates
-5. Commitment   → build the state Merkle trie incrementally
-6. Finalization → persist receipts, update canonical chain
+1. Snapshots    → fetch immutable history files via BitTorrent (OtterSync)
+2. Headers      → download and verify block headers
+3. Bodies       → download block bodies
+4. Senders      → recover transaction senders from signatures
+5. Execution    → re-execute transactions, write state, and build the
+                  state commitment (Merkle trie) — all in a single pass
+6. Finalization → update the canonical chain
 ```
+
+This is the order of Erigon 3's default stage list. There is no separate
+`Commitment` stage — trie/state-root computation runs *inside* Execution (see
+below).
 
 Two consequences:
 
-- **Faster initial sync.** Stages are CPU/IO-bound in different ways, so the pipeline avoids waiting on a single bottleneck per block. Snapshot download (stage 3) parallelises with execution warm-up.
+- **Faster initial sync.** Stages are CPU/IO-bound in different ways, so the pipeline avoids waiting on a single bottleneck per block. Snapshot download (stage 1) parallelises with execution warm-up.
 - **Cheap restarts.** Each stage records its progress. Killing Erigon mid-sync and restarting resumes from the last completed checkpoint — Erigon does not re-execute from genesis.
 
 In Erigon 3, the Execution stage absorbs many previously-separate stages (`stage_hash_state`, `stage_trie`, `log_index`, `history_index`, `trace_index`) into a single pass, which is one reason Erigon 3 syncs faster than Erigon 2.
@@ -96,7 +99,7 @@ For the exact directory layout, file sizes on mainnet, and how to split storage 
 
 ## Embedded consensus (Caplin)
 
-Erigon ships with **Caplin**, a built-in consensus-layer client. By default `--internalcl` is on, so a single `erigon` invocation runs both the execution layer and the consensus layer with no extra processes, no JWT secret to manage, and no separate binary to upgrade.
+Erigon ships with **Caplin**, a built-in consensus-layer client. Caplin runs embedded by default, so a single `erigon` invocation runs both the execution layer and the consensus layer with no extra processes, no JWT secret to manage, and no separate binary to upgrade.
 
 If you prefer to run an external CL (Lighthouse, Prysm, Teku, Nimbus), pass `--externalcl` and connect via the standard Engine API. The Engine-API path is identical to what Geth, Besu, or Reth exposes.
 
@@ -104,7 +107,7 @@ See [Caplin](caplin) for full details.
 
 ## Flat key-value state
 
-Where most clients store account state in a Merkle Patricia Trie *inside* the database, Erigon stores it as **flat key-value pairs** and computes the trie root incrementally during the Commitment stage. Trade-off:
+Where most clients store account state in a Merkle Patricia Trie *inside* the database, Erigon stores it as **flat key-value pairs** and computes the trie root incrementally as part of Execution. Trade-off:
 
 - **Read path is direct** — `getAccount(addr)` is a single key lookup, not a multi-level trie traversal.
 - **Write path defers trie hashing** — updates accumulate in the KV store and the trie is rebuilt only when state-root computation requires it.
@@ -117,9 +120,10 @@ Erigon 3 has one sync pipeline. The user-facing choice is *what to retain after 
 
 | Mode | Retained | Use case |
 |---|---|---|
-| `archive` | All state, all blocks | Indexers, block explorers, deep historical queries |
-| `full` (default) | Latest state + post-Merge blocks | Most users, dApps, validators |
-| `minimal` | Latest state + recent blocks only | Solo stakers, constrained hardware |
+| `archive` | Entire state history + all blocks | Indexers, block explorers, deep historical queries |
+| `full` (default) | Latest state + a rolling window of recent blocks (the default prune distance, ~262k blocks) | Most users, dApps, validators |
+| `blocks` | All blocks, but no state history | Full block/receipt history without archive-size state |
+| `minimal` | Latest state only (shortest block window) | Solo stakers, constrained hardware |
 
 See [Prune Modes](prune-modes) for the full comparison.
 
