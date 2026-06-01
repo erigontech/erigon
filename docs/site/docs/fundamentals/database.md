@@ -16,7 +16,7 @@ This page covers the *what* and *where* of Erigon's data. For the *why* — flat
 datadir/
 ├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
 ├── snapshots/        # Historical data as immutable .seg files. Large, cold.
-│   ├── domain/         # Latest state per domain (account, storage, code, commitment)
+│   ├── domain/         # Latest value per domain (4 state domains + 2 receipt domains)
 │   ├── history/        # Historical values per domain
 │   ├── idx/            # Inverted indices — search/filter/intersect historical data
 │   └── accessor/       # Random-access indices over history (point lookups only)
@@ -50,7 +50,7 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 | Directory | What it holds | Access pattern |
 |---|---|---|
-| `snapshots/domain/` | Latest value per (domain, key). 4 domains: `account`, `storage`, `code`, `commitment` | Sequential + point lookup |
+| `snapshots/domain/` | Latest value per (domain, key). 6 domains: the 4 state domains (`account`, `storage`, `code`, `commitment`) plus 2 receipt domains (`receipt`, `rcache`) | Sequential + point lookup |
 | `snapshots/history/` | Every historical value per (domain, key, txn) | Point lookup keyed by transaction |
 | `snapshots/idx/` | Inverted indices over history — answers "which transactions touched key X?" | Search / filter / set intersection |
 | `snapshots/accessor/` | Pre-built random-access indices over history files | Random-touch point reads only |
@@ -59,7 +59,7 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 - You can replay a single historical transaction without re-executing its block.
 - If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
-- Receipts are not stored — they are re-computed by re-executing the relevant transaction, which is cheap thanks to the index structure above.
+- Full receipts (with logs) are not persisted by default. Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain, and optionally caches full receipts in a separate domain. Receipts are reconstructed on demand from this metadata, re-deriving logs by re-execution only when a full receipt isn't cached.
 
 ## What does it cost on disk?
 
@@ -89,7 +89,7 @@ In Erigon 3, `chaindata/` only holds:
 
 Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
 
-It also means **`rm -rf chaindata/` is recoverable**: Erigon will rebuild it from snapshots on next start, given enough time. (You will still want a backup for fast recovery, but the cost of losing it is hours, not weeks.)
+Deleting `chaindata/` is **recoverable but not free**: it discards the latest mutable state and any recent blocks not yet folded into snapshots. On restart Erigon re-derives state from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip forward from the consensus layer over the Engine API — blocks are no longer pulled from peers over devp2p. Treat it as a resync of the chain tip, not a quick rebuild, and keep a backup if fast recovery matters.
 
 ## Tuning knobs
 
@@ -107,7 +107,7 @@ If you need to reclaim space without resyncing from scratch:
 | `txpool/` | Pending transactions lost; pool refills from peers within minutes |
 | `nodes/` | Peer cache lost; reconnects on restart |
 | `temp/` | Cleaned automatically at startup anyway |
-| `chaindata/` | Rebuilds from snapshots on restart (hours, not days) |
+| `chaindata/` | Recoverable, but triggers a resync of the post-snapshot tip from the consensus layer — not instant; keep a backup for fast recovery |
 | `snapshots/` | **Do not delete** — would force a full resync |
 
 ## Where to go next
