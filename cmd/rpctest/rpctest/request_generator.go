@@ -133,19 +133,19 @@ func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topics [][
 	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "topics": [`, prevBn, bn)
 	for i, posTopics := range topics {
 		if i > 0 {
-			fmt.Fprintf(&sb, `,`)
+			sb.WriteByte(',')
 		}
 		if posTopics == nil {
-			fmt.Fprintf(&sb, `null`)
+			sb.WriteString("null")
 		} else {
-			fmt.Fprintf(&sb, `[`)
+			sb.WriteByte('[')
 			for j, t := range posTopics {
 				if j > 0 {
-					fmt.Fprintf(&sb, `,`)
+					sb.WriteByte(',')
 				}
 				fmt.Fprintf(&sb, `"0x%x"`, t)
 			}
-			fmt.Fprintf(&sb, `]`)
+			sb.WriteByte(']')
 		}
 	}
 	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))

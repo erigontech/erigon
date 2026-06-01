@@ -200,11 +200,18 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
-			sawAddr := map[common.Address]struct{}{} // don't check same addr in this block
+			sawAddr := map[common.Address]struct{}{}
+			topicsByPos := [4]map[common.Hash]struct{}{{}, {}, {}, {}}
 			for _, l := range resp.Result {
 				sawAddr[l.Address] = struct{}{}
+				for pos, t := range l.Topics {
+					if pos < 4 {
+						topicsByPos[pos][t] = struct{}{}
+					}
+				}
 			}
 
+			resp = EthGetLogs{}
 			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, slices.Collect(maps.Keys(sawAddr))), &resp)
 			if res.Err != nil {
 				if failFast {
@@ -240,18 +247,6 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
-			var topicsByPos [4]map[common.Hash]struct{}
-			for i := range topicsByPos {
-				topicsByPos[i] = map[common.Hash]struct{}{}
-			}
-			for _, l := range resp.Result {
-				for pos, t := range l.Topics {
-					if pos < 4 {
-						topicsByPos[pos][t] = struct{}{}
-					}
-				}
-			}
-
 			for pos, topicsAtPos := range topicsByPos {
 				if len(topicsAtPos) == 0 {
 					continue
@@ -259,6 +254,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				filter := make([][]common.Hash, pos+1)
 				filter[pos] = slices.Collect(maps.Keys(topicsAtPos))
 
+				resp = EthGetLogs{}
 				res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForTopics(bn, bn, filter), &resp)
 				if res.Err != nil {
 					if failFast {
