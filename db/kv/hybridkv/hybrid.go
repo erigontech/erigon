@@ -204,6 +204,32 @@ func (db *DB) MergedListTables(durList, memList []string) []string {
 	return out
 }
 
+// CheckSnapshotPrerequisites rejects the hybrid mode when state .kv
+// snapshot production is disabled.
+//
+// The hybrid keeps the per-step history/index delta in RAM; the
+// aggregator's periodic rotation into .kv files is what bounds that RAM
+// footprint and persists the delta across restarts. Without it, RAM grows
+// unbounded and a restart loses the in-memory half with no recovery path.
+//
+// Block snapshot production (ProduceE2) is intentionally NOT required:
+// block bodies and headers live in MDBX in the hybrid partition, so block
+// retiring being off only grows MDBX — it does not affect hybrid
+// correctness or RAM growth.
+//
+// Returns an error suitable for surfacing to the user at process startup,
+// before any database is opened. Pass the active feature flag (typically
+// dbg.UseInMemoryKV) as `inMemoryKV`.
+func CheckSnapshotPrerequisites(inMemoryKV, produceE3 bool) error {
+	if !inMemoryKV {
+		return nil
+	}
+	if !produceE3 {
+		return errors.New("hybridkv: --experimental.inmem-kv requires state snapshot production; remove --snap.state.stop or unset USE_IN_MEMORY_KV")
+	}
+	return nil
+}
+
 // joinErrors returns nil if both nil, the non-nil one if one is nil, or
 // errors.Join otherwise.
 func joinErrors(a, b error) error {

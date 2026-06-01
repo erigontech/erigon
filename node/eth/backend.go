@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/hybridkv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -270,6 +271,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	tmpdir := dirs.Tmp
 	if err := RemoveContents(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
+	}
+
+	if err := hybridkv.CheckSnapshotPrerequisites(dbg.UseInMemoryKV, config.Snapshot.ProduceE3); err != nil {
+		return nil, err
 	}
 
 	// Assemble the Ethereum object
