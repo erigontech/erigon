@@ -660,3 +660,20 @@ func TestUnmarkedForkableUnwindDeletesVals(t *testing.T) {
 		require.Nil(t, v)
 	}
 }
+
+// The merge goroutine BuildFilesInBackground spawns must register on wg before the
+// build goroutine's wg.Done, so wg.Wait (what Close does) never races that Add from zero.
+func TestForkableAggCloseWaitsForBackgroundMerge(t *testing.T) {
+	dirs, db, logger := setupDb(t)
+	_, header := setupHeader(t, db, logger, dirs)
+
+	agg := NewForkableAgg(t.Context(), dirs, db, logger)
+	t.Cleanup(agg.Close)
+	agg.RegisterMarkedForkable(header)
+	require.NoError(t, agg.OpenFolder())
+
+	for range 64 {
+		agg.BuildFilesInBackground(RootNum(10))
+		agg.wg.Wait()
+	}
+}

@@ -921,3 +921,68 @@ func TestViewPinsGeneration(t *testing.T) {
 	require.Same(oldSrc0, pinned[0].src)
 	require.Same(oldSrc1, pinned[1].src)
 }
+
+// TestCloseWhatNotInListVsLiveViewDoesNotCrash reproduces a use-after-close in
+// the snapshot reopen path. After a merge writes a covering segment, the old
+// sub-segment files remain on disk but TypedSegments -> NoOverlaps drops them
+// from the listing. OpenFolder then hands that list to closeWhatNotInList,
+// which close()s those sub-segments — ignoring that a live View still holds a
+// refcount on them. The View's later Close hits closeAndRemoveFiles on the
+// now-nil decompressor and crashes. This is pure snapshotsync (no merge code),
+// so it fails on main.
+func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+
+	verOf := func(i int) snaptype.Version {
+		if i%2 == 1 {
+			return version.V1_1
+		}
+		return version.V1_0
+	}
+
+	// Ten 1k sub-segments per type covering [0, 10000).
+	for from := uint64(0); from < 10_000; from += 1_000 {
+		for i, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, verOf(i), logger)
+		}
+	}
+
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	// A live reader holds the sub-segments (refcount +1), as a merge's View does.
+	v := s.View()
+
+	// Simulate the merge result: a covering [0,10000) segment lands on disk, and
+	// the now-subsumed 1k sub-segments are marked deletable (integrateMergedDirtyFiles).
+	for i, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, verOf(i), logger)
+	}
+	for _, t2 := range s.enums {
+		s.dirty[t2].Walk(func(segs []*DirtySegment) bool {
+			for _, sn := range segs {
+				if sn.To()-sn.From() == 1_000 {
+					sn.canDelete.Store(true)
+				}
+			}
+			return true
+		})
+	}
+
+	// Reopen: NoOverlaps drops the subsumed sub-segments from the list, so
+	// closeWhatNotInList would close them out from under the live View.
+	require.NoError(s.OpenFolder())
+
+	// Closing the View must not crash.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("View.Close crashed (use-after-close of a refcount-held segment): %v", r)
+		}
+	}()
+	v.Close()
+}
