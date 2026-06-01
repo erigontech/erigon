@@ -29,7 +29,7 @@ The split between **`chaindata/`** (mutable) and **`snapshots/`** (immutable) is
 
 ## Storage engine: MDBX
 
-`chaindata/` is a single [MDBX](https://github.com/erthink/libmdbx) key-value store. MDBX is a B+ tree engine derived from LMDB, optimised for read-heavy workloads and predictable memory use.
+`chaindata/` is a single [MDBX](https://github.com/erigontech/mdbx-go) key-value store. MDBX is a B+ tree engine derived from LMDB, optimised for read-heavy workloads and predictable memory use.
 
 Properties that matter operationally:
 
@@ -75,6 +75,8 @@ snapshots/idx      430 GB
 snapshots TOTAL    2.3 TB
 ```
 
+The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+
 For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
 ## Why `chaindata/` stays so small
@@ -91,7 +93,7 @@ It also means **`rm -rf chaindata/` is recoverable**: Erigon will rebuild it fro
 
 ## Tuning knobs
 
-- **`--batchSize`** — controls how much state Erigon buffers in RAM before flushing to MDBX. Default is balanced; lower it (e.g. `--batchSize 1G`) if `chaindata/` grows unexpectedly.
+- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
 - **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
