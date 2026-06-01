@@ -2122,8 +2122,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	maxTxIndex := io.Len() - 1
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
-		// Only Balance and Storage reads feed the block access list; the
-		// other paths are tracked via writes or ignored (see updateRead*).
+		// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
 		rs := io.ReadSet(txIndex)
 		for addr, tr := range rs.balance {
 			if addr.IsNil() || tr.internal {
@@ -2141,6 +2140,54 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				}
 				ensureAccountState(ac, addr).updateReadStorage(key, tr.Val)
 			}
+		}
+		for addr, tr := range rs.address {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.nonce {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.incarnation {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.selfDestruct {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.createContract {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.code {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.codeHash {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+		for addr, tr := range rs.codeSize {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
 		}
 
 		writes := io.WriteSet(txIndex)
