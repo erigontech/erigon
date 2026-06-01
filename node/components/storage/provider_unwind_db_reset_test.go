@@ -110,6 +110,53 @@ func TestDeleteHeaderNumbersPastBlock_WipesOrphans(t *testing.T) {
 	}
 }
 
+// TestUnwindDBPastBlock_PreservesHeadersForBlocksUpToTarget pins the
+// other half of the cold-start invariant: rows ≤ toBlock must SURVIVE
+// the wipe. Live regression on hoodi: after mode B + restart, kv.Headers
+// held only genesis — TruncateBlocks looked like it was wiping
+// everything, not just past toBlock. If the underlying rawdb helpers
+// have a seek-ordering bug interacting with the 40-byte composite key
+// (8-byte block + 32-byte hash) vs an 8-byte ForEach prefix, this test
+// surfaces it directly.
+func TestUnwindDBPastBlock_PreservesHeadersForBlocksUpToTarget(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+
+	hashAt := func(n uint64) common.Hash {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[:8], n)
+		copy(h[24:], "preserve-test")
+		return h
+	}
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const toBlock = uint64(100)
+	for n := uint64(0); n <= 110; n++ {
+		seedHeaderAt(t, tx, n, hashAt(n))
+	}
+
+	require.NoError(t, deleteHeaderNumbersPastBlock(tx, toBlock))
+	require.NoError(t, rawdb.TruncateBlocks(ctx, tx, toBlock+1))
+	require.NoError(t, rawdb.TruncateTd(tx, toBlock+1))
+
+	// Survival check: every block 0..toBlock must still have a kv.Headers
+	// row at its composite key (num || hash).
+	for n := uint64(0); n <= toBlock; n++ {
+		hk := make([]byte, 8+32)
+		binary.BigEndian.PutUint64(hk[:8], n)
+		copy(hk[8:], hashAt(n).Bytes())
+		got, err := tx.GetOne(kv.Headers, hk)
+		require.NoError(t, err)
+		require.NotEmpty(t, got,
+			"kv.Headers at block %d (≤ toBlock=%d) MUST survive — composite key %x",
+			n, toBlock, hk)
+	}
+}
+
 // TestUnwindDBPastBlock_CoreTablesAreEmptyPastTarget exercises the
 // composite block-data wipe added to mode-B's unwindDBPastBlock —
 // TruncateBlocks + TruncateTd + deleteHeaderNumbersPastBlock — and

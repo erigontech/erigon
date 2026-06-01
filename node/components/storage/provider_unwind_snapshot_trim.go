@@ -41,7 +41,18 @@ import (
 //
 // Files removed:
 //
-//   - block files where ToBlock > toBlock;
+//   - block files where FromBlock > toBlock — i.e. files whose
+//     entire content is strictly past the new tip. The straddle
+//     file (FromBlock ≤ toBlock < ToBlock) STAYS: it still holds
+//     the headers / bodies / etc. for blocks in [FromBlock,
+//     toBlock], which the DB-reset's CanonicalHash truncation
+//     gates from being visible past toBlock. Removing the straddle
+//     file would leave the writable DB with no source for blocks
+//     in [FromBlock, toBlock], so a subsequent BlockReader read of
+//     those headers would return nil — exactly the failure mode
+//     that issue #2 from the 2026-06-01 live cycle surfaced: a
+//     second mode B targeting a block inside the removed straddle
+//     file's range failed with "no header for block N".
 //   - domain / history / idx files (all step-indexed) where
 //     ToStep > stepBoundary, where stepBoundary == (lastTxNum/stepSize)+1
 //     — that is, files extending strictly past the boundary step (the
@@ -133,15 +144,19 @@ func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.Tempor
 }
 
 // collectFilesPastBlock walks the inventory and returns every file
-// whose content extends past toBlock. Block files use ToBlock
-// directly; state files use ToStep against stepBoundary. State files
-// are only collected when p.Aggregator != nil — without an aggregator
-// the stepBoundary input is 0 and would over-trim everything.
+// whose content is strictly past toBlock. Block files use FromBlock
+// (the straddle file FromBlock ≤ toBlock < ToBlock stays because it
+// still holds blocks ≤ toBlock); state files use ToStep against
+// stepBoundary by the same principle (the boundary step's file stays
+// and the boundary-step diff-replay handles in-step pruning at read
+// time). State files are only collected when p.Aggregator != nil —
+// without an aggregator the stepBoundary input is 0 and would
+// over-trim everything.
 func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapshot.FileEntry {
 	var out []*snapshot.FileEntry
 
 	for _, e := range p.Inventory.BlockFiles() {
-		if e.ToBlock > toBlock {
+		if e.FromBlock > toBlock {
 			out = append(out, e)
 		}
 	}
