@@ -182,14 +182,16 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 					queueSize := bus.execPool.QueueSize()
 
 					if queueSize > 0 {
-						if int64(queueSize) > bus.prevQueueSize.Load() {
+						prev := bus.prevQueueSize.Load()
+
+						if int64(queueSize) > prev {
 							if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
 								log.Debug("Execpool overflowing",
 									"bus", app.LogInstance(bus),
 									"poolSize", bus.execPool.PoolSize(),
 									"queueSize", bus.execPool.QueueSize())
 							}
-						} else if int64(queueSize) < bus.prevQueueSize.Load() {
+						} else if int64(queueSize) < prev {
 							if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
 								log.Debug("Execpool overflow recovering",
 									"bus", app.LogInstance(bus),
