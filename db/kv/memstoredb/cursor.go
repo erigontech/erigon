@@ -106,6 +106,20 @@ func (c *cursor) Seek(seek []byte) ([]byte, []byte, error) {
 }
 
 func (c *cursor) SeekExact(key []byte) ([]byte, []byte, error) {
+	// Non-DupSort fast path: O(log N) direct lookup with no iterator
+	// allocation. SeekExact is hot (every account/storage/code read).
+	if !c.table.dupSort {
+		it, found := c.table.tree.Get(entry{k: key})
+		if !found {
+			k, v := c.clearPos()
+			return k, v, nil
+		}
+		c.setPos(it)
+		return it.k, it.v, nil
+	}
+	// DupSort: comparator sorts by (k, v), so tree.Get with v=nil never
+	// matches a stored (k, real-v). Fall back to iter-based Seek + exact
+	// match check.
 	k, v, err := c.Seek(key)
 	if err != nil || k == nil {
 		return k, v, err
