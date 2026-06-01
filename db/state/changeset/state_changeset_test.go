@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -60,32 +61,36 @@ func TestNoOverflowPages(t *testing.T) {
 // pack into the configured page size: it logs leaf/overflow page counts so we
 // can pick the largest overflow-free chunk size for a given pagesize.
 func TestDiffChunkOverflowSweep(t *testing.T) {
-	pageSize := ethconfig.DefaultChainDBPageSize
-	p := int(pageSize.Bytes())
-	candidates := []int{changeset.DiffChunkLen, 5120, 7168, p/2 - 32, p - 64}
+	for _, pageSize := range []datasize.ByteSize{4 * datasize.KB, 8 * datasize.KB, ethconfig.DefaultChainDBPageSize} {
+		p := int(pageSize.Bytes())
+		candidates := []int{p/4 - 32, p * 7 / 16, p/2 - 32, p/2 + 64, changeset.DiffChunkLen}
 
-	for _, chunkLen := range candidates {
-		t.Run(fmt.Sprintf("chunkLen=%d", chunkLen), func(t *testing.T) {
-			dirs := datadir.New(t.TempDir())
-			db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(pageSize).MustOpen()
-			t.Cleanup(db.Close)
-
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
-
-			key := make([]byte, changeset.DiffChunkKeyLen)
-			val := make([]byte, chunkLen)
-			for i := 0; i < 8; i++ {
-				binary.BigEndian.PutUint64(key[40:], uint64(i))
-				require.NoError(t, tx.Put(kv.ChangeSets3, key, val))
+		for _, chunkLen := range candidates {
+			if chunkLen <= 0 || chunkLen >= p {
+				continue
 			}
+			t.Run(fmt.Sprintf("page=%s/chunk=%d", pageSize, chunkLen), func(t *testing.T) {
+				dirs := datadir.New(t.TempDir())
+				db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(pageSize).MustOpen()
+				t.Cleanup(db.Close)
 
-			st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
-			require.NoError(t, err)
-			t.Logf("pageSize=%s chunkLen=%d entries=%d leafPages=%d branchPages=%d overflowPages=%d",
-				pageSize, chunkLen, st.Entries, st.LeafPages, st.BranchPages, st.OverflowPages)
-		})
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+
+				key := make([]byte, changeset.DiffChunkKeyLen)
+				val := make([]byte, chunkLen)
+				for i := 0; i < 8; i++ {
+					binary.BigEndian.PutUint64(key[40:], uint64(i))
+					require.NoError(t, tx.Put(kv.ChangeSets3, key, val))
+				}
+
+				st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
+				require.NoError(t, err)
+				t.Logf("pageSize=%s chunkLen=%d entries=%d leafPages=%d branchPages=%d overflowPages=%d",
+					pageSize, chunkLen, st.Entries, st.LeafPages, st.BranchPages, st.OverflowPages)
+			})
+		}
 	}
 }
 

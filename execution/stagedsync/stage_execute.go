@@ -452,7 +452,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func traceChangeSets3(tx kv.Tx, tip, maxReorgDepth uint64, logPrefix string, logger log.Logger) {
+func traceChangeSets3(tx kv.Tx, tip, maxReorgDepth uint64, pageSize datasize.ByteSize, logPrefix string, logger log.Logger) {
 	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
 	if err != nil {
 		logger.Warn(fmt.Sprintf("[%s] diffsets trace", logPrefix), "step", "lowestUnwindable", "err", err)
@@ -489,6 +489,8 @@ func traceChangeSets3(tx kv.Tx, tip, maxReorgDepth uint64, logPrefix string, log
 		"entries", entries,
 		"bytesPerEntry", bytesPerEntry,
 		"chunkLen", changeset.ChunkLen(),
+		"pageSize", pageSize,
+		"safeChunkMax", int(pageSize.Bytes())*7/16,
 	)
 }
 
@@ -537,7 +539,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			)
 		}
 		if dbg.TraceDiffsets {
-			traceChangeSets3(tx, s.ForwardProgress, cfg.syncCfg.MaxReorgDepth, s.LogPrefix(), logger)
+			traceChangeSets3(tx, s.ForwardProgress, cfg.syncCfg.MaxReorgDepth, cfg.db.PageSize(), s.LogPrefix(), logger)
 		}
 	}
 
