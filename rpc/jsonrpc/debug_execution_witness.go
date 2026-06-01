@@ -694,6 +694,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
+	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
+
 	return result, nil
 }
 
@@ -854,11 +859,6 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	})
 	out.SortedKeys = sortedKeys
 
-	type codeWithHash struct {
-		code []byte
-		hash common.Hash
-	}
-
 	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
 	for _, code := range preStateCode {
@@ -868,15 +868,13 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
-	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
-	for h, code := range allCodesByHash {
-		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
+	uniqueCodes := make([][]byte, 0, len(allCodesByHash))
+	for _, code := range allCodesByHash {
+		uniqueCodes = append(uniqueCodes, code)
 	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
+	slices.SortFunc(uniqueCodes, bytes.Compare)
 	for _, c := range uniqueCodes {
-		out.SortedCodes = append(out.SortedCodes, c.code)
+		out.SortedCodes = append(out.SortedCodes, c)
 	}
 
 	preCode := rs.GetPreStateCode()
