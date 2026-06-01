@@ -70,7 +70,7 @@ func NewNoopWriter(trace ...bool) *NoopWriter {
 
 func (nw *NoopWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if nw.trace {
-		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %s, Nonce: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.CodeHash)
 	}
 	return nil
 }
@@ -94,7 +94,7 @@ func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, key accounts
 		return nil
 	}
 	if nw.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, &value)
+		fmt.Printf("storage: %x,%x,%s\n", address, key, value.Hex()[2:])
 	}
 	return nil
 }
