@@ -5,45 +5,50 @@ package kv
 
 // inMemoryTables is the set of ChainDB tables routed to the in-memory
 // (memstoredb) half of the hybrid backend when dbg.UseInMemoryKV is on. They
-// hold the per-step history/index delta on top of the on-disk .kv snapshots,
-// which the aggregator re-derives on startup from .kv files + the
-// authoritative MDBX state. Domain *Vals tables (the current state of
-// accounts, storage, code, commitment, receipts) stay in MDBX so a process
-// restart on a fresh datadir — i.e. before the aggregator has had a chance
-// to flush its first .kv step — still finds the predeploy contract code,
-// genesis allocations, and so on.
+// are the temporal/domain delta on top of the on-disk .kv snapshots, which
+// the aggregator re-derives on startup from .kv files + the authoritative
+// MDBX state.
 //
-// Tables NOT in this set stay in MDBX (block bodies, headers, receipts,
-// senders, txlookup, stage progress, all *Vals tables, beacon, bor, config,
-// …). They hold authoritative state that's expensive (or impossible on a
-// fresh node) to re-derive.
+// Aggressive partition: Domain *Vals tables (current state of accounts,
+// storage, code, commitment, receipts) are also in memory. On a tip-running
+// node the .kv snapshots already hold the bulk of state so cold reads
+// fall through to .kv via the aggregator. On a fresh datadir without .kv
+// snapshots a restart loses *Vals — known limitation,
+// TestFcuReturnsReorgTooDeepCode38006 (predeploy contract code missing
+// after close-reopen on fresh genesis).
 var inMemoryTables = map[string]struct{}{
-	// Account domain — history + index only; values stay in MDBX.
+	// Account domain — values + history + index.
+	TblAccountVals:        {},
 	TblAccountHistoryKeys: {},
 	TblAccountHistoryVals: {},
 	TblAccountIdx:         {},
 
-	// Storage domain — history + index only.
+	// Storage domain — values + history + index.
+	TblStorageVals:        {},
 	TblStorageHistoryKeys: {},
 	TblStorageHistoryVals: {},
 	TblStorageIdx:         {},
 
-	// Code domain — history + index only.
+	// Code domain — values + history + index.
+	TblCodeVals:        {},
 	TblCodeHistoryKeys: {},
 	TblCodeHistoryVals: {},
 	TblCodeIdx:         {},
 
-	// Commitment domain — history + index only.
+	// Commitment domain — values + history + index.
+	TblCommitmentVals:        {},
 	TblCommitmentHistoryKeys: {},
 	TblCommitmentHistoryVals: {},
 	TblCommitmentIdx:         {},
 
-	// Receipt domain — history + index only.
+	// Receipt domain — values + history + index.
+	TblReceiptVals:        {},
 	TblReceiptHistoryKeys: {},
 	TblReceiptHistoryVals: {},
 	TblReceiptIdx:         {},
 
-	// Receipt cache — history + index only.
+	// Receipt cache — values + history + index.
+	TblRCacheVals:        {},
 	TblRCacheHistoryKeys: {},
 	TblRCacheHistoryVals: {},
 	TblRCacheIdx:         {},
