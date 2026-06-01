@@ -149,15 +149,15 @@ rule instead of an implicit derive-and-mutate with a dead alternate branch.
 - Modify: `db/state/squeeze.go`
 - Modify: `execution/commitment/config_test.go`
 
-- [ ] in `config.go`, remove the `MaxDeferredUpdates int` and `RebuildShardMaxSteps uint64` fields from the `TrieConfig` struct (and their doc comments); keep the exported `DefaultMaxDeferredUpdates` and `DefaultRebuildShardMaxSteps` consts
-- [ ] in `config.go`, delete the `maxDeferredUpdatesOrDefault()` and `RebuildShardMaxStepsOrDefault()` methods
-- [ ] in `hex_patricia_hashed.go:163`, replace `cfg.maxDeferredUpdatesOrDefault()` with `DefaultMaxDeferredUpdates`
-- [ ] in `db/state/squeeze.go:888`, replace `rebuildTrieCfg.RebuildShardMaxStepsOrDefault()` with `uint64(commitment.DefaultRebuildShardMaxSteps)` (the `commitment` import is already present at `squeeze.go:36`); `squeeze.go:887` uses `DefaultTrieConfig()` with no field override, so nothing else needs touching
-- [ ] `config_test.go` `TestDefaultTrieConfig`: delete the `cfg.MaxDeferredUpdates` block (lines ~21-23) and the `cfg.RebuildShardMaxSteps` block (lines ~39-41)
-- [ ] `config_test.go` `TestTrieConfig_OrDefaultHelpers` (~47-63): remove the two `RebuildShardMaxStepsOrDefault()` assertions and drop `RebuildShardMaxSteps: 7` from the `TrieConfig{...}` literal (leave the `WarmupNumWorkers` assertions — they are still valid until Task 3)
-- [ ] `config_test.go`: delete `TestTrieConfig_maxDeferredUpdatesOrDefault` (~65-78) entirely (tests a removed accessor)
-- [ ] `config_test.go`: delete `TestTrieConfig_MaxDeferredUpdatesApplied` (~173-193) entirely (it sets the removed `MaxDeferredUpdates` field; the const is now hard-applied in `applyConfig`, not configurable)
-- [ ] run `go build ./...` + `go test -count=0 ./execution/commitment/... ./db/state/...`; then `make lint` until clean — must pass before Task 2
+- [x] in `config.go`, remove the `MaxDeferredUpdates int` and `RebuildShardMaxSteps uint64` fields from the `TrieConfig` struct (and their doc comments); keep the exported `DefaultMaxDeferredUpdates` and `DefaultRebuildShardMaxSteps` consts
+- [x] in `config.go`, delete the `maxDeferredUpdatesOrDefault()` and `RebuildShardMaxStepsOrDefault()` methods
+- [x] in `hex_patricia_hashed.go:163`, replace `cfg.maxDeferredUpdatesOrDefault()` with `DefaultMaxDeferredUpdates`
+- [x] in `db/state/squeeze.go:888`, replace `rebuildTrieCfg.RebuildShardMaxStepsOrDefault()` with `uint64(commitment.DefaultRebuildShardMaxSteps)` (the `commitment` import is already present at `squeeze.go:36`); `squeeze.go:887` uses `DefaultTrieConfig()` with no field override, so nothing else needs touching
+- [x] `config_test.go` `TestDefaultTrieConfig`: delete the `cfg.MaxDeferredUpdates` block (lines ~21-23) and the `cfg.RebuildShardMaxSteps` block (lines ~39-41)
+- [x] `config_test.go` `TestTrieConfig_OrDefaultHelpers` (~47-63): remove the two `RebuildShardMaxStepsOrDefault()` assertions and drop `RebuildShardMaxSteps: 7` from the `TrieConfig{...}` literal (leave the `WarmupNumWorkers` assertions — they are still valid until Task 3)
+- [x] `config_test.go`: delete `TestTrieConfig_maxDeferredUpdatesOrDefault` (~65-78) entirely (tests a removed accessor)
+- [x] `config_test.go`: delete `TestTrieConfig_MaxDeferredUpdatesApplied` (~173-193) entirely (it sets the removed `MaxDeferredUpdates` field; the const is now hard-applied in `applyConfig`, not configurable)
+- [x] run `go build ./...` + `go test -count=0 ./execution/commitment/... ./db/state/...`; then `make lint` until clean — must pass before Task 2
 
 ### Task 2: Add Subtrie() derivation method, drop SubtrieConfig field
 

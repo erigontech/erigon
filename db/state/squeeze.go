@@ -885,7 +885,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// constructed inside the inner loop. Variant is set per-iteration depending on
 	// statecfg.ExperimentalConcurrentCommitment.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
-	maxShardSteps := rebuildTrieCfg.RebuildShardMaxStepsOrDefault()
+	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
 

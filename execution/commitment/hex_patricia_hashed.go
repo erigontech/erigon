@@ -160,7 +160,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
-	hph.branchEncoder.maxDeferredUpdates = cfg.maxDeferredUpdatesOrDefault()
+	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.enableWarmupCache = cfg.EnableWarmupCache
 	hph.memoizationOff = cfg.MemoizationOff
