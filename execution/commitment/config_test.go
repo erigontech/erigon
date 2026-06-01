@@ -3,6 +3,7 @@ package commitment
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -37,8 +38,12 @@ func TestDefaultTrieConfig(t *testing.T) {
 
 func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	cfg := TrieConfig{}
-	if got := cfg.WarmupNumWorkersOrDefault(); got != DefaultWarmupNumWorkers {
-		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", DefaultWarmupNumWorkers, got)
+	wantUnset := DefaultWarmupNumWorkers
+	if dbg.TipTrieWarmupers > 0 {
+		wantUnset = dbg.TipTrieWarmupers
+	}
+	if got := cfg.WarmupNumWorkersOrDefault(); got != wantUnset {
+		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", wantUnset, got)
 	}
 
 	cfg = TrieConfig{WarmupNumWorkers: 3}

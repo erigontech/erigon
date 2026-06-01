@@ -1,5 +1,7 @@
 package commitment
 
+import "github.com/erigontech/erigon/common/dbg"
+
 // Default values for TrieConfig fields. Exported so callers (squeeze, merge,
 // commitment_context) can fall back to the same defaults when a per-instance
 // TrieConfig is not available.
@@ -46,10 +48,15 @@ func (c TrieConfig) Subtrie() TrieConfig {
 	return s
 }
 
-// WarmupNumWorkersOrDefault returns WarmupNumWorkers if set, otherwise DefaultWarmupNumWorkers.
+// WarmupNumWorkersOrDefault resolves the warmup worker count: the configured
+// value if set, otherwise the env-tunable dbg.TipTrieWarmupers (default NumCPU*8),
+// falling back to DefaultWarmupNumWorkers when that is non-positive.
 func (c TrieConfig) WarmupNumWorkersOrDefault() int {
-	if c.WarmupNumWorkers == 0 {
-		return DefaultWarmupNumWorkers
+	if c.WarmupNumWorkers != 0 {
+		return c.WarmupNumWorkers
 	}
-	return c.WarmupNumWorkers
+	if dbg.TipTrieWarmupers > 0 {
+		return dbg.TipTrieWarmupers
+	}
+	return DefaultWarmupNumWorkers
 }

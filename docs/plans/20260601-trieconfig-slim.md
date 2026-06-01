@@ -181,16 +181,16 @@ rule instead of an implicit derive-and-mutate with a dead alternate branch.
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `execution/commitment/config_test.go`
 
-- [ ] in `config.go`, add `import "github.com/erigontech/erigon/common/dbg"` (config.go does not yet import it; the package overall already depends on dbg, so no cycle)
-- [ ] in `config.go`, rewrite `WarmupNumWorkersOrDefault()` to the corrected body in Technical Details: field if nonzero → else `dbg.TipTrieWarmupers` if `>0` → else `DefaultWarmupNumWorkers`
-- [ ] in `commitment_context.go:198`, change `NumWorkers: cfg.WarmupNumWorkers` to `NumWorkers: cfg.WarmupNumWorkersOrDefault()`
-- [ ] in `commitment_context.go`, delete the override block at `:188-191` (the `if cfg.WarmupNumWorkers == 0 && dbg.TipTrieWarmupers > 0 { ... }` lines and its comment)
-- [ ] in `commitment_context.go`, delete the now-dead use-site fallback at `:419-420` (`if warmupConfig.NumWorkers == 0 { warmupConfig.NumWorkers = commitment.DefaultWarmupNumWorkers }`)
-- [ ] in `commitment_context.go`, update the `warmupBase` doc comment (~:53-55) — it no longer "stores raw … defaulted at the use site"; it stores the resolved worker count
-- [ ] confirm `commitment_context.go` still uses its `dbg` import (`TrieTrace*` at `:346-350`); leave those untouched
-- [ ] `config_test.go` `TestTrieConfig_OrDefaultHelpers`: update the zero-config `WarmupNumWorkersOrDefault()` assertion — expected is now `dbg.TipTrieWarmupers` when `>0` else `DefaultWarmupNumWorkers` (compute the expected from `dbg.TipTrieWarmupers` so it stays deterministic regardless of host `NumCPU`); the explicit `WarmupNumWorkers: 3 → 3` case is unchanged
-- [ ] verify equivalence (see Technical Details): unset config resolves to `NumCPU*8`, `TIP_TRIE_WARMUPERS<=0` resolves to `16` — identical to pre-change outcomes
-- [ ] run `go build ./...` + `go test -count=0 ./execution/commitment/... ./db/state/... ./rpc/jsonrpc/receipts/...`; then `make lint` until clean — must pass before Task 4
+- [x] in `config.go`, add `import "github.com/erigontech/erigon/common/dbg"` (config.go does not yet import it; the package overall already depends on dbg, so no cycle)
+- [x] in `config.go`, rewrite `WarmupNumWorkersOrDefault()` to the corrected body in Technical Details: field if nonzero → else `dbg.TipTrieWarmupers` if `>0` → else `DefaultWarmupNumWorkers`
+- [x] in `commitment_context.go:198`, change `NumWorkers: cfg.WarmupNumWorkers` to `NumWorkers: cfg.WarmupNumWorkersOrDefault()`
+- [x] in `commitment_context.go`, delete the override block at `:188-191` (the `if cfg.WarmupNumWorkers == 0 && dbg.TipTrieWarmupers > 0 { ... }` lines and its comment)
+- [x] in `commitment_context.go`, delete the now-dead use-site fallback at `:419-420` (`if warmupConfig.NumWorkers == 0 { warmupConfig.NumWorkers = commitment.DefaultWarmupNumWorkers }`)
+- [x] in `commitment_context.go`, update the `warmupBase` doc comment (~:53-55) — it no longer "stores raw … defaulted at the use site"; it stores the resolved worker count
+- [x] confirm `commitment_context.go` still uses its `dbg` import (`TrieTrace*` at `:346-350`); leave those untouched
+- [x] `config_test.go` `TestTrieConfig_OrDefaultHelpers`: update the zero-config `WarmupNumWorkersOrDefault()` assertion — expected is now `dbg.TipTrieWarmupers` when `>0` else `DefaultWarmupNumWorkers` (compute the expected from `dbg.TipTrieWarmupers` so it stays deterministic regardless of host `NumCPU`); the explicit `WarmupNumWorkers: 3 → 3` case is unchanged
+- [x] verify equivalence (see Technical Details): unset config resolves to `NumCPU*8`, `TIP_TRIE_WARMUPERS<=0` resolves to `16` — identical to pre-change outcomes
+- [x] run `go build ./...` + `go test -count=0 ./execution/commitment/... ./db/state/... ./rpc/jsonrpc/receipts/...`; then `make lint` until clean — must pass before Task 4
 
 ### Task 4: Verify acceptance criteria
 

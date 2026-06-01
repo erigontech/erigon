@@ -51,8 +51,8 @@ type SharedDomainsCommitmentContext struct {
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
-	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers is stored raw
-	// (0 means "use commitment.DefaultWarmupNumWorkers" — defaulted at the use site).
+	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
+	// worker count from WarmupNumWorkersOrDefault.
 	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
 	warmupBase commitment.WarmupConfig
 	tmpDir     string // temp directory for ETL collectors
@@ -183,19 +183,12 @@ func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
-	// Preserve the legacy TIP_TRIE_WARMUPERS env override at the construction
-	// boundary: TrieConfig stays the single source of truth inside the trie, but
-	// an unset WarmupNumWorkers falls back to dbg.TipTrieWarmupers (env-tunable,
-	// defaults to NumCPU*8) before the use-site default of DefaultWarmupNumWorkers.
-	if cfg.WarmupNumWorkers == 0 && dbg.TipTrieWarmupers > 0 {
-		cfg.WarmupNumWorkers = dbg.TipTrieWarmupers
-	}
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
-			NumWorkers: cfg.WarmupNumWorkers,
+			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
@@ -416,9 +409,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	var drainCollectors func() []*etl.Collector
 	if sdc.paraTrieDB != nil {
 		warmupConfig = sdc.warmupBase
-		if warmupConfig.NumWorkers == 0 {
-			warmupConfig.NumWorkers = commitment.DefaultWarmupNumWorkers
-		}
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
 		if _, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok && sdc.updates.IsConcurrentCommitment() {
