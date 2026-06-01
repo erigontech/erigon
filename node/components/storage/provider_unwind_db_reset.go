@@ -18,9 +18,11 @@ package storage
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -45,6 +47,18 @@ import (
 //
 //   - TxNums truncated to [0, lastTxNum(toBlock)].
 //   - Canonical hashes for > toBlock removed.
+//   - Block-data tables — Headers, BlockBody, BlockTransaction (EthTx),
+//     TxSender, BlockAccessList, HeadersTotalDifficulty — truncated
+//     past toBlock. The CL can have pushed forward NewPayloads while
+//     mode B was preparing the unwind; those headers/bodies land in
+//     the writable DB independently of stage progress and would
+//     otherwise survive as orphans past the new tip. The
+//     firstNonGenesisCheck in stage_snapshots reads kv.Headers
+//     directly — leaving orphans there wedges the next startup with
+//     "some blocks are not in snapshots and not in db".
+//   - HeaderNumber (hash → number) orphan entries for the truncated
+//     blocks are removed. TruncateBlocks does not touch HeaderNumber;
+//     we walk kv.Headers' deleted-range first to collect the hashes.
 //   - Headers / Bodies / BlockHashes / Execution stage progress set
 //     to toBlock.
 //   - HeadBlockHash / HeadHeaderHash / ForkchoiceHead set to
@@ -81,6 +95,18 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		return fmt.Errorf("TruncateCanonicalHash(%d): %w", toBlock+1, err)
 	}
 
+	if err := deleteHeaderNumbersPastBlock(tx, toBlock); err != nil {
+		return fmt.Errorf("deleteHeaderNumbersPastBlock(%d): %w", toBlock, err)
+	}
+
+	if err := rawdb.TruncateBlocks(ctx, tx, toBlock+1); err != nil {
+		return fmt.Errorf("TruncateBlocks(%d): %w", toBlock+1, err)
+	}
+
+	if err := rawdb.TruncateTd(tx, toBlock+1); err != nil {
+		return fmt.Errorf("TruncateTd(%d): %w", toBlock+1, err)
+	}
+
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Execution} {
 		if err := stages.SaveStageProgress(tx, stage, toBlock); err != nil {
 			return fmt.Errorf("SaveStageProgress(%s, %d): %w", stage, toBlock, err)
@@ -107,6 +133,44 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		}
 	}
 
+	return nil
+}
+
+// deleteHeaderNumbersPastBlock walks kv.Headers from toBlock+1 and
+// removes the corresponding kv.HeaderNumber (hash → number) entries.
+//
+// kv.Headers is keyed as 8-byte big-endian block-number || 32-byte
+// hash; the hash portion is the kv.HeaderNumber key we need to delete.
+// rawdb.TruncateBlocks (called next) wipes kv.Headers itself but does
+// not touch kv.HeaderNumber, so the lookup map for the truncated
+// hashes would survive as orphans pointing at deleted headers. Walk
+// before TruncateBlocks so the hashes are still readable.
+func deleteHeaderNumbersPastBlock(tx kv.RwTx, toBlock uint64) error {
+	c, err := tx.RwCursor(kv.Headers)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	seekKey := dbutils.EncodeBlockNumber(toBlock + 1)
+	for k, _, err := c.Seek(seekKey); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) < 8+length.Hash {
+			continue
+		}
+		// Defensive: stop if the iterator somehow moved back below
+		// toBlock+1 (shouldn't happen with a sorted cursor, but a
+		// short key could read as a small number).
+		if binary.BigEndian.Uint64(k[:8]) <= toBlock {
+			continue
+		}
+		hash := k[8 : 8+length.Hash]
+		if err := tx.Delete(kv.HeaderNumber, hash); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
