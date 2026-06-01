@@ -116,6 +116,77 @@ func TestSliceStraddleSeg_TruncatesEntries(t *testing.T) {
 	require.Equal(t, 7_000, pos, "read all 7000 entries; no more")
 }
 
+// TestRebuildBodiesStraddleFile_RejectsWrongType pins that the
+// bodies-specific entry point refuses a non-bodies FileInfo. Same
+// pattern as headers.
+func TestRebuildBodiesStraddleFile_RejectsWrongType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fi := snaptype.FileInfo{
+		Version: snaptype2.Headers.Versions().Current,
+		From:    2_000_000,
+		To:      2_010_000,
+		Type:    snaptype2.Headers, // wrong type for bodies entry
+		Ext:     ".seg",
+	}
+	fi = fi.As(snaptype2.Headers)
+	_, err := rebuildBodiesStraddleFile(ctx, fi, 2_007_000, t.TempDir(), t.TempDir(), nil, log.New())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not Bodies")
+}
+
+// TestRebuildTransactionsStraddleFile_RejectsWrongType pins the
+// type guard on the tx entry.
+func TestRebuildTransactionsStraddleFile_RejectsWrongType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fi := snaptype.FileInfo{
+		Version: snaptype2.Headers.Versions().Current,
+		From:    2_000_000,
+		To:      2_010_000,
+		Type:    snaptype2.Bodies, // wrong type for tx entry
+		Ext:     ".seg",
+	}
+	fi = fi.As(snaptype2.Bodies)
+	_, err := rebuildTransactionsStraddleFile(ctx, fi, 2_007_000, t.TempDir(), t.TempDir(), nil, log.New())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not Transactions")
+}
+
+// TestRebuildTransactionsStraddleFile_RejectsMissingRebuiltBodies
+// pins the ordering contract: transactions rebuild requires the
+// bodies file at the NEW range to exist. Without it (because bodies
+// wasn't rebuilt first), the tx rebuild errors out with a clear
+// message.
+func TestRebuildTransactionsStraddleFile_RejectsMissingRebuiltBodies(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	// Fake old transactions .seg fixture. The function reads bodies
+	// BEFORE touching the source tx file, so the source contents
+	// don't matter for this guard test — but the source path must
+	// be visible to a Decompressor open. Build an empty seg.
+	oldFI := snaptype.FileInfo{
+		Version: snaptype2.Transactions.Versions().Current,
+		From:    2_000_000,
+		To:      2_010_000,
+		Type:    snaptype2.Transactions,
+		Ext:     ".seg",
+	}
+	oldFI = oldFI.As(snaptype2.Transactions)
+	oldFI.Path = filepath.Join(snapDir, oldFI.Name())
+	// Need at least one entry for seg.NewCompressor to produce a
+	// valid file; the path-not-found check trips before we touch it.
+	makeFakeSegFile(t, ctx, oldFI.Path, tmpDir, 1)
+
+	_, err := rebuildTransactionsStraddleFile(ctx, oldFI, 2_007_000, snapDir, tmpDir, nil, log.New())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rebuilt bodies file not found",
+		"tx rebuild must fail explicitly when bodies hasn't been rebuilt first — order matters")
+}
+
 // TestSliceStraddleSeg_RejectsBadInputs pins guard-clause behavior.
 func TestSliceStraddleSeg_RejectsBadInputs(t *testing.T) {
 	t.Parallel()

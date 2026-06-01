@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -90,60 +89,31 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 
 	toRemove := p.collectFilesPastBlock(toBlock, stepBoundary)
 
-	// Headers straddle rebuild: the file whose [FromBlock, ToBlock)
-	// straddles toBlock has valid headers for blocks ≤ toBlock that
-	// the writable DB doesn't carry (OtterSync exec doesn't write
-	// kv.Headers). Removing it strands those blocks (live-rig issue
-	// #2 from the 2026-06-01 cycle). Rebuild it to cover only
-	// [FromBlock, chunkAlignedToBlock(toBlock)), drive the headers
-	// IndexBuilderFunc to produce the new accessor, then stage the
-	// old file for post-commit deletion via pendingTrim alongside
-	// the strictly-past files.
+	// Block-snapshot straddle rebuilds. The file whose [FromBlock,
+	// ToBlock) straddles toBlock has valid block-data for blocks ≤
+	// toBlock that the writable DB doesn't carry (OtterSync exec
+	// doesn't write kv.Headers / kv.BlockBody / kv.EthTx for frozen
+	// blocks). Removing the straddle file strands those blocks
+	// (live-rig issue #2 from the 2026-06-01 cycle).
 	//
-	// Scope: this commit handles HEADERS only. Bodies straddle
-	// files keep their stale post-toBlock content but reads are
-	// gated by CanonicalHash truncation (no hash-based reverse
-	// lookup for bodies). Transactions straddle files leak via
-	// eth_getTransactionByHash — known follow-up.
+	// Each type (Headers, Bodies, Transactions) gets a per-file
+	// rebuild that copies entries for [FromBlock, newTo) into a new
+	// .seg with the truncated name. Order matters: Transactions'
+	// IndexBuilderFunc reads the bodies file at the same range, so
+	// bodies must be rebuilt before transactions.
 	//
 	// Non-1000-aligned toBlock (toBlock+1 not a multiple of 1000)
 	// would require seeding leftover [chunkAlignedToBlock(toBlock),
-	// toBlock] into the writable DB; this commit returns an explicit
-	// error rather than silently producing inconsistent state.
-	straddle, err := p.headersStraddleFile(toBlock)
+	// toBlock] into the writable DB; that path returns an explicit
+	// error here (tracked as a follow-up — see
+	// rebuildBlockStraddles).
+	newTo := chunkAlignedToBlock(toBlock)
+	rebuildPaths, straddleRefs, err := p.rebuildBlockStraddles(ctx, toBlock, newTo)
 	if err != nil {
-		return nil, fmt.Errorf("headersStraddleFile(%d): %w", toBlock, err)
+		return nil, err
 	}
-	var rebuildPaths []string
-	if straddle != nil {
-		newTo := chunkAlignedToBlock(toBlock)
-		if newTo != toBlock+1 {
-			return nil, fmt.Errorf("mode-B headers straddle rebuild: toBlock+1=%d not aligned to %d-block boundary; leftover-seed for non-aligned cuts is a known follow-up", toBlock+1, snaptype.Erigon2MinSegmentSize)
-		}
-		if newTo <= straddle.From {
-			// The "straddle" actually starts past toBlock — treat as
-			// strictly-past. Already in `toRemove`; nothing to do here.
-		} else {
-			newFI, err := rebuildHeadersStraddleFile(ctx, *straddle, newTo, p.snapDir, p.snapTmpDir, p.ChainConfig, p.logger)
-			if err != nil {
-				return nil, fmt.Errorf("rebuildHeadersStraddleFile(%s → newTo=%d): %w", straddle.Name(), newTo, err)
-			}
-			// Record new file paths (.seg + idx file names) for
-			// AbortUnwind cleanup.
-			rebuildPaths = append(rebuildPaths, newFI.Path)
-			for _, idxName := range newFI.Type.IdxFileNames(newFI.From, newFI.To) {
-				rebuildPaths = append(rebuildPaths, filepath.Join(newFI.Dir(), idxName))
-			}
-			// The OLD straddle file must be deleted post-commit. Add
-			// it to `toRemove` so the existing trim machinery handles
-			// it. Also delete the old accessors.
-			oldFile := straddle // capture
-			fakeEntry := &snapshot.FileEntry{Name: oldFile.Name()}
-			toRemove = append(toRemove, fakeEntry)
-			for _, idxName := range oldFile.Type.IdxFileNames(oldFile.From, oldFile.To) {
-				toRemove = append(toRemove, &snapshot.FileEntry{Name: idxName})
-			}
-		}
+	for _, r := range straddleRefs {
+		toRemove = append(toRemove, &snapshot.FileEntry{Name: r.Name})
 	}
 
 	if len(toRemove) == 0 && len(rebuildPaths) == 0 {
