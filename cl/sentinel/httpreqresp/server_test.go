@@ -36,14 +36,15 @@ func TestMaxResponseBodySize(t *testing.T) {
 	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/ping/1/ssz_snappy"))
 	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/metadata/2/ssz_snappy"))
 	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/light_client_bootstrap/1/ssz_snappy"))
-	// by_range / by_root protocols may return many chunks, so they get a larger ceiling.
+	// by_range / by_root / by_head protocols may return many chunks, so they get a larger ceiling.
 	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_range/2/ssz_snappy"), int64(maxSingleObjectResponse))
 	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_root/2/ssz_snappy"), int64(maxSingleObjectResponse))
+	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_head/1/ssz_snappy"), int64(maxSingleObjectResponse))
 	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/blob_sidecars_by_range/1/ssz_snappy"), int64(maxSingleObjectResponse))
 }
 
 // A peer that floods its response stream must not be able to make the handler buffer
-// an unbounded amount of memory: a single-chunk response is capped at maxChunkSize.
+// an unbounded amount of memory: a single-object response is capped at maxSingleObjectResponse.
 func TestResponseBodyCappedOnFlood(t *testing.T) {
 	ctx := context.Background()
 

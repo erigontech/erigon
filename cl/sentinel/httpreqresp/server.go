@@ -43,7 +43,7 @@ const (
 	// a single uncompressed req/resp response chunk may be.
 	maxChunkSize = 15 * 1024 * 1024
 	// maxResponseChunks mirrors MAX_REQUEST_BLOCKS, the most chunks a by_range /
-	// by_root response may carry.
+	// by_root / by_head response may carry.
 	maxResponseChunks = 1024
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
@@ -51,10 +51,10 @@ const (
 )
 
 // maxResponseBodySize is the byte ceiling the handler will buffer for a response on
-// the given topic. by_range / by_root responses are multi-chunk (one chunk per
-// requested item); every other req/resp protocol returns a single chunk.
+// the given topic. by_range / by_root / by_head responses are multi-chunk (one chunk
+// per requested item); every other req/resp protocol returns a single chunk.
 func maxResponseBodySize(topic string) int64 {
-	if strings.Contains(topic, "_by_range") || strings.Contains(topic, "_by_root") {
+	if strings.Contains(topic, "_by_range") || strings.Contains(topic, "_by_root") || strings.Contains(topic, "_by_head") {
 		return maxResponseChunks * maxChunkSize
 	}
 	return maxSingleObjectResponse
