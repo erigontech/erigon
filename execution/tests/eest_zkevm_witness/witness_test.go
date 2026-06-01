@@ -85,6 +85,17 @@ func TestExecutionSpecWitness(t *testing.T) {
 		tm.SkipLoad(p)
 	}
 
+	// The eip8025_optional_proofs witness_validation_* fixtures are stateless-verifier
+	// negative tests: each stores a deliberately mutated executionWitness, so producer
+	// comparison always diverges. Need a stateless-verify consumer mode; until then skip.
+	// https://github.com/erigontech/erigon/issues/21566
+	for _, p := range []string{
+		`witness_validation_(codes|headers|state)/[a-z0-9_]+_(missing|extra|malformed)_`,
+		`witness_headers/witness_headers_extra_unused_older_ancestor`,
+	} {
+		tm.SkipLoad(p)
+	}
+
 	tm.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
 		runWitnessTest(t, test)
 	})
