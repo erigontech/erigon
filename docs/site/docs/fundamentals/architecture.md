@@ -30,7 +30,6 @@ flowchart TB
         Execution -.reads/writes.-> Datadir
         RPC -.reads.-> Datadir
 
-        TxPool <-- private gRPC --> Caplin
         TxPool -.reads.-> Datadir
         Caplin -.reads/writes.-> Datadir
     end
@@ -55,7 +54,7 @@ A simplified pipeline:
 3. Snapshots    → fetch immutable history files via BitTorrent
 4. Execution    → re-execute transactions, write account/storage updates
 5. Commitment   → build the state Merkle trie incrementally
-6. Finalization → persist receipts, update canonical chain
+6. Finalization → update canonical chain
 ```
 
 Two consequences:
@@ -96,7 +95,7 @@ For the exact directory layout, file sizes on mainnet, and how to split storage 
 
 ## Embedded consensus (Caplin)
 
-Erigon ships with **Caplin**, a built-in consensus-layer client. By default `--internalcl` is on, so a single `erigon` invocation runs both the execution layer and the consensus layer with no extra processes, no JWT secret to manage, and no separate binary to upgrade.
+Erigon ships with **Caplin**, a built-in consensus-layer client. Caplin runs embedded by default, so a single `erigon` invocation runs both the execution layer and the consensus layer with no extra processes, no JWT secret to manage, and no separate binary to upgrade.
 
 If you prefer to run an external CL (Lighthouse, Prysm, Teku, Nimbus), pass `--externalcl` and connect via the standard Engine API. The Engine-API path is identical to what Geth, Besu, or Reth exposes.
 
