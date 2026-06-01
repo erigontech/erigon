@@ -790,6 +790,27 @@ func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBl
 	f.mu.Unlock()
 }
 
+// MarkPayloadInvalid records that the execution payload has been rejected by the EL.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash, block *cltypes.BeaconBlock) {
+	if f.verifiedExecutionPayload != nil {
+		f.verifiedExecutionPayload.Remove(blockRoot)
+	}
+	if f.executionPayloadStatus != nil {
+		f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusInvalidated)
+	}
+	f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+	if f.optimisticStore != nil {
+		if err := f.optimisticStore.InvalidateBlock(blockRoot, block); err != nil {
+			log.Warn("[MarkPayloadInvalid] optimistic store update failed", "blockRoot", blockRoot, "err", err)
+		}
+	}
+	f.mu.Lock()
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.mu.Unlock()
+}
+
 // ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {

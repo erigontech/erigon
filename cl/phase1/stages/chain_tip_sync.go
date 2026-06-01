@@ -512,6 +512,7 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
 			cfg.forkChoice.RequeuePendingELPayload(p)
 		case execution_client.PayloadStatusInvalidated:
+			cfg.forkChoice.MarkPayloadInvalid(beaconRoot, execHash, p.Block.Block)
 			log.Warn("[chainTipSync] pending GLOAS payload invalidated by EL", "slot", p.Block.Block.Slot, "blockRoot", beaconRoot)
 		}
 	}
@@ -571,6 +572,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
 			cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: item.block, Envelope: envelope})
 		case execution_client.PayloadStatusInvalidated:
+			cfg.forkChoice.MarkPayloadInvalid(item.root, execHash, item.block.Block)
 			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
 		}
 	}

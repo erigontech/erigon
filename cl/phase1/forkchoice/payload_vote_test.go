@@ -313,6 +313,27 @@ func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
 	})
 }
 
+func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	execHash := common.HexToHash("0xabcd")
+	invalidatedHeader := common.Hash{}
+
+	f := newPayloadVoteTestStore(t, root, true, true)
+	f.forkGraph = payloadVoteForkGraph{
+		hasEnvelope:       true,
+		invalidatedHeader: &invalidatedHeader,
+	}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+
+	f.MarkPayloadInvalid(root, execHash, block)
+
+	require.False(t, f.IsPayloadVerified(root))
+	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), status)
+	require.Equal(t, root, invalidatedHeader)
+}
+
 func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 	verifiedExecutionPayload, _ := lru.New[common.Hash, struct{}](16)
 	verifiedExecutionPayload.Add(root, struct{}{})
