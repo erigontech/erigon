@@ -287,8 +287,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// via its own Updates buffer (TouchUpdates from VersionedWrites).
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
 	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
+	// Capture caller's flag and restore on exit — unconditional restore to
+	// false breaks post-exec callers (engine-x runner's restore-state
+	// GetAsOf, RPC reads) that need history-read mode on the shared mem batch.
+	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
 	pe.rs.Domains().SetInMemHistoryReads(true)
-	defer pe.rs.Domains().SetInMemHistoryReads(false)
+	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
 	// Trie warmup left enabled for the parallel path. Original disable was
 	// based on a calculator/warmer interaction concern that turned out to be
