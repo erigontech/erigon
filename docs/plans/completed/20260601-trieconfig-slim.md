@@ -202,8 +202,8 @@ rule instead of an implicit derive-and-mutate with a dead alternate branch.
 
 ### Task 5: [Final] Update plan tracking
 
-- [ ] confirm all checkboxes above are `[x]`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] confirm all checkboxes above are `[x]`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
