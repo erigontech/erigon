@@ -190,16 +190,12 @@ func expectedHeaderHashes(ew *testutil.ExpectedWitness) ([]common.Hash, error) {
 
 func rpcHeaderHashes(res *jsonrpc.ExecutionWitnessResult) ([]common.Hash, error) {
 	hashes := make([]common.Hash, 0, len(res.Headers))
-	for i, m := range res.Headers {
-		hv, ok := m["hash"]
-		if !ok {
-			return nil, fmt.Errorf("rpc header %d missing hash field", i)
+	for i := range res.Headers {
+		var h types.Header
+		if err := rlp.DecodeBytes(res.Headers[i], &h); err != nil {
+			return nil, fmt.Errorf("rpc header %d: %w", i, err)
 		}
-		h, ok := hv.(common.Hash)
-		if !ok {
-			return nil, fmt.Errorf("rpc header %d hash has unexpected type %T", i, hv)
-		}
-		hashes = append(hashes, h)
+		hashes = append(hashes, h.Hash())
 	}
 	return hashes, nil
 }
