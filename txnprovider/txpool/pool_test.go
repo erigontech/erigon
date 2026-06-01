@@ -441,7 +441,7 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	hash := crypto.Keccak256Hash(hashData)
 
 	// Sign the hash
-	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	sig, err := crypto.Sign(hash[:], privateKey)
 	require.NoError(t, err)
 
 	// Separate signature components
@@ -1014,7 +1014,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, testforks.Forks["Prague"])
+	require.NoError(t, copier.CopyWithOption(&chainConfig, testforks.Forks["Prague"], copier.Option{DeepCopy: true}))
 	chainConfig.ChainID = maxUint256
 	cache := kvcache.NewSimple()
 	logger := log.New()

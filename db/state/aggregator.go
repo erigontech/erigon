@@ -122,13 +122,6 @@ type Aggregator struct {
 	configured   bool
 	savedSalt    *uint32
 	disableFsync bool
-
-	// nil = no cap. See #20701.
-	frozenBlocks FrozenBlocksProvider
-}
-
-type FrozenBlocksProvider interface {
-	FrozenBlocks() uint64
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -827,12 +820,23 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	ok, err := a.readyForCollation(ctx, step)
+	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()))
+		lastStepInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		var lastCollatableStepInDB kv.Step
+		if lastStepInDB > 0 {
+			lastCollatableStepInDB = lastStepInDB - 1
+		}
+		a.logger.Debug("[snapshots] holding state collation at reorg depth",
+			"step", step,
+			"lastBlockInStep", lastBlockInStep,
+			"lastBlockInDB", lastBlockInDB,
+			"lastTxInDB", lastTxInDB,
+			"reorgBlockDepth", a.reorgBlockDepth,
+			"lastCollatableStepInDB", lastCollatableStepInDB)
 		return errStepNotReady
 	}
 	var (
@@ -973,56 +977,25 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bool, err error) {
-	if a.reorgBlockDepth == 0 && a.frozenBlocks == nil {
-		return true, nil
+func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	if a.reorgBlockDepth == 0 {
+		return 0, 0, 0, true, nil
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
-
-	if a.frozenBlocks != nil {
-		var capTxNum, lstTxNum uint64
-		if err := a.db.View(ctx, func(tx kv.Tx) error {
-			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-			if err != nil {
-				return err
-			}
-			lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
-			if len(lst) >= 8 {
-				lstTxNum = binary.BigEndian.Uint64(lst)
-			}
-			return nil
-		}); err != nil {
-			return false, fmt.Errorf("read max collatable txNum: %w", err)
-		}
-		if uint64(step+1)*a.StepSize() > capTxNum {
-			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
-				"lastCollatableStepInDB", lstTxNum/a.StepSize())
-			return false, nil
-		}
-		return true, nil
-	}
-
-	// frozenBlocks == nil && reorgBlockDepth > 0: legacy safety net.
-	var lastBlockInStep, lastBlockInDB uint64
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		var found bool
-		lastBlockInStep, found, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
 			return err
 		}
-		if !found {
+		if !ok {
 			lastBlockInStep = 0
 		}
-		lastBlockInDB, _, err = rawdbv3.TxNums.Last(tx)
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
-	if err != nil {
-		return false, err
-	}
-	return lastBlockInDB > lastBlockInStep+a.reorgBlockDepth, nil
+	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
+	return
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
@@ -1080,8 +1053,10 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		}
 
 		if doMerge {
+			a.wg.Add(1)
 			go func() {
-				if err := a.MergeLoop(ctx); err != nil {
+				defer a.wg.Done()
+				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
 			}()
@@ -1124,7 +1099,13 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 	return nil
 }
 
-func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
+func (a *Aggregator) MergeLoop(ctx context.Context) error {
+	a.wg.Add(1)
+	defer a.wg.Done()
+	return a.mergeLoop(ctx)
+}
+
+func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
@@ -1137,8 +1118,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	a.wg.Add(1)
-	defer a.wg.Done()
 	defer a.mergingFiles.Store(false)
 
 	mergeThrottleMs := dbg.MergeThrottleMs
@@ -2001,12 +1980,6 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-// SetFrozenBlocksProvider caps state collation at the block-snapshots boundary.
-// Without it, state files may advance past block files — recovery requires
-// `erigon seg rm-state --latest`. See #20701.
-func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
-	a.frozenBlocks = p
-}
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
@@ -2056,24 +2029,16 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		lastInDB, execStep := func() (kv.Step, kv.Step) {
+		lastInDB := func() kv.Step {
 			a.commitGate.RLock()
 			defer a.commitGate.RUnlock()
-			lastInDB := max(
+			return max(
 				lastIdInDB(a.db, a.d[kv.AccountsDomain]),
 				lastIdInDB(a.db, a.d[kv.CodeDomain]),
 				lastIdInDB(a.db, a.d[kv.StorageDomain]),
 				lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
-			// Sanity check: the DB should not have data at steps beyond where
-			// execution is currently at. If it does, collating those steps
-			// would capture intermediate state.
-			execStep := kv.Step(txNum / a.StepSize())
-			if lastInDB > execStep {
-				a.logger.Warn("BuildFilesInBackground: lastInDB beyond execStep", "lastInDB", lastInDB, "execStep", execStep, "txNum", txNum)
-			}
-			return lastInDB, execStep
 		}()
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "execStep", execStep)
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()))
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
@@ -2190,9 +2155,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !doMerge {
 			return
 		}
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			defer close(fin)
-			if err := a.MergeLoop(a.ctx); err != nil {
+			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
 				}
