@@ -170,10 +170,35 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
-		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
+		// MaxReorgDepth caps backward walks during *reorgs* — when the
+		// CL pushes a head at-or-below our height on a different
+		// chain, refuse to dig deeper than MaxReorgDepth blocks.
+		//
+		// That cap is wrong for *catch-up*: when the CL pushes a head
+		// strictly past our height, we're not reorging — we're
+		// receiving a chain we never had. Admin SetHead (mode B)
+		// produces exactly this state: EL head deliberately moved
+		// back; CL still tracks the forward chain; the gap can be
+		// arbitrarily large by operator intent. Capping it as a reorg
+		// causes the downloader to fail repeatedly and the chain to
+		// wedge.
+		//
+		// Apply the cap only in the reorg case (req's chain tip is
+		// at-or-below our current head). For catch-up, walk back
+		// unlimited — the etl-backed walker handles arbitrary depth.
 		currentHeader := e.chainRW.CurrentHeader(ctx)
-		if currentHeader != nil {
-			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
+		isCatchUp := currentHeader != nil && req.ValidateChainTip != nil &&
+			req.ValidateChainTip.NumberU64() > currentHeader.Number.Uint64()
+		if !isCatchUp {
+			opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
+			if currentHeader != nil {
+				opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
+			}
+		} else {
+			e.logger.Info("[EngineBlockDownloader] catch-up download (no reorg-depth cap)",
+				"tip", req.ValidateChainTip.NumberU64(),
+				"head", currentHeader.Number.Uint64(),
+				"gap", req.ValidateChainTip.NumberU64()-currentHeader.Number.Uint64())
 		}
 	}
 	if req.Trigger == SegmentRecoveryTrigger {
