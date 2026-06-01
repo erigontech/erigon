@@ -30,7 +30,6 @@ flowchart TB
         Execution -.reads/writes.-> Datadir
         RPC -.reads.-> Datadir
 
-        TxPool <-- private gRPC --> Caplin
         TxPool -.reads.-> Datadir
         Caplin -.reads/writes.-> Datadir
     end
