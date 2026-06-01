@@ -38,6 +38,25 @@ const (
 	TopicHeader        = "Reqresp-Topic"
 )
 
+const (
+	// maxChunkSize is MAX_CHUNK_SIZE from the consensus-layer p2p spec: the largest
+	// a single uncompressed req/resp response chunk may be.
+	maxChunkSize = 15 * 1024 * 1024
+	// maxResponseChunks mirrors MAX_REQUEST_BLOCKS, the most chunks a by_range /
+	// by_root response may carry.
+	maxResponseChunks = 1024
+)
+
+// maxResponseBodySize is the byte ceiling the handler will buffer for a response on
+// the given topic. by_range / by_root responses are multi-chunk (one chunk per
+// requested item); every other req/resp protocol returns a single chunk.
+func maxResponseBodySize(topic string) int64 {
+	if strings.Contains(topic, "_by_range") || strings.Contains(topic, "_by_root") {
+		return maxResponseChunks * maxChunkSize
+	}
+	return maxChunkSize
+}
+
 // Do performs an http request against the http handler.
 // NOTE: this is actually very similar to the http.RoundTripper interface... maybe we should investigate using that.
 /*
@@ -153,7 +172,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
 		// copy the data now to the stream
 		// the first write to w will call code 200, so we do not need to
-		_, err = io.Copy(w, stream)
+		_, err = io.Copy(w, io.LimitReader(stream, maxResponseBodySize(topic)))
 		if err != nil {
 			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
 			return
