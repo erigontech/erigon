@@ -610,6 +610,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return err
 						}
 					}
+					// Release pooled per-path maps only after ProcessBAL, the last reader of TxIO.
+					applyResult.TxIO.Release()
 
 					// Mark this block as fully applied. The exit-completeness
 					// check at channel-close compares this set against the
@@ -923,7 +925,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							pe.Lock()
 							delete(pe.blockExecutors, blockResult.BlockNum)
 							pe.Unlock()
-							blockExecutor.blockIO.Release()
 							pe.scheduleNextPending(ctx)
 							if blockResult.BlockNum >= pe.maxBlockNum {
 								pe.reachedMaxBlock.Store(true)
@@ -1005,7 +1006,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
-				blockExecutor.blockIO.Release()
 				pe.scheduleNextPending(ctx)
 
 				// Use AfterCommitment estimate (2x) in per-block mode since
