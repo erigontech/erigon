@@ -68,7 +68,7 @@ type eventBus struct {
 	handlerMap    atomic.Pointer[handlerMap]
 	writerLock    sync.Mutex // serializes Subscribe/Unsubscribe writers
 	wg            sync.WaitGroup
-	prevQueueSize int
+	prevQueueSize atomic.Int64
 }
 
 type handlerMap struct {
@@ -182,14 +182,14 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 					queueSize := bus.execPool.QueueSize()
 
 					if queueSize > 0 {
-						if queueSize > bus.prevQueueSize {
+						if int64(queueSize) > bus.prevQueueSize.Load() {
 							if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
 								log.Debug("Execpool overflowing",
 									"bus", app.LogInstance(bus),
 									"poolSize", bus.execPool.PoolSize(),
 									"queueSize", bus.execPool.QueueSize())
 							}
-						} else if queueSize < bus.prevQueueSize {
+						} else if int64(queueSize) < bus.prevQueueSize.Load() {
 							if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
 								log.Debug("Execpool overflow recovering",
 									"bus", app.LogInstance(bus),
@@ -198,7 +198,7 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 							}
 						}
 
-						bus.prevQueueSize = queueSize
+						bus.prevQueueSize.Store(int64(queueSize))
 					}
 				}
 			}
@@ -281,8 +281,7 @@ func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...i
 // NewEventBus returns new eventBus with empty handlers.
 func NewEventBus(execPool util.ExecPool) EventBus {
 	b := &eventBus{
-		execPool:      execPool,
-		prevQueueSize: 0,
+		execPool: execPool,
 	}
 	b.handlerMap.Store(&handlerMap{nil, map[reflect.Type]*handlerMap{}, []*eventHandler{}})
 	return b
