@@ -909,8 +909,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		// shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 64))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -1058,7 +1057,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
-	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
+	if !squeeze {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
@@ -1067,7 +1066,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	a.dirtyFilesLock.Unlock()
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, squeeze)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
