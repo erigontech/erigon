@@ -31,14 +31,15 @@ import (
 )
 
 func TestMaxResponseBodySize(t *testing.T) {
-	// Single-chunk protocols are capped at one chunk.
-	require.EqualValues(t, maxChunkSize, maxResponseBodySize("/eth2/beacon_chain/req/status/1/ssz_snappy"))
-	require.EqualValues(t, maxChunkSize, maxResponseBodySize("/eth2/beacon_chain/req/ping/1/ssz_snappy"))
-	require.EqualValues(t, maxChunkSize, maxResponseBodySize("/eth2/beacon_chain/req/metadata/2/ssz_snappy"))
+	// Single-object protocols are capped tightly.
+	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/status/1/ssz_snappy"))
+	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/ping/1/ssz_snappy"))
+	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/metadata/2/ssz_snappy"))
+	require.EqualValues(t, maxSingleObjectResponse, maxResponseBodySize("/eth2/beacon_chain/req/light_client_bootstrap/1/ssz_snappy"))
 	// by_range / by_root protocols may return many chunks, so they get a larger ceiling.
-	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_range/2/ssz_snappy"), int64(maxChunkSize))
-	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_root/2/ssz_snappy"), int64(maxChunkSize))
-	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/blob_sidecars_by_range/1/ssz_snappy"), int64(maxChunkSize))
+	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_range/2/ssz_snappy"), int64(maxSingleObjectResponse))
+	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/beacon_blocks_by_root/2/ssz_snappy"), int64(maxSingleObjectResponse))
+	require.Greater(t, maxResponseBodySize("/eth2/beacon_chain/req/blob_sidecars_by_range/1/ssz_snappy"), int64(maxSingleObjectResponse))
 }
 
 // A peer that floods its response stream must not be able to make the handler buffer
@@ -89,6 +90,6 @@ func TestResponseBodyCappedOnFlood(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
-	require.LessOrEqualf(t, len(body), maxChunkSize,
-		"single-chunk response must be capped at maxChunkSize (%d), got %d bytes", maxChunkSize, len(body))
+	require.LessOrEqualf(t, len(body), maxSingleObjectResponse,
+		"single-object response must be capped at maxSingleObjectResponse (%d), got %d bytes", maxSingleObjectResponse, len(body))
 }

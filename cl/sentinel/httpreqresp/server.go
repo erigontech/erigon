@@ -45,6 +45,9 @@ const (
 	// maxResponseChunks mirrors MAX_REQUEST_BLOCKS, the most chunks a by_range /
 	// by_root response may carry.
 	maxResponseChunks = 1024
+	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
+	// goodbye, light-client singles), whose responses are at most tens of KiB.
+	maxSingleObjectResponse = 1024 * 1024
 )
 
 // maxResponseBodySize is the byte ceiling the handler will buffer for a response on
@@ -54,7 +57,7 @@ func maxResponseBodySize(topic string) int64 {
 	if strings.Contains(topic, "_by_range") || strings.Contains(topic, "_by_root") {
 		return maxResponseChunks * maxChunkSize
 	}
-	return maxChunkSize
+	return maxSingleObjectResponse
 }
 
 // Do performs an http request against the http handler.
