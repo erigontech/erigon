@@ -138,6 +138,14 @@ func (t *tx) Has(table string, key []byte) (bool, error) {
 	return bytes.Equal(iter.Item().k, key), nil
 }
 
+// GetOne returns the value directly out of the btree entry — no defensive
+// copy. Matches the kv.Tx contract ("must not be accessed after txn has
+// terminated") and the MDBX implementation. The btree entries are
+// immutable once inserted (Set always replaces with a new entry, leaving
+// the old one alive in Go memory as long as the cursor / snapshot holds
+// a reference), so the returned slice remains valid for the tx lifetime
+// and beyond. Dropping the copy here is a measurable GC-pressure win on
+// hot state reads (every EVM SLOAD / GetCode hits this path).
 func (t *tx) GetOne(table string, key []byte) ([]byte, error) {
 	tab, ok := t.lookupTable(table)
 	if !ok {
@@ -148,7 +156,7 @@ func (t *tx) GetOne(table string, key []byte) ([]byte, error) {
 		if !found {
 			return nil, nil
 		}
-		return common.Copy(it.v), nil
+		return it.v, nil
 	}
 	iter := tab.tree.Iter()
 	defer iter.Release()
@@ -159,7 +167,7 @@ func (t *tx) GetOne(table string, key []byte) ([]byte, error) {
 	if !bytes.Equal(it.k, key) {
 		return nil, nil
 	}
-	return common.Copy(it.v), nil
+	return it.v, nil
 }
 
 func (t *tx) ReadSequence(bucket string) (uint64, error) {
@@ -217,7 +225,7 @@ func snapshotFrom(tab *table, from []byte, limit *uint32) []entry {
 			break
 		}
 		it := iter.Item()
-		out = append(out, entry{k: common.Copy(it.k), v: common.Copy(it.v)})
+		out = append(out, entry{k: it.k, v: it.v})
 		ok = iter.Next()
 	}
 	return out

@@ -54,11 +54,14 @@ func (c *cursor) seekToCurrent(iter *btree2.IterG[entry]) bool {
 
 func (c *cursor) setPos(it entry) ([]byte, []byte) {
 	c.valid = true
-	// Stored entries are never mutated in place (the COW btree creates new
-	// nodes on Set/Delete), so it's safe for the cursor to hold the entry's
-	// slices by reference. The caller gets its own copies.
+	// Stored entries are never mutated in place — Set always inserts a
+	// new entry; Delete unlinks the node from the tree but the entry's
+	// slices stay alive in Go memory while any cursor / snapshot holds a
+	// reference. Returning the slices by reference matches MDBX's
+	// "cursor-position memory, valid until next op" contract and avoids
+	// a per-positioning common.Copy that was a big GC-pressure source.
 	c.current = it
-	return common.Copy(it.k), common.Copy(it.v)
+	return it.k, it.v
 }
 
 func (c *cursor) clearPos() ([]byte, []byte) {
@@ -170,7 +173,7 @@ func (c *cursor) Current() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return c.current.k, c.current.v, nil
 }
 
 // --- kv.CursorDupSort ---
@@ -308,7 +311,7 @@ func (c *cursor) SeekBothRange(key, value []byte) ([]byte, error) {
 		return nil, nil
 	}
 	c.setPos(it)
-	return common.Copy(it.v), nil
+	return it.v, nil
 }
 
 func (c *cursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
@@ -331,7 +334,7 @@ func (c *cursor) FirstDup() ([]byte, error) {
 	if !c.valid {
 		return nil, nil
 	}
-	curKey := common.Copy(c.current.k)
+	curKey := c.current.k
 	iter := c.table.tree.Iter()
 	defer iter.Release()
 	if !iter.Seek(entry{k: curKey}) {
@@ -342,14 +345,14 @@ func (c *cursor) FirstDup() ([]byte, error) {
 		return nil, nil
 	}
 	c.setPos(it)
-	return common.Copy(it.v), nil
+	return it.v, nil
 }
 
 func (c *cursor) LastDup() ([]byte, error) {
 	if !c.valid {
 		return nil, nil
 	}
-	curKey := common.Copy(c.current.k)
+	curKey := c.current.k
 	iter := c.table.tree.Iter()
 	defer iter.Release()
 	// Walk forward from the first dup of curKey, tracking the last entry
@@ -377,7 +380,7 @@ func (c *cursor) LastDup() ([]byte, error) {
 		return nil, nil
 	}
 	c.setPos(last)
-	return common.Copy(last.v), nil
+	return last.v, nil
 }
 
 func (c *cursor) CountDuplicates() (uint64, error) {
@@ -480,7 +483,7 @@ func collectRange(t *table, fromPrefix, toPrefix []byte, asc bool, limit int64) 
 			if toPrefix != nil && bytes.Compare(it.k, toPrefix) >= 0 {
 				break
 			}
-			entries = append(entries, entry{k: common.Copy(it.k), v: common.Copy(it.v)})
+			entries = append(entries, entry{k: it.k, v: it.v})
 			ok = iter.Next()
 		}
 	} else {
@@ -507,7 +510,7 @@ func collectRange(t *table, fromPrefix, toPrefix []byte, asc bool, limit int64) 
 			if toPrefix != nil && bytes.Compare(it.k, toPrefix) <= 0 {
 				break
 			}
-			entries = append(entries, entry{k: common.Copy(it.k), v: common.Copy(it.v)})
+			entries = append(entries, entry{k: it.k, v: it.v})
 			ok = iter.Prev()
 		}
 	}
@@ -529,7 +532,7 @@ func collectRangeDupSort(t *table, key, fromPrefix, toPrefix []byte, asc bool, l
 			if toPrefix != nil && bytes.Compare(it.v, toPrefix) >= 0 {
 				break
 			}
-			entries = append(entries, entry{k: common.Copy(it.k), v: common.Copy(it.v)})
+			entries = append(entries, entry{k: it.k, v: it.v})
 			ok = iter.Next()
 		}
 	} else {
@@ -585,7 +588,7 @@ func collectRangeDupSort(t *table, key, fromPrefix, toPrefix []byte, asc bool, l
 			if toPrefix != nil && bytes.Compare(it.v, toPrefix) <= 0 {
 				break
 			}
-			entries = append(entries, entry{k: common.Copy(it.k), v: common.Copy(it.v)})
+			entries = append(entries, entry{k: it.k, v: it.v})
 			ok = iter.Prev()
 		}
 	}
