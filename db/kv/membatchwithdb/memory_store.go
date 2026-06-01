@@ -514,6 +514,22 @@ func (c *memStoreCursor) Seek(seek []byte) ([]byte, []byte, error) {
 }
 
 func (c *memStoreCursor) SeekExact(key []byte) ([]byte, []byte, error) {
+	// Non-DupSort fast path: direct tree.Get with no iterator allocation.
+	// SeekExact is a hot path (per-account/per-storage state reads via the
+	// in-memory block overlay).
+	if !c.table.dupSort {
+		c.store.mu.RLock()
+		defer c.store.mu.RUnlock()
+		item, found := c.table.tree.Get(memEntry{k: key})
+		if !found {
+			c.valid = false
+			c.current = memEntry{}
+			return nil, nil, nil
+		}
+		c.valid = true
+		c.current = item
+		return common.Copy(item.k), common.Copy(item.v), nil
+	}
 	k, v, err := c.Seek(key)
 	if err != nil {
 		return nil, nil, err
