@@ -37,6 +37,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -464,6 +465,16 @@ func makeP2PServer(
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
+const (
+	// maxBlockHashesPerMsg is the most [hash, number] entries an honest peer packs into one NewBlockHashes packet.
+	maxBlockHashesPerMsg = 4096
+	// maxNewBlockHashesBytes bounds an inbound NewBlockHashes packet (~48B per entry) so oversized ones are dropped before the payload is buffered or forwarded to subscribers.
+	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
+	// newBlockHashesBurst and newBlockHashesRate bound how frequently one peer may send NewBlockHashes packets before it is disconnected.
+	newBlockHashesBurst            = 30
+	newBlockHashesRate  rate.Limit = 10
+)
+
 func runPeer(
 	ctx context.Context,
 	peerID [64]byte,
@@ -487,6 +498,8 @@ func runPeer(
 			logger.Trace("Peer disconnected", "id", hex.EncodeToString(peerID[:]), "name", peerInfo.peer.Fullname())
 		}
 	}()
+
+	newBlockHashesLimiter := rate.NewLimiter(newBlockHashesRate, newBlockHashesBurst)
 
 	for {
 		if !peerPrinted {
@@ -601,6 +614,14 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
+			if msg.Size > maxNewBlockHashesBytes {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: oversized NewBlockHashes %d > %d", msg.Size, maxNewBlockHashesBytes))
+			}
+			if !newBlockHashesLimiter.Allow() {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: NewBlockHashes rate limit exceeded")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -608,7 +629,6 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
-			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {

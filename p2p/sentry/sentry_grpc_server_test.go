@@ -819,6 +819,144 @@ func TestRunWitPeer_MalformedNewWitnessHashesMsg(t *testing.T) {
 	}
 }
 
+func freshNewBlockHashesMsg(t *testing.T, entries int) p2p.Msg {
+	t.Helper()
+	pkt := make(eth.NewBlockHashesPacket, entries)
+	for i := range pkt {
+		pkt[i].Number = uint64(i)
+		pkt[i].Hash[0] = byte(i)
+	}
+	b, err := rlp.EncodeToBytes(pkt)
+	require.NoError(t, err)
+	return p2p.Msg{
+		Code:    eth.NewBlockHashesMsg,
+		Size:    uint32(len(b)),
+		Payload: io.NopCloser(bytes.NewReader(b)),
+	}
+}
+
+// TestRunPeer_OversizedNewBlockHashesKicksPeer verifies the sentry framing
+// layer drops an oversized NewBlockHashes packet and disconnects the peer
+// before the payload is forwarded to any subscriber.
+func TestRunPeer_OversizedNewBlockHashesKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	sendCh := make(chan struct{}, 1)
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sendCh <- struct{}{} }
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	oversize := make([]byte, maxNewBlockHashesBytes+1)
+	rw.readCh <- p2p.Msg{
+		Code:    eth.NewBlockHashesMsg,
+		Size:    uint32(len(oversize)),
+		Payload: io.NopCloser(bytes.NewReader(oversize)),
+	}
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	select {
+	case peerErr := <-errCh:
+		require.NotNil(t, peerErr, "expected a PeerError for oversized NewBlockHashes")
+		assert.Equal(t, p2p.PeerErrorMessageSizeLimit, peerErr.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPeer did not return within timeout")
+	}
+
+	select {
+	case <-sendCh:
+		t.Fatal("oversized NewBlockHashes must not be forwarded to subscribers")
+	default:
+	}
+}
+
+// TestRunPeer_NewBlockHashesFloodKicksPeer verifies a peer flooding compliant
+// NewBlockHashes packets past the per-peer rate limit is disconnected.
+func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) {}
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	assertKicked := func(peerErr *p2p.PeerError) {
+		require.NotNil(t, peerErr, "expected a PeerError for NewBlockHashes flood")
+		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+	}
+
+	for i := 0; i < newBlockHashesBurst+10; i++ {
+		select {
+		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
+		case peerErr := <-errCh:
+			assertKicked(peerErr)
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out feeding NewBlockHashes packets")
+		}
+	}
+
+	select {
+	case peerErr := <-errCh:
+		assertKicked(peerErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPeer did not kick flooding peer within timeout")
+	}
+}
+
+// TestRunPeer_NormalNewBlockHashesForwarded verifies compliant NewBlockHashes
+// traffic is forwarded to subscribers and not penalized.
+func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	const want = 5
+	sent := make(chan struct{}, want)
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sent <- struct{}{} }
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	for i := 0; i < want; i++ {
+		rw.readCh <- freshNewBlockHashesMsg(t, 1)
+	}
+
+	for i := 0; i < want; i++ {
+		select {
+		case <-sent:
+		case peerErr := <-errCh:
+			t.Fatalf("runPeer kicked peer for compliant NewBlockHashes traffic: %v", peerErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for forwarded NewBlockHashes")
+		}
+	}
+}
+
 // minimalP2PServer returns an un-networked p2p.Server (no discovery, no
 // dial, no listener) suitable for tests that only need a non-nil Server
 // to inject into a GrpcServer.
