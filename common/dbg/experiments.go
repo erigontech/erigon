@@ -104,6 +104,7 @@ var (
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
+	TraceDiffsets         = EnvBool("TRACE_DIFFSETS", false)
 	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)

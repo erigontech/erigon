@@ -452,6 +452,46 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
+func traceChangeSets3(tx kv.Tx, tip, maxReorgDepth uint64, logPrefix string, logger log.Logger) {
+	lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+	if err != nil {
+		logger.Warn(fmt.Sprintf("[%s] diffsets trace", logPrefix), "step", "lowestUnwindable", "err", err)
+		return
+	}
+	sizeBytes, err := tx.BucketSize(kv.ChangeSets3)
+	if err != nil {
+		logger.Warn(fmt.Sprintf("[%s] diffsets trace", logPrefix), "step", "bucketSize", "err", err)
+		return
+	}
+	entries, err := tx.Count(kv.ChangeSets3)
+	if err != nil {
+		logger.Warn(fmt.Sprintf("[%s] diffsets trace", logPrefix), "step", "count", "err", err)
+		return
+	}
+
+	var retained, overRetained, bytesPerEntry uint64
+	if lowest != ^uint64(0) && tip >= lowest {
+		retained = tip - lowest
+		if retained > maxReorgDepth {
+			overRetained = retained - maxReorgDepth
+		}
+	}
+	if entries > 0 {
+		bytesPerEntry = sizeBytes / entries
+	}
+	logger.Info(fmt.Sprintf("[%s] diffsets(ChangeSets3) stats", logPrefix),
+		"tip", tip,
+		"lowestUnwindable", lowest,
+		"retainedBlocks", retained,
+		"targetWindow", maxReorgDepth,
+		"overRetained", overRetained,
+		"size", common.ByteCount(sizeBytes),
+		"entries", entries,
+		"bytesPerEntry", bytesPerEntry,
+		"chunkLen", changeset.ChunkLen(),
+	)
+}
+
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
@@ -495,6 +535,9 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 				"duration", duration,
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 			)
+		}
+		if dbg.TraceDiffsets {
+			traceChangeSets3(tx, s.ForwardProgress, cfg.syncCfg.MaxReorgDepth, s.LogPrefix(), logger)
 		}
 	}
 

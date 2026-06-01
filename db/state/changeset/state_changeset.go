@@ -317,6 +317,14 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 const DiffChunkKeyLen = 48
 const DiffChunkLen = 4*1024 - 32
 
+// diffChunkLen is the active value-chunk size; DIFF_CHUNK_LEN overrides the
+// default to test larger chunks, which must stay below MDBX's overflow-page
+// threshold (~pagesize/2) to avoid FreeList costs.
+var diffChunkLen = dbg.EnvInt("DIFF_CHUNK_LEN", DiffChunkLen)
+
+// ChunkLen reports the active value-chunk size (see DIFF_CHUNK_LEN).
+func ChunkLen() int { return diffChunkLen }
+
 type threadSafeBuf struct {
 	b []byte
 	sync.Mutex
@@ -337,7 +345,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	}
 	defer c.Close()
 
-	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
+	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
 	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
@@ -351,8 +359,8 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	copy(key[8:], blockHash[:])
 
 	for i := 0; i < chunkCount; i++ {
-		start := i * DiffChunkLen
-		end := min((i+1)*DiffChunkLen, len(keys))
+		start := i * diffChunkLen
+		end := min((i+1)*diffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
 
 		if err := c.Put(key, keys[start:end]); err != nil {
@@ -394,7 +402,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
+	val := make([]byte, 0, uint64(diffChunkLen)*chunkCount)
 	for i := uint64(0); i < chunkCount; i++ {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
