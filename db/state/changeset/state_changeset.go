@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type StateChangeSet struct {
@@ -315,7 +316,12 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+
+// MDBX caps a leaf node at half a page (leaf_nodemax); a larger value spills to
+// an overflow page. DiffChunkLen is the largest chunk with a DiffChunkKeyLen key
+// that stays off overflow pages — see TestNoOverflowPages.
+const pageHeaderSize = 20                                                                       // per-record overhead on a half page: PAGEHDRSZ/2 + indx_t slot + NODESIZE
+const DiffChunkLen = int(ethconfig.DefaultChainDBPageSize)/2 - pageHeaderSize - DiffChunkKeyLen // = 1980
 
 type threadSafeBuf struct {
 	b []byte
@@ -394,7 +400,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
+	val := make([]byte, 0, DiffChunkLen*int(chunkCount))
 	for i := uint64(0); i < chunkCount; i++ {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
