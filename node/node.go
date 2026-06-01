@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/hybridkv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/memstoredb"
@@ -308,11 +309,11 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	default:
 		name = "test"
 	}
-	if dbg.UseInMemoryKV {
-		key := filepath.Join(config.Dirs.DataDir, name)
-		logger.Info("Opening pure-Go in-memory database (--experimental.inmem-kv)", "label", label, "key", key)
-		return memstoredb.OpenForPath(key, label, nil), nil
-	}
+	// Hybrid in-memory backend. Only ChainDB receives the split treatment;
+	// non-ChainDB labels (TxPool, Consensus, PolygonBridge) keep MDBX because
+	// they're small, off the newPayload hot path, and some carry hard
+	// (*mdbx.MdbxTx) type assertions in their consumers.
+	wantHybrid := dbg.UseInMemoryKV && label == dbcfg.ChainDB
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
@@ -408,6 +409,11 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		}); err != nil {
 			return nil, err
 		}
+	}
+
+	if wantHybrid {
+		logger.Info("Wrapping ChainDB in hybrid MDBX + in-memory backend (--experimental.inmem-kv)", "path", dbPath)
+		db = hybridkv.New(label, db, memstoredb.New(label, nil), kv.IsInMemoryTable)
 	}
 
 	return db, nil

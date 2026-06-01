@@ -28,22 +28,30 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/hybridkv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/memstoredb"
 )
 
-func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
-	if dbg.UseInMemoryKV {
-		return memstoredb.New(label, nil)
+// wrapHybrid wraps the MDBX durable backend with a memstoredb delta backend
+// when the in-memory flag is enabled and the label is ChainDB. Non-ChainDB
+// labels (TxPool, Polygon-bridge, …) keep pure MDBX so that consumer code
+// holding hard *mdbx.MdbxTx assertions keeps working in tests.
+func wrapHybrid(durable kv.RwDB, label kv.Label) kv.RwDB {
+	if !dbg.UseInMemoryKV || label != dbcfg.ChainDB {
+		return durable
 	}
-	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
+	return hybridkv.New(label, durable, memstoredb.New(label, nil), kv.IsInMemoryTable)
+}
+
+func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
+	durable := mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
+	return wrapHybrid(durable, label)
 }
 
 func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
-	if dbg.UseInMemoryKV {
-		return memstoredb.New(dbcfg.ChainDB, nil)
-	}
-	return mdbx.New(dbcfg.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	durable := mdbx.New(dbcfg.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	return wrapHybrid(durable, dbcfg.ChainDB)
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {

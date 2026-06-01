@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"maps"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -33,10 +32,6 @@ import (
 type DB struct {
 	label kv.Label
 	cfg   kv.TableCfg
-
-	// persistFile is the dump path written on Close. Empty if the DB wasn't
-	// opened via OpenForPath. See persist.go for the rationale.
-	persistFile string
 
 	// writeMu serialises RwTx: only one writer at a time, matching MDBX.
 	writeMu sync.Mutex
@@ -69,45 +64,6 @@ func New(label kv.Label, cfg kv.TableCfg) *DB {
 		tables:    make(map[string]*table),
 		sequences: make(map[string]uint64),
 	}
-}
-
-// registry deduplicates DB instances by an arbitrary key (typically the
-// filesystem path that MDBX would have used). Multiple OpenForPath calls with
-// the same key return the same in-memory backend, matching the on-disk
-// semantic that opening the same path returns the same data.
-var (
-	registryMu sync.Mutex
-	registry   = map[string]*DB{}
-)
-
-// OpenForPath returns the shared DB for `path`, creating it on first use.
-// A subsequent OpenForPath against the same path returns the same DB,
-// mirroring MDBX where reopening the same file restores its data. If a dump
-// file exists inside the path directory (`<path>/inmem.dat`), its contents are
-// restored — this lets the multi-process CLI tooling (erigon init / import /
-// daemon) round-trip chaindata through separate processes, while still being
-// wiped when a caller removes the data directory.
-func OpenForPath(path string, label kv.Label, cfg kv.TableCfg) *DB {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if db, ok := registry[path]; ok {
-		db.closed.Store(false)
-		return db
-	}
-	db := New(label, cfg)
-	if path != "" {
-		db.persistFile = filepath.Join(path, "inmem.dat")
-		if err := db.loadFromFile(db.persistFile); err != nil {
-			// Don't crash on a corrupt dump — fall back to a fresh DB and
-			// log via the caller's path. A loud no-op is preferable to a
-			// startup panic when the dump file was written by an older
-			// version or got truncated.
-			db.tables = make(map[string]*table)
-			db.sequences = make(map[string]uint64)
-		}
-	}
-	registry[path] = db
-	return db
 }
 
 // table is the per-table btree.
@@ -170,38 +126,12 @@ func (db *DB) CHandle() unsafe.Pointer     { return nil }
 func (db *DB) Path() string                { return "memstoredb:" + string(db.label) }
 func (db *DB) ReadOnly() bool              { return false }
 
-// Close marks the handle closed. Mirrors MDBX: data survives on disk; a
-// subsequent OpenForPath rehydrates from the dump file. Tests that want a
-// clean slate use WipePath.
+// Close marks the handle closed. The DB is volatile by design: data is lost
+// at process exit. There is no on-disk dump — the durable tables in the
+// hybrid backend live in MDBX, and the in-memory delta is re-derived on
+// startup by the aggregator from .kv snapshots + the persistent MDBX side.
 func (db *DB) Close() {
-	if !db.closed.CompareAndSwap(false, true) {
-		return
-	}
-	// Best-effort dump to disk so a subsequent OpenForPath restores chaindata
-	// (see persist.go). A failed save is non-fatal: the DB is volatile by
-	// design.
-	if db.persistFile != "" {
-		_ = db.saveToFile(db.persistFile)
-	}
-	// Drop the registry entry so a later OpenForPath rehydrates from disk
-	// (or starts empty), matching MDBX which holds no in-memory state for a
-	// closed handle.
-	registryMu.Lock()
-	for k, v := range registry {
-		if v == db {
-			delete(registry, k)
-			break
-		}
-	}
-	registryMu.Unlock()
-}
-
-// WipePath fully removes the DB associated with `path` from the registry,
-// discarding its in-memory data. Use only in tests that need a hard reset.
-func WipePath(path string) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	delete(registry, path)
+	db.closed.Store(true)
 }
 
 func (db *DB) BeginRo(_ context.Context) (kv.Tx, error) {
