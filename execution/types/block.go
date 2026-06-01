@@ -795,11 +795,8 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
-	// rawTransactions caches the on-wire RLP encoding of each transaction
-	// when the Block was constructed from already-encoded bytes (e.g. an
-	// engine_newPayload payload). Lets RawBody() skip the per-tx
-	// rlp.EncodeToBytes round-trip when the bytes are already available.
-	// nil means "no cache" — callers must encode on demand.
+	// rawTransactions optionally caches each transaction's canonical EIP-2718
+	// binary encoding (the engine_newPayload wire form); nil means no cache.
 	rawTransactions [][]byte
 
 	// caches
@@ -1138,11 +1135,10 @@ func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, un
 	return b
 }
 
-// NewBlockFromStorageWithRawTxs is NewBlockFromStorage plus a caller-supplied
-// raw-RLP cache of the transactions. RawBody() returns these bytes directly
-// instead of re-encoding the decoded transactions — saves one RLP encode pass
-// on the engine_newPayload entry path where the CL hands us raw-RLP txs that
-// we then decode for validation. The raw-txs slice length must match txs.
+// NewBlockFromStorageWithRawTxs is NewBlockFromStorage with a caller-supplied
+// cache of the transactions' canonical binary encodings (rawTxs, whose length
+// must match txs), letting RawBody() avoid re-encoding each transaction from
+// scratch on the engine_newPayload entry path.
 func NewBlockFromStorageWithRawTxs(hash common.Hash, header *Header, txs []Transaction, rawTxs [][]byte, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, rawTransactions: rawTxs, uncles: uncles, withdrawals: withdrawals}
@@ -1382,15 +1378,29 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 	}
 }
 
+// rlpFromCanonicalTxn returns a transaction's rlp.EncodeToBytes form given its
+// canonical EIP-2718 binary encoding: a typed txn (first byte < 0x80) is wrapped
+// in an RLP string, a legacy txn (already an RLP list) is returned unchanged.
+func rlpFromCanonicalTxn(canonical []byte) []byte {
+	if len(canonical) == 0 || canonical[0] >= 0x80 {
+		return canonical
+	}
+	wrapped := make([]byte, rlp.StringLen(canonical))
+	rlp.EncodeStringToBuf(canonical, wrapped)
+	return wrapped
+}
+
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
-	// Use the rawTransactions cache when present (e.g. engine_newPayload
-	// constructed this Block from already-RLP-encoded txs) to skip the
-	// per-tx rlp.EncodeToBytes round-trip.
+	// When the canonical-encoding cache is present (e.g. an engine_newPayload
+	// payload), reconstruct each tx's rlp.EncodeToBytes form from it — a cheap
+	// re-wrap of the cached bytes rather than a full per-tx struct re-encode.
 	if len(b.rawTransactions) == len(b.transactions) {
-		copy(br.Transactions, b.rawTransactions)
+		for i, raw := range b.rawTransactions {
+			br.Transactions[i] = rlpFromCanonicalTxn(raw)
+		}
 		return br
 	}
 	for i, txn := range b.transactions {
