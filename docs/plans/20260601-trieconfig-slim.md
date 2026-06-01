@@ -194,11 +194,11 @@ rule instead of an implicit derive-and-mutate with a dead alternate branch.
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] `TrieConfig` struct contains only load-bearing fields: `Variant`, `DeferBranchUpdates`, `LeaveDeferredForCaller`, `EnableWarmupCache`, `EnableTrieWarmup`, `CsvMetricsFilePrefix`, `MemoizationOff`, `WarmupNumWorkers` (no `MaxDeferredUpdates`, `RebuildShardMaxSteps`, `SubtrieConfig`)
-- [ ] `grep -rn "SubtrieConfig\|maxDeferredUpdatesOrDefault\|RebuildShardMaxStepsOrDefault" --include='*.go'` returns no matches outside this plan/docs
-- [ ] no `t.Skip` (or any mute form) was added anywhere
-- [ ] full verification: `make lint` (until clean) then `make erigon integration` both succeed
-- [ ] run the commitment + state test suites (not just compile): `go test ./execution/commitment/... ./db/state/...`
+- [x] `TrieConfig` struct contains only load-bearing fields: `Variant`, `DeferBranchUpdates`, `LeaveDeferredForCaller`, `EnableWarmupCache`, `EnableTrieWarmup`, `CsvMetricsFilePrefix`, `MemoizationOff`, `WarmupNumWorkers` (no `MaxDeferredUpdates`, `RebuildShardMaxSteps`, `SubtrieConfig`)
+- [x] `grep -rn "SubtrieConfig\|maxDeferredUpdatesOrDefault\|RebuildShardMaxStepsOrDefault" --include='*.go'` returns no matches outside this plan/docs
+- [x] no `t.Skip` (or any mute form) was added anywhere
+- [x] full verification: `make lint` (until clean) then `make erigon integration` both succeed
+- [x] run the commitment + state test suites (not just compile): `go test ./execution/commitment/... ./db/state/...`
 
 ### Task 5: [Final] Update plan tracking
 
