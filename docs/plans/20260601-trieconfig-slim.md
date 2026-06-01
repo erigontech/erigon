@@ -166,13 +166,13 @@ rule instead of an implicit derive-and-mutate with a dead alternate branch.
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 - Modify: `execution/commitment/config_test.go`
 
-- [ ] in `config.go`, add `func (c TrieConfig) Subtrie() TrieConfig { s := c; s.DeferBranchUpdates = false; return s }`
-- [ ] in `config.go`, remove the `SubtrieConfig *TrieConfig` field and its doc line from the `TrieConfig` struct
-- [ ] in `hex_patricia_hashed.go` `SpawnSubTrie` (~:126-142), replace the `var subCfg TrieConfig; if hph.cfg.SubtrieConfig != nil {...} else {...}; subCfg.DeferBranchUpdates = false; subCfg.SubtrieConfig = nil` block with `subCfg := hph.cfg.Subtrie()` (drop the now-obsolete "force-disable" comment)
-- [ ] `config_test.go` `TestDefaultTrieConfig`: delete the `cfg.SubtrieConfig != nil` block (lines ~36-38) — the field no longer exists
-- [ ] `config_test.go`: add a focused unit test `TestTrieConfig_Subtrie` asserting `cfg.Subtrie()` sets `DeferBranchUpdates == false` and copies every other field unchanged (e.g. `LeaveDeferredForCaller`, `MemoizationOff`, `Variant`)
-- [ ] keep `TestTrieConfig_SpawnSubTrieInheritsConfig` (~108-134) and `TestTrieConfig_ConcurrentPatriciaHashedPropagation` (~136-171) as-is — they reference no removed symbol and still validate the `SpawnSubTrie`/concurrent consumer end-to-end
-- [ ] run `go build ./...` + `go test -count=0 ./execution/commitment/...`; then `make lint` until clean — must pass before Task 3
+- [x] in `config.go`, add `func (c TrieConfig) Subtrie() TrieConfig { s := c; s.DeferBranchUpdates = false; return s }`
+- [x] in `config.go`, remove the `SubtrieConfig *TrieConfig` field and its doc line from the `TrieConfig` struct
+- [x] in `hex_patricia_hashed.go` `SpawnSubTrie` (~:126-142), replace the `var subCfg TrieConfig; if hph.cfg.SubtrieConfig != nil {...} else {...}; subCfg.DeferBranchUpdates = false; subCfg.SubtrieConfig = nil` block with `subCfg := hph.cfg.Subtrie()` (drop the now-obsolete "force-disable" comment)
+- [x] `config_test.go` `TestDefaultTrieConfig`: delete the `cfg.SubtrieConfig != nil` block (lines ~36-38) — the field no longer exists
+- [x] `config_test.go`: add a focused unit test `TestTrieConfig_Subtrie` asserting `cfg.Subtrie()` sets `DeferBranchUpdates == false` and copies every other field unchanged (e.g. `LeaveDeferredForCaller`, `MemoizationOff`, `Variant`)
+- [x] keep `TestTrieConfig_SpawnSubTrieInheritsConfig` (~108-134) and `TestTrieConfig_ConcurrentPatriciaHashedPropagation` (~136-171) as-is — they reference no removed symbol and still validate the `SpawnSubTrie`/concurrent consumer end-to-end
+- [x] run `go build ./...` + `go test -count=0 ./execution/commitment/...`; then `make lint` until clean — must pass before Task 3
 
 ### Task 3: Move dbg.TipTrieWarmupers into WarmupNumWorkersOrDefault (one home)
 

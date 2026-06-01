@@ -22,7 +22,6 @@ type TrieConfig struct {
 	EnableTrieWarmup       bool        // enable parallel MDBX page-cache warmup during commitment (default: true)
 	CsvMetricsFilePrefix   string      // CSV metrics output prefix; empty = check env var
 	MemoizationOff         bool        // disable memoized hashes in computeCellHash (default: false)
-	SubtrieConfig          *TrieConfig // config for ConcurrentPH sub-tries; nil = derive from parent
 
 	// WarmupNumWorkers is the number of parallel workers used by the MDBX page-cache
 	// warmup during commitment. 0 = use DefaultWarmupNumWorkers (16).
@@ -37,6 +36,14 @@ func DefaultTrieConfig() TrieConfig {
 		EnableTrieWarmup:   true,
 		EnableWarmupCache:  true,
 	}
+}
+
+// Subtrie returns a copy of c configured for a concurrent sub-trie: deferred
+// branch updates are disabled since sub-tries fold directly into the parent.
+func (c TrieConfig) Subtrie() TrieConfig {
+	s := c
+	s.DeferBranchUpdates = false
+	return s
 }
 
 // WarmupNumWorkersOrDefault returns WarmupNumWorkers if set, otherwise DefaultWarmupNumWorkers.

@@ -30,9 +30,6 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.MemoizationOff {
 		t.Error("MemoizationOff should default to false")
 	}
-	if cfg.SubtrieConfig != nil {
-		t.Error("SubtrieConfig should default to nil")
-	}
 	if cfg.WarmupNumWorkers != 0 {
 		t.Errorf("WarmupNumWorkers should default to 0 (use default), got %d", cfg.WarmupNumWorkers)
 	}
@@ -47,6 +44,31 @@ func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	cfg = TrieConfig{WarmupNumWorkers: 3}
 	if got := cfg.WarmupNumWorkersOrDefault(); got != 3 {
 		t.Errorf("WarmupNumWorkersOrDefault: expected 3, got %d", got)
+	}
+}
+
+func TestTrieConfig_Subtrie(t *testing.T) {
+	cfg := TrieConfig{
+		Variant:                VariantHexPatriciaTrie,
+		DeferBranchUpdates:     true,
+		LeaveDeferredForCaller: true,
+		EnableWarmupCache:      true,
+		EnableTrieWarmup:       true,
+		CsvMetricsFilePrefix:   "pre",
+		MemoizationOff:         true,
+		WarmupNumWorkers:       7,
+	}
+
+	sub := cfg.Subtrie()
+
+	if sub.DeferBranchUpdates {
+		t.Error("Subtrie should disable DeferBranchUpdates")
+	}
+
+	want := cfg
+	want.DeferBranchUpdates = false
+	if sub != want {
+		t.Errorf("Subtrie should copy all other fields unchanged: got %+v, want %+v", sub, want)
 	}
 }
 

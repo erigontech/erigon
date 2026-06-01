@@ -124,17 +124,7 @@ type HexPatriciaHashed struct {
 
 // Clones current trie state to allow concurrent processing.
 func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
-	var subCfg TrieConfig
-	if hph.cfg.SubtrieConfig != nil {
-		subCfg = *hph.cfg.SubtrieConfig
-	} else {
-		subCfg = hph.cfg
-	}
-	// Sub-tries fold directly into the parent; only the root's deferred updates
-	// are flushed, so any deferred updates collected on a sub-trie would be lost.
-	// Force-disable here regardless of where subCfg came from (inherited or explicit SubtrieConfig).
-	subCfg.DeferBranchUpdates = false
-	subCfg.SubtrieConfig = nil // no further nesting
+	subCfg := hph.cfg.Subtrie()
 	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
 
 	subTrie.mountTo(hph, forNibble)
