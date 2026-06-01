@@ -67,6 +67,24 @@ func TestExecutionSpecWitness(t *testing.T) {
 	// keep resource use bounded.
 	tm.NoParallel = true
 
+	// zkevm@v0.4.0 charges EIP-8037 AUTH_BASE state gas on EIP-7702 clears of an
+	// undelegated authority; current spec (and tests-bal@v7.2.0) refund it, so
+	// these fixtures' expected gas is stale. Remove when the corpus is bumped.
+	// https://github.com/erigontech/erigon/issues/21563
+	for _, p := range []string{
+		`delegation_clearing\.json/.*undelegated_account`,
+		`delegation_clearing_and_set\.json/.*undelegated_account`,
+		`delegation_clearing_tx_to\.json/.*undelegated_account`,
+		`double_auth\.json/.*first_delegation_DelegationTo\.RESET`,
+		`valid_tx_invalid_auth_signature\.json/.*s=SECP256K1N_OVER_2(-1)?\]`,
+		`tx_to_beacon_root_contract\.json/.*tx_type_4`,
+		`blobhash_gas_cost\.json/.*tx_type_4`,
+		`blobhash_opcode_contexts_tx_types\.json/.*tx_type_4`,
+		`bal_7702_null_address_delegation_no_code_change`,
+	} {
+		tm.SkipLoad(p)
+	}
+
 	tm.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
 		runWitnessTest(t, test)
 	})
