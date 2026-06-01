@@ -1973,6 +1973,19 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			return err
 		}
 
+		// Per EIP-6780 + EIP-7928: SELFDESTRUCT of a SAME-TX created contract
+		// wipes storage at end-of-tx, so the BAL must record dirty slots as
+		// reads, not changes. Zero storage versionedWrites so AsBlockAccessList
+		// folds them away via net-zero. Must run BEFORE so.newlyCreated = false.
+		// The block assembler's BAL is built per-tx from ibs.TxIO() and never
+		// fires the MakeWriteSet hook, so this per-tx hook is required for
+		// assembler/validator BAL convergence.
+		if sdb.versionMap != nil && so.selfdestructed && so.newlyCreated {
+			for key := range so.dirtyStorage {
+				sdb.recordWriteStorage(addr, key, uint256.Int{})
+			}
+		}
+
 		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
