@@ -22,7 +22,6 @@ import (
 	"encoding/hex"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"time"
@@ -82,23 +81,73 @@ the following headers have meaning when passed in to the request:
 		REQRESP-TOPIC - the topic to request with
 		REQRESP-EXPECTED-CHUNKS - this is an integer, which will be multiplied by 10 to calculate the amount of seconds the peer has to respond with all the data
 */
-func Do(handler http.Handler, r *http.Request) (resp *http.Response, err error) {
-	// TODO: there potentially extra alloc here (responses are bufferd)
-	// is that a big deal? not sure. maybe can reuse these buffers since they are read once (and known when close) if so
-	ok := make(chan struct{})
+func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
+	resultCh := make(chan *http.Response, 1)
 	go func() {
-		res := httptest.NewRecorder()
-		handler.ServeHTTP(res, r)
-		// linter does not know we are passing the resposne through channel.
-		// nolint: bodyclose
-		resp = res.Result()
-		close(ok)
+		w := &captureWriter{}
+		handler.ServeHTTP(w, r)
+		// the caller closes the body; we hand it off through the channel.
+		resultCh <- w.result() //nolint:bodyclose
 	}()
 	select {
-	case <-ok:
+	case resp := <-resultCh:
 		return resp, nil
 	case <-r.Context().Done():
 		return nil, r.Context().Err()
+	}
+}
+
+// captureWriter records a handler's status, headers and body for Do. Unlike
+// httptest.ResponseRecorder it adopts the first body slice instead of copying it, so a response
+// the handler already buffered for its size check is held once rather than twice.
+type captureWriter struct {
+	header      http.Header
+	body        []byte
+	code        int
+	wroteHeader bool
+}
+
+func (w *captureWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *captureWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.code = code
+		w.wroteHeader = true
+	}
+}
+
+func (w *captureWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.body == nil {
+		w.body = b
+	} else {
+		w.body = append(w.body, b...)
+	}
+	return len(b), nil
+}
+
+func (w *captureWriter) result() *http.Response {
+	code := w.code
+	if code == 0 {
+		code = http.StatusOK
+	}
+	header := w.header
+	if header == nil {
+		header = make(http.Header)
+	}
+	return &http.Response{
+		StatusCode:    code,
+		Status:        strconv.Itoa(code) + " " + http.StatusText(code),
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(w.body)),
+		ContentLength: int64(len(w.body)),
 	}
 }
 
