@@ -659,15 +659,15 @@ func TestEncodeUint256BufferOverflowPrevention(t *testing.T) {
 	_ = header.Hash()
 }
 
-// A Block built from the raw engine_newPayload tx bytes must produce exactly the
-// same RawBody() encoding as one built without the cache; otherwise the stored
+// A Block built from the binary engine_newPayload tx bytes must produce exactly
+// the same RawBody() encoding as one built without the cache; otherwise the stored
 // body and the EIP-7934 block-RLP-size check diverge for typed (EIP-2718) txs.
-func TestBlockRawBodyFromRawTxsMatchesEncoded(t *testing.T) {
+func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 	t.Parallel()
 	tr := NewTRand()
 	txTypes := []int{LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType}
 
-	rawTxs := make([][]byte, len(txTypes))
+	binaryTxs := make([][]byte, len(txTypes))
 	txns := make([]Transaction, len(txTypes))
 	for i, txType := range txTypes {
 		// Blob/SetCode txs require a non-nil To, which RandTransaction picks
@@ -677,15 +677,15 @@ func TestBlockRawBodyFromRawTxsMatchesEncoded(t *testing.T) {
 			if tr.RandTransaction(txType).MarshalBinary(&buf) != nil {
 				continue
 			}
-			raw := common.Copy(buf.Bytes())
-			if decoded, err := DecodeTransaction(raw); err == nil {
-				rawTxs[i], txns[i] = raw, decoded
+			binaryTxn := common.Copy(buf.Bytes())
+			if decoded, err := DecodeTransaction(binaryTxn); err == nil {
+				binaryTxs[i], txns[i] = binaryTxn, decoded
 			}
 		}
 		require.NotNilf(t, txns[i], "could not generate a decodable txType=%d", txType)
 	}
 
-	cached := NewBlockFromStorageWithRawTxs(common.Hash{}, &Header{}, txns, rawTxs, nil, nil)
+	cached := NewBlockFromStorageWithBinaryTxs(common.Hash{}, &Header{}, txns, binaryTxs, nil, nil)
 	reference := NewBlockFromStorage(common.Hash{}, &Header{}, txns, nil, nil)
 
 	got, want := cached.RawBody(), reference.RawBody()
