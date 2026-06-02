@@ -23,6 +23,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -302,6 +303,54 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	canParallel, err = paratrie.CanDoConcurrentNext()
 	require.NoError(t, err)
 	require.False(t, canParallel, "should be NOT able to parallelize next run")
+}
+
+func Test_ConcurrentPatriciaHashed_CaptureRecordsAllKeys(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	state := NewMockState(t)
+	state.SetConcurrentCommitment(true)
+
+	trieRoot := NewHexPatriciaHashed(length.Addr, state)
+	trie := NewConcurrentPatriciaHashed(trieRoot, state)
+	trie.SetCapture([]string{})
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Build()
+	require.NoError(t, state.applyPlainUpdates(plainKeys, updates))
+
+	upds := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	warmup := WarmupConfig{
+		CtxFactory: func() (PatriciaContext, func()) {
+			return state, func() {}
+		},
+	}
+	_, err := trie.Process(ctx, upds, "", nil, warmup)
+	require.NoError(t, err)
+
+	capture := trie.GetCapture(false)
+	require.Len(t, capture, len(plainKeys))
+	for _, line := range capture {
+		require.Contains(t, line, "Flags: [")
+	}
+	for _, plainKey := range plainKeys {
+		needle := fmt.Sprintf("plainKey [%x]", plainKey)
+		found := false
+		for _, line := range capture {
+			if strings.Contains(line, needle) {
+				found = true
+				break
+			}
+		}
+		require.Truef(t, found, "missing capture for %x in %v", plainKey, capture)
+	}
 }
 
 func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {

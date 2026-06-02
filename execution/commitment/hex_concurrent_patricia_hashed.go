@@ -172,19 +172,18 @@ func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
 	}
 }
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
-	capture := p.root.GetCapture(truncate)
+	capture := p.root.GetCapture(false)
 	if truncate {
-		for i := range p.mounts {
-			p.mounts[i].SetCapture(nil)
-		}
+		p.SetCapture(nil)
 	}
 	return capture
 }
 
 func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
 	p.root.SetCapture(capture)
+	recorder := p.root.captureRecorder()
 	for i := range p.mounts {
-		p.mounts[i].SetCapture(capture)
+		p.mounts[i].setCaptureRecorder(recorder)
 	}
 }
 
@@ -243,10 +242,34 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
+				var stateUpdate *Update
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
-				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
+				if phnib.traceDomain || phnib.capture != nil {
+					var traceErr error
+					if int16(len(plainKey)) == phnib.accountKeyLen {
+						phnib.metrics.AccountLoad(plainKey)
+						stateUpdate, traceErr = phnib.accountFromCacheOrDB(plainKey)
+						if traceErr != nil {
+							return fmt.Errorf("GetAccount (nibble %x) for key %x failed: %w", ni, plainKey, traceErr)
+						}
+					} else {
+						phnib.metrics.StorageLoad(plainKey)
+						stateUpdate, traceErr = phnib.storageFromCacheOrDB(plainKey)
+						if traceErr != nil {
+							return fmt.Errorf("GetStorage (nibble %x) for key %x failed: %w", ni, plainKey, traceErr)
+						}
+					}
+					trace := phnib.debugTraceLine(fmt.Sprintf("(%x/%d)", ni, cnt), plainKey, stateUpdate, hashedKey)
+					if phnib.traceDomain {
+						fmt.Println(trace)
+					}
+					if phnib.capture != nil {
+						phnib.capture.Append(trace)
+					}
+				}
+				if err := phnib.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil

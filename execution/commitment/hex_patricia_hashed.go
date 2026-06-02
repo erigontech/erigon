@@ -26,6 +26,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -54,6 +55,32 @@ type DomainPutter = stateifs.DomainPutter
 
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
+
+type trieDebugRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func newTrieDebugRecorder(capture []string) *trieDebugRecorder {
+	return &trieDebugRecorder{lines: slices.Clone(capture)}
+}
+
+func (r *trieDebugRecorder) Append(line string) {
+	r.mu.Lock()
+	r.lines = append(r.lines, line)
+	r.mu.Unlock()
+}
+
+func (r *trieDebugRecorder) Snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lines == nil {
+		return nil
+	}
+	capture := make([]string, len(r.lines))
+	copy(capture, r.lines)
+	return capture
+}
 
 // CollapseTracer is a callback invoked when a trie node collapse occurs during updates to commitment.
 // When a FullNode is reduced to a single child (updateKindPropagate), the remaining child
@@ -87,7 +114,7 @@ type HexPatriciaHashed struct {
 	rootPresent   bool
 	trace         bool
 	traceDomain   bool
-	capture       []string
+	capture       *trieDebugRecorder
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
@@ -2817,29 +2844,31 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		if hph.trace || hph.traceDomain || hph.capture != nil {
 			update := stateUpdate
-
 			if update == nil {
 				if int16(len(plainKey)) == hph.accountKeyLen {
+					hph.metrics.AccountLoad(plainKey)
 					update, err = hph.accountFromCacheOrDB(plainKey)
 					if err != nil {
 						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 					}
 				} else {
+					hph.metrics.StorageLoad(plainKey)
 					update, err = hph.storageFromCacheOrDB(plainKey)
 					if err != nil {
 						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 					}
 				}
+				stateUpdate = update
 			}
 
-			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			trace := hph.debugTraceLine(fmt.Sprintf("(%d/%d)", ki+1, updatesCount), plainKey, update, hashedKey)
 
 			if hph.trace || hph.traceDomain {
 				fmt.Println(trace)
 			}
 
 			if hph.capture != nil {
-				hph.capture = append(hph.capture, trace)
+				hph.capture.Append(trace)
 			}
 		}
 
@@ -2933,14 +2962,31 @@ func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain =
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
-	capture := hph.capture
+	if hph.capture == nil {
+		return nil
+	}
+	capture := hph.capture.Snapshot()
 	if truncate {
 		hph.capture = nil
 	}
 	return capture
 }
 
-func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
+func (hph *HexPatriciaHashed) SetCapture(capture []string) {
+	if capture == nil {
+		hph.capture = nil
+		return
+	}
+	hph.capture = newTrieDebugRecorder(capture)
+}
+
+func (hph *HexPatriciaHashed) setCaptureRecorder(recorder *trieDebugRecorder) {
+	hph.capture = recorder
+}
+
+func (hph *HexPatriciaHashed) captureRecorder() *trieDebugRecorder {
+	return hph.capture
+}
 
 func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	hph.metrics.EnableCsvMetrics(filePathPrefix)
@@ -3050,6 +3096,10 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 		}
 	}
 	return hph.ctx.Storage(plainKey)
+}
+
+func (hph *HexPatriciaHashed) debugTraceLine(prefix string, plainKey []byte, update *Update, hashedKey []byte) string {
+	return fmt.Sprintf("%s plainKey [%x] %s hashedKey [%x] currentKey [%x]", prefix, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
 }
 
 type stateRootFlag int8
