@@ -176,7 +176,7 @@ When manually dispatching a workflow that is not part of the PR's automatic chec
 
 ### Referring to numbered points in GitHub text
 
-Never use a bare `#N` to refer to a numbered list item, point, step, or nit in PR descriptions, issue descriptions, or comments — GitHub auto-links `#N` to issue/PR number N (e.g. `#1` links to the unrelated PR #1). Write "point 1", "item 1", or "the first nit" instead, and reserve `#N` for genuine references to that issue or PR.
+To refer to a numbered list item, point, step, or nit in PR descriptions, issue descriptions, or comments, write it in words — "point 1", "item 1", "the first nit". Use `#N` only as a reference to a GitHub issue or PR number; GitHub auto-links it, so a bare `#1` would point at an unrelated PR.
 
 ### Backport PRs to release branches
 
