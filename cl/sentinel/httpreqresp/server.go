@@ -39,7 +39,7 @@ const (
 	PeerIdHeader       = "Reqresp-Peer-Id"
 	TopicHeader        = "Reqresp-Topic"
 	// MaxResponseBytesHeader carries the caller's upper bound on the response body size,
-	// used to size the response-body cap. Absent or 0 falls back to the multi-chunk ceiling.
+	// used to size the response-body cap. Absent or 0 falls back to the tight single-object cap.
 	MaxResponseBytesHeader = "Reqresp-Max-Response-Bytes"
 )
 
