@@ -425,8 +425,27 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
-					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
+				// Extra diagnostic context to track down CI-only wrong-trie-root
+				// races (PR #21536 hive Re-Org Back into Canonical Chain). Logs
+				// the change-set address count and sample addresses; compare
+				// across runs to find which block + addresses diverge.
+				cs := pe.currentChangeSet
+				accCount := cs.Diffs[kv.AccountsDomain].Len()
+				stoCount := cs.Diffs[kv.StorageDomain].Len()
+				codeCount := cs.Diffs[kv.CodeDomain].Len()
+				var sampleAddrs []string
+				if cs != nil {
+					for _, e := range cs.Diffs[kv.AccountsDomain].GetDiffSet() {
+						if len(sampleAddrs) >= 10 {
+							break
+						}
+						if len(e.Key) >= 20 {
+							sampleAddrs = append(sampleAddrs, fmt.Sprintf("%x", e.Key[:20]))
+						}
+					}
+				}
+				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v) accChanges=%d stoChanges=%d codeChanges=%d sampleAddrs=%v",
+					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err, accCount, stoCount, codeCount, sampleAddrs))
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}
