@@ -213,10 +213,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 							}
 						}
 
-						backoff := baseInterval * time.Duration(1<<uint(min(failures, 4)))
-						if backoff > 5*time.Second {
-							backoff = 5 * time.Second
-						}
+						backoff := min(baseInterval*time.Duration(1<<uint(min(failures, 4))), 5*time.Second)
 						reqInterval.Reset(backoff)
 						return
 					}
