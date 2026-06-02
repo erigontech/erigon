@@ -350,7 +350,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		var deferredRootErr error
 
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
-		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
+		// (balance, nonce, codeHash, code, storage, selfDestruct are
 		// separate entries).  This differs from the old StateUpdates count which
 		// grouped all fields of one account as a single entry.  The values are only
 		// used for an internal consistency check (blockUpdateCount==ApplyCount) and
@@ -1728,7 +1728,6 @@ func (result *execResult) calcFees(
 			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
 			if coinbaseAcc != nil {
 				addrAcc.Nonce = coinbaseAcc.Nonce
-				addrAcc.Incarnation = coinbaseAcc.Incarnation
 				addrAcc.CodeHash = coinbaseAcc.CodeHash
 			} else {
 				addrAcc.Nonce = coinbaseNonce
@@ -1757,7 +1756,6 @@ func (result *execResult) calcFees(
 		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
 		if burntAcc != nil {
 			burntAddrAcc.Nonce = burntAcc.Nonce
-			burntAddrAcc.Incarnation = burntAcc.Incarnation
 			burntAddrAcc.CodeHash = burntAcc.CodeHash
 		} else {
 			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
@@ -3051,17 +3049,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		return out
 	}
 
-	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
-	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
-	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
-	// d.incarnation != nil and routes into the "cleanup-before-recreate"
-	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
-	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
-	// account stays in sd.mem with non-zero incarnation, and a subsequent
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 2 writes for the
+	// SD'd account (SelfDestructPath=true, BalancePath=0). If we forward
+	// account fields to applyVersionedWrites alongside SelfDestructPath, it
+	// routes into the "cleanup-before-recreate" branch — which writes the
+	// account back instead of taking the pure-delete branch
+	// (DomainDel(Accounts)). The account stays in sd.mem, and a subsequent
 	// block's CREATE2 at the same address sees a phantom existing account,
 	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
-	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
-	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	// Drop the BalancePath/NoncePath/CodeHashPath writes for SD'd addresses
+	// so applyVersionedWrites reaches the pure-delete branch.
 	//
 	// Two filters applied here:
 	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`
@@ -3112,7 +3109,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		// and sometimes leave a phantom slot (TestCVE2020_26265).
 		if sdSet[w.Address] {
 			switch w.Path {
-			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
+			case state.BalancePath, state.NoncePath, state.CodeHashPath, state.CodePath, state.StoragePath:
 				continue
 			}
 		}
@@ -3166,7 +3163,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				}
 			}
 			hasStorageWrite[w.Address] = true
-		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
+		case state.BalancePath, state.NoncePath, state.CodeHashPath:
 			// Account fields: resolve from versionMap to get correct accumulated values.
 			rr := vm.Read(w.Address, w.Path, w.Key, txIndex+1)
 			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
@@ -3233,7 +3230,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	addrFields := make(map[accounts.Address]map[state.AccountPath]bool)
 	for _, w := range filtered {
 		switch w.Path {
-		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
+		case state.BalancePath, state.NoncePath, state.CodeHashPath:
 			if addrFields[w.Address] == nil {
 				addrFields[w.Address] = make(map[state.AccountPath]bool)
 			}
@@ -3246,7 +3243,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// Don't fill account fields for SD'd addresses — same rationale as
 			// the sdSet drop in the filter loop above. Without this, the
 			// stateReader fallback below would round-trip pre-SD account state
-			// (Nonce, CodeHash, Incarnation) back into the writeset and undo
+			// (Nonce, CodeHash) back into the writeset and undo
 			// the SD when applyVersionedWrites picks the cleanup-then-recreate
 			// branch.
 			continue
@@ -3258,9 +3255,9 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
 		// missing account fields are the post-destruction defaults, NOT the
 		// pre-SD values still sitting in the versionMap. IBS.Selfdestruct only
-		// records SelfDestructPath/BalancePath/IncarnationPath, so a re-creation
-		// via a plain value transfer (no CREATE) leaves the stale pre-SD nonce
-		// and codeHash in the map — reading them back here resurrects a phantom
+		// records SelfDestructPath/BalancePath, so a re-creation via a plain
+		// value transfer (no CREATE) leaves the stale pre-SD nonce and
+		// codeHash in the map — reading them back here resurrects a phantom
 		// contract (wrong trie root: TestSelfDestructReceive, TestCVE2020_26265).
 		// If a later TX between the SD and this one re-created addr via CREATE2,
 		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
@@ -3289,7 +3286,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 
 		// For each missing field, try versionMap then stateReader.
-		for _, path := range []state.AccountPath{state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath} {
+		for _, path := range []state.AccountPath{state.BalancePath, state.NoncePath, state.CodeHashPath} {
 			if fields != nil && fields[path] {
 				continue // already in output
 			}
@@ -3299,8 +3296,6 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				case state.BalancePath:
 					val = uint256.Int{}
 				case state.NoncePath:
-					val = uint64(0)
-				case state.IncarnationPath:
 					val = uint64(0)
 				case state.CodeHashPath:
 					val = accounts.EmptyCodeHash
@@ -3329,8 +3324,6 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 							val = acc.Balance
 						case state.NoncePath:
 							val = acc.Nonce
-						case state.IncarnationPath:
-							val = acc.Incarnation
 						case state.CodeHashPath:
 							val = acc.CodeHash
 						}
@@ -3342,8 +3335,6 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 						case state.BalancePath:
 							val = uint256.Int{}
 						case state.NoncePath:
-							val = uint64(0)
-						case state.IncarnationPath:
 							val = uint64(0)
 						case state.CodeHashPath:
 							val = accounts.EmptyCodeHash
@@ -3432,7 +3423,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			if emptyAddrs[w.Address] {
 				// Skip regular account field writes for empty accounts
 				if w.Path == state.BalancePath || w.Path == state.NoncePath ||
-					w.Path == state.IncarnationPath || w.Path == state.CodeHashPath {
+					w.Path == state.CodeHashPath {
 					continue
 				}
 			}
@@ -3514,7 +3505,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 					}
 				}
 			}
-		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
+		case state.BalancePath, state.NoncePath, state.CodeHashPath:
 			// Resolve account field values from the versionMap.
 			// CollectorWrites may have stale values from speculative execution.
 			rr := vm.Read(w.Address, w.Path, w.Key, txIndex+1)

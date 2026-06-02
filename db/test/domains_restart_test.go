@@ -130,7 +130,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		//err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
-		err = writer.WriteAccountStorage(addr, 0, loc, uint256.Int{}, u256.U64(txNum))
+		err = writer.WriteAccountStorage(addr, loc, uint256.Int{}, u256.U64(txNum))
 		//err = domains.WriteAccountStorage(addr, loc, sbuf, nil)
 		require.NoError(t, err)
 		if txNum%blockSize == 0 {
@@ -246,7 +246,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		err = writer.UpdateAccountData(addrs[i], &accounts.Account{}, accs[i])
 		require.NoError(t, err)
 
-		err = writer.WriteAccountStorage(addrs[i], 0, locs[i], uint256.Int{}, u256.U64(txNum))
+		err = writer.WriteAccountStorage(addrs[i], locs[i], uint256.Int{}, u256.U64(txNum))
 		require.NoError(t, err)
 		i++
 
@@ -324,7 +324,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			err = writer.UpdateAccountData(addr, &accounts.Account{}, acc)
 			require.NoError(t, err)
 
-			err = writer.WriteAccountStorage(addr, 0, loc, uint256.Int{}, u256.U64(txNum))
+			err = writer.WriteAccountStorage(addr, loc, uint256.Int{}, u256.U64(txNum))
 			require.NoError(t, err)
 
 			if txNum%blockSize == 0 {
@@ -416,7 +416,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			err = writer.UpdateAccountData(addrs[i], &accounts.Account{}, accs[i])
 			require.NoError(t, err)
 
-			err = writer.WriteAccountStorage(addrs[i], 0, locs[i], uint256.Int{}, u256.U64(txNum))
+			err = writer.WriteAccountStorage(addrs[i], locs[i], uint256.Int{}, u256.U64(txNum))
 			require.NoError(t, err)
 			i++
 
@@ -459,10 +459,9 @@ func TestCommit(t *testing.T) {
 	blockNum, txNum := uint64(0), uint64(0)
 
 	acc := accounts.Account{
-		Nonce:       0,
-		Balance:     u256.U64(7),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  u256.U64(7),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	buf := accounts.SerialiseV3(&acc)
 

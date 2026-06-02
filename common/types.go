@@ -36,8 +36,6 @@ import (
 const (
 	// BlockNumberLength length of uint64 big endian
 	BlockNumberLength = 8
-	// IncarnationLength length of uint64 for contract incarnations
-	IncarnationLength = 8
 )
 
 // UnprefixedHash allows marshaling a Hash without 0x prefix.
@@ -142,12 +140,12 @@ func (hashes Hashes) Sort() {
 	slices.SortFunc(hashes, Hash.Cmp)
 }
 
-const StorageKeyLen = 2*length.Hash + IncarnationLength
+const StorageKeyLen = 2 * length.Hash
 
-// StorageKey is representation of address of a contract storage item
-// It consists of two parts, each of which are 32-byte hashes:
-// 1. Hash of the contract's address
-// 2. Hash of the item's key
+// StorageKey is representation of address of a contract storage item.
+// It consists of two parts, each of which is a 32-byte hash:
+//  1. Hash of the contract's address
+//  2. Hash of the item's key
 type StorageKey [StorageKeyLen]byte
 
 func (k StorageKey) Cmp(other StorageKey) int {

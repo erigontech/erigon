@@ -11,7 +11,7 @@ func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 }
 
 func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecider) (*Witness, error) {
-	foundNode, _, found, _ := t.getNode(prefix, false)
+	foundNode, _, found := t.getNode(prefix, false)
 	if !found {
 		return nil, errors.New("no data found for given prefix")
 	}

@@ -22,7 +22,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -626,9 +625,6 @@ func (t *Trie) FindSubTriesToLoad(rl RetainDecider) (prefixes [][]byte, fixedbit
 	return findSubTriesToLoad(t.RootNode, nil, nil, rl, nil, 0, nil, nil, nil)
 }
 
-var bytes8 [8]byte
-var bytes16 [16]byte
-
 func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
 	switch n := nd.(type) {
 	case *ShortNode:
@@ -711,19 +707,11 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		if n.Storage == nil {
 			return prefixes, fixedbits, hooks
 		}
-		binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
-		dbPrefix = append(dbPrefix, bytes8[:]...)
-		// Add decompressed incarnation to the nibblePath
-		for i, b := range bytes8[:] {
-			bytes16[i*2] = b / 16
-			bytes16[i*2+1] = b % 16
-		}
-		nibblePath = append(nibblePath, bytes16[:]...)
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
 		if rl.Retain(nibblePath) {
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.Storage, nibblePath, hook, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.Storage, nibblePath, hook, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:
@@ -735,8 +723,6 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 	return prefixes, fixedbits, hooks
 }
 
-// can pass incarnation=0 if start from root, method internally will
-// put incarnation from accountNode when pass it by traverse
 func (t *Trie) insert(origNode Node, key []byte, value Node) (updated bool, newNode Node) {
 	return t.insertRecursive(origNode, key, 0, value)
 }
@@ -897,16 +883,15 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 }
 
 // non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
+func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool) {
 	var nd = t.RootNode
 	var parent Node
 	pos := 0
 	var account bool
-	var incarnation uint64
 	for pos < len(hex) || account {
 		switch n := nd.(type) {
 		case nil:
-			return nil, nil, false, incarnation
+			return nil, nil, false
 		case *ShortNode:
 			matchlen := nibbles.CommonPrefixLen(hex[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
@@ -917,7 +902,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
 					account = true
 				}
 			} else {
-				return nil, nil, false, incarnation
+				return nil, nil, false
 			}
 		case *DuoNode:
 			i1, i2 := n.childrenIdx()
@@ -931,12 +916,12 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
 				nd = n.child2
 				pos++
 			default:
-				return nil, nil, false, incarnation
+				return nil, nil, false
 			}
 		case *FullNode:
 			child := n.Children[hex[pos]]
 			if child == nil {
-				return nil, nil, false, incarnation
+				return nil, nil, false
 			}
 			parent = n
 			nd = child
@@ -944,17 +929,16 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
 		case *AccountNode:
 			parent = n
 			nd = n.Storage
-			incarnation = n.Incarnation
 			account = false
 		case ValueNode:
-			return nd, parent, true, incarnation
+			return nd, parent, true
 		case HashNode:
-			return nd, parent, true, incarnation
+			return nd, parent, true
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	return nd, parent, true, incarnation
+	return nd, parent, true
 }
 
 func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
@@ -972,7 +956,7 @@ func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
 }
 
 func (t *Trie) hook(hex []byte, n Node, hash []byte) error {
-	nd, parent, ok, incarnation := t.getNode(hex, true)
+	nd, parent, ok := t.getNode(hex, true)
 	if !ok {
 		return nil
 	}
@@ -987,7 +971,7 @@ func (t *Trie) hook(hex []byte, n Node, hash []byte) error {
 		return fmt.Errorf("expected hash node at %x, got %T", hex, nd)
 	}
 
-	t.touchAll(n, hex, false, incarnation)
+	t.touchAll(n, hex, false)
 	switch p := parent.(type) {
 	case nil:
 		t.RootNode = n
@@ -1010,7 +994,7 @@ func (t *Trie) hook(hex []byte, n Node, hash []byte) error {
 	return nil
 }
 
-func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
+func (t *Trie) touchAll(n Node, hex []byte, del bool) {
 	switch n := n.(type) {
 	case *ShortNode:
 		if _, ok := n.Val.(ValueNode); !ok {
@@ -1021,7 +1005,7 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 				h = h[:len(h)-1]
 			}
 			hexVal := concat(hex, h...)
-			t.touchAll(n.Val, hexVal, del, incarnation)
+			t.touchAll(n.Val, hexVal, del)
 		}
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
@@ -1031,17 +1015,17 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 		hex2 := make([]byte, len(hex)+1)
 		copy(hex2, hex)
 		hex2[len(hex)] = i2
-		t.touchAll(n.child1, hex1, del, incarnation)
-		t.touchAll(n.child2, hex2, del, incarnation)
+		t.touchAll(n.child1, hex1, del)
+		t.touchAll(n.child2, hex2, del)
 	case *FullNode:
 		for i, child := range n.Children {
 			if child != nil {
-				t.touchAll(child, concat(hex, byte(i)), del, incarnation)
+				t.touchAll(child, concat(hex, byte(i)), del)
 			}
 		}
 	case *AccountNode:
 		if n.Storage != nil {
-			t.touchAll(n.Storage, hex, del, n.Incarnation)
+			t.touchAll(n.Storage, hex, del)
 		}
 	}
 }
@@ -1074,16 +1058,13 @@ func (t *Trie) convertToShortNode(child Node, pos uint) Node {
 }
 
 func (t *Trie) delete(origNode Node, key []byte, preserveAccountNode bool) (updated bool, newNode Node) {
-	return t.deleteRecursive(origNode, key, 0, preserveAccountNode, 0)
+	return t.deleteRecursive(origNode, key, 0, preserveAccountNode)
 }
 
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
-//
-// can pass incarnation=0 if start from root, method internally will
-// put incarnation from accountNode when pass it by traverse
-func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode Node) {
+func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode Node) {
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
@@ -1101,14 +1082,14 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				if touchKey[len(touchKey)-1] == 16 {
 					touchKey = touchKey[:len(touchKey)-1]
 				}
-				t.touchAll(n.Val, touchKey, true, incarnation)
+				t.touchAll(n.Val, touchKey, true)
 				newNode = nil
 			} else {
 				// The key is longer than n.Key. Remove the remaining suffix
 				// from the subtrie. Child can never be nil here since the
 				// subtrie must contain at least two other values with keys
 				// longer than n.Key.
-				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode, incarnation)
+				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode)
 				if !updated {
 					newNode = n
 				} else {
@@ -1141,7 +1122,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -1154,7 +1135,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				}
 			}
 		case i2:
-			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -1174,7 +1155,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 	case *FullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode, incarnation)
+		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
 			newNode = n
 		} else {
@@ -1242,7 +1223,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 			}
 			if n.Storage != nil {
 				// Mark all the storage nodes as deleted
-				t.touchAll(n.Storage, h, true, n.Incarnation)
+				t.touchAll(n.Storage, h, true)
 			}
 			if preserveAccountNode {
 				n.Storage = nil
@@ -1254,7 +1235,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			return true, nil
 		}
-		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode, n.Incarnation)
+		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode)
 		if updated {
 			n.Storage = nn
 			n.RootCorrect = false
@@ -1353,7 +1334,7 @@ func (t *Trie) EvictNode(hex []byte) {
 		hex = AddrHashFromCodeKey(hex)
 	}
 
-	nd, parent, ok, incarnation := t.getNode(hex, false)
+	nd, parent, ok := t.getNode(hex, false)
 	if !ok {
 		return
 	}
@@ -1378,7 +1359,7 @@ func (t *Trie) EvictNode(hex []byte) {
 	copy(hn[:], nd.reference())
 	hnode := &HashNode{hash: hn[:]}
 
-	t.notifyUnloadRecursive(hex, incarnation, nd)
+	t.notifyUnloadRecursive(hex, nd)
 
 	switch p := parent.(type) {
 	case nil:
@@ -1401,14 +1382,14 @@ func (t *Trie) EvictNode(hex []byte) {
 	}
 }
 
-func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
+func (t *Trie) notifyUnloadRecursive(hex []byte, nd Node) {
 	switch n := nd.(type) {
 	case *ShortNode:
 		hex = append(hex, n.Key...)
 		if hex[len(hex)-1] == 16 {
 			hex = hex[:len(hex)-1]
 		}
-		t.notifyUnloadRecursive(hex, incarnation, n.Val)
+		t.notifyUnloadRecursive(hex, n.Val)
 	case *AccountNode:
 		if n.Storage == nil {
 			return
@@ -1416,7 +1397,7 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
 		if _, ok := n.Storage.(*HashNode); ok {
 			return
 		}
-		t.notifyUnloadRecursive(hex, n.Incarnation, n.Storage)
+		t.notifyUnloadRecursive(hex, n.Storage)
 	case *FullNode:
 		for i := range n.Children {
 			if n.Children[i] == nil {
@@ -1425,15 +1406,15 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
 			if _, ok := n.Children[i].(*HashNode); ok {
 				continue
 			}
-			t.notifyUnloadRecursive(append(hex, uint8(i)), incarnation, n.Children[i])
+			t.notifyUnloadRecursive(append(hex, uint8(i)), n.Children[i])
 		}
 	case *DuoNode:
 		i1, i2 := n.childrenIdx()
 		if n.child1 != nil {
-			t.notifyUnloadRecursive(append(hex, i1), incarnation, n.child1)
+			t.notifyUnloadRecursive(append(hex, i1), n.child1)
 		}
 		if n.child2 != nil {
-			t.notifyUnloadRecursive(append(hex, i2), incarnation, n.child2)
+			t.notifyUnloadRecursive(append(hex, i2), n.child2)
 		}
 	default:
 		// nothing to do

@@ -99,7 +99,3 @@ func (r *CachedReader3) ReadAccountCodeSize(address accounts.Address) (int, erro
 	code, err := r.ReadAccountCode(address)
 	return len(code), err
 }
-
-func (r *CachedReader3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	return 0, nil
-}

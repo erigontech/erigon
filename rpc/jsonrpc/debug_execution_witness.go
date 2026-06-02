@@ -288,16 +288,6 @@ func (s *RecordingState) ReadAccountCodeSize(address accounts.Address) (int, err
 	return size, err
 }
 
-func (s *RecordingState) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addr := address.Value()
-	s.AccessedAccounts[addr] = struct{}{}
-	inc, err := s.inner.ReadAccountIncarnation(address)
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE] ReadAccountIncarnation %s -> %d (err=%v)\n", addr.Hex(), inc, err)
-	}
-	return inc, err
-}
-
 func (s *RecordingState) SetTrace(trace bool, tracePrefix string) {
 	s.trace = trace
 	s.prefix = tracePrefix
@@ -329,7 +319,7 @@ func (s *RecordingState) UpdateAccountData(address accounts.Address, original, a
 	return nil
 }
 
-func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (s *RecordingState) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
 	s.codeOverlay[addr] = common.Copy(code)
@@ -362,7 +352,7 @@ func (s *RecordingState) DeleteAccount(address accounts.Address, original *accou
 	return nil
 }
 
-func (s *RecordingState) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (s *RecordingState) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
 	if s.ModifiedStorage[addr] == nil {
@@ -1570,14 +1560,6 @@ func (s *witnessStateless) ReadAccountCodeSize(address accounts.Address) (int, e
 	return len(code), nil
 }
 
-func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addr := address.Value()
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE-S] ReadAccountIncarnation %s -> 0\n", addr.Hex())
-	}
-	return 0, nil
-}
-
 func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 	addr := address.Value()
 	addrHash, err := common.HashData(addr[:])
@@ -1664,7 +1646,7 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 	return nil
 }
 
-func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (s *witnessStateless) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	s.codeUpdates[codeHash.Value()] = code
 	// Keep accountUpdates CodeHash in sync so ReadAccountData returns a
 	// consistent CodeHash even before UpdateAccountData is called.
@@ -1678,7 +1660,7 @@ func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnati
 	return nil
 }
 
-func (s *witnessStateless) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (s *witnessStateless) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	addr := address.Value()
 	keyValue := key.Value()
 

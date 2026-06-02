@@ -397,15 +397,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(code, common.FromHex("6002ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", code)
 		}
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
-			incarnation, err := st.GetIncarnation(create2address)
-			if err != nil {
-				return err
-			}
-			if incarnation != 1 {
-				t.Errorf("expected incarnation 1, got %d", incarnation)
-			}
-		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -443,15 +434,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(code, common.FromHex("6004ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", code)
 		}
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
-			incarnation, err := st.GetIncarnation(create2address)
-			if err != nil {
-				return err
-			}
-			if incarnation != 2 {
-				t.Errorf("expected incarnation 2, got %d", incarnation)
-			}
-		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -473,16 +455,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		}
 		if !bytes.Equal(code, common.FromHex("6005ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", code)
-		}
-
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
-			incarnation, err := st.GetIncarnation(create2address)
-			if err != nil {
-				return err
-			}
-			if incarnation != 4 {
-				t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", incarnation)
-			}
 		}
 		return nil
 	})
@@ -1069,8 +1041,8 @@ func TestEip2200Gas(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Create contract, drop trie, reload trie from disk and add block with contract call
-func TestWrongIncarnation(t *testing.T) {
+// Deploy a contract in block 1, call it in block 2, assert state is readable after each block.
+func TestContractDeployThenCall(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -1157,10 +1129,6 @@ func TestWrongIncarnation(t *testing.T) {
 			t.Fatal(errors.New("acc not found"))
 		}
 
-		if acc.Incarnation != state.FirstContractIncarnation {
-			t.Fatal("Incorrect incarnation", acc.Incarnation)
-		}
-
 		st := state.New(stateReader)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -1184,16 +1152,15 @@ func TestWrongIncarnation(t *testing.T) {
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
-		if acc.Incarnation != state.FirstContractIncarnation {
-			t.Fatal("Incorrect incarnation", acc.Incarnation)
-		}
 		return nil
 	})
 	require.NoError(t, err)
 }
 
-// create acc, deploy to it contract, reorg to state without contract
-func TestWrongIncarnation2(t *testing.T) {
+// Pre-fund a deterministic address with a plain transfer, deploy a contract at
+// that same address on the short chain, then reorg to a longer chain that only
+// does the pre-funding (no deploy). Asserts post-reorg state is consistent.
+func TestContractReorgPrefundedAddress(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1323,9 +1290,6 @@ func TestWrongIncarnation2(t *testing.T) {
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
-		if acc.Incarnation != state.FirstContractIncarnation {
-			t.Fatal("wrong incarnation")
-		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -1342,9 +1306,6 @@ func TestWrongIncarnation2(t *testing.T) {
 		}
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
-		}
-		if acc.Incarnation != state.NonContractIncarnation {
-			t.Fatal("wrong incarnation", acc.Incarnation)
 		}
 		return nil
 	})

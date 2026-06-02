@@ -28,8 +28,6 @@ func (p AccountPath) String() string {
 		return "Balance"
 	case NoncePath:
 		return "Nonce"
-	case IncarnationPath:
-		return "Incarnation"
 	case CodePath:
 		return "Code"
 	case CodeHashPath:
@@ -58,7 +56,6 @@ const (
 	SelfDestructPath
 	BalancePath
 	NoncePath
-	IncarnationPath
 	CodePath
 	CodeHashPath
 	CodeSizePath
@@ -423,7 +420,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// alone misses it because SD doesn't write the read's own path.
 		// revivalLimit excludes our own writes (validation runs post-flush).
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
-			path != IncarnationPath && path != CreateContractPath && path != CodePath {
+			path != CreateContractPath && path != CodePath {
 			sdRR := vm.Read(addr, SelfDestructPath, accounts.NilKey, txIndex)
 			if sdRR.Status() == MVReadResultDone {
 				if sdVal, ok := sdRR.value.(bool); ok && sdVal {
@@ -448,7 +445,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		valid = VersionInvalid
 	case MVReadResultNone:
 		if source == MapRead && !recursive &&
-			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath) {
+			(path == BalancePath || path == NoncePath || path == CodeHashPath) {
 			// The recording side (versionedRead, MVReadResultNone branch) folds
 			// a sub-field read that has no dedicated versionMap cell onto the
 			// account record: it stamps the read with AddressPath's source and
@@ -478,22 +475,28 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				} else if path == AddressPath {
 					// Account-existence changes are signalled by AddressPath
 					// MVReadResultDone (newObject in a prior tx),
-					// SelfDestructPath, or IncarnationPath. We cross-check
-					// SelfDestructPath and IncarnationPath here because under
+					// SelfDestructPath, or CreateContractPath. We cross-check
+					// SelfDestructPath and CreateContractPath here because under
 					// HasBAL the worker's AddressPath write is filtered out of
 					// the per-tx flush (BAL doesn't list AddressPath), so the
 					// MVReadResultDone arm can't catch the staleness on its
-					// own. IncarnationPath is the SPECIFIC signal — it's
-					// written only by CreateAccount and SelfDestruct, never by
+					// own. CreateContractPath is the SPECIFIC creation signal —
+					// it is written only by CREATE / CREATE2 (the contract
+					// creation path in IBS.CreateAccount), never by
 					// UpdateAccountData and never by BAL pre-population. Using
-					// BalancePath here (the prior implementation) overfires for
-					// every gas-paying same-sender tx and for any BAL-listed
-					// balance change, causing a retry storm under BAL.
+					// BalancePath here overfires for every gas-paying
+					// same-sender tx and for any BAL-listed balance change,
+					// causing a retry storm under BAL (see PR #21240). EOA-
+					// creation-via-CALL+value (CreateAccount with
+					// contractCreation=false) does not emit CreateContractPath
+					// on this branch — that case is intentionally not caught by
+					// this cross-check; downstream value-tiebreaker validation
+					// catches real EOA-balance staleness.
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					if valid == VersionValid {
-						incRR := vm.Read(addr, IncarnationPath, accounts.NilKey, txIndex)
-						if incRR.Status() == MVReadResultDone {
+						ccRR := vm.Read(addr, CreateContractPath, accounts.NilKey, txIndex)
+						if ccRR.Status() == MVReadResultDone {
 							valid = VersionInvalid
 						}
 					}
@@ -557,10 +560,6 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		rv, ok1 := readVal.(uint64)
 		wv, ok2 := writeVal.(uint64)
 		return ok1 && ok2 && rv == wv
-	case IncarnationPath:
-		rv, ok1 := readVal.(uint64)
-		wv, ok2 := writeVal.(uint64)
-		return ok1 && ok2 && rv == wv
 	case CodeHashPath:
 		rv, ok1 := readVal.(accounts.CodeHash)
 		wv, ok2 := writeVal.(accounts.CodeHash)
@@ -572,8 +571,7 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		if !ok1 || !ok2 || rv == nil || wv == nil {
 			return false
 		}
-		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
-			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce && rv.CodeHash == wv.CodeHash
 	case StoragePath:
 		rv, ok1 := readVal.(uint256.Int)
 		wv, ok2 := writeVal.(uint256.Int)

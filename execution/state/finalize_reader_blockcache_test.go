@@ -67,10 +67,9 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 	// Pre-block committed balance: the value sd.mem / ttx would return.
 	preBlockBalance := uint256.NewInt(7290)
 	preAcc := &accounts.Account{
-		Nonce:       1,
-		Balance:     *preBlockBalance,
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 0,
+		Nonce:    1,
+		Balance:  *preBlockBalance,
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	preEnc := accounts.SerialiseV3(preAcc)
 
@@ -89,10 +88,9 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 	// parallel path).
 	postTx28Balance := uint256.NewInt(6707)
 	postAcc := &accounts.Account{
-		Nonce:       1,
-		Balance:     *postTx28Balance,
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 0,
+		Nonce:    1,
+		Balance:  *postTx28Balance,
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	postEnc := accounts.SerialiseV3(postAcc)
 

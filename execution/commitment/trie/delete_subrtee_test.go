@@ -365,11 +365,10 @@ func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
 
 func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	acc := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        EmptyRoot,
-		CodeHash:    accounts.InternCodeHash(emptyState),
+		Nonce:    2,
+		Balance:  u256.U64(200),
+		Root:     EmptyRoot,
+		CodeHash: accounts.InternCodeHash(emptyState),
 	}
 
 	trie := newEmpty()

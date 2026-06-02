@@ -1563,10 +1563,9 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    uint64(i),
+				Balance:  *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts3.SerialiseV3(&acc)
 

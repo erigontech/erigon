@@ -122,7 +122,7 @@ message StorageChange {
 
 message AccountChange {
   types.H160 address = 1;
-  uint64 incarnation = 2;
+  reserved 2; reserved "incarnation"; // dropped: pre-E3 incarnation counter
   Action action = 3;
   bytes data = 4; // nil if there is no UPSERT in action
   bytes code = 5; // nil if there is no CODE in action

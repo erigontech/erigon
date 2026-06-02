@@ -704,7 +704,7 @@ func (sd *StateDiff) UpdateAccountData(address accounts.Address, original, accou
 	return nil
 }
 
-func (sd *StateDiff) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (sd *StateDiff) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
@@ -718,7 +718,7 @@ func (sd *StateDiff) DeleteAccount(address accounts.Address, original *accounts.
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (sd *StateDiff) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}

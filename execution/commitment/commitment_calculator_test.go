@@ -30,9 +30,9 @@ func TestTouchKeyFromWrites(t *testing.T) {
 	}
 
 	// Create properly serialized account values
-	acc1 := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000), Incarnation: 1}
+	acc1 := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
 	acc1Enc := accounts.SerialiseV3(&acc1)
-	acc2 := accounts.Account{Nonce: 42, Balance: *uint256.NewInt(5000000), Incarnation: 1}
+	acc2 := accounts.Account{Nonce: 42, Balance: *uint256.NewInt(5000000)}
 	acc2Enc := accounts.SerialiseV3(&acc2)
 
 	writes := []write{
@@ -93,7 +93,7 @@ func TestTouchKeyIdempotent(t *testing.T) {
 	t.Parallel()
 
 	key := common.FromHex("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
-	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000), Incarnation: 1}
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
 	val := accounts.SerialiseV3(&acc)
 
 	// Touch once

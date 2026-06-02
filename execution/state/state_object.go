@@ -97,11 +97,13 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode       bool // true if the code was updated
-	selfdestructed  bool
-	deleted         bool // true if account was deleted during the lifetime of this object
-	newlyCreated    bool // true if this object was created in the current transaction
-	createdContract bool // true if this object represents a newly created contract
+	dirtyCode               bool // true if the code was updated
+	selfdestructed          bool
+	deleted                 bool // true if account was deleted during the lifetime of this object
+	newlyCreated            bool // true if this object was created in the current transaction
+	createdContract         bool // true if this object represents a newly created contract
+	recreatedFromDestructed bool // true if this object replaces a prior selfdestructed/deleted object at the same address; signals updateAccount to wipe leftover storage+code before writing the new state
+	versionMapMarker        bool // true if this object is a synthetic placeholder created by getStateObject to record a cross-tx SelfDestructPath signal (parallel-exec only); never represents a real account that lived in this IBS
 }
 
 // newObject creates a state object from the pool.
@@ -137,6 +139,8 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+	so.recreatedFromDestructed = false
+	so.versionMapMarker = false
 	stateObjectPool.Put(so)
 }
 
@@ -359,7 +363,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 					stateWriter, so.address, key, originValue.Hex(), value.Hex())
 			}
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, key, originValue, value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value
@@ -391,10 +395,6 @@ func (so *stateObject) setBalance(amount uint256.Int) {
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures
 func (so *stateObject) ReturnGas(gas *big.Int) {}
-
-func (so *stateObject) setIncarnation(incarnation uint64) {
-	so.data.SetIncarnation(incarnation)
-}
 
 //
 // Attribute accessors

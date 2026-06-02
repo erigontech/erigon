@@ -78,8 +78,8 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // emitted by UpdateAccountData), so no domain reads are needed to reconstruct
 // the full serialised account. SelfDestructPath=true signals either:
 //   - pure account deletion (no account fields follow) — from DeleteAccount
-//   - code+storage cleanup before recreation — from UpdateAccountData when
-//     original.Incarnation > account.Incarnation (followed by account fields)
+//   - code+storage cleanup before recreation — from Writer.DeleteAccount when
+//     stateObject.recreatedFromDestructed fires (followed by account fields)
 func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes VersionedWrites, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
 	domains := rs.domains
 
@@ -87,7 +87,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 		type addrState struct {
 			balance        *uint256.Int
 			nonce          *uint64
-			incarnation    *uint64
 			codeHash       *accounts.CodeHash
 			code           []byte
 			selfDestruct   bool
@@ -112,9 +111,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			case NoncePath:
 				v := w.Val.(uint64)
 				d.nonce = &v
-			case IncarnationPath:
-				v := w.Val.(uint64)
-				d.incarnation = &v
 			case CodeHashPath:
 				v := w.Val.(accounts.CodeHash)
 				d.codeHash = &v
@@ -161,7 +157,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
 					}
-					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if d.balance == nil && d.nonce == nil && d.codeHash == nil {
 						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
@@ -175,7 +171,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						return err
 					}
 					// Pure delete: no account fields means DeleteAccount was called.
-					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if d.balance == nil && d.nonce == nil && d.codeHash == nil {
 						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
@@ -185,8 +181,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						continue
 					}
 				}
-				// Otherwise: cleanup code+storage before recreating account
-				// (originalIncarnation > account.Incarnation case).
+				// Otherwise: cleanup code+storage before recreating account.
 			}
 
 			// Contract creation: clear stale storage before writing new account.
@@ -197,7 +192,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 			}
 
-			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
+			if d.balance != nil || d.nonce != nil || d.codeHash != nil || d.code != nil {
 				// LightCollector emits only fields that changed vs the per-TX
 				// `original` snapshot, so missing fields here mean "unchanged"
 				// — we must read the current base (from blockCache when present,
@@ -220,9 +215,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 				if d.nonce != nil {
 					acc.Nonce = *d.nonce
-				}
-				if d.incarnation != nil {
-					acc.Incarnation = *d.incarnation
 				}
 				if d.codeHash != nil {
 					acc.CodeHash = *d.codeHash
@@ -589,37 +581,20 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	// the stateObject is returned to the pool and its Account may be overwritten.
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
 
-	// When the original incarnation was higher than the new incarnation
-	// (pre-existing contract destroyed then recreated at a lower incarnation),
-	// emit a SelfDestructPath write first to signal code+storage cleanup before
-	// the new account state is written. applyVersionedWrites detects the presence
-	// of account fields after SelfDestructPath to distinguish cleanup+recreate
-	// from a pure account deletion.
-	needsCleanup := original.Incarnation > accountCopy.Incarnation
-	// Cross-block reincarnation: in the parallel executor, versionedRead
-	// returns a nil account (Incarnation=0) for addresses self-destructed
-	// in a prior block, so the check above misses the cleanup. Blocks are
-	// processed sequentially, so rs.accounts already has the deleted marker
-	// from the prior block's DeleteAccount by the time this runs.
-	if !needsCleanup && accountCopy.Incarnation > 0 {
-		c.rs.accountsMutex.RLock()
-		if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
-			needsCleanup = true
-		}
-		c.rs.accountsMutex.RUnlock()
-	}
-	if needsCleanup {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
-	}
+	// Note: SELFDESTRUCT-driven storage wipe flows from the SD tx's own
+	// SelfDestructPath=true write (emitted by DeleteAccount). Subsequent writes
+	// to a previously-destroyed address are not destruction events themselves
+	// — matching the execution-specs model where destroy_account adds to
+	// storage_clears exactly once at SD time. Re-emitting SelfDestructPath
+	// here for every write to a wasDeleted address would cause normalizeWriteSet
+	// to drop the recreated account's fields and corrupt the post-state.
 
 	// Emit complete account state as individual VersionedWrites so that
 	// applyVersionedWrites can reconstruct the full serialised account.
 	c.writes = append(c.writes,
 		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
 		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
-		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
 		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
 	)
 
@@ -637,7 +612,7 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	return nil
 }
 
-func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
 
 	c.rs.accountsMutex.Lock()
@@ -656,13 +631,8 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	// MIRROR-OF: LightCollector.DeleteAccount — kept symmetric so that
 	// future searches for one find the other. Both collectors emit only
-	// SelfDestructPath; the IncarnationPath needed by the parallel
-	// commitment calculator for the SD-of-pre-existing-contract case is
-	// emitted via IBS.Selfdestruct's versionWritten (intra_block_state.go
-	// around line 1430), not via either DeleteAccount. If a future caller
-	// ever invokes DeleteAccount outside the IBS.Selfdestruct path on a
-	// pre-existing contract, both implementations would need an
-	// IncarnationPath emit here.
+	// SelfDestructPath; the parallel commitment calculator drives the
+	// storage/code wipe off of that single signal.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 
 	c.rs.accountsMutex.Lock()
@@ -677,7 +647,7 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	return nil
 }
 
-func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -725,11 +695,6 @@ func (c *LightCollector) TakeWrites() VersionedWrites {
 func (c *LightCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
-
-	if original.Incarnation > accountCopy.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
-	}
 
 	// Only emit fields that changed vs `original`. In the parallel executor
 	// `original` comes from the worker's block-origin snapshot (pre-block
@@ -743,16 +708,13 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	if accountCopy.Nonce != original.Nonce {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
 	}
-	if accountCopy.Incarnation != original.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
-	}
 	if accountCopy.CodeHash != original.CodeHash {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash})
 	}
 	return nil
 }
 
-func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, _ accounts.CodeHash, code []byte) error {
+func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ accounts.CodeHash, code []byte) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
 	return nil
 }
@@ -762,7 +724,7 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 	return nil
 }
 
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, _, value uint256.Int) error {
 	// Always emit — deduplication happens in the BlockStateCache write buffer.
 	// The buffer compares with pre-block committed values at flush time.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
@@ -781,10 +743,9 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 	}
 
 	type pendingAccount struct {
-		balance     *uint256.Int
-		nonce       *uint64
-		incarnation *uint64
-		codeHash    *accounts.CodeHash
+		balance  *uint256.Int
+		nonce    *uint64
+		codeHash *accounts.CodeHash
 	}
 
 	pending := make(map[accounts.Address]*pendingAccount, len(writes)/4+1)
@@ -810,14 +771,6 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 			}
 			v := w.Val.(uint64)
 			p.nonce = &v
-		case IncarnationPath:
-			p := pending[w.Address]
-			if p == nil {
-				p = &pendingAccount{}
-				pending[w.Address] = p
-			}
-			v := w.Val.(uint64)
-			p.incarnation = &v
 		case CodeHashPath:
 			p := pending[w.Address]
 			if p == nil {
@@ -828,18 +781,10 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 			p.codeHash = &v
 		case CodePath:
 			code := w.Val.([]byte)
-			var inc uint64
-			if p := pending[w.Address]; p != nil && p.incarnation != nil {
-				inc = *p.incarnation
-			}
-			accumulator.ChangeCode(w.Address.Value(), inc, code)
+			accumulator.ChangeCode(w.Address.Value(), code)
 		case StoragePath:
 			val := w.Val.(uint256.Int)
-			var inc uint64
-			if p := pending[w.Address]; p != nil && p.incarnation != nil {
-				inc = *p.incarnation
-			}
-			accumulator.ChangeStorage(w.Address.Value(), inc, w.Key.Value(), val.Bytes())
+			accumulator.ChangeStorage(w.Address.Value(), w.Key.Value(), val.Bytes())
 		}
 	}
 
@@ -855,14 +800,11 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 		if p.nonce != nil {
 			acc.Nonce = *p.nonce
 		}
-		if p.incarnation != nil {
-			acc.Incarnation = *p.incarnation
-		}
 		if p.codeHash != nil {
 			acc.CodeHash = *p.codeHash
 		}
 		serialised := accounts.SerialiseV3(&acc)
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, serialised)
+		accumulator.ChangeAccount(addr.Value(), serialised)
 	}
 }
 
@@ -892,21 +834,12 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %s, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("Writer: acc %x: {Balance: %s, Nonce: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.CodeHash)
 	}
 	addressValue := address.Value()
-	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
-		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
-			return err
-		}
-		if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
-			return err
-		}
-	}
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
+		w.accumulator.ChangeAccount(addressValue, value)
 	}
 
 	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, nil); err != nil {
@@ -915,7 +848,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	return nil
 }
 
-func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (w *Writer) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
@@ -924,7 +857,7 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 		return err
 	}
 	if w.accumulator != nil {
-		w.accumulator.ChangeCode(addressValue, incarnation, code)
+		w.accumulator.ChangeCode(addressValue, code)
 	}
 	return nil
 }
@@ -933,14 +866,15 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	//TODO: move logic from SD
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil); err != nil {
-	//	return err
-	//}
 	addressValue := address.Value()
+	// Explicit removal of code and storage on SELFDESTRUCT (and EIP-161 empty-account
+	// removal), mirroring what the parallel-exec apply path already does.
+	if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
+		return err
+	}
+	if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
+		return err
+	}
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
@@ -950,7 +884,7 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (w *Writer) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -971,7 +905,7 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
 	if w.accumulator != nil {
-		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
+		w.accumulator.ChangeStorage(addressValue, keyValue, v)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
@@ -1558,10 +1492,6 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	return size, nil
 }
 
-func (r *ReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	return 0, nil
-}
-
 type bufferedReader struct {
 	reader        StateReader
 	bufferedState *StateV3Buffered
@@ -1757,23 +1687,6 @@ func (r *bufferedReader) ReadAccountCodeSize(address accounts.Address) (int, err
 	}
 
 	return r.reader.ReadAccountCodeSize(address)
-}
-
-func (r *bufferedReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	var incarnation uint64
-
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-	if ok && so.data != nil {
-		incarnation = so.data.Incarnation
-	}
-	r.bufferedState.accountsMutex.RUnlock()
-
-	if ok {
-		return incarnation, nil
-	}
-
-	return r.reader.ReadAccountIncarnation(address)
 }
 
 type ReadLists map[string]*execctx.KvList

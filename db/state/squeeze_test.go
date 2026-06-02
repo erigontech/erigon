@@ -176,10 +176,9 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    uint64(i),
+				Balance:  *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
@@ -469,10 +468,9 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		require.Equal(t, length.Hash, n)
 		//keys[txNum-1] = append(addr, loc...)
 		acc := accounts.Account{
-			Nonce:       1,
-			Balance:     *uint256.NewInt(rnd.Uint64()),
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    1,
+			Balance:  *uint256.NewInt(rnd.Uint64()),
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
@@ -637,10 +635,9 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
 			addr := makeAccountAddr(accIdx)
 			acc := accounts.Account{
-				Nonce:       txNum,
-				Balance:     *uint256.NewInt(txNum * 1000),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 1000),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
@@ -673,10 +670,9 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 			// Update account with real code hash
 			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
 			acc := accounts.Account{
-				Nonce:       txNum,
-				Balance:     *uint256.NewInt(txNum * 1000),
-				CodeHash:    codeHash,
-				Incarnation: 0,
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 1000),
+				CodeHash: codeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
@@ -759,10 +755,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    uint64(i),
+				Balance:  *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
@@ -804,10 +799,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    uint64(i),
+				Balance:  *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
@@ -851,10 +845,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i * 100_000)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    uint64(i),
+				Balance:  *uint256.NewInt(uint64(i * 100_000)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])

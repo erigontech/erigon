@@ -35,9 +35,9 @@ func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
 	var a1 common.Address
 	a1[0] = 1
 	sc.SetAccountRead(a1[:], &accounts.Account{})
-	sc.SetAccountWrite(a1[:], &accounts.Account{Incarnation: 2})
+	sc.SetAccountWrite(a1[:], &accounts.Account{Nonce: 2})
 	x, ok := sc.GetAccount(a1[:])
-	fmt.Printf("%+v,%t\n", x.Incarnation, ok)
+	fmt.Printf("%+v,%t\n", x.Nonce, ok)
 
 }
 
@@ -63,11 +63,11 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	l1[0] = 42
 	l2[0] = 2
 	l3[0] = 3
-	sc.SetStorageWrite(a1[:], 1, l1[:], nil)
-	sc.SetStorageWrite(a1[:], 1, l2[:], nil)
-	sc.SetStorageWrite(a2[:], 1, l3[:], nil)
+	sc.SetStorageWrite(a1[:], l1[:], nil)
+	sc.SetStorageWrite(a1[:], l2[:], nil)
+	sc.SetStorageWrite(a2[:], l3[:], nil)
 	lastK = lastK[:0]
-	if err := sc.WalkStorage(common.BytesToHash(keccak.NewFastKeccak().Sum(a1[:])), 1, nil, func(locHash common.Hash, val []byte) error {
+	if err := sc.WalkStorage(common.BytesToHash(keccak.NewFastKeccak().Sum(a1[:])), nil, func(locHash common.Hash, val []byte) error {
 		curK = append(curK[:0], locHash[:]...)
 		assert.Negative(t, bytes.Compare(lastK, curK))
 		lastK = append(lastK[:0], curK...)
@@ -75,25 +75,9 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sc.SetCodeWrite(a1[:], 1, []byte{1})
-	sc.SetCodeWrite(a2[:], 1, []byte{2})
+	sc.SetCodeWrite(a1[:], []byte{1})
+	sc.SetCodeWrite(a2[:], []byte{2})
 	lastK = lastK[:0]
-	//if err := WalkWrites(sc.PrepareWrites(), nil, nil, nil, nil, func(address []byte, incarnation uint64, code []byte) error {
-	//	i++
-	//	if i == 1 {
-	//		assert.Equal(t, a1[:], address)
-	//		assert.Equal(t, 1, incarnation)
-	//		assert.Equal(t, []byte{1}, code)
-	//	}
-	//	if i == 2 {
-	//		assert.Equal(t, a2[:], address)
-	//		assert.Equal(t, 1, incarnation)
-	//		assert.Equal(t, []byte{2}, code)
-	//	}
-	//	return nil
-	//}, nil); err != nil {
-	//	t.Fatal(err)
-	//}
 }
 
 func TestAccountReads(t *testing.T) {
@@ -326,12 +310,12 @@ func TestGetDeletedAccount(t *testing.T) {
 	sc := NewStateCache(32, datasize.ByteSize(4*accountItemSize))
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
-	account1.Incarnation = 1
+	account1.Nonce = 1
 	var addr1 common.Address
 	addr1[0] = 1
 	sc.SetAccountRead(addr1[:], &account1)
 	var account11 accounts.Account
-	account11.Incarnation = 2
+	account11.Nonce = 2
 	sc.SetAccountWrite(addr1[:], &account11)
 	acc := sc.GetDeletedAccount(addr1[:])
 	if acc != nil {
@@ -342,8 +326,8 @@ func TestGetDeletedAccount(t *testing.T) {
 	if acc == nil {
 		t.Fatalf("Expected to find deleted account")
 	}
-	if acc.Incarnation != 2 {
-		t.Fatalf("Expected to find deleted account with incarnation 2, got %d", acc.Incarnation)
+	if acc.Nonce != 2 {
+		t.Fatalf("Expected to find deleted account with nonce 2, got %d", acc.Nonce)
 	}
 }
 
@@ -356,7 +340,7 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		sc.SetStorageAbsent(addr[:], 1, loc[:])
+		sc.SetStorageAbsent(addr[:], loc[:])
 	}
 	if sc.readQueuesLen() != 4 {
 		t.Fatalf("expected 4 reads got: %d", sc.readQueuesLen())
@@ -366,50 +350,17 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		if s, ok := sc.GetStorage(addr[:], 1, loc[:]); !ok || s != nil {
-			t.Fatalf("expected entry with %x,1,%x not to exist", addr, loc)
+		if s, ok := sc.GetStorage(addr[:], loc[:]); !ok || s != nil {
+			t.Fatalf("expected entry with %x,%x not to exist", addr, loc)
 		}
 	}
-	// Add reads for incarnation 2 (instead of 1), 6 records instead of 4, so only last 4 will stay
-	for i := 1; i <= 6; i++ {
-		var addr common.Address
-		addr[0] = byte(i)
-		var loc common.Hash
-		loc[1] = byte(i)
-		var val common.Hash
-		val[2] = byte(i)
-		sc.SetStorageRead(addr[:], 2, loc[:], val[:])
-	}
-	if sc.readQueuesLen() != 4 {
-		t.Fatalf("expected 4 reads got: %d", sc.readQueuesLen())
-	}
-	// Check that first two records were evicted
-	for i := 1; i <= 2; i++ {
-		var addr common.Address
-		addr[0] = byte(i)
-		var loc common.Hash
-		loc[1] = byte(i)
-		if _, ok := sc.GetStorage(addr[:], 2, loc[:]); ok {
-			t.Fatalf("expected entry with %x,2,%x to be evicted", addr, loc)
-		}
-	}
-	// Check that last 4 records stayed
-	for i := 3; i <= 6; i++ {
-		var addr common.Address
-		addr[0] = byte(i)
-		var loc common.Hash
-		loc[1] = byte(i)
-		if _, ok := sc.GetStorage(addr[:], 2, loc[:]); !ok {
-			t.Errorf("expected entry with %x,2,%x to exist", addr, loc)
-		}
-	}
-	// Replace all 4 entries with deletes
+	// Replace all 4 absents with deletes
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		sc.SetStorageDelete(addr[:], 1, loc[:])
+		sc.SetStorageDelete(addr[:], loc[:])
 	}
 	if sc.readQueuesLen() != 0 {
 		t.Fatalf("expected 0 reads got: %d", sc.readQueuesLen())
@@ -419,8 +370,8 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		if s, ok := sc.GetStorage(addr[:], 1, loc[:]); !ok || s != nil {
-			t.Fatalf("expected entry with %x,1,%x not to exist", addr, loc)
+		if s, ok := sc.GetStorage(addr[:], loc[:]); !ok || s != nil {
+			t.Fatalf("expected entry with %x,%x not to exist", addr, loc)
 		}
 	}
 	// Replace all 4 deletes with writes
@@ -431,7 +382,7 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		loc[1] = byte(i)
 		var val common.Hash
 		val[2] = byte(i)
-		sc.SetStorageWrite(addr[:], 1, loc[:], val[:])
+		sc.SetStorageWrite(addr[:], loc[:], val[:])
 	}
 	if sc.WriteCount() != 4 {
 		t.Fatalf("expected 4 writes, got %d", sc.WriteCount())
@@ -441,8 +392,8 @@ func TestReadWriteAbsentDeleteStorage(t *testing.T) {
 		addr[0] = byte(i)
 		var loc common.Hash
 		loc[1] = byte(i)
-		if _, ok := sc.GetStorage(addr[:], 1, loc[:]); !ok {
-			t.Fatalf("expected entry with %x,1,%x to exist", addr, loc)
+		if _, ok := sc.GetStorage(addr[:], loc[:]); !ok {
+			t.Fatalf("expected entry with %x,%x to exist", addr, loc)
 		}
 	}
 }
@@ -455,13 +406,13 @@ func TestReadStorageExisting(t *testing.T) {
 	var loc1 common.Hash
 	var val1 common.Hash
 	val1[2] = 1
-	sc.SetStorageRead(addr1[:], 1, loc1[:], val1[:])
+	sc.SetStorageRead(addr1[:], loc1[:], val1[:])
 	defer func() {
 		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
-	sc.SetStorageRead(addr1[:], 1, loc1[:], val1[:])
+	sc.SetStorageRead(addr1[:], loc1[:], val1[:])
 	t.Fatalf("Expected to panic")
 }
 
@@ -480,7 +431,7 @@ func TestWriteStorageExceedLimit(t *testing.T) {
 		loc[1] = byte(i)
 		var val common.Hash
 		val[2] = byte(i)
-		sc.SetStorageWrite(addr[:], 1, loc[:], val[:])
+		sc.SetStorageWrite(addr[:], loc[:], val[:])
 	}
 }
 
@@ -491,7 +442,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		sc.SetCodeAbsent(addr[:], 1)
+		sc.SetCodeAbsent(addr[:])
 	}
 	if sc.readQueuesLen() != 4 {
 		t.Fatalf("expected 4 reads got: %d", sc.readQueuesLen())
@@ -499,41 +450,15 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		if c, ok := sc.GetCode(addr[:], 1); !ok || c != nil {
-			t.Fatalf("expected entry with %x,1 not to exist", addr)
+		if c, ok := sc.GetCode(addr[:]); !ok || c != nil {
+			t.Fatalf("expected entry with %x not to exist", addr)
 		}
 	}
-	// Add reads for incarnation 2 (instead of 1), 6 records instead of 4, so only last 4 will stay
-	for i := 1; i <= 6; i++ {
-		var addr common.Address
-		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
-		sc.SetCodeRead(addr[:], 2, code)
-	}
-	if sc.readQueuesLen() != 4 {
-		t.Fatalf("expected 4 reads got: %d", sc.readQueuesLen())
-	}
-	// Check that first two records were evicted
-	for i := 1; i <= 2; i++ {
-		var addr common.Address
-		addr[0] = byte(i)
-		if _, ok := sc.GetCode(addr[:], 2); ok {
-			t.Fatalf("expected entry with %x,2 to be evicted", addr)
-		}
-	}
-	// Check that last 4 records stayed
-	for i := 3; i <= 6; i++ {
-		var addr common.Address
-		addr[0] = byte(i)
-		if _, ok := sc.GetCode(addr[:], 2); !ok {
-			t.Errorf("expected entry with %x,2 to exist", addr)
-		}
-	}
-	// Replace all 4 entries with deletes
+	// Replace all 4 absents with deletes
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		sc.SetCodeDelete(addr[:], 1)
+		sc.SetCodeDelete(addr[:])
 	}
 	if sc.readQueuesLen() != 0 {
 		t.Fatalf("expected 0 reads got: %d", sc.readQueuesLen())
@@ -541,8 +466,8 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		if c, ok := sc.GetCode(addr[:], 1); !ok || c != nil {
-			t.Fatalf("expected entry with %x,1 not to exist", addr)
+		if c, ok := sc.GetCode(addr[:]); !ok || c != nil {
+			t.Fatalf("expected entry with %x not to exist", addr)
 		}
 	}
 	// Replace all 4 deletes with writes
@@ -550,7 +475,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 		var addr common.Address
 		addr[0] = byte(i)
 		var code = []byte{byte(i), 2, 3}
-		sc.SetCodeWrite(addr[:], 1, code)
+		sc.SetCodeWrite(addr[:], code)
 	}
 	if sc.WriteCount() != 4 {
 		t.Fatalf("expected 4 writes, got %d", sc.WriteCount())
@@ -558,8 +483,8 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		if _, ok := sc.GetCode(addr[:], 1); !ok {
-			t.Fatalf("expected entry with %x,1 to exist", addr)
+		if _, ok := sc.GetCode(addr[:]); !ok {
+			t.Fatalf("expected entry with %x to exist", addr)
 		}
 	}
 }
@@ -570,13 +495,13 @@ func TestReadCodeExisting(t *testing.T) {
 	var addr1 common.Address
 	addr1[0] = 1
 	code1 := []byte{1, 2, 3}
-	sc.SetCodeRead(addr1[:], 1, code1)
+	sc.SetCodeRead(addr1[:], code1)
 	defer func() {
 		//nolint:staticcheck
 		if r := recover(); r != nil {
 		}
 	}()
-	sc.SetCodeRead(addr1[:], 1, code1)
+	sc.SetCodeRead(addr1[:], code1)
 	t.Fatalf("Expected to panic")
 }
 
@@ -592,6 +517,6 @@ func TestWriteCodeExceedLimit(t *testing.T) {
 		var addr common.Address
 		addr[0] = byte(i)
 		code := []byte{byte(i), 2, 3}
-		sc.SetCodeWrite(addr[:], 1, code)
+		sc.SetCodeWrite(addr[:], code)
 	}
 }

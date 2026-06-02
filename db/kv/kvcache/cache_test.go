@@ -182,15 +182,14 @@ func TestAPI(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 	acc := accounts.Account{
-		Nonce:       1,
-		Balance:     *uint256.NewInt(11),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 2,
+		Nonce:    1,
+		Balance:  *uint256.NewInt(11),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	account1Enc := accounts.SerialiseV3(&acc)
-	acc.Incarnation = 3
+	acc.Nonce = 3
 	account2Enc := accounts.SerialiseV3(&acc)
-	acc.Incarnation = 5
+	acc.Nonce = 5
 	account4Enc := accounts.SerialiseV3(&acc)
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {

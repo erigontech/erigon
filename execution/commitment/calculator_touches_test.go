@@ -170,7 +170,6 @@ func TestTouchPlainKeyDirect_MatchesSerialized(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(12345)
 	acc.Nonce = 42
-	acc.Incarnation = 1
 
 	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
 	enc := accounts.SerialiseV3(&acc)

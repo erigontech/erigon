@@ -95,9 +95,6 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 			statedb.SetState(addr, key, *val)
 		}
 
-		if len(account.Code) > 0 || len(account.Storage) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-		}
 	}
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {

@@ -46,12 +46,9 @@ func (r *minimalStateReader) ReadAccountCode(addr accounts.Address) ([]byte, err
 	return nil, nil
 }
 func (r *minimalStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) { return 0, nil }
-func (r *minimalStateReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
-	return 0, nil
-}
-func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string) {}
-func (r *minimalStateReader) Trace() bool                             { return false }
-func (r *minimalStateReader) TracePrefix() string                     { return "" }
+func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string)                {}
+func (r *minimalStateReader) Trace() bool                                            { return false }
+func (r *minimalStateReader) TracePrefix() string                                    { return "" }
 
 // TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
 // system address (0xff...fe) is excluded from the BAL when it has no actual
@@ -500,9 +497,9 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 }
 
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
-// that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
-// (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
-// after selfdestruct, and drops NoncePath/CodePath which selfdestruct resets.
+// that IntraBlockState.VersionedWrites retains SelfDestructPath and BalancePath
+// (including non-zero residual balances — EIP-7708 case 2) after selfdestruct,
+// and drops NoncePath/CodePath which selfdestruct resets.
 func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing.T) {
 	t.Parallel()
 
@@ -515,7 +512,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
-	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
+	// Selfdestruct: records SelfDestructPath=true and BalancePath=0.
 	destructed, err := ibs.Selfdestruct(addr)
 	require.NoError(t, err)
 	require.True(t, destructed)
@@ -536,7 +533,6 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 
 	// Retained paths.
 	require.True(t, pathSet[SelfDestructPath], "SelfDestructPath must be retained")
-	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be retained")
 	require.True(t, pathSet[BalancePath], "BalancePath (non-zero residual) must be retained")
 
 	// Dropped paths — selfdestruct resets nonce and code, so they must not appear.
@@ -574,8 +570,8 @@ func TestSetAccountBalanceOrDelete_UpdateExisting(t *testing.T) {
 }
 
 // TestSetAccountBalanceOrDelete_NewAccount verifies that when an account has no
-// existing writes, all 4 account fields are emitted (balance, nonce, incarnation,
-// codeHash) so that applyVersionedWrites can reconstruct a complete account.
+// existing writes, balance, nonce and codeHash are all emitted so that
+// applyVersionedWrites can reconstruct a complete account.
 func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	t.Parallel()
 
@@ -588,11 +584,10 @@ func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(0)
 	acc.Nonce = 3
-	acc.Incarnation = 1
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
 
-	// Should have original write + 4 new fields for addr.
-	require.Len(t, result, 5)
+	// Should have original write + 3 new fields for addr.
+	require.Len(t, result, 4)
 	pathSet := map[AccountPath]bool{}
 	for _, w := range result {
 		if w.Address == addr {
@@ -601,12 +596,11 @@ func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	}
 	require.True(t, pathSet[BalancePath], "BalancePath must be emitted")
 	require.True(t, pathSet[NoncePath], "NoncePath must be emitted")
-	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be emitted")
 	require.True(t, pathSet[CodeHashPath], "CodeHashPath must be emitted")
 }
 
 // TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty verifies that passing
-// nil for acc creates a fresh empty account (nonce=0, incarnation=0, emptyCodeHash).
+// nil for acc creates a fresh empty account (nonce=0, emptyCodeHash).
 func TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -615,13 +609,11 @@ func TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty(t *testing.T) {
 
 	result := writes.SetAccountBalanceOrDelete(addr, nil, *uint256.NewInt(100), tracing.BalanceIncreaseRewardTransactionFee, false)
 
-	require.Len(t, result, 4)
+	require.Len(t, result, 3)
 	for _, w := range result {
 		require.Equal(t, addr, w.Address)
 		switch w.Path {
 		case NoncePath:
-			require.Equal(t, uint64(0), w.Val)
-		case IncarnationPath:
 			require.Equal(t, uint64(0), w.Val)
 		case CodeHashPath:
 			require.Equal(t, accounts.EmptyCodeHash, w.Val)
@@ -683,8 +675,8 @@ func TestSetAccountBalanceOrDelete_EIP161DisabledNoRemoval(t *testing.T) {
 	acc := accounts.NewAccount()
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(0), tracing.BalanceIncreaseRewardTransactionFee, false)
 
-	// Should emit all 4 fields, NOT a SelfDestructPath.
-	require.Len(t, result, 4)
+	// Should emit all 3 fields, NOT a SelfDestructPath.
+	require.Len(t, result, 3)
 	for _, w := range result {
 		require.NotEqual(t, SelfDestructPath, w.Path)
 	}
@@ -752,13 +744,12 @@ func TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount(t *
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(100)
 	acc.Nonce = 41 // stale; worker has it at 42
-	acc.Incarnation = 1
 	acc.CodeHash = accounts.EmptyCodeHash
 
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
 
 	// Should be NoncePath (worker's) + BalancePath (newly appended).
-	// Must NOT re-emit Incarnation / CodeHash from the stale snapshot.
+	// Must NOT re-emit CodeHash from the stale snapshot.
 	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
 
 	pathSet := map[AccountPath]bool{}
@@ -775,7 +766,6 @@ func TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount(t *
 	}
 	require.True(t, pathSet[NoncePath], "NoncePath must be preserved")
 	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
-	require.False(t, pathSet[IncarnationPath], "IncarnationPath must NOT be re-emitted from stale snapshot")
 	require.False(t, pathSet[CodeHashPath], "CodeHashPath must NOT be re-emitted from stale snapshot")
 }
 
@@ -796,7 +786,6 @@ func TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount(
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(100)
 	acc.Nonce = 5
-	acc.Incarnation = 2
 	acc.CodeHash = accounts.EmptyCodeHash // stale; worker installed real code
 
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
@@ -814,43 +803,6 @@ func TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount(
 	require.True(t, pathSet[CodeHashPath], "CodeHashPath must be preserved")
 	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
 	require.False(t, pathSet[NoncePath], "NoncePath must NOT be re-emitted from stale snapshot")
-	require.False(t, pathSet[IncarnationPath], "IncarnationPath must NOT be re-emitted from stale snapshot")
-}
-
-// TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount
-// covers the same addrHasAnyWrite guard for an Incarnation-only worker write
-// (e.g. a SELFDESTRUCT-and-recreate that bumps incarnation without changing
-// other paths via this code path).
-func TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xC000"))
-	writes := VersionedWrites{
-		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: uint64(7)},
-	}
-
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(100)
-	acc.Nonce = 3
-	acc.Incarnation = 6 // stale; worker has it at 7
-	acc.CodeHash = accounts.EmptyCodeHash
-
-	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
-
-	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
-
-	pathSet := map[AccountPath]bool{}
-	for _, w := range result {
-		require.Equal(t, addr, w.Address)
-		pathSet[w.Path] = true
-		if w.Path == IncarnationPath {
-			require.Equal(t, uint64(7), w.Val, "worker's incarnation must NOT be clobbered by stale snapshot")
-		}
-	}
-	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be preserved")
-	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
-	require.False(t, pathSet[NoncePath], "NoncePath must NOT be re-emitted from stale snapshot")
-	require.False(t, pathSet[CodeHashPath], "CodeHashPath must NOT be re-emitted from stale snapshot")
 }
 
 // --- StripBalanceWrite tests ---

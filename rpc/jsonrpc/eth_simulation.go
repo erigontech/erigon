@@ -454,8 +454,8 @@ func (w diffTrackingWriter) UpdateAccountData(address accounts.Address, original
 	return nil
 }
 
-func (w diffTrackingWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	err := w.delegate.UpdateAccountCode(address, incarnation, codeHash, code)
+func (w diffTrackingWriter) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
+	err := w.delegate.UpdateAccountCode(address, codeHash, code)
 	if err != nil {
 		return err
 	}
@@ -476,8 +476,8 @@ func (w diffTrackingWriter) DeleteAccount(address accounts.Address, original *ac
 	return nil
 }
 
-func (w diffTrackingWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	err := w.delegate.WriteAccountStorage(address, incarnation, key, original, value)
+func (w diffTrackingWriter) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
+	err := w.delegate.WriteAccountStorage(address, key, original, value)
 	if err != nil {
 		return err
 	}
@@ -1112,17 +1112,6 @@ func (r *simulationIntraBlockStateReader) ReadAccountCode(address accounts.Addre
 func (r *simulationIntraBlockStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	code, err := r.ReadAccountCode(address)
 	return len(code), err
-}
-
-func (r *simulationIntraBlockStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	acc, err := r.ReadAccountData(address)
-	if err != nil || acc == nil {
-		return 0, err
-	}
-	if acc.Incarnation == 0 {
-		return 0, nil
-	}
-	return acc.Incarnation - 1, nil
 }
 
 func (r *simulationIntraBlockStateReader) SetTrace(_ bool, _ string) {}

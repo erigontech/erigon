@@ -52,7 +52,7 @@ type recordingWriter struct {
 	storageWrites []struct{ orig, val uint256.Int }
 }
 
-func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ uint64, _ accounts.StorageKey, orig, val uint256.Int) error {
+func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ accounts.StorageKey, orig, val uint256.Int) error {
 	rw.storageWrites = append(rw.storageWrites, struct{ orig, val uint256.Int }{orig, val})
 	return nil
 }
@@ -455,7 +455,6 @@ func TestDump(t *testing.T) {
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
 	obj2.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{3, 3, 3, 3, 3, 3, 3})), []byte{3, 3, 3, 3, 3, 3, 3}, true, tracing.CodeChangeUnspecified)
-	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)
 	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)

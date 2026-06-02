@@ -452,12 +452,6 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 			}
 		}
 
-		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-			err = statedb.SetIncarnation(address, state.FirstContractIncarnation)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
 	}
 	if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 		return nil, nil, err

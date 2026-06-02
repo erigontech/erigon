@@ -184,23 +184,23 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xBEEF"))
 
 	original := &accounts.Account{}
-	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3, Incarnation: 1}
+	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3}
 	err := collector.UpdateAccountData(addr, original, account)
 	require.NoError(t, err)
 
 	code := []byte{0x60, 0x00}
 	codeHash := accounts.InternCodeHash(common.BytesToHash(code))
-	err = collector.UpdateAccountCode(addr, 1, codeHash, code)
+	err = collector.UpdateAccountCode(addr, codeHash, code)
 	require.NoError(t, err)
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
 	var storageVal uint256.Int
 	storageVal.SetUint64(999)
-	err = collector.WriteAccountStorage(addr, 1, storageKey, uint256.Int{}, storageVal)
+	err = collector.WriteAccountStorage(addr, storageKey, uint256.Int{}, storageVal)
 	require.NoError(t, err)
 
 	// No-op write (original==value) must not produce a write.
-	err = collector.WriteAccountStorage(addr, 1, storageKey, storageVal, storageVal)
+	err = collector.WriteAccountStorage(addr, storageKey, storageVal, storageVal)
 	require.NoError(t, err)
 
 	// Now drive the accumulator from the collected writes —

@@ -181,22 +181,19 @@ func TestV2Resolution(t *testing.T) {
 
 // In this test, we try to combine both accounts and their storage items in the single
 // hash builder by tricking the GenStructStep slightly.
-// For storage items, we will be using the keys which are concatenation of the contract address hash,
-// incarnation encoding, and the storage location hash.
-// If we just allow it to be processed natually, then at the end of the processing of all storage
-// items, we would have entension node which hasTree off at some point, but includes incarnation encoding
-// in it, which we do not want. To cut it off, we will use the "trick". When we give the last
-// storage item to the GenStructStep, instead of setting `succ` to the empty slice, indicating that
-// nothing follows, we will set `succ` to a key which is the concatenation of the address hash,
-// incarnation encoding, except that the last nibble of the incoding is arbitrarily modified
-// This will cause the correct extension node to form.
-// In order to prevent the branch node on top of the extension node, we will need to manipulate
-// the `groups` array and truncate it to the level of the accounts
+// For storage items, we will be using the keys which are concatenation of the contract
+// address hash and the storage location hash.
+// If we just allow it to be processed natually, then at the end of the processing of all
+// storage items, we would have entension node which hasTree off at some point. To cut it
+// off, we will use the "trick". When we give the last storage item to the GenStructStep,
+// instead of setting `succ` to the empty slice, indicating that nothing follows, we will
+// set `succ` to a key derived from the address hash with its last nibble arbitrarily
+// modified. This will cause the correct extension node to form.
+// In order to prevent the branch node on top of the extension node, we will need to
+// manipulate the `groups` array and truncate it to the level of the accounts
 func TestEmbeddedStorage(t *testing.T) {
 	var accountAddress = common.Address{3, 4, 5, 6}
 	addrHash := crypto.Keccak256(accountAddress[:])
-	incarnation := make([]byte, 8)
-	binary.BigEndian.PutUint64(incarnation, uint64(2))
 	var location1 = common.Hash{1}
 	locationKey1 := append(append([]byte{}, addrHash...), crypto.Keccak256(location1[:])...)
 	var location2 = common.Hash{2}
@@ -310,7 +307,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	cutoff := 2 * (length.Hash + common.IncarnationLength)
+	cutoff := 2 * length.Hash
 	succ.Write(curr.Bytes()[:cutoff-1])
 	succ.WriteByte(curr.Bytes()[cutoff-1] + 1)
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlp.RlpSerializableBytes(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {

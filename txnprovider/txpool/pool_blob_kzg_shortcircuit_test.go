@@ -63,10 +63,9 @@ func seedBlobKZGTestPool(t *testing.T, ctx context.Context) *TxPool {
 		},
 	}
 	acc := accounts.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts.SerialiseV3(&acc)
 	var addr [20]byte

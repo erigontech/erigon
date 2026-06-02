@@ -218,7 +218,7 @@ func valueString(path AccountPath, value any) string {
 	case StoragePath:
 		num := value.(uint256.Int)
 		return num.Hex()[2:]
-	case NoncePath, IncarnationPath:
+	case NoncePath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
 		l := min(len(value.([]byte)), 40)
@@ -363,9 +363,6 @@ func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, a
 	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, IncarnationPath, accounts.NilKey, vr.txIndex); ok {
-		account.Incarnation = update
-	}
 	if update, ok := versionedUpdate[accounts.CodeHash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
 		account.CodeHash = update
 	}
@@ -482,18 +479,6 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 
 	if vr.stateReader != nil {
 		return vr.stateReader.ReadAccountCodeSize(address)
-	}
-
-	return 0, nil
-}
-
-func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		return r.Val.(*accounts.Account).Incarnation, nil
-	}
-
-	if vr.stateReader != nil {
-		return vr.stateReader.ReadAccountIncarnation(address)
 	}
 
 	return 0, nil
@@ -702,10 +687,9 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 }
 
 // SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
-// address has no existing writes in the set, all four account fields (balance,
-// nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
-// reconstruct a complete account. Without the full set, it would create an
-// account with nonce=0, incarnation=0, empty codeHash — wiping the real values.
+// address has no existing writes in the set, Nonce and CodeHash are also
+// emitted so applyVersionedWrites can reconstruct a complete account instead
+// of wiping the real values with defaults.
 //
 // When emptyRemoval is true (EIP-161 SpuriousDragon), if the final account
 // would be empty (balance=0, nonce=0, empty code), the existing writes for
@@ -730,10 +714,10 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 
 	// First pass: if a Balance entry exists for this addr, just update value.
 	// Tracks whether ANY entry for this addr exists — if yes we MUST NOT
-	// re-emit Nonce/Incarnation/CodeHash from the pre-block snapshot acc,
-	// because the worker has already written some fields with the correct
-	// post-execution values; appending pre-block field entries after the
-	// worker's writes would clobber them under last-wins downstream merge.
+	// re-emit Nonce/CodeHash from the pre-block snapshot acc, because the
+	// worker has already written some fields with the correct post-execution
+	// values; appending pre-block field entries after the worker's writes
+	// would clobber them under last-wins downstream merge.
 	addrHasAnyWrite := false
 	for _, w := range writes {
 		if w.Address != addr {
@@ -758,7 +742,6 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 	return append(writes,
 		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
 		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
-		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
 		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
 	)
 }
@@ -778,15 +761,10 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		// If the in-memory deletion reflects a prior tx's selfdestruct
 		// (versionMap has SelfDestructPath=true), surface the SD version
-		// instead of UnknownVersion. Returning UnknownVersion here was
-		// causing CreateAccount's synthetic Balance/Incarnation read records
-		// (intra_block_state.go:1864-1865) to be stamped with UnknownVersion
-		// while subsequent reads — via the SD-revival path that falls through
-		// to MVReadResultDone — observed the real (0.0) version, producing a
-		// versionedReads mismatch that panicked tx N+1 on every incarnation
-		// and exhausted the parallel-exec retry budget ("too many incarnations").
-		// Aligning this shortcut with the SD-zero path below removes the
-		// inconsistency.
+		// instead of UnknownVersion so CreateAccount's synthetic Balance
+		// read record aligns with the SD-zero fallthrough path below;
+		// otherwise a versionedReads mismatch panics every retry of the
+		// next tx and exhausts the parallel-exec budget.
 		if s.versionMap != nil {
 			sdRes := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
 			if sdRes.Status() == MVReadResultDone {
@@ -1026,7 +1004,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				}
 
 				if pr.Source == MapRead {
-					if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+					if path == BalancePath || path == NoncePath || path == CodeHashPath {
 						if _, source, version, _ := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
 							return pr.Val.(T), ReadSetRead, pr.Version, nil
@@ -1048,26 +1026,15 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 
 		// Self-destructed account: a per-account field (Balance/Nonce/
-		// Incarnation/CodeHash/Code) with no dedicated versionMap cell reads as
-		// the post-SD zero value. Record the read as a dependency on the
+		// CodeHash/Code) with no dedicated versionMap cell reads as the post-
+		// SD zero value. Record the read as a dependency on the
 		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion
-		// read — the latter is rejected on sight by the validator's
-		// path==AddressPath cross-check (IncarnationPath is Done), producing a
-		// non-converging validator-invalid retry loop. The SelfDestructPath
-		// dependency validates cleanly via checkVersion. (Branch 794's SD
-		// short-circuit misses this when its revival check fires for a
-		// recreate-in-the-same-tx target.)
-		//
-		// Per-path revival resolution (issue #21319): reaching here means res
-		// — the version-map read of THIS path — was MVReadResultNone, so this
-		// field has no post-SD write and per-path it is not revived; it reads
-		// as the post-SD zero value regardless of whether other fields were
-		// revived. The old account-wide LatestTxIndex scan over
-		// Balance|Nonce|CodeHash would, for a value-transfer revival
-		// (BalancePath write only), treat the whole account as revived and
-		// fall through to surface a stale pre-SD nonce/codeHash — the same
-		// imprecision #21323 removed from the branch-794 SD short-circuit.
-		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
+		// read so the validator's path==AddressPath cross-check validates
+		// cleanly via checkVersion instead of looping in validator-invalid
+		// retries. Per-path: a field with no post-SD write is not revived on
+		// its own — a value-transfer revival writes only BalancePath and must
+		// not surface a stale pre-SD nonce/codeHash on the other paths.
+		if path == BalancePath || path == NoncePath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
 			if sd := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); sd.Status() == MVReadResultDone {
 				if destructed, ok := sd.Value().(bool); ok && destructed {
@@ -1102,9 +1069,9 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			// AddressPath probes MUST be recorded: getStateObject probes the
 			// versionMap for AddressPath before falling back to the
 			// stateReader. The validator's path==AddressPath branch cross-
-			// checks the precise IncarnationPath signal (account create /
-			// destruct), so the recorded probe does not over-invalidate on
-			// ordinary BalancePath/NoncePath writes.
+			// checks the CreateContractPath / SelfDestructPath signals, so
+			// the recorded probe does not over-invalidate on ordinary
+			// BalancePath/NoncePath writes.
 			//
 			// Do NOT cache CodePath: getStateObject calls versionedRead for
 			// CodePath with readStorage=nil to check if a prior tx wrote
@@ -1127,47 +1094,46 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		var err error
 
 		// For StoragePath, detect contract creation/destruction by a prior tx.
-		// IncarnationPath is written ONLY by CreateAccount (contract creation) and
-		// Selfdestruct — both operations that clear all storage.  When no prior tx
-		// wrote this specific storage slot (MVReadResultNone), but a prior tx DID
-		// write IncarnationPath, the account was created or destroyed in this block
-		// and all unwritten storage slots must be zero.
-		//
-		// Without this check, the read falls through to StorageDomain which may
-		// contain stale data from before a prior block's SELFDESTRUCT (because
-		// Writer.DeleteAccount clears AccountsDomain but NOT StorageDomain).
+		// The presence of ANY SelfDestructPath / CreateContractPath entry —
+		// regardless of its current value — proves storage was wiped at some
+		// point in this block (a later SelfDestructPath=false revival doesn't
+		// restore wiped slots). Any slot not explicitly re-written since must
+		// read as zero. Mirrors the spec's per-block storage_clears semantic.
 		if path == StoragePath {
-			incRes := s.versionMap.Read(addr, IncarnationPath, accounts.NilKey, s.txIndex)
-			if incRes.Status() == MVReadResultDone {
+			for _, depPath := range [...]AccountPath{SelfDestructPath, CreateContractPath} {
+				depRes := s.versionMap.Read(addr, depPath, accounts.NilKey, s.txIndex)
+				if depRes.Status() != MVReadResultDone {
+					continue
+				}
 				var zero T
 				vr.Source = StorageRead
 				vr.Val = zero
 
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
-						s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, incRes.DepIdx())
+					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (%s written by tx %d)\n",
+						s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, depPath, depRes.DepIdx())
 				}
 
 				if s.versionedReads == nil {
 					s.versionedReads = ReadSet{}
 				}
 				s.versionedReads.Set(vr)
-				// Record dependency on IncarnationPath so that ValidateVersion
+				// Record dependency on the SD/Create marker so ValidateVersion
 				// detects if the creation/destruction is reverted by a re-execution.
-				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
+				depVersion := Version{TxIndex: depRes.DepIdx(), Incarnation: depRes.Incarnation()}
 				s.versionedReads.Set(VersionedRead{
 					Address: addr,
-					Path:    IncarnationPath,
+					Path:    depPath,
 					Key:     accounts.NilKey,
 					Source:  MapRead,
-					Version: incVersion,
-					Val:     incRes.Value(),
+					Version: depVersion,
+					Val:     depRes.Value(),
 				})
 				return zero, StorageRead, UnknownVersion, nil
 			}
 		}
 
-		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+		if path == BalancePath || path == NoncePath || path == CodeHashPath {
 			readAccount, source, version, err := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 				func(v *accounts.Account) *accounts.Account { return v }, nil)
 

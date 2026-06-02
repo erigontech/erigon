@@ -22,9 +22,9 @@ block execution, dispatched after the pipeline run.
 ```
 exec3 block execution (execution/stagedsync/exec3_serial.go, exec3_parallel.go)
   → Accumulator.StartChange(header, txs, unwind)     per block
-  → Accumulator.ChangeAccount(addr, incarnation, data)
-  → Accumulator.ChangeStorage(addr, incarnation, loc, data)
-  → Accumulator.ChangeCode(addr, incarnation, code)
+  → Accumulator.ChangeAccount(addr, data)
+  → Accumulator.ChangeStorage(addr, loc, data)
+  → Accumulator.ChangeCode(addr, code)
   → Accumulator.DeleteAccount(addr)
 
 Dispatcher.Dispatch()  (execution/execmodule/notification_dispatcher.go)

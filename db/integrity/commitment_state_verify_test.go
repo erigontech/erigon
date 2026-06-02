@@ -72,10 +72,9 @@ func TestCheckStateVerify(t *testing.T) {
 		rnd.Read(loc)
 
 		acc := accounts.Account{
-			Nonce:       txNum,
-			Balance:     *uint256.NewInt(txNum * 1000),
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    txNum,
+			Balance:  *uint256.NewInt(txNum * 1000),
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)

@@ -439,9 +439,6 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 			statedb.SetState(address, key, *val)
 		}
 
-		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(address, state.FirstContractIncarnation)
-		}
 	}
 
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())

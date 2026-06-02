@@ -46,66 +46,16 @@ func newTestUpdates() *commitment.Updates {
 	return commitment.NewUpdates(commitment.ModeUpdate, "", commitment.KeyToHexNibbleHash)
 }
 
-// TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate is
-// DEFENSIVE-ONLY coverage for the first branch of FlushToUpdates'
-// switch: acc.Deleted=true AND Incarnation>0 AND all-zero fields →
-// zero-account UPDATE (not DeleteUpdate).
+// TestFlushToUpdates_Deleted_EmitsDelete verifies that a touched-empty
+// account (e.g. system address 0xff..fe after a Cancun EIP-4788 system
+// call) is emitted as DeleteUpdate, matching serial's EIP-161 emptyRemoval
+// path.
 //
-// Reachability: this branch is currently UNREACHABLE from real
-// production writesets. The realistic-pipeline test
-// TestSDOfPreExistingContract_FullPipeline below drives the full
-// IBS.Selfdestruct → blockIO.WriteSet → normalizeWriteSet →
-// ApplyWrites → FlushToUpdates flow and shows that the BalancePath=0
-// write IBS emits via versionWritten arrives in ApplyWrites after
-// SelfDestructPath and resets acc.Deleted=false — meaning the
-// SD-of-pre-existing-contract case lands in the default branch with
-// {Balance=0, Nonce=preBlock, CodeHash=preBlock}, not in the
-// zero-account branch.
-//
-// This test populates cs.accounts directly to keep the branch
-// covered against future ApplyWrites/normalizeWriteSet refactors
-// (e.g. dropping IBS' BalancePath=0 emit, or changing the order of
-// writes such that BalancePath no longer clears Deleted) — at which
-// point this branch could become reachable and this test would
-// become a load-bearing assertion rather than defensive coverage.
-func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing.T) {
-	cs := newTestCalcState()
-	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
-
-	cs.accounts[addr] = &calcAccountState{
-		Balance:     uint256.Int{},
-		Nonce:       0,
-		CodeHash:    empty.CodeHash,
-		Incarnation: 1,
-		Deleted:     true,
-		dirty:       true,
-	}
-
-	updates := newTestUpdates()
-	cs.FlushToUpdates(updates)
-
-	keyVal := addr.Value()
-	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
-
-	assert.Equal(t,
-		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
-		got.Flags,
-		"SD'd contract with incarnation>0 must emit BalanceUpdate|NonceUpdate|CodeUpdate, not DeleteUpdate")
-	assert.True(t, got.Balance.IsZero(), "balance must be zero")
-	assert.Equal(t, uint64(0), got.Nonce, "nonce must be zero")
-	assert.Equal(t, empty.CodeHash, got.CodeHash, "codeHash must be empty.CodeHash")
-}
-
-// TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete verifies that a
-// touched-empty account (e.g. system address 0xff..fe after a Cancun
-// EIP-4788 system call) is emitted as DeleteUpdate, matching serial's
-// EIP-161 emptyRemoval path.
-//
-// Without this differentiation, parallel exec misses the leaf removal at
-// post-Cancun blocks where the system address is touched-and-empty,
-// producing a different trie root. This is the bug the import hit at
-// block 42 (Cancun start).
-func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
+// Without this, parallel exec misses the leaf removal at post-Cancun
+// blocks where the system address is touched-and-empty, producing a
+// different trie root. This is the bug the import hit at block 42
+// (Cancun start).
+func TestFlushToUpdates_Deleted_EmitsDelete(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -113,12 +63,11 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 	})
 
 	cs.accounts[addr] = &calcAccountState{
-		Balance:     uint256.Int{},
-		Nonce:       0,
-		CodeHash:    empty.CodeHash,
-		Incarnation: 0,
-		Deleted:     true,
-		dirty:       true,
+		Balance:  uint256.Int{},
+		Nonce:    0,
+		CodeHash: empty.CodeHash,
+		Deleted:  true,
+		dirty:    true,
 	}
 
 	updates := newTestUpdates()
@@ -128,14 +77,13 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
 
 	assert.Equal(t, commitment.DeleteUpdate, got.Flags,
-		"touched-empty account with incarnation==0 must emit DeleteUpdate (EIP-161 emptyRemoval)")
+		"touched-empty account must emit DeleteUpdate (EIP-161 emptyRemoval)")
 }
 
 // TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate is
-// DEFENSIVE coverage for the third branch of FlushToUpdates' switch:
+// DEFENSIVE coverage for the second branch of FlushToUpdates' switch:
 // when acc.Deleted is true but balance/nonce/codeHash retain non-zero
-// values, the trie leaf must survive with the actual values rather
-// than being zeroed by the SD-with-incarnation branch.
+// values, the trie leaf must survive with the actual values.
 //
 // Note: under the *current* ApplyWrites semantics this state is
 // unreachable from a real LightCollector writeset, because
@@ -149,10 +97,10 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 //
 // The actual `extcodehash_subcall_create2_oog[fork_Amsterdam-...]`
 // regression that prompted this defensive case is fixed upstream by
-// the removal of the redundant `IncarnationPath > 0` clause in
-// `normalizeWriteSet` (the OOG path leaves Nonce=0 → empty-account
-// → DeleteUpdate, not Deleted+RetainedBalance). End-to-end coverage
-// of that path lives in the eest_devnet suite, not in this unit test.
+// the empty-account check in `normalizeWriteSet` (the OOG path leaves
+// Nonce=0 → empty-account → DeleteUpdate, not Deleted+RetainedBalance).
+// End-to-end coverage of that path lives in the eest_devnet suite,
+// not in this unit test.
 func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing.T) {
 	cs := newTestCalcState()
 	// 0x2adc25... is the CREATE2 deterministic address from the failing
@@ -161,12 +109,11 @@ func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing
 	retainedBalance := *uint256.NewInt(0x0421fe)
 
 	cs.accounts[addr] = &calcAccountState{
-		Balance:     retainedBalance,
-		Nonce:       0,
-		CodeHash:    empty.CodeHash,
-		Incarnation: 1, // bumped during CREATE2 frame, retained through revert
-		Deleted:     true,
-		dirty:       true,
+		Balance:  retainedBalance,
+		Nonce:    0,
+		CodeHash: empty.CodeHash,
+		Deleted:  true,
+		dirty:    true,
 	}
 
 	updates := newTestUpdates()
@@ -215,45 +162,6 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 	assert.Equal(t, common.Hash(codeHashArr), got.CodeHash)
 }
 
-// TestApplyWrites_IncarnationPath verifies that an IncarnationPath write
-// captured before SelfDestructPath does NOT survive the SD: the SD case
-// zeros all account fields (Balance/Nonce/CodeHash/Incarnation) so
-// FlushToUpdates routes into the EIP-161 DeleteUpdate branch, matching
-// serial's DomainDel behavior of removing the leaf for a pure SD.
-//
-// The previous expectation (Incarnation preserved → zero-account UPDATE
-// flags) was based on a misreading of serial — empirically serial emits
-// DeleteUpdate for a pure SD-of-pre-existing-contract, not a zero-account
-// leaf with retained incarnation. TestRecreateAndRewind (block 3 SD)
-// fails under the old expectation.
-func TestApplyWrites_IncarnationPath(t *testing.T) {
-	cs := newTestCalcState()
-	addr := accounts.InternAddress([20]byte{0xc1})
-
-	writes := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: uint64(1)},
-		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},
-	}
-	cs.ApplyWrites(writes)
-
-	acc, ok := cs.accounts[addr]
-	require.True(t, ok, "ensureAccount should have created an entry")
-	assert.True(t, acc.Deleted, "SelfDestructPath=true must set Deleted")
-	assert.Equal(t, uint64(0), acc.Incarnation, "SelfDestructPath must zero Incarnation (matches serial's DomainDel removing the leaf)")
-	assert.True(t, acc.Balance.IsZero(), "SelfDestructPath must zero Balance")
-	assert.Equal(t, uint64(0), acc.Nonce, "SelfDestructPath must zero Nonce")
-	assert.Equal(t, [32]byte(empty.CodeHash), acc.CodeHash, "SelfDestructPath must reset CodeHash")
-
-	updates := newTestUpdates()
-	cs.FlushToUpdates(updates)
-	keyVal := addr.Value()
-	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
-	assert.Equal(t,
-		commitment.DeleteUpdate,
-		got.Flags,
-		"Deleted+isAllZero routes through the EIP-161 DeleteUpdate branch (matches serial's DomainDel)")
-}
-
 // TestApplyWrites_BalancePathClearsDeleted verifies that a non-empty
 // account write after a SelfDestructPath resets the Deleted flag — the
 // same way TouchAccount drops the DeleteUpdate flag in serial when a
@@ -293,19 +201,17 @@ func (r *preBlockReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Ac
 func (r *preBlockReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *preBlockReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
-func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
-func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
-func (r *preBlockReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
-func (r *preBlockReader) SetTrace(bool, string)                                   {}
-func (r *preBlockReader) Trace() bool                                             { return false }
-func (r *preBlockReader) TracePrefix() string                                     { return "" }
+func (r *preBlockReader) HasStorage(accounts.Address) (bool, error)         { return false, nil }
+func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)  { return nil, nil }
+func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error) { return 0, nil }
+func (r *preBlockReader) SetTrace(bool, string)                             {}
+func (r *preBlockReader) Trace() bool                                       { return false }
+func (r *preBlockReader) TracePrefix() string                               { return "" }
 
 // TestSDOfPreExistingContract_FullPipeline drives the production pipeline
 // end-to-end for an SD-of-pre-existing-contract scenario:
 //
 //	IBS.Selfdestruct (intra_block_state.go ~1430) emits via versionWritten:
-//	    IncarnationPath = original.Incarnation
 //	    SelfDestructPath = true
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
@@ -322,18 +228,18 @@ func (r *preBlockReader) TracePrefix() string                                   
 // What it locks in (post-#21088 corrected semantics):
 //  1. normalizeWriteSet detects SD'd addresses by scanning for
 //     SelfDestructPath=true entries up front, and DROPS the raw
-//     IncarnationPath / BalancePath / NoncePath / CodeHashPath / CodePath
-//     writes for those addresses. The completion loop also skips them.
-//     The normalized writeset for the SD'd address contains ONLY
-//     SelfDestructPath=true (plus StoragePath=0 entries from vm.StorageKeys,
-//     none in this scenario). Without this, applyVersionedWrites takes the
+//     BalancePath / NoncePath / CodeHashPath / CodePath writes for those
+//     addresses. The completion loop also skips them. The normalized
+//     writeset for the SD'd address contains ONLY SelfDestructPath=true
+//     (plus StoragePath=0 entries from vm.StorageKeys, none in this
+//     scenario). Without this, applyVersionedWrites takes the
 //     cleanup-before-recreate branch and writes the account back with
-//     {Balance=0, Inc=preInc} encoding instead of taking the pure-delete
-//     branch (DomainDel(Accounts)).
+//     a non-empty encoding instead of taking the pure-delete branch
+//     (DomainDel(Accounts)).
 //  2. calcState.ApplyWrites ends with acc.Deleted=true, acc.Balance=0,
-//     acc.Nonce=0, acc.CodeHash=empty, acc.Incarnation=0 — the
-//     SelfDestructPath case zeros all account fields so FlushToUpdates
-//     routes into the EIP-161 DeleteUpdate branch.
+//     acc.Nonce=0, acc.CodeHash=empty — the SelfDestructPath case zeros
+//     all account fields so FlushToUpdates routes into the EIP-161
+//     DeleteUpdate branch.
 //  3. FlushToUpdates emits DeleteUpdate, matching serial's DomainDel
 //     removing the leaf for a pure SD-of-pre-existing-contract.
 //
@@ -347,13 +253,11 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	preBlockBalance := *uint256.NewInt(1_000_000)
 	preBlockNonce := uint64(7)
 	preBlockCodeHash := accounts.InternCodeHash(common.Hash{0xab, 0xcd, 0xef})
-	preBlockIncarnation := uint64(3)
 
 	original := &accounts.Account{
-		Balance:     preBlockBalance,
-		Nonce:       preBlockNonce,
-		CodeHash:    preBlockCodeHash,
-		Incarnation: preBlockIncarnation,
+		Balance:  preBlockBalance,
+		Nonce:    preBlockNonce,
+		CodeHash: preBlockCodeHash,
 	}
 
 	// Build the raw writeset that IBS.Selfdestruct produces in production
@@ -364,7 +268,6 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// sees.
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
 	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: original.Incarnation, Version: ver},
 		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true, Version: ver},
 		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
 	}
@@ -373,7 +276,6 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// which goes through the version map, so by the time normalizeWriteSet's
 	// completion loop runs, vm.Read sees these values.
 	vm := state.NewVersionMap(nil)
-	vm.Write(addr, state.IncarnationPath, accounts.NilKey, ver, original.Incarnation, true)
 	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
@@ -381,21 +283,19 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true)
 
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
-	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
-	// writes are dropped, and the completion loop skips this address.
+	// writeset for the SD'd address. The raw BalancePath write is dropped,
+	// and the completion loop skips this address.
 	pathSeen := map[state.AccountPath]any{}
 	for _, w := range normalized {
 		switch w.Path {
-		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.IncarnationPath, state.SelfDestructPath:
+		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.SelfDestructPath:
 			pathSeen[w.Path] = w.Val
 		}
 	}
 	require.Contains(t, pathSeen, state.SelfDestructPath,
 		"SelfDestructPath=true must survive normalize for the pure-delete branch in applyVersionedWrites")
-	assert.NotContains(t, pathSeen, state.IncarnationPath,
-		"IncarnationPath must be filtered for SD'd address — otherwise applyVersionedWrites takes cleanup-before-recreate")
 	assert.NotContains(t, pathSeen, state.BalancePath,
-		"BalancePath must be filtered for SD'd address — same reason")
+		"BalancePath must be filtered for SD'd address — otherwise applyVersionedWrites takes cleanup-before-recreate")
 	assert.NotContains(t, pathSeen, state.NoncePath,
 		"NoncePath must not be filled by completion-loop fallback for SD'd address")
 	assert.NotContains(t, pathSeen, state.CodeHashPath,
@@ -415,8 +315,6 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 		"SelfDestructPath case zeros Nonce")
 	assert.Equal(t, [32]byte(empty.CodeHash), acc.CodeHash,
 		"SelfDestructPath case resets CodeHash to empty")
-	assert.Equal(t, uint64(0), acc.Incarnation,
-		"SelfDestructPath case zeros Incarnation so FlushToUpdates routes through DeleteUpdate (EIP-161 branch), matching serial's DomainDel")
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -453,9 +351,8 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	preSDValue2 := *uint256.NewInt(0xbbbb)
 
 	original := &accounts.Account{
-		Balance:     *uint256.NewInt(1),
-		Nonce:       1,
-		Incarnation: 5,
+		Balance: *uint256.NewInt(1),
+		Nonce:   1,
 	}
 
 	// Pre-load cs.storageState with the pre-SD slot values, simulating
@@ -477,12 +374,10 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	vm.Write(addr, state.StoragePath, slot1, ver, preSDValue1, true)
 	vm.Write(addr, state.StoragePath, slot2, ver, preSDValue2, true)
-	vm.Write(addr, state.IncarnationPath, accounts.NilKey, ver, original.Incarnation, true)
 	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
 	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: original.Incarnation, Version: ver},
 		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true, Version: ver},
 		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
 	}

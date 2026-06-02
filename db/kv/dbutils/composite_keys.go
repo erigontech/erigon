@@ -76,30 +76,20 @@ func GenerateStoragePlainKey(address common.Address, storageKey common.Hash) []b
 	return storagePlainKey
 }
 
-// AddrHash + incarnation + KeyHash
-// For contract storage
-func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
-	compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
+// AddrHash + KeyHash. Compact storage-key format used by the legacy MPT
+// path (eth_getProof / witness generation in execution/commitment/trie)
+// and by the modern E3 storage domain (kv.StorageDomain).
+func GenerateCompositeStorageKey(addressHash common.Hash, seckey common.Hash) []byte {
+	compositeKey := make([]byte, length.Hash+length.Hash)
 	copy(compositeKey, addressHash[:])
-	binary.BigEndian.PutUint64(compositeKey[length.Hash:], incarnation)
-	copy(compositeKey[length.Hash+length.Incarnation:], seckey[:])
+	copy(compositeKey[length.Hash:], seckey[:])
 	return compositeKey
 }
 
-func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.Hash) {
-	prefixLen := length.Hash + length.Incarnation
-	addrHash, inc := ParseStoragePrefix(compositeKey[:prefixLen])
-	var key common.Hash
-	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
-	return addrHash, inc, key
-}
-
-// AddrHash + incarnation + KeyHash
-// For contract storage (for plain state)
-
-func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {
+func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, common.Hash) {
 	var addrHash common.Hash
-	copy(addrHash[:], prefix[:length.Hash])
-	inc := binary.BigEndian.Uint64(prefix[length.Hash : length.Hash+length.Incarnation])
-	return addrHash, inc
+	copy(addrHash[:], compositeKey[:length.Hash])
+	var key common.Hash
+	copy(key[:], compositeKey[length.Hash:length.Hash+length.Hash])
+	return addrHash, key
 }

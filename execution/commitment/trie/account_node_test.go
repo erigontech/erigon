@@ -33,17 +33,15 @@ import (
 
 func TestGetAccount(t *testing.T) {
 	acc1 := &accounts.Account{
-		Nonce:       1,
-		Incarnation: 1,
-		Balance:     u256.U64(100),
-		Root:        EmptyRoot,
+		Nonce:   1,
+		Balance: u256.U64(100),
+		Root:    EmptyRoot,
 	}
 	acc2 := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        common.BytesToHash([]byte("0x1")),
-		CodeHash:    accounts.InternCodeHash(common.BytesToHash([]byte("0x01"))),
+		Nonce:    2,
+		Balance:  u256.U64(200),
+		Root:     common.BytesToHash([]byte("0x1")),
+		CodeHash: accounts.InternCodeHash(common.BytesToHash([]byte("0x01"))),
 	}
 	trie := newEmpty()
 	key1 := []byte("acc1")
@@ -69,11 +67,10 @@ func TestGetAccount(t *testing.T) {
 
 func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	acc := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        EmptyRoot,
-		CodeHash:    accounts.InternCodeHash(emptyState),
+		Nonce:    2,
+		Balance:  u256.U64(200),
+		Root:     EmptyRoot,
+		CodeHash: accounts.InternCodeHash(emptyState),
 	}
 
 	_, _, addrHash, err := generateAcc()

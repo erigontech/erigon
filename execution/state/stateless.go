@@ -222,10 +222,6 @@ func (s *Stateless) ReadAccountCodeSize(address accounts.Address) (codeSize int,
 	return 0, nil
 }
 
-func (s *Stateless) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	return 0, nil
-}
-
 // UpdateAccountData is a part of the StateWriter interface
 // This implementation registers the account update in the `accountUpdates` map
 func (s *Stateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
@@ -259,7 +255,7 @@ func (s *Stateless) DeleteAccount(address accounts.Address, original *accounts.A
 
 // UpdateAccountCode is a part of the StateWriter interface
 // This implementation adds the code to the codeMap to make it available for further accesses
-func (s *Stateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (s *Stateless) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	s.codeUpdates[codeHash.Value()] = code
 
 	if s.trace {
@@ -270,7 +266,7 @@ func (s *Stateless) UpdateAccountCode(address accounts.Address, incarnation uint
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (s *Stateless) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	addrValue := address.Value()
 	keyValue := key.Value()
 	addrHash, err := common.HashData(addrValue[:])
@@ -331,8 +327,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 
 // Finalize the execution of a block and computes the resulting state root
 func (s *Stateless) Finalize() common.Hash {
-	// New contracts are being created at these addresses. Therefore, we need to clear the storage items
-	// that might be remaining in the trie and figure out the next incarnations
+	// Newly-created contracts: clear any stale storage left in the trie at these addresses.
 	for addrHash := range s.created {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot

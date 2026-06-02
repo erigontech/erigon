@@ -21,13 +21,12 @@ func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Accou
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
-func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
-func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
-func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
-func (r *emptyReader) SetTrace(bool, string)                                   {}
-func (r *emptyReader) Trace() bool                                             { return false }
-func (r *emptyReader) TracePrefix() string                                     { return "" }
+func (r *emptyReader) HasStorage(accounts.Address) (bool, error)         { return false, nil }
+func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)  { return nil, nil }
+func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error) { return 0, nil }
+func (r *emptyReader) SetTrace(bool, string)                             {}
+func (r *emptyReader) Trace() bool                                       { return false }
+func (r *emptyReader) TracePrefix() string                               { return "" }
 
 // TestValueTiebreaker_BalancePath verifies that validation does not
 // invalidate a StorageRead when the versionMap Done value matches the
@@ -110,10 +109,6 @@ func TestValuesEqual(t *testing.T) {
 	// NoncePath
 	assert.True(t, valuesEqual(NoncePath, uint64(5), uint64(5)), "Same nonce")
 	assert.False(t, valuesEqual(NoncePath, uint64(5), uint64(6)), "Different nonce")
-
-	// IncarnationPath
-	assert.True(t, valuesEqual(IncarnationPath, uint64(1), uint64(1)), "Same incarnation")
-	assert.False(t, valuesEqual(IncarnationPath, uint64(1), uint64(2)), "Different incarnation")
 
 	// Nil values
 	assert.True(t, valuesEqual(BalancePath, nil, nil), "Both nil should be equal")
@@ -229,14 +224,13 @@ func TestTouchUpdates_Account(t *testing.T) {
 	writes := VersionedWrites{
 		{Address: addr, Path: BalancePath, Val: *uint256.NewInt(1000)},
 		{Address: addr, Path: NoncePath, Val: uint64(5)},
-		{Address: addr, Path: IncarnationPath, Val: uint64(1)},
 		{Address: addr, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
 	}
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
 
-	// All 4 fields merge into 1 key (same address)
+	// All 3 fields merge into 1 key (same address)
 	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
 }
 
@@ -286,7 +280,6 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 		// Account 1: balance + nonce + code
 		{Address: addr1, Path: BalancePath, Val: *uint256.NewInt(100)},
 		{Address: addr1, Path: NoncePath, Val: uint64(1)},
-		{Address: addr1, Path: IncarnationPath, Val: uint64(0)},
 		{Address: addr1, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{})},
 		{Address: addr1, Path: CodePath, Val: []byte{0x60, 0x00}},
 		// Account 2: storage write

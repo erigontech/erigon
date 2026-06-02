@@ -92,13 +92,6 @@ func (r *mapStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error)
 	return len(r.code[addr]), nil
 }
 
-func (r *mapStateReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
-	if a, ok := r.accounts[addr]; ok {
-		return a.Incarnation, nil
-	}
-	return 0, nil
-}
-
 func (r *mapStateReader) SetTrace(bool, string) {}
 func (r *mapStateReader) Trace() bool           { return false }
 func (r *mapStateReader) TracePrefix() string   { return "" }
@@ -267,9 +260,8 @@ func fAddr(name string) accounts.Address {
 
 func fMakeAccount(balance uint64, nonce uint64) *accounts.Account {
 	return &accounts.Account{
-		Balance:     *uint256.NewInt(balance),
-		Nonce:       nonce,
-		Incarnation: 1,
+		Balance: *uint256.NewInt(balance),
+		Nonce:   nonce,
 	}
 }
 
@@ -316,11 +308,9 @@ func simpleTransferScenario() *testFinalizeScenario {
 	collectorWrites := state.VersionedWrites{
 		{Address: sender, Path: state.BalancePath, Val: *newSenderBal},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: sender, Path: state.IncarnationPath, Val: uint64(1)},
 		{Address: sender, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
 		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal},
 		{Address: recipient, Path: state.NoncePath, Val: uint64(0)},
-		{Address: recipient, Path: state.IncarnationPath, Val: uint64(1)},
 		{Address: recipient, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
 	}
 
@@ -439,7 +429,6 @@ func senderIsCoinbaseScenario(t *testing.T, value uint64, preBlockCoinbaseBal ui
 	// to exercise the senderIsCoinbase discriminator.
 	collectorWrites := state.VersionedWrites{
 		{Address: coinbase, Path: state.NoncePath, Val: uint64(1)},
-		{Address: coinbase, Path: state.IncarnationPath, Val: uint64(1)},
 		{Address: coinbase, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
 	}
 
@@ -1630,8 +1619,6 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 		{Address: addr, Path: state.NoncePath, Val: uint64(1),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.IncarnationPath, Val: uint64(1),
-			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 		{Address: addr, Path: state.CodeHashPath, Val: codeHash,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}
@@ -1639,7 +1626,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 
 	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
-	// Should have CreateContractPath + all 4 account fields.
+	// Should have CreateContractPath + all 3 account fields.
 	// The empty balance should NOT cause deletion because CreateContractPath is present.
 	createCount := countPath(result, state.CreateContractPath)
 	balCount := countPath(result, state.BalancePath)

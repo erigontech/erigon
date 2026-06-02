@@ -62,16 +62,20 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, err
 	}
 
-	var acc accounts.Account
-
 	// Contract; search for creation tx; navigate forward on AccountsHistory/ChangeSets
 	//
 	// We traversing history Index - because it's cheaper than traversing History
 	// and probe History periodically. In result will have small range of blocks. For binary search or full-scan.
 	//
 	// popular contracts may have dozens of states changes due to ETH deposits/withdraw after contract creation,
-	// so it is optimal to search from the beginning even if the contract has multiple
-	// incarnations.
+	// so it is optimal to search from the beginning even if the contract has been
+	// SELFDESTRUCT'd and re-created multiple times.
+	// Walk the full history index forward, tracking the latest empty→non-empty
+	// boundary. For contracts that have been SELFDESTRUCT'd and redeployed,
+	// only the LAST such boundary corresponds to the current bytecode's
+	// creation — earlier ones are previous, now-defunct deploys. The bracket
+	// [prevTxnID, nextTxnID] is reset whenever a probe goes back to empty,
+	// so the trailing binary search narrows to the current creation.
 	var prevTxnID, nextTxnID uint64
 	it, err := tx.IndexRange(kv.AccountsHistoryIdx, addr[:], 0, -1, order.Asc, kv.Unlim)
 	if err != nil {
@@ -85,7 +89,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		}
 
 		if i%4096 != 0 { // probe history periodically, not on every change
-			nextTxnID = txnID
+			if nextTxnID == 0 {
+				nextTxnID = txnID
+			}
 			continue
 		}
 
@@ -100,25 +106,26 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			log.Error("[rpc] Unexpected error", "err", err)
 			return nil, err
 		}
-		if len(v) == 0 { // creation, but maybe not our Incarnation
+		if len(v) == 0 {
+			// Account did not exist as of this probe — any previously-seen
+			// non-empty probe was for a now-destroyed deploy. Reset the
+			// bracket and keep walking.
 			prevTxnID = txnID
+			nextTxnID = 0
 			continue
 		}
 
-		if err := accounts.DeserialiseV3(&acc, v); err != nil {
-			return nil, err
-		}
-		// Found the shard where the incarnation change happens; ignore all next index values
-		if acc.Incarnation >= plainStateAcc.Incarnation {
+		// Non-empty: candidate upper bound. Keep walking — a later empty
+		// probe would invalidate this and re-set the search range to the
+		// post-recreate boundary.
+		if nextTxnID == 0 {
 			nextTxnID = txnID
-			break
 		}
-		prevTxnID = txnID
 	}
 
-	// The sort.Search function finds the first block where the incarnation has
-	// changed to the desired one, so we get the previous block from the bitmap;
-	// however if the creationTxnID block is already the first one from the bitmap, it means
+	// The sort.Search function finds the first block where the contract appears
+	// (post-creation), so we get the previous block from the bitmap; however if
+	// the creationTxnID block is already the first one from the bitmap, it means
 	// the block we want is the max block from the previous shard.
 	var creationTxnID uint64
 	var searchErr error
@@ -126,8 +133,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	if nextTxnID == 0 {
 		nextTxnID = prevTxnID + 1
 	}
-	// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
-	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
+	// Binary search in [prevTxnID, nextTxnID] range; get first block where the
+	// contract code is non-empty (= post-creation).
+	// Can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
@@ -140,15 +148,6 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			return false
 		}
 		if len(v) == 0 {
-			creationTxnID = max(creationTxnID, txnID)
-			return false
-		}
-
-		if err := accounts.DeserialiseV3(&acc, v); err != nil {
-			searchErr = err
-			return false
-		}
-		if acc.Incarnation < plainStateAcc.Incarnation {
 			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}

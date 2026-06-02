@@ -29,13 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-const (
-	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
-	FirstContractIncarnation = 1
-	//NonContractIncarnation incarnation for non contracts
-	NonContractIncarnation = 0
-)
-
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
@@ -43,7 +36,6 @@ type StateReader interface {
 	HasStorage(address accounts.Address) (bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
 	ReadAccountCodeSize(address accounts.Address) (int, error)
-	ReadAccountIncarnation(address accounts.Address) (uint64, error)
 
 	SetTrace(trace bool, tracePrefix string)
 	Trace() bool
@@ -57,9 +49,9 @@ type HistoricalStateReader interface {
 
 type StateWriter interface {
 	UpdateAccountData(address accounts.Address, original, account *accounts.Account) error
-	UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error
+	UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error
 	DeleteAccount(address accounts.Address, original *accounts.Account) error
-	WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error
+	WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error
 	CreateContract(address accounts.Address) error
 }
 
@@ -78,7 +70,7 @@ func NewNoopWriter(trace ...bool) *NoopWriter {
 
 func (nw *NoopWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if nw.trace {
-		fmt.Printf("acc %x: {Balance: %s, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("acc %x: {Balance: %s, Nonce: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.CodeHash)
 	}
 	return nil
 }
@@ -90,14 +82,14 @@ func (nw *NoopWriter) DeleteAccount(address accounts.Address, original *accounts
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(address accounts.Address, codeHash accounts.CodeHash, code []byte) error {
 	if nw.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -133,10 +125,9 @@ func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (*NoopReader) HasStorage(address accounts.Address) (bool, error)               { return false, nil }
-func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)        { return nil, nil }
-func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)       { return 0, nil }
-func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }
+func (*NoopReader) HasStorage(address accounts.Address) (bool, error)         { return false, nil }
+func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)  { return nil, nil }
+func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
 
 func (*NoopReader) SetTrace(_ bool, _ string) {}
 func (r *NoopReader) Trace() bool             { return false }
