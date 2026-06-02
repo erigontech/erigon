@@ -246,6 +246,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
 
 	reopenedSnapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
 	require.NoError(t, reopenedSnapshots.OpenFolder())
 	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
 	requireSegmentFilesExist(t, tmpDir, ver, 1, 1000, snaptype2.Enums.Transactions)

@@ -943,14 +943,14 @@ func TestViewPinsGeneration(t *testing.T) {
 	require.Same(oldSrc1, pinned[1].src)
 }
 
-// TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that a live View does
-// not crash when OpenFolder re-opens after a merge. The crash was originally
-// caused by closeWhatNotInList closing sub-segments that a View still held.
-// Two protections now prevent this:
-//  1. OpenFolder uses allTypedSegments (no NoOverlaps), so sub-segment files
-//     remain in the protect list and closeWhatNotInList does not close them.
-//  2. PR #21545 added a refcount guard in closeWhatNotInList that skips
-//     segments held by a live View even if they are in the close set.
+// TestCloseWhatNotInListVsLiveViewDoesNotCrash reproduces a use-after-close in
+// the snapshot reopen path. After a merge writes a covering segment, the old
+// sub-segment files remain on disk but TypedSegments -> NoOverlaps drops them
+// from the listing. OpenFolder then hands that list to closeWhatNotInList,
+// which close()s those sub-segments — ignoring that a live View still holds a
+// refcount on them. The View's later Close hits closeAndRemoveFiles on the
+// now-nil decompressor and crashes. This is pure snapshotsync (no merge code),
+// so it fails on main.
 func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
