@@ -32,6 +32,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 )
 
 const (
@@ -44,26 +45,31 @@ const (
 )
 
 const (
-	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MaxChunkSize it sets the fallback
-	// multi-chunk ceiling used when the caller provides no byte budget.
+	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MaxChunkSize it sets the absolute
+	// multi-chunk ceiling (maxMultiChunkResponse).
 	maxResponseChunks = 1024
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxResponseBodySize is the byte ceiling the handler buffers for a response on the given
-// topic: single-chunk protocols get a tight fixed cap; multi-chunk (by_range / by_root /
-// by_head) responses use the caller's on-wire byte budget, falling back to
-// MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE when none is set.
+// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the fallback
+// when no caller budget is set, and the backstop any provided budget is clamped to so a
+// miscomputed or overflowed budget can't make the handler buffer more than a spec-maximal response.
+var maxMultiChunkResponse = int64(communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks))
+
+// maxResponseBodySize is the byte ceiling the handler buffers for a response on the given topic:
+// single-object protocols get a tight fixed cap; multi-chunk protocols (per IsMultiChunkProtocol)
+// use the caller's on-wire byte budget, clamped to maxMultiChunkResponse and falling back to it
+// when no budget is set.
 func maxResponseBodySize(topic string, maxBytes int64) int64 {
-	if !strings.Contains(topic, "_by_range") && !strings.Contains(topic, "_by_root") && !strings.Contains(topic, "_by_head") {
+	if !communication.IsMultiChunkProtocol(topic) {
 		return maxSingleObjectResponse
 	}
-	if maxBytes > 0 {
+	if maxBytes > 0 && maxBytes < maxMultiChunkResponse {
 		return maxBytes
 	}
-	return maxResponseChunks * int64(clparams.MaxChunkSize)
+	return maxMultiChunkResponse
 }
 
 // Do performs an http request against the http handler.

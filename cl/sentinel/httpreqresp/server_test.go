@@ -30,61 +30,35 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 )
 
 func TestMaxResponseBodySize(t *testing.T) {
-	// Keep both lists exhaustive over communication/topics.go: a multi-chunk protocol
-	// missing from multiChunk (or unrecognised by maxResponseBodySize) is silently
-	// capped at the single-object ceiling and its responses truncate.
-	singleObject := []string{
-		communication.PingProtocolV1,
-		communication.GoodbyeProtocolV1,
-		communication.MetadataProtocolV1,
-		communication.MetadataProtocolV2,
-		communication.MetadataProtocolV3,
-		communication.StatusProtocolV1,
-		communication.StatusProtocolV2,
-		communication.LightClientOptimisticUpdateProtocolV1,
-		communication.LightClientFinalityUpdateProtocolV1,
-		communication.LightClientBootstrapProtocolV1,
-	}
-	multiChunk := []string{
-		communication.BeaconBlocksByRangeProtocolV1,
-		communication.BeaconBlocksByRangeProtocolV2,
-		communication.BeaconBlocksByRootProtocolV1,
-		communication.BeaconBlocksByRootProtocolV2,
-		communication.BeaconBlocksByHeadProtocolV1,
-		communication.BlobSidecarByRootProtocolV1,
-		communication.BlobSidecarByRangeProtocolV1,
-		communication.DataColumnSidecarsByRootProtocolV1,
-		communication.DataColumnSidecarsByRangeProtocolV1,
-		communication.ExecutionPayloadEnvelopesByRangeProtocolV1,
-		communication.ExecutionPayloadEnvelopesByRootProtocolV1,
-		communication.LightClientUpdatesByRangeProtocolV1,
-	}
-	ceiling := int64(maxResponseChunks) * int64(clparams.MaxChunkSize)
+	// Drive the cap off communication.AllProtocols, the single source of truth for response-size
+	// classification, so a protocol added there is automatically covered here.
+	ceiling := maxMultiChunkResponse
 	const budget = 5 * 1024 * 1024
-	for _, topic := range singleObject {
-		// Single-object protocols ignore the caller's byte budget.
-		require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(topic, 0),
-			"single-object protocol %s must get the tight ceiling", topic)
-		require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(topic, budget),
-			"single-object protocol %s must ignore the byte budget", topic)
-	}
-	for _, topic := range multiChunk {
+	for _, p := range communication.AllProtocols {
+		if !p.MultiChunk {
+			// Single-object protocols ignore the caller's byte budget.
+			require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(p.ID, 0),
+				"single-object protocol %s must get the tight cap", p.ID)
+			require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(p.ID, budget),
+				"single-object protocol %s must ignore the byte budget", p.ID)
+			continue
+		}
 		// No budget falls back to the absolute ceiling.
-		require.EqualValuesf(t, ceiling, maxResponseBodySize(topic, 0),
-			"multi-chunk protocol %s with no budget must get the ceiling", topic)
-		// The caller's byte budget is honored as-is (not clamped): it's an internal, wire-sized,
-		// already-bounded value, so even one above the fallback ceiling passes through.
-		require.EqualValuesf(t, budget, maxResponseBodySize(topic, budget),
-			"multi-chunk protocol %s must honor the caller's byte budget", topic)
-		require.Lessf(t, maxResponseBodySize(topic, budget), ceiling,
-			"multi-chunk protocol %s with a small budget must be tighter than the ceiling", topic)
-		require.EqualValuesf(t, ceiling+1, maxResponseBodySize(topic, ceiling+1),
-			"multi-chunk protocol %s must not clamp the caller's byte budget", topic)
+		require.EqualValuesf(t, ceiling, maxResponseBodySize(p.ID, 0),
+			"multi-chunk protocol %s with no budget must get the ceiling", p.ID)
+		// A budget below the ceiling is honored as-is (an internal, wire-sized value).
+		require.EqualValuesf(t, budget, maxResponseBodySize(p.ID, budget),
+			"multi-chunk protocol %s must honor the caller's byte budget", p.ID)
+		require.Lessf(t, maxResponseBodySize(p.ID, budget), ceiling,
+			"multi-chunk protocol %s with a small budget must be tighter than the ceiling", p.ID)
+		// A budget above the ceiling is clamped to it, so a miscomputed or overflowed budget
+		// can't make the handler buffer more than a spec-maximal response.
+		require.EqualValuesf(t, ceiling, maxResponseBodySize(p.ID, ceiling+1),
+			"multi-chunk protocol %s must clamp a budget above the ceiling", p.ID)
 	}
 }
 
