@@ -1162,8 +1162,8 @@ var (
 	}
 	ExecWorkersFlag = cli.IntFlag{
 		Name:  "exec.workers",
-		Usage: "Parallel executor worker count (equivalent to EXEC3_WORKERS). Default: half the number of CPU cores, other half reserved for snapshots build/merge/prune.",
-		Value: runtime.NumCPU() / 2,
+		Usage: "Parallel executor worker count (equivalent to EXEC3_WORKERS). Default: NumCPU − 2 (clamped to ≥ 2), leaving 2 cores for snapshots build/merge/prune + Go runtime.",
+		Value: defaultExecWorkers(),
 	}
 	ExecSerialFlag = cli.BoolFlag{
 		Name:  "exec.serial",
@@ -1186,6 +1186,24 @@ var (
 		Value: false,
 	}
 )
+
+// defaultExecWorkers picks the default for --exec.workers.
+//
+// Rationale: a matched-pair rig measurement (issue #21446, mainnet tip,
+// each EL pinned to 4 P-cores / 8 hyperthreads) showed that the previous
+// NumCPU/2 default was no better than serial at p50 and only modestly
+// better at p99, while NumCPU − 1 was meaningfully better than serial
+// (p99 −113 ms, mean −17 ms). NumCPU − 2 sits between the two: it picks
+// up most of the parallel-execution win while still leaving room for the
+// Go runtime and the snapshots build/merge/prune backstop. The clamp
+// keeps small machines (NumCPU ≤ 3) usable.
+func defaultExecWorkers() int {
+	n := runtime.NumCPU() - 2
+	if n < 2 {
+		return 2
+	}
+	return n
+}
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
 
