@@ -74,16 +74,17 @@ func TestMaxResponseBodySize(t *testing.T) {
 			"single-object protocol %s must ignore the byte budget", topic)
 	}
 	for _, topic := range multiChunk {
-		// An unknown (0) or oversized budget falls back to the absolute ceiling.
+		// No budget falls back to the absolute ceiling.
 		require.EqualValuesf(t, ceiling, maxResponseBodySize(topic, 0),
 			"multi-chunk protocol %s with no budget must get the ceiling", topic)
-		require.EqualValuesf(t, ceiling, maxResponseBodySize(topic, ceiling+1),
-			"multi-chunk protocol %s with an oversized budget must clamp to the ceiling", topic)
-		// A concrete budget below the ceiling is honored as-is.
+		// The caller's byte budget is honored as-is (not clamped): it's an internal, wire-sized,
+		// already-bounded value, so even one above the fallback ceiling passes through.
 		require.EqualValuesf(t, budget, maxResponseBodySize(topic, budget),
 			"multi-chunk protocol %s must honor the caller's byte budget", topic)
 		require.Lessf(t, maxResponseBodySize(topic, budget), ceiling,
 			"multi-chunk protocol %s with a small budget must be tighter than the ceiling", topic)
+		require.EqualValuesf(t, ceiling+1, maxResponseBodySize(topic, ceiling+1),
+			"multi-chunk protocol %s must not clamp the caller's byte budget", topic)
 	}
 }
 

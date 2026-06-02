@@ -44,26 +44,26 @@ const (
 )
 
 const (
-	// maxResponseChunks is MAX_REQUEST_BLOCKS; with maxChunkSize it sets the absolute
-	// multi-chunk ceiling used when the caller's byte budget is absent or implausibly large.
+	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MaxChunkSize it sets the fallback
+	// multi-chunk ceiling used when the caller provides no byte budget.
 	maxResponseChunks = 1024
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxResponseBodySize is the byte ceiling the handler will buffer for a response on the
-// given topic. Single-chunk protocols get a tight fixed cap; by_range / by_root / by_head
-// responses use the caller's byte budget, clamped to the absolute multi-chunk ceiling.
+// maxResponseBodySize is the byte ceiling the handler buffers for a response on the given
+// topic: single-chunk protocols get a tight fixed cap; multi-chunk (by_range / by_root /
+// by_head) responses use the caller's on-wire byte budget, falling back to
+// MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE when none is set.
 func maxResponseBodySize(topic string, maxBytes int64) int64 {
 	if !strings.Contains(topic, "_by_range") && !strings.Contains(topic, "_by_root") && !strings.Contains(topic, "_by_head") {
 		return maxSingleObjectResponse
 	}
-	ceiling := maxResponseChunks * int64(clparams.MaxChunkSize)
-	if maxBytes <= 0 || maxBytes > ceiling {
-		return ceiling
+	if maxBytes > 0 {
+		return maxBytes
 	}
-	return maxBytes
+	return maxResponseChunks * int64(clparams.MaxChunkSize)
 }
 
 // Do performs an http request against the http handler.
