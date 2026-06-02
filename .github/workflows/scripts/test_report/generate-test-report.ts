@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 const acceptedWorkflows = [
-    '.github/workflows/ci-gate.yml',
+    //'.github/workflows/ci-gate.yml',
     '.github/workflows/qa-clean-exit-block-downloading.yml',
     '.github/workflows/qa-clean-exit-snapshot-downloading.yml',
     '.github/workflows/qa-constrained-tip-tracking.yml',
@@ -156,6 +156,43 @@ function mapChain(chain: string | null): string {
     return chain;
 }
 
+// Chain-related words referenced by mapChain — removed from the job name when a chain
+// is detected, since the chain emoji already conveys them.
+const CHAIN_WORDS = new Set([
+    'bor', 'mainnet', 'polygon', 'lighthouse', 'prysm', 'ethereum',
+    'sepolia', 'hoodi', 'amoy', 'chiado', 'gnosis',
+    'externalcl', 'test', 'integ', 'benchmark',
+]);
+
+// Transforms a job name by replacing chain references with the mapChain emoji and
+// dropping words already present in the workflow name (to avoid redundancy with the
+// Test column). Words not in either category are preserved.
+function transformJobName(jobName: string, workflowName: string): string {
+    let chainEmoji = '';
+    const jobMapped = mapChain(jobName);
+    if (jobMapped !== jobName) {
+        chainEmoji = jobMapped;
+    } else {
+        const wfMapped = mapChain(workflowName);
+        if (wfMapped !== workflowName) chainEmoji = wfMapped;
+    }
+
+    const tokenize = (s: string) => s.split(/[^a-zA-Z0-9]+/).filter(w => w.length > 0);
+    const workflowWords = new Set(tokenize(workflowName).map(w => w.toLowerCase()));
+
+    const remaining: string[] = [];
+    for (const token of tokenize(jobName)) {
+        const lower = token.toLowerCase();
+        if (workflowWords.has(lower)) continue;
+        if (chainEmoji && CHAIN_WORDS.has(lower)) continue;
+        remaining.push(token);
+    }
+
+    return chainEmoji
+        ? [chainEmoji, ...remaining].join(' ').trim()
+        : remaining.join(' ').trim();
+}
+
 // Removes 'QA' and chain information from a job name
 function cleanJobName(jobName: string): string {
     return jobName
@@ -303,11 +340,9 @@ export async function run() {
         for (const workflowSummary of summaries) {
             for (const jobSummary of workflowSummary.jobs) {
 
-                // Map the job name to a more readable format
-                let jobName = mapChain(workflowSummary.name)
-                if (jobName == workflowSummary.name) {
-                    jobName = mapChain(jobSummary.name);
-                }
+                // Transform the job name: replace chain refs with mapChain output,
+                // drop words shared with the workflow name, keep the rest.
+                const jobName = transformJobName(jobSummary.name, workflowSummary.name);
 
                 // order the results by date
                 if (jobSummary.results.length > 0) {
