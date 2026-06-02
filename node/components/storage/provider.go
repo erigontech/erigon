@@ -1021,6 +1021,20 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: orchestrator.SetPostIndexed: %w", err)
 		}
 
+		// Tell the orchestrator to wait for the synthetic
+		// bootstrap-from-preverified manifest before firing
+		// InitialStateReady. backend.go calls
+		// p.BootstrapFromPreverified() later in startup (after all bus
+		// subscribers are wired); without this gate, the orchestrator's
+		// inventory ChangeSet watcher fires on its first tick with
+		// phase1Files empty and postIndexed runs against a partial
+		// snapshot view. Live-rig 2026-06-02 surfaced this as exec
+		// failing with "nil block N" against blockReader.frozenBlocks
+		// that was lower than the on-disk file set.
+		if config.Snapshot.BootstrapFromPreverified {
+			p.Orchestrator.MarkAwaitingBootstrap()
+		}
+
 		if err := p.Orchestrator.Start(ctx); err != nil {
 			p.LifecycleDriver.Stop() // unwind partial init
 			return fmt.Errorf("storage: start orchestrator: %w", err)

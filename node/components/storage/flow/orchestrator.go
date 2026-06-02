@@ -166,6 +166,26 @@ type Orchestrator struct {
 	// preserving pre-(C) behaviour.
 	phase1Files map[string]struct{}
 
+	// awaitingBootstrap blocks tryFireInitialStateReady until the
+	// bootstrap-from-preverified synthetic manifest has been processed.
+	// Set via MarkAwaitingBootstrap before Start when the Provider was
+	// configured with --snap.bootstrap-from-preverified. Cleared by
+	// onPeerManifestReceived when it sees PeerID == "bootstrap-preverified".
+	//
+	// Closes the live-rig 2026-06-02 race: without this gate, the
+	// inventory ChangeSet watcher (started in Start) fires
+	// tryFireInitialStateReady on the very first ChangeSet — before
+	// BootstrapFromPreverified has had a chance to publish its
+	// synthetic manifest. phase1Files is empty in that window so the
+	// gate would open with phase1_total=0; postIndexed would then run
+	// against a partial inventory view (e.g. blockReader.frozenBlocks
+	// = 2,899,999 instead of 2,935,999), and execution would fail
+	// with "nil block N" on the very next block after the partial
+	// view's tip.
+	//
+	// Read/written under peerMu (same as stateReadyFired).
+	awaitingBootstrap bool
+
 	// postIndexed is invoked once after every name in phase1Files has
 	// reached LifecycleIndexed in the inventory AND statePending == 0
 	// — i.e. all phase-1 downloads complete AND their accessors built.
@@ -504,6 +524,18 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	o.requestSimpleGaps(e.Salt, e.PeerID, true /* phase1 */)
 	o.requestSimpleGaps(e.Caplin, e.PeerID, false /* phase1 */)
 
+	// Clear awaitingBootstrap when the bootstrap-from-preverified
+	// synthetic manifest finishes processing — by this point
+	// phase1Files has been populated, so a subsequent gate evaluation
+	// will see the right "phase1 not all Indexed" state instead of
+	// the empty-and-firing-prematurely state. The PeerID sentinel
+	// is set by Provider.bootstrapFromPreverified.
+	if e.PeerID == "bootstrap-preverified" {
+		o.peerMu.Lock()
+		o.awaitingBootstrap = false
+		o.peerMu.Unlock()
+	}
+
 	// If the state phase has nothing pending and hasn't fired yet, open
 	// phase 2 now. Handles the all-local and blocks-only cases.
 	o.peerMu.Lock()
@@ -512,6 +544,22 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	if shouldFire {
 		o.tryFireInitialStateReady(o.ctx)
 	}
+}
+
+// MarkAwaitingBootstrap tells the orchestrator that a synthetic
+// bootstrap-from-preverified manifest will arrive shortly and that
+// tryFireInitialStateReady must not fire until that manifest has been
+// processed. Must be called BEFORE Start — calling after Start is
+// allowed but leaves a race window equal to the time between Start
+// and the call.
+//
+// The orchestrator clears the flag automatically when it sees a
+// PeerManifestReceived with PeerID == "bootstrap-preverified" (the
+// sentinel set by Provider.bootstrapFromPreverified).
+func (o *Orchestrator) MarkAwaitingBootstrap() {
+	o.peerMu.Lock()
+	o.awaitingBootstrap = true
+	o.peerMu.Unlock()
 }
 
 // requestSimpleGaps emits DownloadRequested for non-ranged peer entries
@@ -724,6 +772,11 @@ func isBlockHeader(name string) bool {
 func (o *Orchestrator) tryFireInitialStateReady(ctx context.Context) {
 	o.peerMu.Lock()
 	if o.stateReadyFired {
+		o.peerMu.Unlock()
+		return
+	}
+	if o.awaitingBootstrap {
+		o.log.Debug("[flow] tryFireInitialStateReady: blocked", "reason", "awaitingBootstrap")
 		o.peerMu.Unlock()
 		return
 	}
