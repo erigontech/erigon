@@ -429,12 +429,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				// races (PR #21536 hive Re-Org Back into Canonical Chain). Logs
 				// the change-set address count and sample addresses; compare
 				// across runs to find which block + addresses diverge.
-				cs := pe.currentChangeSet
-				accCount := cs.Diffs[kv.AccountsDomain].Len()
-				stoCount := cs.Diffs[kv.StorageDomain].Len()
-				codeCount := cs.Diffs[kv.CodeDomain].Len()
+				accCount, stoCount, codeCount := 0, 0, 0
 				var sampleAddrs []string
-				if cs != nil {
+				if cs := pe.currentChangeSet; cs != nil {
+					accCount = cs.Diffs[kv.AccountsDomain].Len()
+					stoCount = cs.Diffs[kv.StorageDomain].Len()
+					codeCount = cs.Diffs[kv.CodeDomain].Len()
 					for _, e := range cs.Diffs[kv.AccountsDomain].GetDiffSet() {
 						if len(sampleAddrs) >= 10 {
 							break
