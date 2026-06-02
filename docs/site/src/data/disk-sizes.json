@@ -1,5 +1,5 @@
 {
-  "ci_last_updated": "2025-09-01",
+  "ci_last_updated": "2026-06-02",
   "networks": {
     "mainnet": {
       "archive": {
@@ -9,16 +9,16 @@
         "source": "manual"
       },
       "full": {
-        "bytes": null,
-        "display": "920 GB",
-        "measured_at": "2025-09-01",
-        "source": "manual"
+        "bytes": 2025696615783,
+        "display": "2.03 TB",
+        "measured_at": "2026-06-02",
+        "source": "ci"
       },
       "minimal": {
-        "bytes": null,
-        "display": "350 GB",
-        "measured_at": "2025-09-01",
-        "source": "manual"
+        "bytes": 414818659805,
+        "display": "414.82 GB",
+        "measured_at": "2026-06-02",
+        "source": "ci"
       }
     },
     "gnosis": {
@@ -29,16 +29,16 @@
         "source": "manual"
       },
       "full": {
-        "bytes": null,
-        "display": "462 GB",
-        "measured_at": "2025-09-01",
-        "source": "manual"
+        "bytes": 657108940182,
+        "display": "657.11 GB",
+        "measured_at": "2026-06-02",
+        "source": "ci"
       },
       "minimal": {
-        "bytes": null,
-        "display": "128 GB",
-        "measured_at": "2025-09-01",
-        "source": "manual"
+        "bytes": 208469972033,
+        "display": "208.47 GB",
+        "measured_at": "2026-06-02",
+        "source": "ci"
       }
     }
   }
