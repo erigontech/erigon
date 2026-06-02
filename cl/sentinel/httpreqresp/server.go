@@ -186,11 +186,21 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
 		// this is technically incorrect, and more aggressive than the network might like.
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
-		// copy the data now to the stream
-		// the first write to w will call code 200, so we do not need to
-		_, err = io.Copy(w, io.LimitReader(stream, maxResponseBodySize(topic, maxBytes)))
+		// Buffer up to the cap (plus one byte to detect overflow): a response over the cap is
+		// rejected with 413 rather than silently truncated and returned as 200.
+		limit := maxResponseBodySize(topic, maxBytes)
+		respBody, err := io.ReadAll(io.LimitReader(stream, limit+1))
 		if err != nil {
 			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if int64(len(respBody)) > limit {
+			http.Error(w, "Response Exceeds Cap: topic="+topic, http.StatusRequestEntityTooLarge)
+			return
+		}
+		// the first write to w will call code 200
+		if _, err := w.Write(respBody); err != nil {
+			http.Error(w, "Writing Stream Response: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
