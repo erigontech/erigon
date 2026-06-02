@@ -1487,6 +1487,16 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 	panic("invalid version")
 }
 
+// MaxBlobsPerBlockUpperBound returns the largest blobs-per-block limit across every fork
+// and BPO schedule entry, so it safely upper-bounds the blob count of any block.
+func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
+	m := max(b.MaxBlobsPerBlock, b.MaxBlobsPerBlockElectra)
+	for _, p := range b.BlobSchedule {
+		m = max(m, p.MaxBlobsPerBlock)
+	}
+	return m
+}
+
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
 	switch v {
 	case DenebVersion:

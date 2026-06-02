@@ -96,8 +96,8 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
-	if req.MaxResponseChunks > 0 {
-		httpReq.Header.Set(httpreqresp.MaxResponseChunksHeader, strconv.FormatUint(req.MaxResponseChunks, 10))
+	if req.MaxResponseBytes > 0 {
+		httpReq.Header.Set(httpreqresp.MaxResponseBytesHeader, strconv.FormatUint(req.MaxResponseBytes, 10))
 	}
 	// for now this can't actually error. in the future, it can due to a network error
 	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
@@ -185,8 +185,9 @@ func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *senti
 		return nil, err
 	}
 	req := &sentinelproto.RequestData{
-		Data:  reqWithPeer.Data,
-		Topic: reqWithPeer.Topic,
+		Data:             reqWithPeer.Data,
+		Topic:            reqWithPeer.Topic,
+		MaxResponseBytes: reqWithPeer.MaxResponseBytes,
 	}
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
