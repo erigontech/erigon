@@ -40,27 +40,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func UsesBorEngine(chainConfig *chain.Config) bool {
-	if chainConfig == nil || chainConfig.Bor == nil {
-		return false
-	}
-	if borConfig, ok := chainConfig.Bor.(*borcfg.BorConfig); ok {
-		return borConfig.ValidatorContract != ""
-	}
-	return true
-}
-
-func ActiveRulesName(chainConfig *chain.Config) chain.RulesName {
-	switch {
-	case chainConfig != nil && chainConfig.Aura != nil:
-		return chain.AuRaRules
-	case UsesBorEngine(chainConfig):
-		return chain.BorRules
-	default:
-		return chain.EtHashRules
-	}
-}
-
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
 	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
@@ -109,7 +88,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 		// If Matic bor consensus is requested, set it up
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
 		// Then, bor != nil will also be enabled for ethash. Only enable Bor for real if there is a validator contract present.
-		if ActiveRulesName(chainConfig) == chain.BorRules {
+		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
 			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
 			eng = bor.New(chainConfig, blockReader, spanner, stateReceiver, logger, polygonBridge, heimdallService)
@@ -130,12 +109,11 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 	var consensusConfig any
 
-	switch ActiveRulesName(chainConfig) {
-	case chain.AuRaRules:
+	if chainConfig.Aura != nil {
 		consensusConfig = chainConfig.Aura
-	case chain.BorRules:
+	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
-	default:
+	} else {
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake
 		consensusConfig = &ethashCfg
