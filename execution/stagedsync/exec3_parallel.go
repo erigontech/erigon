@@ -427,17 +427,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				}
 				// Extra diagnostic context to track down CI-only wrong-trie-root
 				// races (PR #21536 hive Re-Org Back into Canonical Chain). Dump
-				// ZeroAddr (the test's hot recipient) and coinbase final state
-				// from the validation SD so we can compare build vs validate.
+				// ZeroAddr balance + nonce — hot recipient for 50 txs/block.
+				// Compare across runs to confirm OCC lost-write hypothesis.
 				zeroAddr := make([]byte, 20)
 				zeroAcc, _, _ := pe.rs.Domains().GetLatest(kv.AccountsDomain, rwTx, zeroAddr)
-				var cb common.Address
-				if lastBlockResult.Header != nil {
-					cb = lastBlockResult.Header.Coinbase
+				var zaNonce uint64
+				var zaBal uint256.Int
+				if len(zeroAcc) > 0 {
+					var a accounts.Account
+					if err := accounts.DeserialiseV3(&a, zeroAcc); err == nil {
+						zaNonce = a.Nonce
+						zaBal = a.Balance
+					}
 				}
-				cbAcc, _, _ := pe.rs.Domains().GetLatest(kv.AccountsDomain, rwTx, cb[:])
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v) zeroAddr=%x coinbase=%x cbAcc=%x",
-					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err, zeroAcc, cb[:], cbAcc))
+				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v) zeroAddr_bal=%s zeroAddr_nonce=%d zeroAddr_raw=%x",
+					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err, zaBal.Dec(), zaNonce, zeroAcc))
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}
