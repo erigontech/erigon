@@ -18,7 +18,6 @@ package rpchelper
 
 import (
 	"errors"
-	"math"
 	"testing"
 	"time"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -48,17 +48,11 @@ func createLog() *remoteproto.SubscribeLogsReply {
 }
 
 func appliedLogsReply() *remoteproto.SubscribeLogsReply {
-	return &remoteproto.SubscribeLogsReply{
-		BlockNumber: math.MaxUint64,
-		LogIndex:    math.MaxUint64,
-	}
+	return filterack.LogsReply()
 }
 
 func appliedReceiptsReply() *remoteproto.SubscribeReceiptsReply {
-	return &remoteproto.SubscribeReceiptsReply{
-		BlockNumber:      math.MaxUint64,
-		TransactionIndex: math.MaxUint64,
-	}
+	return filterack.ReceiptsReply()
 }
 
 var (
@@ -968,6 +962,97 @@ func TestFilters_LateAppliedAckDoesNotSatisfyNextUpdate(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected second update to finish after matching applied ack")
+	}
+}
+
+func TestFilters_AppliedAckConcurrentWithTimeoutDoesNotFailUpdate(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.filterUpdateAckTimeout = 10 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() {
+		done <- f.waitForFilterUpdateApplied("receipts", f.receiptsFilterAppliedAck, &f.receiptsFilterAppliedCount, &f.receiptsFilterUpdateCount, &f.receiptsUpdateMu, func() error {
+			return nil
+		})
+	}()
+
+	deadline := time.After(time.Second)
+	for f.receiptsFilterUpdateCount.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("expected receipts filter update count to advance")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	f.receiptsFilterAppliedCount.Store(1)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected concurrently applied receipts filter update to succeed, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected receipts filter update to finish")
+	}
+}
+
+func TestFilters_LogsRequestorReadySendsCurrentFilterWithoutPendingFlag(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	_, _ = f.SubscribeLogs(1, filters.FilterCriteria{
+		Addresses: []common.Address{address1},
+		Topics:    [][]common.Hash{{topic1}},
+	})
+	f.pendingLogsUpdate.Store(false)
+
+	var sent *remoteproto.LogsFilterRequest
+	err := f.onLogsRequestorReady(func(req *remoteproto.LogsFilterRequest) error {
+		sent = req
+		f.OnNewLogs(appliedLogsReply())
+		return nil
+	}, log.New())
+	if err != nil {
+		t.Fatalf("expected logs ready refresh to succeed, got %v", err)
+	}
+	if sent == nil {
+		t.Fatal("expected logs ready refresh to send current filter")
+	}
+	if len(sent.Addresses) != 1 || gointerfaces.ConvertH160toAddress(sent.Addresses[0]) != address1 {
+		t.Fatalf("expected logs ready refresh to include subscribed address, got %v", sent.Addresses)
+	}
+	if len(sent.Topics) != 1 || gointerfaces.ConvertH256ToHash(sent.Topics[0]) != topic1 {
+		t.Fatalf("expected logs ready refresh to include subscribed topic, got %v", sent.Topics)
+	}
+}
+
+func TestFilters_ReceiptsRequestorReadySendsCurrentFilterWithoutPendingFlag(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	_, _ = f.SubscribeReceipts(1, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{txHash1}})
+	f.pendingReceiptsUpdate.Store(false)
+
+	var sent *remoteproto.ReceiptsFilterRequest
+	err := f.onReceiptsRequestorReady(func(req *remoteproto.ReceiptsFilterRequest) error {
+		sent = req
+		f.OnReceipts(appliedReceiptsReply())
+		return nil
+	}, log.New())
+	if err != nil {
+		t.Fatalf("expected receipts ready refresh to succeed, got %v", err)
+	}
+	if sent == nil {
+		t.Fatal("expected receipts ready refresh to send current filter")
+	}
+	if len(sent.TransactionHashes) != 1 || gointerfaces.ConvertH256ToHash(sent.TransactionHashes[0]) != txHash1 {
+		t.Fatalf("expected receipts ready refresh to include subscribed transaction hash, got %v", sent.TransactionHashes)
 	}
 }
 

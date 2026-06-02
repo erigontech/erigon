@@ -19,7 +19,6 @@ package privateapi
 import (
 	"fmt"
 	"io"
-	"math"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -42,13 +42,6 @@ type ReceiptsFilter struct {
 	allTxHashes int
 	txHashes    map[common.Hash]int
 	sender      remoteproto.ETHBACKEND_SubscribeReceiptsServer
-}
-
-func receiptsFilterAppliedReply() *remoteproto.SubscribeReceiptsReply {
-	return &remoteproto.SubscribeReceiptsReply{
-		BlockNumber:      math.MaxUint64,
-		TransactionIndex: math.MaxUint64,
-	}
 }
 
 func NewReceiptsFilterAggregator(events *shards.Events) *ReceiptsFilterAggregator {
@@ -137,7 +130,7 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateReceiptsFilter(filter, filterReq)
-		if err := server.Send(receiptsFilterAppliedReply()); err != nil {
+		if err := server.Send(filterack.ReceiptsReply()); err != nil {
 			return fmt.Errorf("sending receipts filter applied ack: %w", err)
 		}
 	}

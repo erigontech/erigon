@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -172,15 +172,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 			var err error
 			if readyBackend, ok := ethBackend.(logsReadySubscriber); ok {
 				err = readyBackend.SubscribeLogsOnReady(ctx, ff.OnNewLogs, func(send func(*remoteproto.LogsFilterRequest) error) {
-					ff.mu.Lock()
-					ff.logsRequestor.Store(send)
-					ff.mu.Unlock()
-					if ff.pendingLogsUpdate.CompareAndSwap(true, false) {
-						if err := ff.sendLogsFilterUpdate(); err != nil {
-							logger.Warn("rpc filters: error sending pending logs filter update", "err", err)
-							ff.pendingLogsUpdate.Store(true)
-						}
-					}
+					_ = ff.onLogsRequestorReady(send, logger)
 				})
 			} else {
 				err = ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor)
@@ -214,15 +206,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 			default:
 			}
 			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
-				ff.mu.Lock()
-				ff.receiptsRequestor.Store(send)
-				ff.mu.Unlock()
-				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					if err := ff.sendReceiptsFilterUpdate(); err != nil {
-						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
-						ff.pendingReceiptsUpdate.Store(true)
-					}
-				}
+				_ = ff.onReceiptsRequestorReady(send, logger)
 			}); err != nil {
 				select {
 				case <-ctx.Done():
@@ -576,6 +560,19 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 	})
 }
 
+func (ff *Filters) onReceiptsRequestorReady(send func(*remoteproto.ReceiptsFilterRequest) error, logger log.Logger) error {
+	ff.mu.Lock()
+	ff.receiptsRequestor.Store(send)
+	ff.pendingReceiptsUpdate.Store(false)
+	ff.mu.Unlock()
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		logger.Warn("rpc filters: error sending receipts filter update", "err", err)
+		ff.pendingReceiptsUpdate.Store(true)
+		return err
+	}
+	return nil
+}
+
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
@@ -664,6 +661,19 @@ func (ff *Filters) sendLogsFilterUpdate() error {
 	return ff.waitForFilterUpdateApplied("logs", ff.logsFilterAppliedAck, &ff.logsFilterAppliedCount, &ff.logsFilterUpdateCount, &ff.logsUpdateMu, func() error {
 		return send(lfr)
 	})
+}
+
+func (ff *Filters) onLogsRequestorReady(send func(*remoteproto.LogsFilterRequest) error, logger log.Logger) error {
+	ff.mu.Lock()
+	ff.logsRequestor.Store(send)
+	ff.pendingLogsUpdate.Store(false)
+	ff.mu.Unlock()
+	if err := ff.sendLogsFilterUpdate(); err != nil {
+		logger.Warn("rpc filters: error sending logs filter update", "err", err)
+		ff.pendingLogsUpdate.Store(true)
+		return err
+	}
+	return nil
 }
 
 func (ff *Filters) HasSubscription(id LogsSubID) bool {
@@ -781,7 +791,7 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 
 // OnReceipts handles a new receipt event from the remote and processes it.
 func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
-	if isReceiptsFilterAppliedReply(reply) {
+	if filterack.IsReceiptsReply(reply) {
 		ff.signalFilterApplied(ff.receiptsFilterAppliedAck, &ff.receiptsFilterAppliedCount)
 		return
 	}
@@ -811,7 +821,7 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 
 // OnNewLogs handles a new log event from the remote and processes it.
 func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
-	if isLogsFilterAppliedReply(reply) {
+	if filterack.IsLogsReply(reply) {
 		ff.signalFilterApplied(ff.logsFilterAppliedAck, &ff.logsFilterAppliedCount)
 		return
 	}
@@ -839,6 +849,9 @@ func (ff *Filters) waitForFilterUpdateApplied(kind string, ackCh chan struct{}, 
 		select {
 		case <-ackCh:
 		case <-timer.C:
+			if appliedCount.Load() >= targetCount {
+				return nil
+			}
 			return fmt.Errorf("timed out waiting for %s filter update to apply", kind)
 		case <-ff.ctx.Done():
 			return ff.ctx.Err()
@@ -852,20 +865,6 @@ func (ff *Filters) signalFilterApplied(ackCh chan struct{}, appliedCount *atomic
 	case ackCh <- struct{}{}:
 	default:
 	}
-}
-
-func isLogsFilterAppliedReply(reply *remoteproto.SubscribeLogsReply) bool {
-	return reply.GetBlockNumber() == math.MaxUint64 &&
-		reply.GetLogIndex() == math.MaxUint64 &&
-		reply.GetAddress() == nil &&
-		reply.GetTransactionHash() == nil
-}
-
-func isReceiptsFilterAppliedReply(reply *remoteproto.SubscribeReceiptsReply) bool {
-	return reply.GetBlockNumber() == math.MaxUint64 &&
-		reply.GetTransactionIndex() == math.MaxUint64 &&
-		reply.GetBlockHash() == nil &&
-		reply.GetTransactionHash() == nil
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.

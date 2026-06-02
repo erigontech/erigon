@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"math"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -85,7 +85,7 @@ func newFailingTestServer(ctx context.Context) *failingTestServer {
 
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 	ts.sendCalls++
-	if m.GetBlockNumber() == math.MaxUint64 && m.GetLogIndex() == math.MaxUint64 {
+	if filterack.IsLogsReply(m) {
 		ts.acks++
 		return nil
 	}
@@ -98,7 +98,7 @@ func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 }
 
 func (ts *failingTestServer) Send(m *remoteproto.SubscribeLogsReply) error {
-	if m.GetBlockNumber() == math.MaxUint64 && m.GetLogIndex() == math.MaxUint64 {
+	if filterack.IsLogsReply(m) {
 		ts.acks++
 		return nil
 	}

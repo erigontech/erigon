@@ -19,7 +19,6 @@ package privateapi
 import (
 	"context"
 	"io"
-	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -71,7 +71,7 @@ func newTestReceiptsServer(ctx context.Context) *testReceiptsServer {
 }
 
 func (ts *testReceiptsServer) Send(m *remoteproto.SubscribeReceiptsReply) error {
-	if m.GetBlockNumber() == math.MaxUint64 && m.GetTransactionIndex() == math.MaxUint64 {
+	if filterack.IsReceiptsReply(m) {
 		ts.acks++
 		return nil
 	}
