@@ -251,6 +251,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 }
 
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
+	if traceConfig != nil && traceConfig.Tracer != nil && *traceConfig.Tracer != "" {
+		return OeTracerConfig{}, errors.New("trace_* does not support custom tracers; use debug_* (e.g. debug_traceTransaction) for named or JS tracers")
+	}
 	if traceConfig == nil || traceConfig.TracerConfig == nil || *traceConfig.TracerConfig == nil {
 		return OeTracerConfig{}, nil
 	}

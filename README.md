@@ -399,8 +399,6 @@ hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-bl
 
 **Flat KV storage.** Erigon uses a key-value database and stores accounts and storage in a straightforward way.
 
-<code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
-
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
