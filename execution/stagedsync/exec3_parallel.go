@@ -426,26 +426,18 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
 				// Extra diagnostic context to track down CI-only wrong-trie-root
-				// races (PR #21536 hive Re-Org Back into Canonical Chain). Logs
-				// the change-set address count and sample addresses; compare
-				// across runs to find which block + addresses diverge.
-				accCount, stoCount, codeCount := 0, 0, 0
-				var sampleAddrs []string
-				if cs := pe.currentChangeSet; cs != nil {
-					accCount = cs.Diffs[kv.AccountsDomain].Len()
-					stoCount = cs.Diffs[kv.StorageDomain].Len()
-					codeCount = cs.Diffs[kv.CodeDomain].Len()
-					for _, e := range cs.Diffs[kv.AccountsDomain].GetDiffSet() {
-						if len(sampleAddrs) >= 10 {
-							break
-						}
-						if len(e.Key) >= 20 {
-							sampleAddrs = append(sampleAddrs, fmt.Sprintf("%x", e.Key[:20]))
-						}
-					}
+				// races (PR #21536 hive Re-Org Back into Canonical Chain). Dump
+				// ZeroAddr (the test's hot recipient) and coinbase final state
+				// from the validation SD so we can compare build vs validate.
+				zeroAddr := make([]byte, 20)
+				zeroAcc, _, _ := pe.rs.Domains().GetLatest(kv.AccountsDomain, rwTx, zeroAddr)
+				var cb common.Address
+				if lastBlockResult.Header != nil {
+					cb = lastBlockResult.Header.Coinbase
 				}
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v) accChanges=%d stoChanges=%d codeChanges=%d sampleAddrs=%v",
-					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err, accCount, stoCount, codeCount, sampleAddrs))
+				cbAcc, _, _ := pe.rs.Domains().GetLatest(kv.AccountsDomain, rwTx, cb[:])
+				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v) zeroAddr=%x coinbase=%x cbAcc=%x",
+					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err, zeroAcc, cb[:], cbAcc))
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}
