@@ -71,6 +71,11 @@ type RecordingState struct {
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
+
+	// The system address is touched as msg.sender on every block's system calls;
+	// that alone is not a witness access. A real opcode access during a user tx
+	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
+	systemAddrTouchedInTx bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -93,6 +98,10 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
+
+// MarkSystemAddrTouchedInTx records that a user transaction accessed the system
+// address via an opcode, so it is kept in the witness even without a state change.
+func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -601,6 +610,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		ibs.SetTxContext(blockNum, txIndex)
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		// A user tx that accesses the system address via an opcode keeps it in the
+		// witness; the per-tx access set captures this even on state-cache hits.
+		if acc := ibs.AccessedAddresses(); acc != nil {
+			if _, ok := acc[params.SystemAddress]; ok {
+				recordingState.MarkSystemAddrTouchedInTx()
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
@@ -839,7 +855,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
-		if !reallyChanged && !hasStorage && !existenceChanged {
+		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrTouchedInTx {
 			delete(out.Addresses, sysAddr)
 		}
 	}
