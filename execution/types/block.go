@@ -410,6 +410,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if size != 32 { // AuRa
+		// Reused *Header may carry stale MixDigest/Nonce from a previous
+		// non-AuRa decode; Hash() encoding depends on which branch is set.
+		h.MixDigest = common.Hash{}
+		h.Nonce = BlockNonce{}
 		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
@@ -417,6 +421,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
+		// Symmetric: clear any stale AuRa fields so EncodeRLP's
+		// len(AuRaSeal)>0 branch select stays correct.
+		h.AuRaStep = 0
+		h.AuRaSeal = h.AuRaSeal[:0]
 		if err = s.ReadBytes(h.MixDigest[:]); err != nil {
 			return fmt.Errorf("read MixDigest: %w", err)
 		}
