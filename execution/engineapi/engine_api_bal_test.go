@@ -310,6 +310,88 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 	})
 }
 
+// TestEngineApiBALStorageNoOpWriteOmitted exercises the EIP-7928 no-op rule
+// end-to-end through the parallel executor: a write storing the value a slot
+// already holds must not appear in storage_changes. The contract does
+// SSTORE(0,2);SSTORE(0,1) so the final write is recorded even though it equals
+// the slot's prior value — a plain same-value SSTORE would be skipped before
+// reaching the access list. Called twice in one block, the second call is a
+// no-op whose write must be excluded.
+func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+		gasPrice, err := eat.RpcApiClient.GasPrice()
+		require.NoError(t, err)
+		gasPriceU256, overflow := uint256.FromBig(gasPrice)
+		require.False(t, overflow)
+
+		// init: 600b600c600039600b6000f3   -> return the 11-byte runtime
+		// code: 6002600055 6001600055 00   -> SSTORE(0,2); SSTORE(0,1); STOP
+		initCode := common.FromHex("600b600c600039600b6000f36002600055600160005500")
+
+		signTx := func(nonce uint64, to *common.Address, data []byte, gas uint64) types.Transaction {
+			tx, err := types.SignTx(&types.LegacyTx{
+				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: to, Value: uint256.Int{}, Data: data},
+				GasPrice: *gasPriceU256,
+			}, *signer, eat.CoinbaseKey)
+			require.NoError(t, err)
+			return tx
+		}
+
+		// Block 1: deploy the contract.
+		deployNonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+		deployTx := signTx(deployNonce.Uint64(), nil, initCode, 1_000_000)
+		_, err = eat.RpcApiClient.SendTransaction(deployTx)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		contractAddr := types.CreateAddress(coinbaseAddr, deployNonce.Uint64())
+		code, err := eat.RpcApiClient.GetCode(contractAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.NotEmpty(t, code, "contract must be deployed")
+
+		// Block 2: two calls to the contract in the same block. Same sender, so
+		// they execute in nonce order — fully deterministic, no scheduling race.
+		callNonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+		firstCall := signTx(callNonce.Uint64(), &contractAddr, nil, 1_000_000)
+		secondCall := signTx(callNonce.Uint64()+1, &contractAddr, nil, 1_000_000)
+		_, err = eat.RpcApiClient.SendTransaction(firstCall)
+		require.NoError(t, err)
+		_, err = eat.RpcApiClient.SendTransaction(secondCall)
+		require.NoError(t, err)
+
+		// A node accepts its own BAL, so the block stays VALID even without the
+		// fix (assembler and parallel validator compute the same wrong BAL); the
+		// storage_changes assertion below is what catches the leaked no-op write.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, firstCall.Hash(), secondCall.Hash()))
+
+		bal := decodeAndValidateBAL(t, payload)
+		cc := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+		require.NotNilf(t, cc, "contract must appear in BAL\n%s", bal.DebugString())
+		require.Lenf(t, cc.StorageChanges, 1, "contract writes exactly one slot\n%s", bal.DebugString())
+		require.Lenf(t, cc.StorageChanges[0].Changes, 1,
+			"slot 0 must record only the first call's real change (0->1); the second call leaves the value unchanged, so the no-op write must not appear in storage_changes\n%s",
+			bal.DebugString())
+	})
+}
+
 func TestEngineApiBALMultiTxBlock(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")

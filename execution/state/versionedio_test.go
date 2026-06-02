@@ -431,6 +431,49 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 	require.True(t, found, "burn target address must appear in BAL")
 }
 
+// TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL verifies the
+// EIP-7928 rule that, for a slot written multiple times in a block, a write
+// storing the value an earlier write already set is a no-op and must be
+// excluded from storage_changes — only value-changing writes are recorded.
+func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	valA := *uint256.NewInt(0x111)
+	valB := *uint256.NewInt(0x222)
+
+	io := NewVersionedIO(4)
+	write := func(txIndex int, v uint256.Int) {
+		io.RecordWrites(Version{TxIndex: txIndex}, VersionedWrites{
+			&VersionedWrite{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: txIndex}, Val: v},
+		})
+	}
+	write(0, valA) // slot: 0 -> A  (real change)
+	write(1, valB) // slot: A -> B  (real change)
+	write(2, valB) // slot: B -> B  (no-op)
+	write(3, valB) // slot: B -> B  (no-op)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address != addr {
+			continue
+		}
+		found = true
+		require.Lenf(t, ac.StorageChanges, 1, "one slot expected\n%s", bal.DebugString())
+		changes := ac.StorageChanges[0].Changes
+		require.Lenf(t, changes, 2,
+			"no-op repeated-value writes (idx 3,4) must be excluded from storage_changes\n%s", bal.DebugString())
+		require.Equal(t, uint32(1), changes[0].Index)
+		require.True(t, changes[0].Value.Eq(&valA))
+		require.Equal(t, uint32(2), changes[1].Index)
+		require.True(t, changes[1].Value.Eq(&valB))
+	}
+	require.True(t, found, "contract must appear in BAL")
+}
+
 // fallthroughStateReader returns a fixed account and a fixed storage value, so
 // a test can observe whether a versionedRead fell through to the underlying
 // state (vs. returning a version-map value or aborting).

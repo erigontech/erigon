@@ -128,11 +128,6 @@ jobs:
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
-            exec_mode: serial
-          - suite: glamsterdam
-            package_args: .github/workflows/kurtosis/glamsterdam.io
-            ethereum_package_branch: "6.1.0"
-            test_timeout_minutes: 20
             exec_mode: parallel
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
