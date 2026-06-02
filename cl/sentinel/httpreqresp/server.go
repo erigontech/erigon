@@ -30,6 +30,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 const (
@@ -39,9 +41,6 @@ const (
 )
 
 const (
-	// maxChunkSize is MAX_CHUNK_SIZE from the consensus-layer p2p spec: the largest
-	// a single uncompressed req/resp response chunk may be.
-	maxChunkSize = 15 * 1024 * 1024
 	// maxResponseChunks mirrors MAX_REQUEST_BLOCKS, the most chunks a by_range /
 	// by_root / by_head response may carry.
 	maxResponseChunks = 1024
@@ -55,7 +54,7 @@ const (
 // per requested item); every other req/resp protocol returns a single chunk.
 func maxResponseBodySize(topic string) int64 {
 	if strings.Contains(topic, "_by_range") || strings.Contains(topic, "_by_root") || strings.Contains(topic, "_by_head") {
-		return maxResponseChunks * maxChunkSize
+		return maxResponseChunks * int64(clparams.MaxChunkSize)
 	}
 	return maxSingleObjectResponse
 }
