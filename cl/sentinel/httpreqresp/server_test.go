@@ -47,9 +47,10 @@ func TestMaxResponseBodySize(t *testing.T) {
 				"single-object protocol %s must ignore the byte budget", p.ID)
 			continue
 		}
-		// No budget falls back to the absolute ceiling.
-		require.EqualValuesf(t, ceiling, maxResponseBodySize(p.ID, 0),
-			"multi-chunk protocol %s with no budget must get the ceiling", p.ID)
+		// No budget falls back to the tight single-object cap, not the multi-GiB ceiling, so a
+		// caller that forgets to size a budget can't turn a flood into an OOM.
+		require.EqualValuesf(t, maxSingleObjectResponse, maxResponseBodySize(p.ID, 0),
+			"multi-chunk protocol %s with no budget must get the tight cap, not the ceiling", p.ID)
 		// A budget below the ceiling is honored as-is (an internal, wire-sized value).
 		require.EqualValuesf(t, budget, maxResponseBodySize(p.ID, budget),
 			"multi-chunk protocol %s must honor the caller's byte budget", p.ID)
@@ -156,15 +157,15 @@ func TestResponseBodyRejectedOnFlood(t *testing.T) {
 		"a rejected response must not carry a peer success code that header-gating callers (e.g. handshake.ValidatePeer) would misread")
 }
 
-// A legitimate multi-chunk response larger than the single-object cap must pass through
-// uncapped: by_range / by_root / by_head topics get the multi-chunk ceiling, so the cap
-// must not truncate real block/blob/column responses.
-func TestMultiChunkResponseNotCappedAtSingleObject(t *testing.T) {
-	const payloadSize = 5 * 1024 * 1024 // above the single-object cap, far below the multi-chunk ceiling
-	status, _, body := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, payloadSize, 0)
-	require.Equal(t, http.StatusOK, status)
-	require.EqualValues(t, payloadSize, len(body),
-		"a legitimate multi-chunk response must not be truncated by the response cap")
+// A multi-chunk request that reaches the handler without a caller budget (a caller that failed to
+// size one, or an empty request) must fall back to the tight single-object cap, not the multi-GiB
+// ceiling — so a missing budget can never let a flooding peer drive an OOM. A budgeted multi-chunk
+// response above the single-object cap still passes; see TestMultiChunkResponseRejectedOverByteBudget.
+func TestMultiChunkResponseCappedWithoutBudget(t *testing.T) {
+	const floodSize = 5 * 1024 * 1024 // above the single-object cap
+	status, _, _ := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, 0)
+	require.Equalf(t, http.StatusRequestEntityTooLarge, status,
+		"an unbudgeted multi-chunk response over the single-object cap must be rejected, not buffered toward the ceiling")
 }
 
 // The multi-chunk cap honors the caller's byte budget: a response within it passes through, a

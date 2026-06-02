@@ -52,20 +52,21 @@ const (
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the fallback
-// when no caller budget is set, and the backstop any provided budget is clamped to so a
-// miscomputed or overflowed budget can't make the handler buffer more than a spec-maximal response.
+// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the backstop a
+// caller-supplied multi-chunk budget is clamped to, so a miscomputed or overflowed budget can't make
+// the handler buffer more than a spec-maximal response.
 var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks)
 
-// maxResponseBodySize is the byte ceiling the handler buffers for a response on the given topic:
-// single-object protocols get a tight fixed cap; multi-chunk protocols (per IsMultiChunkProtocol)
-// use the caller's on-wire byte budget, clamped to maxMultiChunkResponse and falling back to it
-// when no budget is set.
+// maxResponseBodySize is the byte ceiling the handler buffers for a response on the given topic.
+// Single-object protocols, and any request that arrives without a caller budget (an empty request,
+// or a multi-chunk caller that failed to size one), get the tight single-object cap — never the
+// multi-GiB ceiling, so a missing budget surfaces as a 413 rather than an OOM. A multi-chunk caller
+// that does supply a budget gets it, clamped to maxMultiChunkResponse.
 func maxResponseBodySize(topic string, maxBytes uint64) uint64 {
-	if !communication.IsMultiChunkProtocol(topic) {
+	if maxBytes == 0 || !communication.IsMultiChunkProtocol(topic) {
 		return maxSingleObjectResponse
 	}
-	if maxBytes > 0 && maxBytes < maxMultiChunkResponse {
+	if maxBytes < maxMultiChunkResponse {
 		return maxBytes
 	}
 	return maxMultiChunkResponse
