@@ -116,6 +116,8 @@ If a user explicitly directs an agent to add a skip in the current turn (overrid
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
+Do not add `Co-Authored-By: Claude` or `🤖 Generated with Claude Code` lines to commits, PRs, or issues — Claude attribution is disabled repo-wide via `.claude/settings.json` (`includeCoAuthoredBy: false`).
+
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
@@ -171,6 +173,10 @@ Function docstrings follow the same rule: a one-line summary, plus param/return 
 ## Pull Requests & Workflows
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
+
+### Referring to numbered points in GitHub text
+
+Never use a bare `#N` to refer to a numbered list item, point, step, or nit in PR descriptions, issue descriptions, or comments — GitHub auto-links `#N` to issue/PR number N (e.g. `#1` links to the unrelated PR #1). Write "point 1", "item 1", or "the first nit" instead, and reserve `#N` for genuine references to that issue or PR.
 
 ### Backport PRs to release branches
 
