@@ -83,7 +83,7 @@ func TestNotFoundMustReturnError(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 
-	a, err := api.GetBalance(ctx, common.Address{}, rpc.BlockNumberOrHashWithNumber(10_000))
+	a, err := api.GetBalance(ctx, common.Address{}, bnhPtr(rpc.BlockNumberOrHashWithNumber(10_000)))
 	assertions.Nil(a)
 	assertions.EqualError(err, "block not found: 10000")
 }

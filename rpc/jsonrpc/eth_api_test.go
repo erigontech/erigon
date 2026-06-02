@@ -113,7 +113,7 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -185,7 +185,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -202,7 +202,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)))
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -221,7 +221,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -302,7 +302,7 @@ func TestGetStorageValues_HappyPath(t *testing.T) {
 
 	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {slot0, slot1},
-	}, latest)
+	}, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestGetStorageValues_MultipleAddresses(t *testing.T) {
 		addr2: {slot1, slot2},
 		addr3: {slot0, slot2},
 	}
-	result, err := api.GetStorageValues(context.Background(), request, latest)
+	result, err := api.GetStorageValues(context.Background(), request, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestGetStorageValues_MissingSlotReturnsZero(t *testing.T) {
 
 	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.HexToHash("0xff")},
-	}, latest)
+	}, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestGetStorageValues_EmptyRequestReturnsError(t *testing.T) {
 
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
-	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, latest)
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, &latest)
 	if err == nil {
 		t.Fatal("expected error for empty request")
 	}
@@ -394,7 +394,7 @@ func TestGetStorageValues_ExceedingSlotLimitReturnsError(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: tooMany,
-	}, latest)
+	}, &latest)
 	if err == nil {
 		t.Fatal("expected error for exceeding slot limit")
 	}
@@ -411,7 +411,7 @@ func TestGetStorageValues_ByBlockHash_NonCanonicalBlock(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -432,7 +432,7 @@ func TestGetStorageValues_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -453,8 +453,12 @@ func TestGetStorageValues_PrunedBlockReturnsError(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		t.Logf("got expected prune error: %v", err)
 	}
 }
+
+// bnhPtr returns a pointer to a BlockNumberOrHash, for the state methods whose
+// block parameter is now optional (*rpc.BlockNumberOrHash).
+func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
