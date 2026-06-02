@@ -179,8 +179,6 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// this is not necessary, but seems like the right thing to do
 		w.Header().Set("CONTENT-TYPE", "application/octet-stream")
 		w.Header().Set("CONTENT-ENCODING", "snappy/stream")
-		// add the response code & headers
-		w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(code[0])))
 		w.Header().Set("REQRESP-PEER-ID", peerIdBase58)
 		w.Header().Set("REQRESP-TOPIC", topic)
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
@@ -198,6 +196,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "Response Exceeds Cap: topic="+topic, http.StatusRequestEntityTooLarge)
 			return
 		}
+		// Set the peer's response code only on success: on the 413/400 paths above it must be
+		// absent so header-gating callers (handshake.ValidatePeer) can't read it as a peer success.
+		w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(code[0])))
 		// the first write to w will call code 200
 		if _, err := w.Write(respBody); err != nil {
 			http.Error(w, "Writing Stream Response: "+err.Error(), http.StatusBadRequest)
