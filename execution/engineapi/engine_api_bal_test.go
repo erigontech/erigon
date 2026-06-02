@@ -375,8 +375,11 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		_, err = eat.RpcApiClient.SendTransaction(secondCall)
 		require.NoError(t, err)
 
+		// A node accepts its own BAL, so the block stays VALID even without the
+		// fix (assembler and parallel validator compute the same wrong BAL); the
+		// storage_changes assertion below is what catches the leaked no-op write.
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err, "BAL divergence: a repeated same-value SSTORE was recorded as a storage_change")
+		require.NoError(t, err)
 		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, firstCall.Hash(), secondCall.Hash()))
 
 		bal := decodeAndValidateBAL(t, payload)
