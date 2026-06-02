@@ -420,8 +420,9 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		return nil // Pre-GLOAS anchor, nothing to do
 	}
 
+	anchorRoot := cfg.forkChoice.AnchorRoot()
 	// Find the anchor block root via the header stored in the fork graph
-	anchorHeader, ok := cfg.forkChoice.GetHeader(cfg.forkChoice.FinalizedCheckpoint().Root)
+	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
 	if !ok {
 		// Try to find by iterating — the anchor root should be the finalized root
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor header not found, skipping")
@@ -430,7 +431,6 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	_ = anchorHeader
 
 	// Get anchor block root from state
-	anchorRoot := cfg.forkChoice.FinalizedCheckpoint().Root
 	if cfg.forkChoice.IsPayloadVerified(anchorRoot) {
 		return nil
 	}

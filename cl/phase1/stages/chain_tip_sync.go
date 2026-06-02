@@ -596,7 +596,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
 		return
 	}
-	anchorRoot := cfg.forkChoice.FinalizedCheckpoint().Root
+	anchorRoot := cfg.forkChoice.AnchorRoot()
 	if anchorRoot == (common.Hash{}) || cfg.forkChoice.IsPayloadVerified(anchorRoot) || !cfg.forkChoice.HasEnvelope(anchorRoot) {
 		return
 	}
