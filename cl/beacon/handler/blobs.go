@@ -63,19 +63,12 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("block not found"))
 	}
 
-	if a.caplinSnapshots != nil && *slot < a.caplinSnapshots.FrozenBlobs() {
-		out, err := a.caplinSnapshots.ReadBlobSidecars(*slot)
-		if err != nil {
-			return nil, err
-		}
-		resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
-		for _, v := range out {
-			resp.Append(v)
-		}
-		return beaconhttp.NewBeaconResponse(resp), nil
-
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
 	}
-	out, found, err := a.blobStoage.ReadBlobSidecars(ctx, *slot, blockRoot)
+
+	out, found, err := a.readBlobSidecars(ctx, *slot, blockRoot, canonicalRoot)
 	if err != nil {
 		return nil, err
 	}
