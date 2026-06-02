@@ -27,6 +27,24 @@ type ConfigKey []byte
 var (
 	PersistReceipts   = ConfigKey("persist.receipts")
 	CommitmentHistory = ConfigKey("commitment.history")
+
+	// SnapLifecycleDrivenByStorage, SnapP2PManifest, and
+	// SnapBootstrapFromPreverified persist the snapshot-flow mode
+	// flags so that omitting one on restart can't silently downgrade
+	// the datadir to the legacy stage-driven path. Live-rig discovery
+	// 2026-06-02: launching without --snap.lifecycle-driven-by-storage
+	// left Provider.Inventory nil and the new mode-B snapshot-trim
+	// path was a silent no-op.
+	SnapLifecycleDrivenByStorage = ConfigKey("snap.lifecycle-driven-by-storage")
+	SnapP2PManifest              = ConfigKey("snap.p2p-manifest")
+	SnapBootstrapFromPreverified = ConfigKey("snap.bootstrap-from-preverified")
+
+	// SnapTrustFingerprint is a 32-byte sha256 over the canonical
+	// encoding of the effective trust-root set (sorted by Pubkey).
+	// Locks the trust universe to the datadir: an operator restart
+	// pointed at a different trust spec is effectively unauthorised
+	// auth rotation, and refuses at startup.
+	SnapTrustFingerprint = ConfigKey("snap.trust.fingerprint")
 )
 
 func (k ConfigKey) Enabled(tx kv.Tx) (bool, error) { return kv.GetBool(tx, kv.DatabaseInfo, k) }

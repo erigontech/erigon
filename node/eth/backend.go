@@ -21,6 +21,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -337,6 +338,68 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
 		if err != nil {
 			return err
+		}
+
+		// Persist the snapshot-flow mode flags. Omitting one on
+		// restart must not silently downgrade the datadir — e.g.
+		// dropping --snap.lifecycle-driven-by-storage previously left
+		// Provider.Inventory nil and the new mode-B snapshot-trim
+		// path a silent no-op (live-rig 2026-06-02). Flipping a
+		// persisted value via CLI is refused at startup.
+		type snapModeFlag struct {
+			name string
+			key  kvcfg.ConfigKey
+			ptr  *bool
+		}
+		snapModes := []snapModeFlag{
+			{"--snap.lifecycle-driven-by-storage", kvcfg.SnapLifecycleDrivenByStorage, &config.Snapshot.LifecycleDrivenByStorage},
+			{"--snap.p2p-manifest", kvcfg.SnapP2PManifest, &config.Snapshot.P2PManifest},
+			{"--snap.bootstrap-from-preverified", kvcfg.SnapBootstrapFromPreverified, &config.Snapshot.BootstrapFromPreverified},
+		}
+		for _, f := range snapModes {
+			notChanged, enabled, terr := f.key.EnsureNotChanged(tx, *f.ptr)
+			if terr != nil {
+				return terr
+			}
+			if !notChanged {
+				return fmt.Errorf("%s changed since the datadir was created (datadir=%v, cli=%v); changing this flag mid-life is prohibited — reset the datadir or restart without the flag to use the persisted value", f.name, enabled, *f.ptr)
+			}
+			*f.ptr = enabled
+		}
+
+		// Persist the trust-root universe fingerprint. The effective
+		// trust spec = compiled-in chain default, optionally
+		// overridden by --snapshot.trust-roots. Hashing the parsed
+		// root set (rather than the spec string) tolerates harmless
+		// reordering / whitespace changes while still rejecting
+		// authority rotation. An empty / "any" spec persists the
+		// fingerprint of an empty root set; flipping to a populated
+		// spec later still trips this gate, which is intended (going
+		// from trust-everyone to a specific universe is a real
+		// trust-posture change).
+		mxChainName := config.Genesis.Config.ChainName
+		trustSpec := snapcfg.GetEmbeddedTrustRoots(mxChainName)
+		if override := strings.TrimSpace(config.Snapshot.TrustRoots); override != "" {
+			trustSpec = override
+		}
+		var trustRoots []snapshotauth.TrustRoot
+		if trustSpec != "" && !strings.EqualFold(trustSpec, "any") {
+			trustRoots, err = snapshotauth.ParseTrustRoots(trustSpec)
+			if err != nil {
+				return fmt.Errorf("parsing snapshot trust roots: %w", err)
+			}
+		}
+		fp := snapshotauth.TrustRootsFingerprint(trustRoots)
+		stored, err := tx.GetOne(kv.DatabaseInfo, kvcfg.SnapTrustFingerprint)
+		if err != nil {
+			return err
+		}
+		if stored == nil {
+			if err := tx.Put(kv.DatabaseInfo, kvcfg.SnapTrustFingerprint, fp[:]); err != nil {
+				return err
+			}
+		} else if !bytes.Equal(stored, fp[:]) {
+			return fmt.Errorf("snapshot trust root universe changed since the datadir was created (stored fingerprint %x, current %x); changing trust roots mid-life is prohibited — reset the datadir to rotate", stored, fp)
 		}
 
 		return nil

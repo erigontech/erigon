@@ -167,6 +167,52 @@ func bytesN(n int) []byte {
 	return b
 }
 
+func TestTrustRootsFingerprint(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		require.Equal(t, TrustRootsFingerprint(nil), TrustRootsFingerprint([]TrustRoot{}))
+	})
+
+	r1 := TrustRoot{Kind: RootENR, Pubkey: bytesN(33)}
+	r2Pub := append([]byte{}, bytesN(33)...)
+	r2Pub[0] = 0xFF
+	r2 := TrustRoot{Kind: RootDID, Pubkey: r2Pub, DID: "did:key:z..."}
+
+	t.Run("order invariant", func(t *testing.T) {
+		fp1 := TrustRootsFingerprint([]TrustRoot{r1, r2})
+		fp2 := TrustRootsFingerprint([]TrustRoot{r2, r1})
+		require.Equal(t, fp1, fp2)
+	})
+
+	t.Run("DID string is diagnostic, not in hash", func(t *testing.T) {
+		r2copy := r2
+		r2copy.DID = "did:key:z-different-string"
+		fp1 := TrustRootsFingerprint([]TrustRoot{r2})
+		fp2 := TrustRootsFingerprint([]TrustRoot{r2copy})
+		require.Equal(t, fp1, fp2)
+	})
+
+	t.Run("Kind change flips fingerprint", func(t *testing.T) {
+		flipped := r1
+		flipped.Kind = RootBootnode
+		fp1 := TrustRootsFingerprint([]TrustRoot{r1})
+		fp2 := TrustRootsFingerprint([]TrustRoot{flipped})
+		require.NotEqual(t, fp1, fp2)
+	})
+
+	t.Run("Pubkey change flips fingerprint", func(t *testing.T) {
+		mutated := r1
+		mutated.Pubkey = append([]byte{}, r1.Pubkey...)
+		mutated.Pubkey[5] ^= 0x01
+		fp1 := TrustRootsFingerprint([]TrustRoot{r1})
+		fp2 := TrustRootsFingerprint([]TrustRoot{mutated})
+		require.NotEqual(t, fp1, fp2)
+	})
+
+	t.Run("empty differs from any non-empty", func(t *testing.T) {
+		require.NotEqual(t, TrustRootsFingerprint(nil), TrustRootsFingerprint([]TrustRoot{r1}))
+	})
+}
+
 // base58Encode is a thin wrapper so the test reads naturally. Uses the
 // same btcsuite base58 the production parser uses, so a round-trip
 // through the same library is guaranteed.

@@ -18,8 +18,10 @@ package snapshotauth
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mr-tron/base58"
@@ -117,4 +119,33 @@ func validateCompressedPubkey(pub []byte) error {
 		return fmt.Errorf("invalid compressed secp256k1 pubkey: %w", err)
 	}
 	return nil
+}
+
+// TrustRootsFingerprint returns a stable 32-byte sha256 over the
+// canonical encoding of the trust-root set: roots sorted by Pubkey,
+// each emitted as Kind(1 byte) || len(Pubkey)(1 byte) || Pubkey.
+// Empty input yields the sha256 of the empty string.
+//
+// Kind is included so that swapping an ENR root for a DID root with the
+// same Pubkey changes the fingerprint (the trust-evaluation path treats
+// them differently). DID strings are NOT in the fingerprint — they are
+// diagnostic, and a did:key's authority IS its Pubkey, so the input is
+// already covered.
+func TrustRootsFingerprint(roots []TrustRoot) [32]byte {
+	cp := make([]TrustRoot, len(roots))
+	copy(cp, roots)
+	sort.Slice(cp, func(i, j int) bool {
+		if c := bytes.Compare(cp[i].Pubkey, cp[j].Pubkey); c != 0 {
+			return c < 0
+		}
+		return cp[i].Kind < cp[j].Kind
+	})
+	h := sha256.New()
+	for _, r := range cp {
+		h.Write([]byte{byte(r.Kind), byte(len(r.Pubkey))})
+		h.Write(r.Pubkey)
+	}
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
 }
