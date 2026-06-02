@@ -220,10 +220,6 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 // accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
 func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
 	rawBlocks := blocksToRaw(blocks, accessLists)
-	// executionModule.InsertBlocks now blocks on its internal semaphore
-	// when the previous insert is still in flight (channel-notify style),
-	// so we no longer need the 100 ms retry-on-Busy loop here. The earlier
-	// busy-wait was the dominant tail-latency spike on a saturated tip.
 	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
 	if err != nil {
 		return err
@@ -238,16 +234,13 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
 }
 
-// InsertBlocksWithAccessLists inserts blocks without waiting for confirmation.
+// InsertBlocksWithAccessLists inserts blocks, blocking until the execution module finishes the insert.
 // accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
 func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
 	rawBlocks := blocksToRaw(blocks, accessLists)
 	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
 	if err != nil {
 		return err
-	}
-	if status == execmodule.ExecutionStatusBusy {
-		return context.DeadlineExceeded
 	}
 	if status != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
