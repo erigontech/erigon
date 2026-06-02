@@ -795,9 +795,9 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
-	// binaryTransactions optionally caches each transaction's binary (canonical
-	// EIP-2718) encoding — the engine_newPayload wire form; nil means no cache.
-	binaryTransactions [][]byte
+	// binaryTransactions optionally caches the transactions' encodings (e.g. from
+	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
+	binaryTransactions BinaryTransactions
 
 	// caches
 	size atomic.Uint64
@@ -1135,11 +1135,9 @@ func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, un
 	return b
 }
 
-// NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a caller-supplied
-// cache of the transactions' binary encodings (binaryTxs, whose length must
-// match txs), letting RawBody() avoid re-encoding each transaction from scratch
-// on the engine_newPayload entry path.
-func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs [][]byte, uncles []*Header, withdrawals []*Withdrawal) *Block {
+// NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a binaryTxs cache
+// (its length must match txs) that lets RawBody() skip re-encoding the transactions.
+func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals}
 	return b
@@ -1394,9 +1392,8 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
-	// When the binary-encoding cache is present (e.g. an engine_newPayload
-	// payload), reconstruct each tx's rlp.EncodeToBytes form from it — a cheap
-	// re-wrap of the cached bytes rather than a full per-tx struct re-encode.
+	// Re-wrap the cached binary encodings into their rlp.EncodeToBytes form —
+	// cheaper than a full per-tx struct re-encode.
 	if len(b.binaryTransactions) == len(b.transactions) {
 		for i, binaryTxn := range b.binaryTransactions {
 			br.Transactions[i] = rlpFromBinaryTxn(binaryTxn)

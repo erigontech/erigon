@@ -667,7 +667,7 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 	tr := NewTRand()
 	txTypes := []int{LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType}
 
-	binaryTxs := make([][]byte, len(txTypes))
+	binaryTxs := make(BinaryTransactions, len(txTypes))
 	txns := make([]Transaction, len(txTypes))
 	for i, txType := range txTypes {
 		// Blob/SetCode txs require a non-nil To, which RandTransaction picks
