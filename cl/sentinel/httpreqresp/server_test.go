@@ -92,7 +92,8 @@ func TestMaxResponseBodySize(t *testing.T) {
 // as the response-chunk hint that sizes the multi-chunk cap.
 func fetchPeerResponse(t *testing.T, topic string, payloadSize int, expectedChunks uint64) []byte {
 	t.Helper()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	victim, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -112,7 +113,11 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, expectedChun
 		}
 		buf := make([]byte, 1024*1024)
 		for sent := 0; sent < payloadSize; {
-			n, err := s.Write(buf)
+			chunk := buf
+			if remaining := payloadSize - sent; remaining < len(chunk) {
+				chunk = chunk[:remaining]
+			}
+			n, err := s.Write(chunk)
 			if err != nil {
 				return
 			}
@@ -122,7 +127,7 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, expectedChun
 
 	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
 
-	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
 	require.NoError(t, err)
 	req.Header.Set("REQRESP-PEER-ID", peerHost.ID().String())
 	req.Header.Set("REQRESP-TOPIC", topic)
