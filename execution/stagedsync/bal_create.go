@@ -77,9 +77,8 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	if err != nil {
 		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 	}
-	// BAL data may not be stored for blocks downloaded via backward
-	// block downloader (p2p sync) since it does not carry BAL sidecars.
-	// Remove after eth/71 has been implemented.
+	// A stored BAL sidecar may be absent — eth/71 backfill is best-effort and
+	// never blocks stage progress — so cross-check it only when present.
 	if dbBALBytes != nil {
 		dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 		if err != nil {

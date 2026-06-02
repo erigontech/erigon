@@ -305,17 +305,17 @@ func TestMergeSeek(t *testing.T) {
 	result := ReadMultiEncSeq(1000, merged.AppendBytes(nil))
 
 	// Seek to existing value
-	n, ok := result.Seek(1010)
+	n, _, ok := result.Seek(1010)
 	require.True(t, ok)
 	require.Equal(t, uint64(1010), n)
 
 	// Seek to gap — returns next
-	n, ok = result.Seek(1011)
+	n, _, ok = result.Seek(1011)
 	require.True(t, ok)
 	require.Equal(t, uint64(1012), n)
 
 	// Seek past end
-	_, ok = result.Seek(1039)
+	_, _, ok = result.Seek(1039)
 	require.False(t, ok)
 
 	// Has
@@ -335,15 +335,15 @@ func TestBuilderFreeFunctions(t *testing.T) {
 
 	require.Equal(t, uint64(3), Count(baseNum, raw))
 
-	n, ok := Seek(baseNum, raw, 5006)
+	n, _, ok := Seek(baseNum, raw, 5006)
 	require.True(t, ok)
 	require.Equal(t, uint64(5007), n)
 
-	n, ok = Seek(baseNum, raw, 5007)
+	n, _, ok = Seek(baseNum, raw, 5007)
 	require.True(t, ok)
 	require.Equal(t, uint64(5007), n)
 
-	_, ok = Seek(baseNum, raw, 5016)
+	_, _, ok = Seek(baseNum, raw, 5016)
 	require.False(t, ok)
 }
 
@@ -491,19 +491,19 @@ func requireRawDataChecks(t *testing.T, b []byte) {
 	require.Equal(t, uint64(3), Count(1000, b))
 
 	// check search
-	n, found := Seek(1000, b, 1014)
+	n, _, found := Seek(1000, b, 1014)
 	require.True(t, found)
 	require.Equal(t, uint64(1015), n)
 
-	n, found = Seek(1000, b, 1015)
+	n, _, found = Seek(1000, b, 1015)
 	require.True(t, found)
 	require.Equal(t, uint64(1015), n)
 
-	_, found = Seek(1000, b, 1028)
+	_, _, found = Seek(1000, b, 1028)
 	require.False(t, found)
 
 	// check search before base num
-	n, found = Seek(1000, b, 999)
+	n, _, found = Seek(1000, b, 999)
 	require.True(t, found)
 	require.Equal(t, uint64(1000), n)
 }

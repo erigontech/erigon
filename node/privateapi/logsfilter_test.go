@@ -18,6 +18,7 @@ package privateapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -42,7 +44,7 @@ var (
 
 func init() {
 	var a common.Address
-	a.SetBytes(address1.Bytes())
+	a.SetBytes(address1[:])
 	address160 = gointerfaces.ConvertAddressToH160(a)
 	topic1H256 = gointerfaces.ConvertHashToH256(topic1)
 }
@@ -52,8 +54,14 @@ type testServer struct {
 	receiveCompleted chan struct{}
 	acks             int
 	sent             []*remoteproto.SubscribeLogsReply
+	sendErr          error
+	sendCalls        int
 	ctx              context.Context
 	grpc.ServerStream
+}
+
+type failingTestServer struct {
+	*testServer
 }
 
 func newTestServer(ctx context.Context) *testServer {
@@ -71,14 +79,30 @@ func newTestServer(ctx context.Context) *testServer {
 	return ts
 }
 
+func newFailingTestServer(ctx context.Context) *failingTestServer {
+	return &failingTestServer{testServer: newTestServer(ctx)}
+}
+
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
+	ts.sendCalls++
 	if m.GetBlockNumber() == math.MaxUint64 && m.GetLogIndex() == math.MaxUint64 {
 		ts.acks++
 		return nil
 	}
+	if ts.sendErr != nil {
+		return ts.sendErr
+	}
 	ts.sent = append(ts.sent, m)
 
 	return nil
+}
+
+func (ts *failingTestServer) Send(m *remoteproto.SubscribeLogsReply) error {
+	if m.GetBlockNumber() == math.MaxUint64 && m.GetLogIndex() == math.MaxUint64 {
+		ts.acks++
+		return nil
+	}
+	return errors.New("send failed")
 }
 
 func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
@@ -178,7 +202,7 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 
 	lg = createLog()
 	var addr common.Address
-	addr.SetBytes(address1.Bytes())
+	addr.SetBytes(address1[:])
 	lg.Address = addr
 	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 3 {
@@ -258,7 +282,7 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 
 	lg = createLog()
 	var addr common.Address
-	addr.SetBytes(address1.Bytes())
+	addr.SetBytes(address1[:])
 	lg.Address = addr
 	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
@@ -288,5 +312,96 @@ func TestLogsFilter_UpdateSignalsApplied(t *testing.T) {
 
 	if srv.acks != 1 {
 		t.Fatalf("expected 1 logs filter applied ack, got %d", srv.acks)
+	}
+}
+
+func TestLogsFilter_SendFailure_DoesNotSkipHealthySubscribers(t *testing.T) {
+	events := shards.NewEvents()
+	agg := NewLogsFilterAggregator(events)
+
+	ctx := t.Context()
+
+	const badSubscribers = 8
+	badServers := make([]*failingTestServer, 0, badSubscribers)
+	req := &remoteproto.LogsFilterRequest{
+		AllAddresses: true,
+		AllTopics:    true,
+	}
+
+	for range badSubscribers {
+		srv := newFailingTestServer(ctx)
+		srv.received <- req
+		badServers = append(badServers, srv)
+		go func(server *failingTestServer) {
+			err := agg.subscribeLogs(server)
+			if err != nil {
+				t.Error(err)
+			}
+		}(srv)
+	}
+
+	healthySrv := newTestServer(ctx)
+	healthySrv.received <- req
+	go func() {
+		err := agg.subscribeLogs(healthySrv)
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+
+	for _, srv := range badServers {
+		<-srv.receiveCompleted
+	}
+	<-healthySrv.receiveCompleted
+
+	const logsToSend = 32
+	logs := make([]*notifications.LogNotification, 0, logsToSend)
+	for i := range logsToSend {
+		lg := createLog()
+		lg.Index = hexutil.Uint(i)
+		logs = append(logs, lg)
+	}
+
+	_ = agg.distributeLogs(logs)
+
+	if got, want := len(healthySrv.sent), logsToSend; got != want {
+		t.Fatalf("expected healthy subscriber to receive %d logs, got %d", want, got)
+	}
+	if got := len(agg.logsFilters); got != 1 {
+		t.Fatalf("expected only healthy subscriber to remain, got %d", got)
+	}
+}
+
+func TestLogsFilter_RemoveLogsFilter_IsIdempotent(t *testing.T) {
+	events := shards.NewEvents()
+	agg := NewLogsFilterAggregator(events)
+
+	ctx := t.Context()
+	brokenSrv := newTestServer(ctx)
+	brokenSrv.sendErr = errors.New("send failed")
+	healthySrv := newTestServer(ctx)
+
+	brokenID, brokenFilter := agg.insertLogsFilter(brokenSrv)
+	healthyID, healthyFilter := agg.insertLogsFilter(healthySrv)
+
+	req := &remoteproto.LogsFilterRequest{AllAddresses: true, AllTopics: true}
+	agg.updateLogsFilter(brokenFilter, req)
+	agg.updateLogsFilter(healthyFilter, req)
+
+	if err := agg.distributeLogs([]*notifications.LogNotification{createLog()}); err != nil {
+		t.Fatalf("distributeLogs returned error: %v", err)
+	}
+
+	// Simulate deferred cleanup in subscribeLogs for a filter already removed in distributeLogs.
+	agg.removeLogsFilter(brokenID, brokenFilter)
+
+	if agg.aggLogsFilter.allAddrs != 1 {
+		t.Fatalf("expected allAddrs to remain 1 after duplicate removal, got %d", agg.aggLogsFilter.allAddrs)
+	}
+	if agg.aggLogsFilter.allTopics != 1 {
+		t.Fatalf("expected allTopics to remain 1 after duplicate removal, got %d", agg.aggLogsFilter.allTopics)
+	}
+	if _, ok := agg.logsFilters[healthyID]; !ok {
+		t.Fatalf("expected healthy filter %d to remain", healthyID)
 	}
 }

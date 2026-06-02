@@ -265,7 +265,7 @@ func TestGetProof(t *testing.T) {
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
 		result[31] = b
-		return result.Bytes()
+		return result[:]
 	}
 	_ = bankAddr
 
@@ -809,12 +809,14 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	err = rawdb.PruneTableDupSort(tx, kv.TblAccountVals, "", pruneTo, logEvery, ctx)
 	require.NoError(t, err)
 
-	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
-	require.NoError(t, err)
+	// kv.StorageChangeSetDeprecated is no longer part of the active
+	// schema (drop_legacy_e2_tables migration drops it), so there is
+	// nothing to prune from that table.
 
 	//err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	//require.NoError(t, err)

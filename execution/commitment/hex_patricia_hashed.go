@@ -287,7 +287,7 @@ func (f loadFlags) addFlag(loadFlags loadFlags) loadFlags {
 }
 
 var (
-	emptyRootHashBytes = empty.RootHash.Bytes()
+	emptyRootHashBytes = empty.RootHash[:]
 )
 
 func (cell *cell) hashAccKey(keccak keccak.KeccakState, depth int16, hashBuf []byte) error {
