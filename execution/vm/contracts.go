@@ -33,7 +33,6 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
 	evmone "github.com/erigontech/evmone_precompiles"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -323,45 +322,10 @@ func (c *ecrecover) RequiredGas(input []byte) uint64 {
 	return params.EcrecoverGas
 }
 
-// ecrecoverCache memoises ECRECOVER precompile results across calls within
-// the process. The precompile is a pure function of its 128-byte input, so
-// the result never varies. The same call is hot in two scenarios:
-//
-//  1. Contracts that re-verify a stored signature in every entry-point call
-//     (account abstraction wallets, meta-transactions, EIP-712 routers).
-//  2. The parallel executor re-running a tx whose speculative execution
-//     aborted: each incarnation re-executes the same ECRECOVER from scratch
-//     and pays the secp256k1 cgo cost again. The pprof breakdown on
-//     `engine_newPayload` for issue #21446 attributed ~70 ms over 180 s to
-//     this duplication — the bulk of the parallel-vs-serial cgocall gap.
-//
-// 32 768 entries × ~32 bytes value ≈ 1 MiB. Hits are O(1) map lookup; misses
-// fall through to the original libsecp256k1 path.
-var ecrecoverCache = func() *lru.Cache[[128]byte, [32]byte] {
-	c, _ := lru.New[[128]byte, [32]byte](32768)
-	return c
-}()
-
-// ecrecoverEmptyResult is the cached "signature invalid" verdict — output is
-// nil and gas is consumed as usual. Encoded as the zero address so we can
-// distinguish it from cache misses by checking the cache's ok flag.
-var ecrecoverEmptyResult = [32]byte{}
-
 func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	const ecRecoverInputLength = 128
 
 	input = common.RightPadBytes(input, ecRecoverInputLength)
-	var key [128]byte
-	copy(key[:], input[:ecRecoverInputLength])
-	if cached, ok := ecrecoverCache.Get(key); ok {
-		if cached == ecrecoverEmptyResult {
-			return nil, nil
-		}
-		out := make([]byte, 32)
-		copy(out, cached[:])
-		return out, nil
-	}
-
 	// "input" is (hash, v, r, s), each 32 bytes
 	// but for ecrecover we want (r, s, v)
 
@@ -371,7 +335,6 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 
 	// tighter sig s values input homestead only apply to txn sigs
 	if bitutil.TestBytes(input[32:63]) || !crypto.TransactionSignatureIsValid(v, r, s, true /* allowPreEip2s */) {
-		ecrecoverCache.Add(key, ecrecoverEmptyResult)
 		return nil, nil
 	}
 	// We must make sure not to modify the 'input', so placing the 'v' along with
@@ -383,16 +346,11 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	pubKey, err := crypto.Ecrecover(input[:32], sig[:])
 	// make sure the public key is a valid one
 	if err != nil {
-		ecrecoverCache.Add(key, ecrecoverEmptyResult)
 		return nil, nil
 	}
 
 	// the first byte of pubkey is bitcoin heritage
-	out := common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32)
-	var stored [32]byte
-	copy(stored[:], out)
-	ecrecoverCache.Add(key, stored)
-	return out, nil
+	return common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32), nil
 }
 
 func (c *ecrecover) Name() string {
