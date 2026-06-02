@@ -55,13 +55,13 @@ const (
 // maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the fallback
 // when no caller budget is set, and the backstop any provided budget is clamped to so a
 // miscomputed or overflowed budget can't make the handler buffer more than a spec-maximal response.
-var maxMultiChunkResponse = int64(communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks))
+var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks)
 
 // maxResponseBodySize is the byte ceiling the handler buffers for a response on the given topic:
 // single-object protocols get a tight fixed cap; multi-chunk protocols (per IsMultiChunkProtocol)
 // use the caller's on-wire byte budget, clamped to maxMultiChunkResponse and falling back to it
 // when no budget is set.
-func maxResponseBodySize(topic string, maxBytes int64) int64 {
+func maxResponseBodySize(topic string, maxBytes uint64) uint64 {
 	if !communication.IsMultiChunkProtocol(topic) {
 		return maxSingleObjectResponse
 	}
@@ -169,7 +169,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		topic := r.Header.Get("REQRESP-TOPIC")
 		chunkCount := r.Header.Get("REQRESP-EXPECTED-CHUNKS")
 		chunks, _ := strconv.Atoi(chunkCount)
-		maxBytes, _ := strconv.ParseInt(r.Header.Get(MaxResponseBytesHeader), 10, 64)
+		maxBytes, _ := strconv.ParseUint(r.Header.Get(MaxResponseBytesHeader), 10, 64)
 		// some sanity checking on chunks
 		if chunks < 1 {
 			chunks = 1
@@ -245,7 +245,8 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
 		// Buffer up to the cap (plus one byte to detect overflow): a response over the cap is
 		// rejected with 413 rather than silently truncated and returned as 200.
-		limit := maxResponseBodySize(topic, maxBytes)
+		// the size is bounded by maxMultiChunkResponse, which fits int64 for io.LimitReader.
+		limit := int64(maxResponseBodySize(topic, maxBytes))
 		respBody, err := io.ReadAll(io.LimitReader(stream, limit+1))
 		if err != nil {
 			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
