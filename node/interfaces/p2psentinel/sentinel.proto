@@ -59,6 +59,7 @@ message PeerCount {
 message RequestData {
     bytes data = 1; // SSZ encoded data
     string topic = 2;
+    uint64 max_response_chunks = 3; // upper bound on the response's chunk count; sizes the response-body cap (0 = unknown)
 }
 
 message RequestDataWithPeer {

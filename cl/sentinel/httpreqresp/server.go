@@ -38,25 +38,31 @@ const (
 	ResponseCodeHeader = "Reqresp-Response-Code"
 	PeerIdHeader       = "Reqresp-Peer-Id"
 	TopicHeader        = "Reqresp-Topic"
+	// MaxResponseChunksHeader carries the caller's upper bound on the response's chunk
+	// count, used to size the response-body cap. Absent or 0 falls back to maxResponseChunks.
+	MaxResponseChunksHeader = "Reqresp-Max-Response-Chunks"
 )
 
 const (
-	// maxResponseChunks mirrors MAX_REQUEST_BLOCKS, the most chunks a by_range /
-	// by_root / by_head response may carry.
+	// maxResponseChunks is the absolute ceiling on a multi-chunk response's chunk count,
+	// used when the caller's expected count is absent or implausibly large.
 	maxResponseChunks = 1024
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxResponseBodySize is the byte ceiling the handler will buffer for a response on
-// the given topic. by_range / by_root / by_head responses are multi-chunk (one chunk
-// per requested item); every other req/resp protocol returns a single chunk.
-func maxResponseBodySize(topic string) int64 {
-	if strings.Contains(topic, "_by_range") || strings.Contains(topic, "_by_root") || strings.Contains(topic, "_by_head") {
-		return maxResponseChunks * int64(clparams.MaxChunkSize)
+// maxResponseBodySize is the byte ceiling the handler will buffer for a response on the
+// given topic. Single-chunk protocols get a tight fixed cap; by_range / by_root / by_head
+// responses are bounded by expectedChunks (the caller's item count) clamped to maxResponseChunks.
+func maxResponseBodySize(topic string, expectedChunks int64) int64 {
+	if !strings.Contains(topic, "_by_range") && !strings.Contains(topic, "_by_root") && !strings.Contains(topic, "_by_head") {
+		return maxSingleObjectResponse
 	}
-	return maxSingleObjectResponse
+	if expectedChunks <= 0 || expectedChunks > maxResponseChunks {
+		expectedChunks = maxResponseChunks
+	}
+	return expectedChunks * int64(clparams.MaxChunkSize)
 }
 
 // Do performs an http request against the http handler.
@@ -97,6 +103,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		topic := r.Header.Get("REQRESP-TOPIC")
 		chunkCount := r.Header.Get("REQRESP-EXPECTED-CHUNKS")
 		chunks, _ := strconv.Atoi(chunkCount)
+		expectedChunks, _ := strconv.Atoi(r.Header.Get(MaxResponseChunksHeader))
 		// some sanity checking on chunks
 		if chunks < 1 {
 			chunks = 1
@@ -174,7 +181,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
 		// copy the data now to the stream
 		// the first write to w will call code 200, so we do not need to
-		_, err = io.Copy(w, io.LimitReader(stream, maxResponseBodySize(topic)))
+		_, err = io.Copy(w, io.LimitReader(stream, maxResponseBodySize(topic, int64(expectedChunks))))
 		if err != nil {
 			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
 			return

@@ -96,6 +96,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
+	if req.MaxResponseChunks > 0 {
+		httpReq.Header.Set(httpreqresp.MaxResponseChunksHeader, strconv.FormatUint(req.MaxResponseChunks, 10))
+	}
 	// for now this can't actually error. in the future, it can due to a network error
 	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
 	if err != nil {

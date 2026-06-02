@@ -519,11 +519,12 @@ func (x *PeerCount) GetDisconnecting() uint64 {
 }
 
 type RequestData struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"` // SSZ encoded data
-	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Data              []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"` // SSZ encoded data
+	Topic             string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
+	MaxResponseChunks uint64                 `protobuf:"varint,3,opt,name=max_response_chunks,json=maxResponseChunks,proto3" json:"max_response_chunks,omitempty"` // upper bound on the response's chunk count; sizes the response-body cap (0 = unknown)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RequestData) Reset() {
@@ -568,6 +569,13 @@ func (x *RequestData) GetTopic() string {
 		return x.Topic
 	}
 	return ""
+}
+
+func (x *RequestData) GetMaxResponseChunks() uint64 {
+	if x != nil {
+		return x.MaxResponseChunks
+	}
+	return 0
 }
 
 type RequestDataWithPeer struct {
@@ -928,10 +936,11 @@ const file_p2psentinel_sentinel_proto_rawDesc = "" +
 	"\n" +
 	"connecting\x18\x04 \x01(\x04R\n" +
 	"connecting\x12$\n" +
-	"\rdisconnecting\x18\x05 \x01(\x04R\rdisconnecting\"7\n" +
+	"\rdisconnecting\x18\x05 \x01(\x04R\rdisconnecting\"g\n" +
 	"\vRequestData\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
-	"\x05topic\x18\x02 \x01(\tR\x05topic\"Q\n" +
+	"\x05topic\x18\x02 \x01(\tR\x05topic\x12.\n" +
+	"\x13max_response_chunks\x18\x03 \x01(\x04R\x11maxResponseChunks\"Q\n" +
 	"\x13RequestDataWithPeer\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x10\n" +

@@ -78,8 +78,8 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 	return rpc
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte) ([]*cltypes.SignedBeaconBlock, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData)
+func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, expectedChunks uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+	responses, pid, err := b.sendRequest(ctx, topic, reqData, expectedChunks)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -97,7 +97,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 }
 
 func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.BlobSidecar, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData)
+	responses, pid, err := b.sendRequest(ctx, topic, reqData, count)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -164,7 +164,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), count*uint64(len(columns)))
 	if err != nil {
 		return nil, pid, err
 	}
@@ -191,7 +191,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), count)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -221,7 +221,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), uint64(len(roots)))
 	if err != nil {
 		return nil, pid, err
 	}
@@ -286,7 +286,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRangeTopic := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data)
+	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, count)
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
@@ -302,7 +302,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRootTopic := communication.BeaconBlocksByRootProtocolV2 + "," + communication.BeaconBlocksByRootProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRootTopic, data)
+	return b.sendBlocksRequest(ctx, blocksByRootTopic, data, uint64(len(roots)))
 }
 
 // Peers retrieves peer count.
@@ -414,12 +414,14 @@ func (b *BeaconRpcP2P) sendRequest(
 	ctx context.Context,
 	topic string,
 	reqPayload []byte,
+	expectedChunks uint64,
 ) ([]responseData, string, error) {
 	ctx, cn := context.WithTimeout(ctx, time.Second*2)
 	defer cn()
 	message, err := b.sentinel.SendRequest(ctx, &sentinelproto.RequestData{
-		Data:  reqPayload,
-		Topic: topic,
+		Data:              reqPayload,
+		Topic:             topic,
+		MaxResponseChunks: expectedChunks,
 	})
 	if err != nil {
 		return nil, "", err
