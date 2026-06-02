@@ -140,10 +140,7 @@ func (d *BALDownloader) scanAndFetch(ctx context.Context) error {
 	sem := make(chan struct{}, d.maxConcurrent)
 	var wg sync.WaitGroup
 	for i := 0; i < len(missing); i += batchSize {
-		end := i + batchSize
-		if end > len(missing) {
-			end = len(missing)
-		}
+		end := min(i+batchSize, len(missing))
 		batch := missing[i:end]
 
 		select {

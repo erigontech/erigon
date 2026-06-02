@@ -380,10 +380,7 @@ func (s *simulator) sanitizeCall(
 
 	if args.Gas == nil {
 		// Default to remaining block gas, but capped by the node's effective gas cap.
-		remaining := blockContext.GasLimit - gasUsed
-		if remaining > effectiveCap {
-			remaining = effectiveCap
-		}
+		remaining := min(blockContext.GasLimit-gasUsed, effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	} else {
 		// Cap user-specified gas against the node's gas cap.
