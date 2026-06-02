@@ -417,15 +417,13 @@ func (s *DirtySegment) close() {
 
 func (s *DirtySegment) closeAndRemoveFiles() {
 	if s != nil {
-		f := s.FilePath()
-		s.closeIdx()
-		s.closeSeg()
-		toRemove := make([]string, 0, 2)
-		toRemove = append(toRemove, f)
+		toRemove := make([]string, 0, 1+len(s.indexes))
+		toRemove = append(toRemove, s.FilePath())
 		for _, index := range s.indexes {
 			toRemove = append(toRemove, index.FilePath())
 		}
-
+		s.closeIdx()
+		s.closeSeg()
 		removeOldFiles(toRemove)
 	}
 }
@@ -1066,6 +1064,23 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 	return res, missingSnapshots, nil
 }
 
+func allTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInfo, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, segType := range types {
+		for _, f := range list {
+			if f.Type.Enum() != segType.Enum() {
+				continue
+			}
+			res = append(res, f)
+		}
+	}
+	return res, nil
+}
+
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
@@ -1175,7 +1190,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		files, _, err := TypedSegments(s.dir, s.Types(), false)
+		files, err := allTypedSegments(s.dir, s.Types())
 		if err != nil {
 			return err
 		}
@@ -1201,13 +1216,13 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	files, _, err := TypedSegments(s.dir, types, allowGaps)
+	files, err := allTypedSegments(s.dir, types)
 
 	if err != nil {
 		return err
@@ -1218,6 +1233,8 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bo
 		list = append(list, fName)
 	}
 
+	// NOTE: We must not call closeWhatNotInList(list) here because list only contains the requested types,
+	// which would incorrectly close segments of other types. Stale files are cleaned by OpenFolder.
 	if err := s.openSegments(list, true, false); err != nil {
 		return err
 	}
@@ -1248,7 +1265,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 				if _, ok := protectFiles[seg.FileName()]; ok {
 					continue
 				}
-				if _, ok := toClose[seg.segType.Enum()]; !ok {
+				if _, ok := toClose[t]; !ok {
 					toClose[t] = make([]*DirtySegment, 0)
 				}
 				toClose[t] = append(toClose[t], seg)

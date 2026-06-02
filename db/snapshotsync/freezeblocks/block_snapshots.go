@@ -142,8 +142,9 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cf
 }
 
 type BlockRetire struct {
-	maxScheduledBlock atomic.Uint64
-	working           atomic.Bool
+	maxScheduledBlock  atomic.Uint64
+	working            atomic.Bool
+	lastRetireGapStart atomic.Uint64
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -271,10 +272,19 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		if !ok {
 			return nil
 		}
-		lastInFiles := br.snapshots().SegmentsMax() + 1
-		haveGap = lastInFiles < firstInDB
+		nextBlockInSnapshots := br.snapshots().SegmentsMax() + 1
+		haveGap = nextBlockInSnapshots < firstInDB
 		if haveGap {
-			log.Debug("[snapshots] not enough blocks in db to create snapshots", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB, "recommendations", "it's ok to ignore this message. can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`")
+			// Log once per unique gap start.
+			if br.lastRetireGapStart.Swap(firstInDB) != firstInDB {
+				br.logger.Debug("[snapshots] skipping block snapshot retirement due to gap",
+					"nextBlockInSnapshots", nextBlockInSnapshots,
+					"firstBlockInDB", firstInDB,
+					"gapBlocks", firstInDB-nextBlockInSnapshots,
+					"recommendation", "retirement will resume once matching snapshots are downloaded or the gap is covered")
+			}
+		} else {
+			br.lastRetireGapStart.Store(0)
 		}
 		return nil
 	}); err != nil {

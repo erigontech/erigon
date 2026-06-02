@@ -82,6 +82,17 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	}
 }
 
+func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	require.NoError(t, c.AddWord([]byte{1}))
+	require.NoError(t, c.Compress())
+}
+
 func BenchmarkFindMergeRange(t *testing.B) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
 	merger.DisableFsync()
@@ -209,9 +220,14 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
-		s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true)
+		s.OpenSegments(snaptype2.BlockSnapshotTypes, true)
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Len(Ranges, 3)
+		// NOTE: TestMergeSnapshots calls Merge with doIndex=false. 
+		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
+		// and the subsegments marked canDelete=true will also be skipped, causing visible
+		// segments to drop to 0 until BuildMissedIndices/OpenFolder runs. This is expected
+		// for doIndex=false merges and is only done in this test to skip redundant index rebuilding.
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
@@ -229,6 +245,7 @@ func TestMergeSnapshots(t *testing.T) {
 		s.OpenFolder()
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Empty(Ranges)
+		// doIndex=false, same rationale as above
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
@@ -397,7 +414,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
 
-	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true))
+	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
 	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {
 		require.Len(delFiles, 69)
 		mustSeeFile(delFiles, "000000-000010-bodies.seg")
@@ -452,7 +469,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	require.NoError(err)
 	require.Equal(4, len(list))
 
-	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true))
+	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
 	require.NoError(s.RemoveOverlaps(func(delList []string) error {
 		require.Len(delList, 0)
 		return nil
@@ -524,7 +541,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
-		s.OpenSegments(snaptype2.BlockSnapshotTypes, false, true)
+		s.OpenSegments(snaptype2.BlockSnapshotTypes, true)
 		// require.Equal(1, len(getSegs(snaptype2.Enums.Headers]))
 		s.Close()
 
@@ -794,9 +811,10 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
+		// dirty retains gapped files; visible is still filtered by RecalcVisibleSegments.
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
-		require.Equal(5, s.dirty[snaptype2.Enums.Transactions].Len())
+		require.Equal(6, s.dirty[snaptype2.Enums.Transactions].Len())
 	}
 
 	// overlap in transactions: [4*500_000 - 4.5*500_000]
@@ -811,9 +829,10 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
+		// dirty retains overlapping files; visible is still filtered by RecalcVisibleSegments.
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
-		require.Equal(5, s.dirty[snaptype2.Enums.Transactions].Len())
+		require.Equal(7, s.dirty[snaptype2.Enums.Transactions].Len())
 	}
 }
 
@@ -844,6 +863,40 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 
 	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
+}
+
+func TestOpenFolderKeepsUnindexedOverlapInDirty(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+
+	createFile(0, 500_000, snaptype2.Headers)
+	createFile(0, 500_000, snaptype2.Bodies)
+	createFile(0, 500_000, snaptype2.Transactions)
+	createFile(500_000, 1_000_000, snaptype2.Headers)
+	createFile(500_000, 1_000_000, snaptype2.Bodies)
+	createFile(500_000, 1_000_000, snaptype2.Transactions)
+	createTestSegmentOnlyFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenFolder())
+	require.Equal(3, s.dirty[snaptype2.Enums.Transactions].Len())
+	// Headers and Bodies are not affected by the unindexed Transactions overlap.
+	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
+	require.Equal(2, s.dirty[snaptype2.Enums.Bodies].Len())
+	visibleTxn := s.visible.Load().segments[snaptype2.Enums.Transactions]
+	require.Len(visibleTxn, 2)
+	// The two visible segments must be the indexed subsegments, not the unindexed covering file.
+	require.Equal(uint64(0), visibleTxn[0].from)
+	require.Equal(uint64(500_000), visibleTxn[0].to)
+	require.Equal(uint64(500_000), visibleTxn[1].from)
+	require.Equal(uint64(1_000_000), visibleTxn[1].to)
+	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
 }
 
 func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
@@ -922,14 +975,14 @@ func TestViewPinsGeneration(t *testing.T) {
 	require.Same(oldSrc1, pinned[1].src)
 }
 
-// TestCloseWhatNotInListVsLiveViewDoesNotCrash reproduces a use-after-close in
-// the snapshot reopen path. After a merge writes a covering segment, the old
-// sub-segment files remain on disk but TypedSegments -> NoOverlaps drops them
-// from the listing. OpenFolder then hands that list to closeWhatNotInList,
-// which close()s those sub-segments — ignoring that a live View still holds a
-// refcount on them. The View's later Close hits closeAndRemoveFiles on the
-// now-nil decompressor and crashes. This is pure snapshotsync (no merge code),
-// so it fails on main.
+// TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that a live View does
+// not crash when OpenFolder re-opens after a merge. The crash was originally
+// caused by closeWhatNotInList closing sub-segments that a View still held.
+// Two protections now prevent this:
+//  1. OpenFolder uses allTypedSegments (no NoOverlaps), so sub-segment files
+//     remain in the protect list and closeWhatNotInList does not close them.
+//  2. PR #21545 added a refcount guard in closeWhatNotInList that skips
+//     segments held by a live View even if they are in the close set.
 func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -985,4 +1038,76 @@ func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 		}
 	}()
 	v.Close()
+}
+
+func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		TmpDir:     dir,
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, name.String())),
+		LeafSize:   8,
+	}, logger)
+	require.NoError(t, err)
+	defer idx.Close()
+	idx.DisableFsync()
+	err = idx.AddKey([]byte{1}, 0)
+	require.NoError(t, err)
+	err = idx.Build(t.Context())
+	require.NoError(t, err)
+	if name == snaptype2.Transactions.Enum() {
+		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   1,
+			BucketSize: 10,
+			TmpDir:     dir,
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
+			LeafSize:   8,
+		}, logger)
+		require.NoError(t, err)
+		defer idx.Close()
+		idx.DisableFsync()
+		err = idx.AddKey([]byte{1}, 0)
+		require.NoError(t, err)
+		err = idx.Build(t.Context())
+		require.NoError(t, err)
+	}
+}
+
+func TestOpenFolderPromotesCoveringSegmentOnceIndexed(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+
+	createFile(0, 500_000, snaptype2.Headers)
+	createFile(0, 500_000, snaptype2.Bodies)
+	createFile(0, 500_000, snaptype2.Transactions)
+	createFile(500_000, 1_000_000, snaptype2.Headers)
+	createFile(500_000, 1_000_000, snaptype2.Bodies)
+	createFile(500_000, 1_000_000, snaptype2.Transactions)
+
+	createTestSegmentOnlyFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenFolder())
+	visibleTxn := s.visible.Load().segments[snaptype2.Enums.Transactions]
+	require.Len(visibleTxn, 2)
+	require.Equal(uint64(0), visibleTxn[0].from)
+	require.Equal(uint64(500_000), visibleTxn[0].to)
+	require.Equal(uint64(500_000), visibleTxn[1].from)
+	require.Equal(uint64(1_000_000), visibleTxn[1].to)
+	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
+
+	createTestIdxFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
+
+	require.NoError(s.OpenFolder())
+	visibleTxnAfter := s.visible.Load().segments[snaptype2.Enums.Transactions]
+	require.Len(visibleTxnAfter, 1)
+	require.Equal(uint64(0), visibleTxnAfter[0].from)
+	require.Equal(uint64(1_000_000), visibleTxnAfter[0].to)
+	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
 }
