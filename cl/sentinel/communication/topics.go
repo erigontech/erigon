@@ -33,6 +33,7 @@ const StatusTopic = "/status"
 const GoodbyeTopic = "/goodbye"
 const BeaconBlocksByRangeTopic = "/beacon_blocks_by_range"
 const BeaconBlocksByRootTopic = "/beacon_blocks_by_root"
+const BeaconBlocksByHeadTopic = "/beacon_blocks_by_head"
 const BlobSidecarByRootTopic = "/blob_sidecars_by_root"
 const BlobSidecarByRangeTopic = "/blob_sidecars_by_range"
 const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
@@ -42,6 +43,9 @@ const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
 
 const DataColumnSidecarsByRangeTopic = "/data_column_sidecars_by_range"
 const DataColumnSidecarsByRootTopic = "/data_column_sidecars_by_root"
+
+const ExecutionPayloadEnvelopesByRangeTopic = "/execution_payload_envelopes_by_range"
+const ExecutionPayloadEnvelopesByRootTopic = "/execution_payload_envelopes_by_root"
 
 // Request and Response protocol ids
 var (
@@ -61,11 +65,16 @@ var (
 	BeaconBlocksByRootProtocolV1 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
 	BeaconBlocksByRootProtocolV2 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema2 + EncodingProtocol
 
+	BeaconBlocksByHeadProtocolV1 = ProtocolPrefix + BeaconBlocksByHeadTopic + Schema1 + EncodingProtocol
+
 	BlobSidecarByRootProtocolV1  = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
 	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
 
 	DataColumnSidecarsByRootProtocolV1  = ProtocolPrefix + DataColumnSidecarsByRootTopic + Schema1 + EncodingProtocol
 	DataColumnSidecarsByRangeProtocolV1 = ProtocolPrefix + DataColumnSidecarsByRangeTopic + Schema1 + EncodingProtocol
+
+	ExecutionPayloadEnvelopesByRangeProtocolV1 = ProtocolPrefix + ExecutionPayloadEnvelopesByRangeTopic + Schema1 + EncodingProtocol
+	ExecutionPayloadEnvelopesByRootProtocolV1  = ProtocolPrefix + ExecutionPayloadEnvelopesByRootTopic + Schema1 + EncodingProtocol
 
 	LightClientOptimisticUpdateProtocolV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateProtocolV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol

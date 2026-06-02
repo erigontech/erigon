@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -101,6 +102,15 @@ func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.Pendi
 // SetPendingUpdate sets the pending update (used during Merge to transfer from another context).
 func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.PendingCommitmentUpdate) {
 	sdc.pendingUpdate = upd
+}
+
+// PeekPendingUpdate returns the current pending update without taking ownership.
+// Returns nil if no pending update is set. Used by the parallel commitment
+// calculator to annotate the pending update with the block hash after a
+// per-block ComputeCommitment, so the next FlushPendingUpdates can route to
+// the exact (BlockNum, BlockHash) past changeset.
+func (sdc *SharedDomainsCommitmentContext) PeekPendingUpdate() *commitment.PendingCommitmentUpdate {
+	return sdc.pendingUpdate
 }
 
 // ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
@@ -283,6 +293,17 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	if ok {
 		hexPatriciaHashed.SetCollapseTracer(tracer)
 	}
+}
+
+// BranchChildCount returns the child count of the branch at nibblePrefix, read
+// from the in-memory commitment domain (post-compute state).
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+	key := nibbles.HexToCompact(nibblePrefix)
+	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	if err != nil {
+		return 0, err
+	}
+	return commitment.BranchData(enc).ChildCount(), nil
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.

@@ -36,12 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -54,12 +52,11 @@ type SendersCfg struct {
 	badBlockHalt    bool
 	tmpdir          string
 	chainConfig     *chain.Config
-	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
 	readAheader     *exec.BlockReadAheader
 }
 
-func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, readAheader *exec.BlockReadAheader) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
 	const sendersBatchSize = 1000
 	return SendersCfg{
 		batchSize:       sendersBatchSize,
@@ -67,7 +64,6 @@ func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHal
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
-		hd:              hd,
 		blockReader:     blockReader,
 		readAheader:     readAheader,
 	}
@@ -313,10 +309,6 @@ Loop:
 		logger.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
 		if cfg.badBlockHalt {
 			return minBlockErr
-		}
-		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(minBlockErr, rules.ErrInvalidBlock) {
-			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 
 		if to > s.BlockNumber {

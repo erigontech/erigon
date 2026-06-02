@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -96,6 +97,18 @@ type commitmentCalculator struct {
 	// out publishes commitment roots.
 	out chan commitmentResult
 
+	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
+	// ComputeCommitment at every block boundary. Mirrors serial's
+	// `!dbg.BatchCommitments || shouldGenerateChangesets || KeepExecutionProofs`
+	// gate in [exec3_serial.go]: when changesets must be generated (reorg
+	// support) or execution proofs must be kept, per-block computation is
+	// required so that each block's changeset records the branch deltas
+	// attributable to that block alone. In batch mode, the trie folds
+	// multiple blocks together and the deferred buffer dedupes branch
+	// prefixes across the batch — those merged updates flush into the
+	// LAST block's changeset, which is wrong for per-block unwind.
+	forcePerBlockCompute bool
+
 	wg   sync.WaitGroup
 	done chan struct{}
 }
@@ -106,6 +119,7 @@ func newCommitmentCalculator(
 	db kv.TemporalRoDB,
 	logPrefix string,
 	logger log.Logger,
+	forcePerBlockCompute bool,
 	in chan applyResult,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
@@ -125,7 +139,7 @@ func newCommitmentCalculator(
 	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
 	// deferred here. Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
 	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
 	// back and the calculator goroutine is gone.
@@ -137,17 +151,18 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
 	return &commitmentCalculator{
-		doms:       doms,
-		db:         db,
-		logPrefix:  logPrefix,
-		logger:     logger,
-		updates:    calcUpdates,
-		state:      newCalcState(asOfReader, logger, logPrefix),
-		asOfReader: asOfReader,
-		roTx:       roTx,
-		in:         in,
-		out:        out,
-		done:       make(chan struct{}),
+		doms:                 doms,
+		db:                   db,
+		logPrefix:            logPrefix,
+		logger:               logger,
+		updates:              calcUpdates,
+		state:                newCalcState(asOfReader, logger, logPrefix),
+		asOfReader:           asOfReader,
+		roTx:                 roTx,
+		in:                   in,
+		out:                  out,
+		forcePerBlockCompute: forcePerBlockCompute,
+		done:                 make(chan struct{}),
 	}, nil
 }
 
@@ -165,6 +180,7 @@ func (cc *commitmentCalculator) Stop() {
 }
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer cc.wg.Done()
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
@@ -208,12 +224,34 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
+		// Block-validity rejection (set by the worker-result path in
+		// nextResult — insufficient funds, gas overflow, finalize error,
+		// scheduler-exhausted incarnations). The apply loop's case
+		// *blockResult fast-paths Err != nil and returns it directly;
+		// we must NOT compute commitment for this block because (a)
+		// sd.mem may contain partial-tx writes from txs that succeeded
+		// before the failing one, so the computed root would be
+		// non-canonical, and (b) computing here would emit an
+		// ErrWrongTrieRoot through rootResults that races with the apply
+		// loop's Err return — the wrong-trie-root error wins and masks
+		// the original validation diagnostic (EEST assertions on the
+		// underlying exception class then fail). Skip silently and let
+		// the apply loop surface the worker's diagnosis.
+		if r.Err != nil {
+			return
+		}
+
 		// Track the latest block boundary.
 		cc.lastBlockResult = r
 
 		// Break logic: in per-block mode, compute at every block boundary.
 		// Skip the first block if it's a partial block (resumed mid-block).
-		if !dbg.BatchCommitments {
+		// `forcePerBlockCompute` overrides dbg.BatchCommitments to mirror
+		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
+		// || shouldGenerateChangesets || ...` check) — per-block compute is
+		// required when changesets must record per-block branch deltas
+		// (reorg support, KeepExecutionProofs).
+		if !dbg.BatchCommitments || cc.forcePerBlockCompute {
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block is partial (resumed mid-block).
 				// Compute it (like serial does) to save trie state, then
@@ -224,8 +262,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.computeAndCheck(ctx, r)
 			}
 		}
-		// In BatchCommitments mode: just accumulate — compute only on
-		// explicit commitComputeRequest from the apply loop.
+		// In BatchCommitments mode (without forcePerBlockCompute): just
+		// accumulate — compute only on explicit commitComputeRequest from
+		// the apply loop.
 
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
@@ -282,7 +321,9 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	// Use hash-aware accumulator wrap — see computeWithBlockAccumulator
+	// docstring for why this is mandatory in reorg scenarios.
+	rh, err := cc.computeWithBlockAccumulator(ctx, br)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -299,7 +340,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	// Check against expected root from the block header.
-	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
+	if !bytes.Equal(rh, br.StateRoot[:]) {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
 	}
 
@@ -329,7 +370,12 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	if _, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil); err != nil {
+	// Use the same hash-aware accumulator wrap as computeAndCheck — without
+	// it, the [state] write inside ComputeCommitment can land in a stale
+	// past-changeset entry chosen non-deterministically by GetChangesetByBlockNum
+	// when pastChangesAccumulator holds multiple changesets per block number
+	// (canonical + fork during reorg-bounce tests).
+	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
 		// Partial-block compute is intentionally not verified (no header root
 		// to compare against), but a real ComputeCommitment failure leaves
 		// later trie state suspect — log so the failure isn't silent.
@@ -372,7 +418,15 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	// In per-block compute mode, the exec loop has (or is about to)
+	// swap the changeset accumulator to block N+1 by the time this runs.
+	// Wrap ComputeCommitment so any branch writes (mid-process inline
+	// flushes from `pendingPrefixes` collisions, plus any writes via
+	// putBranch) go into block N's saved changeset, not whatever the
+	// exec loop has set as current. Without this wrap, block N's
+	// branch deltas leak into block N+1's CS, producing a wrong-trie-root
+	// chain on subsequent blocks (see TestTxLookupUnwind reproducer).
+	rh, err := cc.computeWithBlockAccumulator(ctx, br)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -385,12 +439,8 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
 
-	// Trim old version entries from sd.mem — only keeps the latest
-	// entry at or before this block's txNum. Reclaims memory from
-	// accumulated inMemHistoryReads entries during batch processing.
-
 	// Only publish on mismatch — success is silent.
-	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
+	if mismatch := !bytes.Equal(rh, br.StateRoot[:]); mismatch {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,
@@ -406,6 +456,70 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	case <-ctx.Done():
 	case <-cc.done:
 	}
+}
+
+// computeWithBlockAccumulator runs ComputeCommitment with the changeset
+// accumulator switched to block N's saved changeset (looked up by hash) so
+// that any branch writes during compute (mid-process inline flushes from
+// `pendingPrefixes` collisions, plus the [state] write at end via
+// encodeAndStoreCommitmentState) land in block N's CS rather than whatever
+// the exec loop has installed as current.
+//
+// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
+// can hold multiple changesets per block number after a fork-bounce
+// (canonical block 1 + forks[i] block 1 with different hashes), and a
+// number-only GetChangesetByBlockNum returns the first match in
+// non-deterministic map iteration order. That non-determinism caused the
+// calculator's [state] write for canonical block 1 to land in the fork's
+// block 1 CS during the TestBlockchainHeaderchainReorgConsistency
+// reproducer, leaving canonical block 1's CS without [state] and producing
+// off-by-one wrong-trie-root chains on the next iteration's re-execution.
+//
+// If block N's CS hasn't been saved yet (rare race with the exec loop's
+// SavePastChangesetAccumulator), falls through to whatever current is
+// installed — same as the pre-fix behavior.
+//
+// Also annotates the pending deferred update (set inside ComputeCommitment
+// when defer mode is on) with the block's hash, so the next call's
+// FlushPendingUpdates uses the same hash-aware routing.
+func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, br *blockResult) ([]byte, error) {
+	defer func() {
+		// Stamp the pending update (if any was set during ComputeCommitment)
+		// with this block's hash so FlushPendingUpdates on the next call
+		// routes to the exact (BlockNum, BlockHash) entry rather than
+		// guessing among ambiguous block-number-only matches.
+		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == br.BlockNum {
+			upd.BlockHash = br.BlockHash
+		}
+	}()
+
+	cs := cc.doms.GetChangesetByHash(br.BlockNum, br.BlockHash)
+	// Always take the lock around ComputeCommitment, even on the cs==nil
+	// fast path: the FlushPendingUpdates that ComputeCommitment runs
+	// internally still mutates the global accumulator pointer + per-domain
+	// diff fields, racing with the apply loop's SetChangesetAccumulator if
+	// we don't serialize. Without this, race detector flags ~73 SetDiff vs
+	// PutWithPrev hits on the cs==nil path (genesis, missing-CS edge cases).
+	cc.doms.LockChangesetAccumulator()
+	defer cc.doms.UnlockChangesetAccumulator()
+	if cs == nil {
+		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	}
+	// LOAD-BEARING swap under the outer lock (already taken above). The
+	// Set/restore dance below mutates the global current-accumulator
+	// pointer; the deferred branch writes from block N-1 (flushed inside
+	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
+	// marker write at end of compute also touch that same global pointer
+	// and the per-domain diff fields. Holding changesetMu through all of
+	// it serializes against the apply goroutine's DomainPut/DomainDel.
+	//
+	// Inside the lock we must use the *Locked variants of Get/Set/Compute
+	// — the public counterparts re-acquire the same Mutex and would
+	// self-deadlock.
+	prev := cc.doms.GetChangesetAccumulatorLocked()
+	cc.doms.SetChangesetAccumulatorLocked(cs)
+	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

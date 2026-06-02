@@ -20,10 +20,20 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+// The integration tool defaults parallel exec on (the integration tool's
+// preferred mode for stage_exec), overriding the dbg package's default-off.
+// dbg.EnvBool honours both EXEC3_PARALLEL and ERIGON_EXEC3_PARALLEL — the
+// latter is what envLookup auto-prepends, so CI workflows that set
+// ERIGON_EXEC3_PARALLEL=false actually take effect.
+func init() {
+	dbg.Exec3Parallel = dbg.EnvBool("EXEC3_PARALLEL", true)
+}
 
 var (
 	chaindata                     string
@@ -118,7 +128,7 @@ func withYes(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", false, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withClearCommitment(cmd *cobra.Command) {

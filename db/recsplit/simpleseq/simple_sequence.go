@@ -109,16 +109,16 @@ func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
 	return idx, idx >= 0
 }
 
-func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
+func (s *SimpleSequence) Seek(v uint64) (uint64, uint64, bool) {
 	idx, found := s.search(v)
 	if !found {
-		return 0, false
+		return 0, 0, false
 	}
-	return s.Get(uint64(idx)), true
+	return s.Get(uint64(idx)), uint64(idx), true
 }
 
 func (s *SimpleSequence) Has(v uint64) bool {
-	n, ok := s.Seek(v)
+	n, _, ok := s.Seek(v)
 	return ok && n == v
 }
 

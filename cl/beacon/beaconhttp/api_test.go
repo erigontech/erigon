@@ -31,6 +31,29 @@ func TestHandleEndpoint_SetsEthConsensusVersionHeaderFromBodyVersion(t *testing.
 	}
 }
 
+func TestWillEncodeSSZ(t *testing.T) {
+	tests := []struct {
+		accept string
+		want   bool
+	}{
+		{"", false},
+		{"*/*", false},
+		{"application/json", false},
+		{"application/octet-stream", true},
+		{"application/json, application/octet-stream", false},
+		{"application/octet-stream, application/json", false},
+		{"text/html", false},
+		{"text/event-stream", false},
+		{"application/octet-stream; q=1", true},
+		{"text/html, application/octet-stream", false},
+	}
+	for _, tt := range tests {
+		if got := WillEncodeSSZ(tt.accept); got != tt.want {
+			t.Errorf("WillEncodeSSZ(%q) = %v, want %v", tt.accept, got, tt.want)
+		}
+	}
+}
+
 func TestHandleEndpoint_DoesNotOverrideEthConsensusVersionHeader(t *testing.T) {
 	h := HandleEndpointFunc(func(w http.ResponseWriter, r *http.Request) (*BeaconResponse, error) {
 		return NewBeaconResponse(map[string]any{"ok": true}).

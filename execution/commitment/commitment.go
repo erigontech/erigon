@@ -328,8 +328,16 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 // Used by the commitment context to defer branch update application until a later flush.
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
-	TxNum    uint64
-	Deferred []*DeferredBranchUpdate
+	// BlockHash is the hash of the block these deferred updates were
+	// generated for. It disambiguates pastChangesAccumulator lookups when
+	// multiple changesets exist for the same block number (e.g. during a
+	// fork-bounce reorg test where canonical and fork chains both saved a
+	// block 1 changeset). Without the hash, GetChangesetByBlockNum returns
+	// the first match it iterates — non-deterministic and wrong in that
+	// scenario.
+	BlockHash common.Hash
+	TxNum     uint64
+	Deferred  []*DeferredBranchUpdate
 }
 
 // Clear returns all deferred updates to the pool and nils the slice.
@@ -749,6 +757,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 }
 
 type BranchData []byte
+
+// ChildCount returns the number of children present in the branch.
+func (branchData BranchData) ChildCount() int {
+	if len(branchData) < 4 {
+		return 0
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+}
 
 func (branchData BranchData) String() string {
 	if len(branchData) == 0 {

@@ -346,6 +346,9 @@ func (s *DirtySegment) IsIndexed() bool {
 }
 
 func (s *DirtySegment) FileName() string {
+	if s.Decompressor != nil {
+		return s.Decompressor.FileName()
+	}
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
@@ -1258,6 +1261,13 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	for segtype, delSegments := range toClose {
 		dirtyFiles := s.dirty[segtype]
 		for _, delSeg := range delSegments {
+			if delSeg.refcount.Load() > 0 {
+				// A live reader (View/RoTx) still holds this segment. Closing it
+				// now would nil its decompressor out from under that reader and
+				// turn the reader's later closeAndRemoveFiles into a crash. Leave
+				// it; it is reaped on a later pass once the reader releases it.
+				continue
+			}
 			delSeg.close()
 			dirtyFiles.Delete(delSeg)
 		}
@@ -1375,7 +1385,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 				if sn.Decompressor == nil {
 					continue
 				}
-				if sn.segType.FileName(sn.version, sn.from, sn.to) != fName {
+				if sn.FileName() != fName {
 					continue
 				}
 				sn.canDelete.Store(true)
