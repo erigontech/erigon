@@ -329,14 +329,27 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 			}
 		}
 
-		// Walk this block's tx entries. txCount entries; format per
-		// entry: 1-byte hash-prefix + 20-byte sender + tx_rlp.
-		// Even when !writeThisBlock we MUST advance the tx getter
-		// to keep the lockstep position in sync.
+		// Walk this block's tx entries. txCount entries per block, written
+		// by freezeblocks.DumpTxs in this order:
+		//   - 1 entry for the first system tx (BaseTxnID). Empty if the
+		//     source row in kv.EthTx was absent (DumpTxs calls collect(nil));
+		//     otherwise has the user-tx wire format.
+		//   - txCount-2 user txs. Always non-empty; wire format
+		//     hashByte(1) + sender(20) + tx_rlp.
+		//   - 1 entry for the last system tx (LastSystemTx). Same empty-or-full
+		//     convention as the first.
+		//
+		// kv.Senders for a block is a packed slice of 20-byte sender
+		// addresses with one entry per USER tx (system txs aren't
+		// included). We mirror that by only appending sender bytes for
+		// entries inside the [1, txCount-1) user range.
+		//
+		// Even when !writeThisBlock we MUST advance the tx getter to
+		// keep the lockstep position in sync.
 		txCount := uint64(body.TxCount)
 		var sendersBuf []byte
-		if writeThisBlock {
-			sendersBuf = make([]byte, 0, txCount*20)
+		if writeThisBlock && txCount > 2 {
+			sendersBuf = make([]byte, 0, (txCount-2)*20)
 		}
 		txnID := body.BaseTxnID.U64()
 		for i := uint64(0); i < txCount; i++ {
@@ -348,15 +361,31 @@ func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHead
 				txnID++
 				continue
 			}
-			if len(tBuf) < 21 {
+			isSystemSlot := i == 0 || i == txCount-1
+			switch {
+			case len(tBuf) == 0:
+				// Empty entry — only legal for system tx slots
+				// (DumpTxs writes nil when the source kv.EthTx row
+				// was absent). For user-tx positions this would be
+				// a malformed file.
+				if !isSystemSlot {
+					return fmt.Errorf("seedLeftoverBlocks: empty tx entry at block %d tx %d (user position; only system slots may be empty)", n, i)
+				}
+				// Nothing to write — kv.EthTx had no row for this
+				// txnID at retire time, so leaving it absent now
+				// matches that.
+			case len(tBuf) < 21:
 				return fmt.Errorf("seedLeftoverBlocks: tx entry at block %d tx %d shorter than sender prefix (len=%d)", n, i, len(tBuf))
-			}
-			// sender = tBuf[1:21]; tx_rlp = tBuf[21:]
-			sendersBuf = append(sendersBuf, tBuf[1:21]...)
-			var txIDBytes [8]byte
-			binary.BigEndian.PutUint64(txIDBytes[:], txnID)
-			if err := tx.Put(kv.EthTx, txIDBytes[:], tBuf[21:]); err != nil {
-				return fmt.Errorf("seedLeftoverBlocks: write EthTx[txnID=%d] (block %d): %w", txnID, n, err)
+			default:
+				// tBuf = hashByte(1) + sender(20) + tx_rlp.
+				if !isSystemSlot {
+					sendersBuf = append(sendersBuf, tBuf[1:21]...)
+				}
+				var txIDBytes [8]byte
+				binary.BigEndian.PutUint64(txIDBytes[:], txnID)
+				if err := tx.Put(kv.EthTx, txIDBytes[:], tBuf[21:]); err != nil {
+					return fmt.Errorf("seedLeftoverBlocks: write EthTx[txnID=%d] (block %d): %w", txnID, n, err)
+				}
 			}
 			txnID++
 		}

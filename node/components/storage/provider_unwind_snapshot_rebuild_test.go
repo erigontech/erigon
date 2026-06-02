@@ -191,12 +191,29 @@ func makeBlockSnapshotTriple(t *testing.T, ctx context.Context, snapDir, tmpDir 
 	require.NoError(t, bc.Compress())
 	bc.Close()
 
-	// Write transactions. Total = blockCount * txCount; format per
-	// entry: 1-byte hash prefix + 20-byte sender + 5-byte fake tx_rlp.
+	// Write transactions. Real Erigon format per block from
+	// freezeblocks.DumpTxs: txCount entries laid out as
+	//   [system tx slot] + (txCount-2) user txs + [system tx slot]
+	// System tx slots are empty bytes when the source kv.EthTx row was
+	// absent at retire time (collect(nil) in DumpTxs). User txs have
+	// 1-byte hashByte + 20-byte sender + tx_rlp.
+	//
+	// Fixture choices: empty system tx slots both sides (the common
+	// case in practice); user txs follow the same hashByte+sender+rlp
+	// shape DumpTxs would produce. The synthetic "txCount" param must
+	// be >= 2 (one slot at each end).
+	require.GreaterOrEqual(t, int(txCount), 2, "fixture requires txCount >= 2 to include the two system slots")
 	tc, err := seg.NewCompressor(ctx, "fixture-txs", tFI.Path, tmpDir, seg.DefaultCfg, log.LvlError, log.New())
 	require.NoError(t, err)
 	totalTx := (toBlock - fromBlock) * uint64(txCount)
 	for i := uint64(0); i < totalTx; i++ {
+		positionInBlock := i % uint64(txCount)
+		isSystemSlot := positionInBlock == 0 || positionInBlock == uint64(txCount)-1
+		if isSystemSlot {
+			// Empty system tx slot.
+			require.NoError(t, tc.AddUncompressedWord(nil))
+			continue
+		}
 		word := make([]byte, 0, 1+20+5)
 		word = append(word, 0xAB) // hash prefix
 		var sender [20]byte
@@ -221,14 +238,18 @@ func makeBlockSnapshotTriple(t *testing.T, ctx context.Context, snapDir, tmpDir 
 // seeded from the OLD straddle files into the writable DB so
 // canonical reads resolve post-mode-B.
 //
-// Fixture: 10-block triple covering [2_000_000, 2_000_010), 2
-// txs/block, baseTxnID=1000. Seeds blocks [2_000_005, 2_000_007]
-// (3 blocks → 6 txs). Asserts:
+// Fixture: 10-block triple covering [2_000_000, 2_000_010), 4
+// txs/block (= 2 user txs + 2 system tx slots, matching what
+// freezeblocks.DumpTxs writes), baseTxnID=1000. Seeds blocks
+// [2_000_005, 2_000_007] (3 blocks → 12 tx entries, of which 6 are
+// user txs and 6 are empty system tx slots). Asserts:
 //   - kv.Headers, kv.HeaderNumber populated for the seeded range
 //   - kv.BlockBody populated
-//   - kv.EthTx populated for txnIDs 1010..1015 (= 1000 + 5*2 to 1000 + 7*2+1)
+//   - kv.EthTx populated for USER tx slot txnIDs only — block 2_000_005
+//     spans 1020..1023 with user at 1021,1022; system slots 1020 and
+//     1023 stay absent because the source snapshot entries were empty
 //   - kv.Senders populated for each seeded block with the right
-//     concatenated 20-byte senders
+//     concatenated 20-byte senders (2 per block = 40 bytes)
 func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -239,7 +260,7 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 		fromBlock = uint64(2_000_000)
 		toBlock   = uint64(2_000_010)
 		baseTxn   = uint64(1_000)
-		txPer     = uint32(2)
+		txPer     = uint32(4)
 	)
 	hFI, bFI, tFI := makeBlockSnapshotTriple(t, ctx, snapDir, tmpDir, fromBlock, toBlock, baseTxn, txPer)
 
@@ -301,22 +322,35 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 		require.NotEmpty(t, got, "seeded block %d must have kv.BlockBody entry", n)
 	}
 
-	// kv.EthTx populated for the right txn IDs. With baseTxn=1000
-	// and txPer=2, block 2_000_005 → txn IDs 1010..1011, block
-	// 2_000_006 → 1012..1013, block 2_000_007 → 1014..1015.
-	for txnID := uint64(1010); txnID <= 1015; txnID++ {
+	// kv.EthTx populated for USER tx slot txnIDs only. With
+	// baseTxn=1000 and txPer=4 (4 entries per block: sys, user,
+	// user, sys), block N maps to txnIDs [baseTxn + (N-fromBlock)*4,
+	// baseTxn + (N-fromBlock+1)*4). User-tx slots are positions 1+2
+	// (txnID%4 == 1 or 2 within the block).
+	//
+	//   block 2_000_005 → txnIDs 1020..1023; user slots 1021,1022
+	//   block 2_000_006 → txnIDs 1024..1027; user slots 1025,1026
+	//   block 2_000_007 → txnIDs 1028..1031; user slots 1029,1030
+	checkEth := func(txnID uint64, expectPresent bool, msg string) {
 		var keyBytes [8]byte
 		binary.BigEndian.PutUint64(keyBytes[:], txnID)
-		got, err := rwTx.GetOne(kv.EthTx, keyBytes[:])
-		require.NoError(t, err)
-		require.NotEmpty(t, got, "seeded txnID %d must have kv.EthTx entry", txnID)
+		got, gerr := rwTx.GetOne(kv.EthTx, keyBytes[:])
+		require.NoError(t, gerr)
+		if expectPresent {
+			require.NotEmpty(t, got, "txnID %d (%s) must have kv.EthTx entry", txnID, msg)
+		} else {
+			require.Empty(t, got, "txnID %d (%s) must NOT have kv.EthTx entry", txnID, msg)
+		}
 	}
-	// Spot-check below: txn 1009 (last tx of block 2_000_004) must NOT be seeded.
-	var notSeededKey [8]byte
-	binary.BigEndian.PutUint64(notSeededKey[:], 1009)
-	got, err = rwTx.GetOne(kv.EthTx, notSeededKey[:])
-	require.NoError(t, err)
-	require.Empty(t, got, "txnID 1009 (block below seedFrom) must NOT be seeded")
+	for _, userTxnID := range []uint64{1021, 1022, 1025, 1026, 1029, 1030} {
+		checkEth(userTxnID, true, "user tx in seeded block")
+	}
+	for _, sysTxnID := range []uint64{1020, 1023, 1024, 1027, 1028, 1031} {
+		checkEth(sysTxnID, false, "system tx slot in seeded block (empty source entry)")
+	}
+	// Spot-check below: txnID 1019 (last slot of block 2_000_004)
+	// must NOT be seeded.
+	checkEth(1019, false, "below seedFrom range")
 
 	// kv.Senders populated with 40-byte len (2 senders × 20 bytes per
 	// block) for each seeded block.
