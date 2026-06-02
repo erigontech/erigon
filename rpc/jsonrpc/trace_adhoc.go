@@ -1027,7 +1027,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 
 	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, signer, chainConfig, traceConfig)
+	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1049,6 +1049,37 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		}
 		tr.TransactionHash = trace.TransactionHash
 		result[i] = tr
+	}
+
+	// Append a synthetic entry for beacon chain withdrawal balance diffs.
+	// Multiple withdrawals to the same address are collapsed into a single entry
+	// whose From is the pre-first-withdrawal balance and To accumulates all amounts.
+	if traceTypeStateDiff && len(wdiffs) > 0 {
+		sdMap := make(map[accounts.Address]*StateDiffAccount, len(wdiffs))
+		for _, wd := range wdiffs {
+			addr := accounts.InternAddress(wd.address)
+			if entry, ok := sdMap[addr]; ok {
+				bal := entry.Balance.(*StateDiffBalance)
+				cur, _ := uint256.FromBig(bal.To.ToInt())
+				cur.Add(cur, &wd.amount)
+				bal.To = (*hexutil.Big)(cur.ToBig())
+			} else {
+				to := new(uint256.Int).Add(&wd.prev, &wd.amount)
+				sdMap[addr] = &StateDiffAccount{
+					Balance: &StateDiffBalance{
+						From: (*hexutil.Big)(wd.prev.ToBig()),
+						To:   (*hexutil.Big)(to.ToBig()),
+					},
+					Code:    "=",
+					Nonce:   "=",
+					Storage: map[common.Hash]map[string]any{},
+				}
+			}
+		}
+		result = append(result, &TraceCallResult{
+			Trace:     []*ParityTrace{},
+			StateDiff: sdMap,
+		})
 	}
 
 	return result, nil

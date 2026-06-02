@@ -19,17 +19,22 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
@@ -135,4 +140,124 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 		require.Equal(t, string(seqJSON), string(parJSON),
 			"tx %d: parallel and sequential traces differ", i)
 	}
+}
+
+// chainWithWithdrawal builds a one-block PoS chain (Shanghai enabled) that
+// includes a single beacon-chain withdrawal of withdrawalGwei to withdrawalAddr.
+func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawalGwei uint64) (*execmoduletester.ExecModuleTester, *types.Block) {
+	t.Helper()
+	bankFunds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: bankFunds}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+		b.AddWithdrawal(&types.Withdrawal{
+			Index:     0,
+			Validator: 42,
+			Address:   withdrawalAddr,
+			Amount:    withdrawalGwei,
+		})
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(generated)
+	require.NoError(t, err)
+	return m, generated.Blocks[0]
+}
+
+// TestBlockWithdrawalTraceEntries verifies that trace_block includes a
+// "reward"/"withdrawal" entry for each beacon-chain withdrawal in the block.
+func TestBlockWithdrawalTraceEntries(t *testing.T) {
+	const withdrawalGwei = uint64(32_000_000) // 32 ETH in Gwei
+	withdrawalAddr := common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	n := rpc.BlockNumber(blk.NumberU64())
+	traces, err := api.Block(context.Background(), n, new(bool), nil)
+	require.NoError(t, err)
+	require.NotNil(t, traces)
+
+	var wdTraces []ParityTrace
+	for _, tr := range traces {
+		action, ok := tr.Action.(*RewardTraceAction)
+		if ok && action.RewardType == rewardTypeWithdrawal {
+			wdTraces = append(wdTraces, tr)
+		}
+	}
+	require.Len(t, wdTraces, 1, "expected one withdrawal trace entry")
+
+	action := wdTraces[0].Action.(*RewardTraceAction)
+	require.Equal(t, withdrawalAddr, action.Author)
+	require.Equal(t, rewardTypeWithdrawal, action.RewardType)
+
+	expectedWei := new(big.Int).Mul(new(big.Int).SetUint64(withdrawalGwei), big.NewInt(1e9))
+	require.Equal(t, expectedWei, action.Value.ToInt())
+	require.Equal(t, blk.NumberU64(), *wdTraces[0].BlockNumber)
+	require.Equal(t, rewardTraceType, wdTraces[0].Type)
+
+	// Withdrawal entries must not carry a transaction hash or position.
+	require.Nil(t, wdTraces[0].TransactionHash)
+	require.Nil(t, wdTraces[0].TransactionPosition)
+}
+
+// TestBlockWithdrawalNoEntriesPreShanghai verifies that blocks before Shanghai
+// (no withdrawals) do not produce any withdrawal trace entries.
+func TestBlockWithdrawalNoEntriesPreShanghai(t *testing.T) {
+	// Default test chain uses TestChainBerlinConfig which has no ShanghaiTime.
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	// Block 1 is pre-Shanghai on the default test chain.
+	n := rpc.BlockNumber(1)
+	traces, err := api.Block(context.Background(), n, new(bool), nil)
+	require.NoError(t, err)
+
+	for _, tr := range traces {
+		action, ok := tr.Action.(*RewardTraceAction)
+		require.False(t, ok && action.RewardType == rewardTypeWithdrawal,
+			"unexpected withdrawal trace entry in pre-Shanghai block")
+	}
+}
+
+// TestReplayBlockTransactionsWithdrawalStateDiff verifies that
+// trace_replayBlockTransactions returns a synthetic final entry whose
+// stateDiff captures the balance increase from beacon-chain withdrawals.
+func TestReplayBlockTransactionsWithdrawalStateDiff(t *testing.T) {
+	const withdrawalGwei = uint64(1_000_000) // 1 ETH in Gwei
+	withdrawalAddr := common.HexToAddress("0xcafecafecafecafecafecafecafecafecafecafe")
+
+	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	n := rpc.BlockNumber(blk.NumberU64())
+	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+
+	// The last entry is the synthetic withdrawal entry (block has no real txs).
+	last := results[len(results)-1]
+	require.NotNil(t, last.StateDiff)
+
+	internedAddr := internedAddress(withdrawalAddr.Hex())
+	wdDiff, ok := last.StateDiff[internedAddr]
+	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
+
+	balDiff, ok := wdDiff.Balance.(*StateDiffBalance)
+	require.True(t, ok, "balance diff has unexpected type: %T", wdDiff.Balance)
+
+	expectedAmountWei := new(big.Int).Mul(new(big.Int).SetUint64(withdrawalGwei), big.NewInt(1e9))
+	actualFrom := balDiff.From.ToInt()
+	actualTo := balDiff.To.ToInt()
+	delta := new(big.Int).Sub(actualTo, actualFrom)
+	require.Equal(t, expectedAmountWei, delta,
+		"withdrawal balance delta mismatch: from=%s to=%s expected delta=%s", actualFrom, actualTo, expectedAmountWei)
+
+	// Code and nonce must be "=" (unchanged).
+	require.Equal(t, "=", wdDiff.Code)
+	require.Equal(t, "=", wdDiff.Nonce)
+
 }
