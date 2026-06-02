@@ -20,5 +20,10 @@
       "Bash(find:*)",
       "Bash(gh pr:*)"
     ]
+  },
+  "includeCoAuthoredBy": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
   }
 }
