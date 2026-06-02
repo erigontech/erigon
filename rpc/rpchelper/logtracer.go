@@ -123,7 +123,8 @@ func (t *LogTracer) captureTransfer(from, to accounts.Address, value *uint256.In
 		common.BytesToHash(fromValue[:]),
 		common.BytesToHash(toValue[:]),
 	}
-	t.captureLog(transferAddress, topics, common.BigToHash(value.ToBig()).Bytes())
+	valueHash := common.BigToHash(value.ToBig())
+	t.captureLog(transferAddress, topics, valueHash[:])
 }
 
 // Reset prepares the LogTracer for the next transaction.
