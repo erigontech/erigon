@@ -21,12 +21,8 @@ import (
 	"testing"
 )
 
-// On any post-merge chain the EL block number is far larger than the beacon
-// slot (e.g. mainnet block ~25.2M vs slot ~14.46M). When a snapshot gap sets
-// an EL block-number floor, the backfill-finished decision must compare EL
-// block progress against that floor — comparing the beacon slot instead trips
-// trivially true and stops the backfill at the chain tip, leaving the gap
-// unfilled (manifesting downstream as "parent's total difficulty not found").
+// Post-merge the EL block number exceeds the beacon slot, so a snapshot-gap
+// floor must be compared against EL block progress, not the slot.
 func TestELBackfillFinished_GapUsesBlockNotSlot(t *testing.T) {
 	const (
 		bellatrixSlot = uint64(4_636_672) // a real beacon-slot floor
@@ -36,8 +32,6 @@ func TestELBackfillFinished_GapUsesBlockNotSlot(t *testing.T) {
 	)
 	destBlock := frozenBlock - 1
 
-	// At the chain tip, with a gap still to fill down to the frozen tip, the
-	// backfill must NOT be considered finished.
 	if elBackfillFinished(headSlot, headBlock, bellatrixSlot, destBlock) {
 		t.Fatalf("backfill reported finished at the tip (slot=%d block=%d) while gap down to block %d is unfilled",
 			headSlot, headBlock, destBlock)

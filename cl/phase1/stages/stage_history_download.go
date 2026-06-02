@@ -84,11 +84,8 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 	}
 }
 
-// elBackfillFinished reports whether the execution-layer history backfill has
-// reached its destination. destinationSlot is a beacon slot (normal Deneb
-// backfill toward the merge); destinationBlock is an EL block number (set when
-// filling a snapshot gap). The two are different units: the EL block progress
-// must be compared to destinationBlock, never the beacon slot.
+// elBackfillFinished reports whether the EL history backfill reached its floor:
+// the beacon slot, or for a snapshot gap the EL block number (compared to elBlock).
 func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64) bool {
 	if destinationSlot != math.MaxUint64 && slot <= destinationSlot {
 		return true
@@ -129,9 +126,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	}
-	// EL block-number floor used when filling a snapshot gap. Kept separate from
-	// destinationSlotForEL because the two carry different units (EL block number
-	// vs beacon slot) and must never be compared against each other.
+	// EL block-number floor for snapshot-gap backfill, kept separate from the
+	// beacon-slot destinationSlotForEL since the units must not be mixed.
 	destinationBlockForEL := uint64(math.MaxUint64)
 	// Set up onNewBlock callback
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
