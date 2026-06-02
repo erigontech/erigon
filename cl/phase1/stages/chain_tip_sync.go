@@ -590,6 +590,51 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	}
 }
 
+func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
+	anchorSlot := cfg.forkChoice.AnchorSlot()
+	epoch := anchorSlot / cfg.beaconCfg.SlotsPerEpoch
+	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+		return
+	}
+	anchorRoot := cfg.forkChoice.FinalizedCheckpoint().Root
+	if anchorRoot == (common.Hash{}) || cfg.forkChoice.IsPayloadVerified(anchorRoot) || !cfg.forkChoice.HasEnvelope(anchorRoot) {
+		return
+	}
+	if status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(anchorRoot); ok && status == execution_client.PayloadStatusInvalidated {
+		return
+	}
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	if err != nil || anchorState == nil {
+		log.Debug("[chainTipSync] anchor state not available for payload retry", "anchorRoot", anchorRoot, "err", err)
+		return
+	}
+	bid := anchorState.GetLatestExecutionPayloadBid()
+	if bid == nil {
+		return
+	}
+	envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
+	if err != nil {
+		log.Debug("[chainTipSync] failed to read anchor envelope for payload retry", "anchorRoot", anchorRoot, "err", err)
+		return
+	}
+	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, envelope); err != nil {
+		log.Warn("[chainTipSync] invalid anchor envelope during payload retry", "anchorRoot", anchorRoot, "err", err)
+		return
+	}
+	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
+	if err != nil {
+		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	}
+	execHash := envelope.Message.Payload.BlockHash
+	switch status {
+	case execution_client.PayloadStatusValidated:
+		cfg.forkChoice.MarkPayloadVerified(anchorRoot, execHash, nil)
+	case execution_client.PayloadStatusInvalidated:
+		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, execHash, nil)
+		log.Warn("[chainTipSync] anchor payload invalidated by EL", "anchorRoot", anchorRoot)
+	}
+}
+
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
@@ -604,6 +649,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
 		drainPendingGloasPayloads(ctx, cfg)
+		retryUnverifiedAnchorPayload(ctx, cfg)
 		if cfg.executionClient.SupportInsertion() {
 			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
