@@ -950,6 +950,7 @@ func detectCollapseSiblings(
 			branchPrefix: common.Copy(branchPrefix),
 		})
 	})
+	defer sdCtx.SetCollapseTracer(nil)
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
@@ -960,10 +961,10 @@ func detectCollapseSiblings(
 		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
 	}
 
-	sdCtx.SetCollapseTracer(nil)
-
-	// A collapse refilled by a later insert in the same block leaves a final branch
-	// with >=2 children; its sibling is not in the witness, so drop it.
+	// The canonical witness (insert-before-delete order) does not touch the sibling of
+	// a branch whose net block change leaves it with >=2 children; erigon's replay can
+	// transiently collapse such a branch, so drop those siblings to match membership.
+	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
 		childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
 		if err != nil {

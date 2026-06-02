@@ -202,6 +202,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.capture = nil
 	hph.trace = false
 	hph.traceDomain = false
+	hph.collapseTracer = nil
 
 	// flags
 	hph.memoizationOff = false
