@@ -24,13 +24,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -49,6 +50,9 @@ type RecordingState struct {
 	AccessedStorage  map[common.Address]map[common.Hash]struct{}
 	AccessedCode     map[common.Address][]byte // all code seen during execution
 	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
+	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
+	// already created in-block is redundant in the witness (the verifier replays the create).
+	createdCodeHashes map[common.Hash]struct{}
 
 	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
@@ -58,11 +62,12 @@ type RecordingState struct {
 	codeOverlay    map[common.Address][]byte
 
 	// Write tracking
-	ModifiedAccounts map[common.Address]struct{}
-	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
-	ModifiedCode     map[common.Address][]byte
-	DeletedAccounts  map[common.Address]struct{}
-	CreatedContracts map[common.Address]struct{}
+	ModifiedAccounts      map[common.Address]struct{}
+	ReallyChangedAccounts map[common.Address]struct{} // subset of ModifiedAccounts where actual state (nonce/balance/code) changed
+	ModifiedStorage       map[common.Address]map[common.Hash]struct{}
+	ModifiedCode          map[common.Address][]byte
+	DeletedAccounts       map[common.Address]struct{}
+	CreatedContracts      map[common.Address]struct{}
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -71,19 +76,21 @@ type RecordingState struct {
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
 func NewRecordingState(inner state.StateReader) *RecordingState {
 	return &RecordingState{
-		inner:            inner,
-		AccessedAccounts: make(map[common.Address]struct{}),
-		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		AccessedCode:     make(map[common.Address][]byte),
-		PreStateCode:     make(map[common.Address][]byte),
-		accountOverlay:   make(map[common.Address]*accounts.Account),
-		storageOverlay:   make(map[common.Address]map[common.Hash]uint256.Int),
-		codeOverlay:      make(map[common.Address][]byte),
-		ModifiedAccounts: make(map[common.Address]struct{}),
-		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		ModifiedCode:     make(map[common.Address][]byte),
-		DeletedAccounts:  make(map[common.Address]struct{}),
-		CreatedContracts: make(map[common.Address]struct{}),
+		inner:                 inner,
+		AccessedAccounts:      make(map[common.Address]struct{}),
+		AccessedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		AccessedCode:          make(map[common.Address][]byte),
+		PreStateCode:          make(map[common.Address][]byte),
+		createdCodeHashes:     make(map[common.Hash]struct{}),
+		accountOverlay:        make(map[common.Address]*accounts.Account),
+		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
+		codeOverlay:           make(map[common.Address][]byte),
+		ModifiedAccounts:      make(map[common.Address]struct{}),
+		ReallyChangedAccounts: make(map[common.Address]struct{}),
+		ModifiedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		ModifiedCode:          make(map[common.Address][]byte),
+		DeletedAccounts:       make(map[common.Address]struct{}),
+		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
 
@@ -244,7 +251,9 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 	if len(code) > 0 {
 		s.AccessedCode[addr] = code
 		if _, already := s.PreStateCode[addr]; !already {
-			s.PreStateCode[addr] = code
+			if _, created := s.createdCodeHashes[crypto.Keccak256Hash(code)]; !created {
+				s.PreStateCode[addr] = code
+			}
 		}
 	}
 	if s.tracing(addr) {
@@ -307,6 +316,9 @@ func (s *RecordingState) TracePrefix() string {
 func (s *RecordingState) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
+	if original == nil || account.Nonce != original.Nonce || !account.Balance.Eq(&original.Balance) || account.CodeHash != original.CodeHash {
+		s.ReallyChangedAccounts[addr] = struct{}{}
+	}
 	// Store a copy in the overlay
 	acctCopy := *account
 	s.accountOverlay[addr] = &acctCopy
@@ -322,6 +334,9 @@ func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation
 	s.ModifiedAccounts[addr] = struct{}{}
 	s.codeOverlay[addr] = common.Copy(code)
 	s.ModifiedCode[addr] = common.Copy(code)
+	if len(code) > 0 {
+		s.createdCodeHashes[codeHash.Value()] = struct{}{}
+	}
 	// Keep accountOverlay CodeHash in sync so ReadAccountData returns a
 	// consistent CodeHash even before UpdateAccountData is called.
 	if acc, ok := s.accountOverlay[addr]; ok && acc != nil {
@@ -454,33 +469,6 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 	return result
 }
 
-// marshalWitnessHeader converts a block header to the JSON map format used in
-// debug_executionWitness responses, matching Geth's output format.
-func marshalWitnessHeader(h *types.Header) map[string]any {
-	m := ethapi.RPCMarshalHeader(h)
-
-	// Geth always emits these optional fields as null when absent.
-	nullFields := []string{
-		"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
-
-	for _, field := range nullFields {
-		if _, ok := m[field]; !ok {
-			m[field] = nil
-		}
-	}
-
-	// Geth uses "balHash" instead of Erigon's "blockAccessListHash".
-	if v, ok := m["blockAccessListHash"]; ok {
-		m["balHash"] = v
-		delete(m, "blockAccessListHash")
-	} else {
-		m["balHash"] = nil
-	}
-	delete(m, "size")
-
-	return m
-}
-
 // witnessBlockInfo bundles the inputs that downstream witness-building phases need
 // after resolving the target block: the block itself plus its txnum range and the
 // parent block number. BlockNum is stored as a field (rather than recomputed via
@@ -501,13 +489,12 @@ type ExecutionWitnessResult struct {
 	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
 	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
-	// Keys is always null (reserved for future use, included for Geth compatibility)
-	Keys []hexutil.Bytes `json:"keys"`
-	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
-	// For blocks that touch state, always includes the parent block header plus any blocks accessed
-	// via BLOCKHASH. Omitted (nil) for empty-touch blocks, where ExecutionWitness returns early
-	// before headers are collected.
-	Headers []map[string]any `json:"headers,omitempty"`
+	// Keys is reserved for future use; omitted while empty so the response matches
+	// the canonical {state, codes, headers} shape.
+	Keys []hexutil.Bytes `json:"keys,omitempty"`
+	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
+	// back to the oldest block reached via BLOCKHASH.
+	Headers []hexutil.Bytes `json:"headers,omitempty"`
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
@@ -707,6 +694,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
+	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
+
 	return result, nil
 }
 
@@ -731,28 +723,62 @@ func (a *accessedState) isEmpty() bool {
 	return len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0
 }
 
+// touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
+// skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
+func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
+	for addr := range a.Addresses {
+		plainKey := addr[:]
+		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
+			if len(preEnc) == 0 {
+				continue
+			}
+		}
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+	}
+	for addr := range a.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			plainKey := append(addr[:], key[:]...)
+			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
+			if len(postEnc) == 0 {
+				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
+				if len(preEnc) == 0 {
+					continue
+				}
+			}
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+		}
+	}
+}
+
 // touchAll touches every accessed account, storage slot, and code address on the
 // commitment context. Order matches the original inline implementation: accounts
 // first, then storage, then code.
 func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
 	for addr := range a.Addresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			storageKey := string(append(addr[:], key[:]...))
 			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
 }
 
 // collectAccessedState rolls the RecordingState read/write maps and the three
 // code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetAccessedCode() to match Geth's witness.AddCode semantics (only code
-// reached via GetCode/GetCodeSize, not all deployed code).
+// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
+// bytecode that existed at the start of the block, not code created in-block.
+// A stateless verifier re-derives in-block-created code by replaying the
+// transactions, so emitting it would be redundant over-inclusion.
 //
 // SortedCodes is initialized to an empty (non-nil) slice so callers can assign
 // result.Codes = accessed.SortedCodes without risking a "codes": null JSON
@@ -793,13 +819,38 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
+	// Per EIP-7928, the system address (0xff...fe) must not appear in the witness
+	// unless it has actual state changes. It is touched as msg.sender on every
+	// block's system call but that alone does not constitute a state access.
+	sysAddr := common.Address(params.SystemAddress.Value())
+	if _, inAddresses := out.Addresses[sysAddr]; inAddresses {
+		_, reallyChanged := rs.ReallyChangedAccounts[sysAddr]
+		hasStorage := len(out.Storage[sysAddr]) > 0
+		preAcct, _ := rs.inner.ReadAccountData(params.SystemAddress)
+		preExists := preAcct != nil
+		_, deleted := rs.DeletedAccounts[sysAddr]
+		postOverlay, hasOverlay := rs.accountOverlay[sysAddr]
+		var postExists bool
+		if deleted {
+			postExists = false
+		} else if hasOverlay {
+			postExists = postOverlay != nil
+		} else {
+			postExists = preExists
+		}
+		existenceChanged := preExists != postExists
+		if !reallyChanged && !hasStorage && !existenceChanged {
+			delete(out.Addresses, sysAddr)
+		}
+	}
+
 	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
 	for addr := range out.Addresses {
-		sortedKeys = append(sortedKeys, addr.Bytes())
+		sortedKeys = append(sortedKeys, addr[:])
 	}
 	for addr, keys := range out.Storage {
 		for key := range keys {
-			composite := append(addr.Bytes(), key.Bytes()...)
+			composite := append(addr[:], key[:]...)
 			sortedKeys = append(sortedKeys, composite)
 		}
 	}
@@ -808,36 +859,29 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	})
 	out.SortedKeys = sortedKeys
 
-	type codeWithHash struct {
-		code []byte
-		hash common.Hash
-	}
-
-	accessedCode := rs.GetAccessedCode()
+	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range accessedCode {
+	for _, code := range preStateCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			allCodesByHash[h] = code
 		}
 	}
 
-	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
-	for h, code := range allCodesByHash {
-		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
+	uniqueCodes := make([][]byte, 0, len(allCodesByHash))
+	for _, code := range allCodesByHash {
+		uniqueCodes = append(uniqueCodes, code)
 	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
+	slices.SortFunc(uniqueCodes, bytes.Compare)
 	for _, c := range uniqueCodes {
-		out.SortedCodes = append(out.SortedCodes, c.code)
+		out.SortedCodes = append(out.SortedCodes, c)
 	}
 
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
 		if len(code) > 0 {
 			codeHash := crypto.Keccak256Hash(code)
-			addrHash := crypto.Keccak256Hash(addr.Bytes())
+			addrHash := crypto.Keccak256Hash(addr[:])
 			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
 				CodeHash: accounts.InternCodeHash(codeHash),
@@ -892,10 +936,10 @@ func detectCollapseSiblings(
 			blockNum, seekBlockNum, parentNum)
 	}
 
-	accessed.touchAll(sdCtx)
+	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -1016,16 +1060,16 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 }
 
 // collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
-// pre-state and resolve BLOCKHASH lookups. The parent header is always included
-// first; remaining entries come from blocks accessed via the BLOCKHASH opcode and
-// are deduplicated against the parent and each other via byNumber.
+// pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
+// from the parent back to the oldest block reached via the BLOCKHASH opcode, so
+// each header can be validated against the next one's parentHash.
 func (api *DebugAPIImpl) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	parentNum uint64,
 	accessedBlockNums []uint64,
-) (headers []map[string]any, byNumber map[uint64]*types.Header, err error) {
-	headers = []map[string]any{}
+) (headers []hexutil.Bytes, byNumber map[uint64]*types.Header, err error) {
+	headers = []hexutil.Bytes{}
 	byNumber = make(map[uint64]*types.Header)
 
 	addHeader := func(bn uint64) error {
@@ -1040,16 +1084,23 @@ func (api *DebugAPIImpl) collectAccessedHeaders(
 		if h == nil {
 			return fmt.Errorf("missing header for block %d", bn)
 		}
-		headers = append(headers, marshalWitnessHeader(h))
+		encoded, err := rlp.EncodeToBytes(h)
+		if err != nil {
+			return fmt.Errorf("failed to encode header for block %d: %w", bn, err)
+		}
+		headers = append(headers, encoded)
 		byNumber[h.Number.Uint64()] = h
 
 		return nil
 	}
 
-	if err := addHeader(parentNum); err != nil {
-		return nil, nil, err
-	}
+	oldest := parentNum
 	for _, bn := range accessedBlockNums {
+		if bn < oldest {
+			oldest = bn
+		}
+	}
+	for bn := oldest; bn <= parentNum; bn++ {
 		if err := addHeader(bn); err != nil {
 			return nil, nil, err
 		}
@@ -1131,11 +1182,11 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 
 	// Touch all modified accounts and storage keys for the post-state trie
 	for _, addr := range writeAddresses {
-		postSdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		postSdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
 	for addr, keys := range writeStorageKeys {
 		for _, key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			storageKey := string(append(addr[:], key[:]...))
 			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
@@ -1147,7 +1198,8 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 
 	// Verify the post-state root matches the block's state root
-	if !bytes.Equal(postRoot, block.Root().Bytes()) {
+	blockRoot := block.Root()
+	if !bytes.Equal(postRoot, blockRoot[:]) {
 		// only warn, so we can see comparison later
 		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
 	}
@@ -1155,12 +1207,12 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	// Read account data from the post-state trie (with correct storage roots)
 	// Include both read and write addresses
 	for _, addr := range readAddresses {
-		addrHash := crypto.Keccak256(addr.Bytes())
+		addrHash := crypto.Keccak256(addr[:])
 		acc, _ := postTrie.GetAccount(addrHash)
 		expectedState[addr] = acc
 	}
 	for _, addr := range writeAddresses {
-		addrHash := crypto.Keccak256(addr.Bytes())
+		addrHash := crypto.Keccak256(addr[:])
 		acc, _ := postTrie.GetAccount(addrHash)
 		expectedState[addr] = acc
 	}

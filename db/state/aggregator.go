@@ -78,8 +78,10 @@ type Aggregator struct {
 	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
-	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
-	visible           atomic.Pointer[aggregatorVisible]
+	// visible is CoW field updated only by `recalcVisibleFiles`.
+	visible atomic.Pointer[aggregatorVisible]
+	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
+	oldestVisible     *aggregatorVisible
 	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory bool
@@ -120,13 +122,6 @@ type Aggregator struct {
 	configured   bool
 	savedSalt    *uint32
 	disableFsync bool
-
-	// nil = no cap. See #20701.
-	frozenBlocks FrozenBlocksProvider
-}
-
-type FrozenBlocksProvider interface {
-	FrozenBlocks() uint64
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -146,9 +141,9 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 
 		produce: true,
 	}
-	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
-	// nil pointer — recalcVisibleFiles will overwrite it during ConfigureDomains.
-	a.visible.Store(&aggregatorVisible{})
+	empty := &aggregatorVisible{}
+	a.visible.Store(empty)
+	a.oldestVisible = empty
 	return a, nil
 }
 
@@ -363,7 +358,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	func() {
 		a.dirtyFilesLock.Lock()
 		defer a.dirtyFilesLock.Unlock()
-		a.recalcVisibleFiles()
+		a.recalcVisibleFiles(nil)
 	}()
 	return nil
 }
@@ -420,7 +415,7 @@ func (a *Aggregator) EnableAllDependencies() {
 	a.checker.Enable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) DisableAllDependencies() {
@@ -430,7 +425,7 @@ func (a *Aggregator) DisableAllDependencies() {
 	a.checker.Disable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) DisableInterDomainDependencies() {
@@ -440,7 +435,7 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -515,7 +510,7 @@ func (a *Aggregator) openFolder() error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 	return nil
 }
 
@@ -548,7 +543,7 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) closeDirtyFiles() {
@@ -825,12 +820,23 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	ok, err := a.readyForCollation(ctx, step)
+	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()))
+		lastStepInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		var lastCollatableStepInDB kv.Step
+		if lastStepInDB > 0 {
+			lastCollatableStepInDB = lastStepInDB - 1
+		}
+		a.logger.Debug("[snapshots] holding state collation at reorg depth",
+			"step", step,
+			"lastBlockInStep", lastBlockInStep,
+			"lastBlockInDB", lastBlockInDB,
+			"lastTxInDB", lastTxInDB,
+			"reorgBlockDepth", a.reorgBlockDepth,
+			"lastCollatableStepInDB", lastCollatableStepInDB)
 		return errStepNotReady
 	}
 	var (
@@ -971,56 +977,56 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bool, err error) {
-	if a.reorgBlockDepth == 0 && a.frozenBlocks == nil {
-		return true, nil
+func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	if a.reorgBlockDepth == 0 {
+		return 0, 0, 0, true, nil
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
-
-	if a.frozenBlocks != nil {
-		var capTxNum, lstTxNum uint64
-		if err := a.db.View(ctx, func(tx kv.Tx) error {
-			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-			if err != nil {
-				return err
-			}
-			lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
-			if len(lst) >= 8 {
-				lstTxNum = binary.BigEndian.Uint64(lst)
-			}
-			return nil
-		}); err != nil {
-			return false, fmt.Errorf("read max collatable txNum: %w", err)
-		}
-		if uint64(step+1)*a.StepSize() > capTxNum {
-			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
-				"lastCollatableStepInDB", lstTxNum/a.StepSize())
-			return false, nil
-		}
-		return true, nil
-	}
-
-	// frozenBlocks == nil && reorgBlockDepth > 0: legacy safety net.
-	var lastBlockInStep, lastBlockInDB uint64
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		var found bool
-		lastBlockInStep, found, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
 			return err
 		}
-		if !found {
+		if !ok {
 			lastBlockInStep = 0
 		}
-		lastBlockInDB, _, err = rawdbv3.TxNums.Last(tx)
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
-	if err != nil {
-		return false, err
+	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
+	return
+}
+
+// reorgSafeBlockAndStep reports the highest block that is safe to freeze
+// (lastBlockInDB - reorgBlockDepth) and the fractional step that block maps to.
+func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock uint64, reorgSafeStep float64, ok bool) {
+	if a.reorgBlockDepth == 0 {
+		return 0, 0, false
 	}
-	return lastBlockInDB > lastBlockInStep+a.reorgBlockDepth, nil
+	a.commitGate.RLock()
+	defer a.commitGate.RUnlock()
+	if err := a.db.View(ctx, func(tx kv.Tx) error {
+		lastBlockInDB, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return err
+		}
+		if lastBlockInDB <= a.reorgBlockDepth {
+			return nil
+		}
+		reorgSafeBlock = lastBlockInDB - a.reorgBlockDepth
+		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, reorgSafeBlock)
+		if err != nil {
+			return err
+		}
+		reorgSafeStep = float64(maxTxNum) / float64(a.stepSize.Load())
+		ok = true
+		return nil
+	}); err != nil {
+		a.logger.Warn("[snapshots] reorgSafeBlockAndStep", "err", err)
+		return 0, 0, false
+	}
+	return reorgSafeBlock, reorgSafeStep, ok
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
@@ -1078,8 +1084,10 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		}
 
 		if doMerge {
+			a.wg.Add(1)
 			go func() {
-				if err := a.MergeLoop(ctx); err != nil {
+				defer a.wg.Done()
+				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
 			}()
@@ -1122,7 +1130,13 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 	return nil
 }
 
-func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
+func (a *Aggregator) MergeLoop(ctx context.Context) error {
+	a.wg.Add(1)
+	defer a.wg.Done()
+	return a.mergeLoop(ctx)
+}
+
+func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
@@ -1135,8 +1149,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	a.wg.Add(1)
-	defer a.wg.Done()
 	defer a.mergingFiles.Store(false)
 
 	mergeThrottleMs := dbg.MergeThrottleMs
@@ -1178,7 +1190,7 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
 
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
@@ -1666,16 +1678,23 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return m
 }
 
-// aggregatorVisible is the immutable per-entity snapshot read by every
-// AggregatorRoTx. The bundle is what makes BeginFilesRo lock-free and
-// cross-entity consistent: a single atomic load pins one generation for all
-// domains, histories, inverted indexes and the state minimax.
+// aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
+// See also
+//
+// new reader: refcnt++
+// new end: refcnt++
+// FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
+// See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+
+	refcnt  atomic.Int32       // live readers
+	retired []*FilesItem       // files marked as "ready for delete"
+	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
@@ -1684,7 +1703,7 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
-func (a *Aggregator) recalcVisibleFiles() {
+func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
@@ -1700,7 +1719,15 @@ func (a *Aggregator) recalcVisibleFiles() {
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+
+	old := a.visible.Load()
+	old.retired = retired
+	old.next = next
 	a.visible.Store(next)
+
+	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
+	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
+	closeAndRemoveFiles(a.reclaimRetiredLocked())
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -1919,63 +1946,48 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
-	var deleted []string
-
 	at := a.BeginFilesRo()
 	defer at.Close()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
-	// Step 1: collect file names and do Blocking-Notification of downstream (like Downloader). Only then delete files (otherwise Downloader may re-create deleted file)
-	// ToDo: call only `.garbage()` and remove `dryRun` parameter from `cleanAfterMerge`. Also remove return parameter from `cleanAfterMerge`
-	dryRun := true
+	// Collect garbage names and remove it from dirtyFiles in one pass. onFilesDelete
+	// blocks downstream (e.g. Downloader) before recalc/reclaim physically unlinks
+	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
+	var deleted []string
+	var retired []*FilesItem
 	for id, d := range at.d {
 		if d.d.Disable {
 			continue
 		}
+		var names []string
+		var r []*FilesItem
 		if in == nil {
-			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil, dryRun)...)
+			names, r = d.cleanAfterMerge(nil, nil, nil)
 		} else {
-			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)...)
+			names, r = d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 		}
+		deleted = append(deleted, names...)
+		retired = append(retired, r...)
 	}
 	for id, ii := range at.standaloneIIs() {
 		if ii.ii.Disable {
 			continue
 		}
+		var names []string
+		var r []*FilesItem
 		if in == nil {
-			deleted = append(deleted, ii.cleanAfterMerge(nil, dryRun)...)
+			names, r = ii.cleanAfterMerge(nil)
 		} else {
-			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id], dryRun)...)
+			names, r = ii.cleanAfterMerge(in.iis[id])
 		}
+		deleted = append(deleted, names...)
+		retired = append(retired, r...)
 	}
+
 	a.onFilesDelete(deleted)
-
-	// Step 2: delete
-	dryRun = false
-	for id, d := range at.d {
-		if d.d.Disable {
-			continue
-		}
-		if in == nil {
-			d.cleanAfterMerge(nil, nil, nil, dryRun)
-		} else {
-			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
-		}
-	}
-	for id, ii := range at.standaloneIIs() {
-		if ii.ii.Disable {
-			continue
-		}
-		if in == nil {
-			ii.cleanAfterMerge(nil, dryRun)
-		} else {
-			ii.cleanAfterMerge(in.iis[id], dryRun)
-		}
-	}
-
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(retired)
 }
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
@@ -1999,12 +2011,6 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-// SetFrozenBlocksProvider caps state collation at the block-snapshots boundary.
-// Without it, state files may advance past block files — recovery requires
-// `erigon seg rm-state --latest`. See #20701.
-func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
-	a.frozenBlocks = p
-}
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
@@ -2054,24 +2060,18 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		lastInDB, execStep := func() (kv.Step, kv.Step) {
+		lastInDB := func() kv.Step {
 			a.commitGate.RLock()
 			defer a.commitGate.RUnlock()
-			lastInDB := max(
+			return max(
 				lastIdInDB(a.db, a.d[kv.AccountsDomain]),
 				lastIdInDB(a.db, a.d[kv.CodeDomain]),
 				lastIdInDB(a.db, a.d[kv.StorageDomain]),
 				lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
-			// Sanity check: the DB should not have data at steps beyond where
-			// execution is currently at. If it does, collating those steps
-			// would capture intermediate state.
-			execStep := kv.Step(txNum / a.StepSize())
-			if lastInDB > execStep {
-				a.logger.Warn("BuildFilesInBackground: lastInDB beyond execStep", "lastInDB", lastInDB, "execStep", execStep, "txNum", txNum)
-			}
-			return lastInDB, execStep
 		}()
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "execStep", execStep)
+		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx)
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
+			"reorgSafeBlock", reorgSafeBlock, "reorgSafeStep", fmt.Sprintf("%.2f", reorgSafeStep), "reorgSafeOK", reorgSafeOK)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
@@ -2188,9 +2188,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !doMerge {
 			return
 		}
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			defer close(fin)
-			if err := a.MergeLoop(a.ctx); err != nil {
+			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
 				}
@@ -2273,6 +2275,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
 	a        *Aggregator
+	visible  *aggregatorVisible // pinned generation; refcnt released in Close
 	d        [kv.DomainLen]*DomainRoTx
 	iis      [kv.StandaloneIdxLen]*InvertedIndexRoTx
 	iisCount int
@@ -2280,10 +2283,58 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
+func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
+	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
+	// Means: must check that latest view didn't change
+	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
+	for {
+		v = a.visible.Load()
+		v.refcnt.Add(1)
+		if a.visible.Load() == v {
+			break
+		}
+		a.releaseVisibleFiles(v) // mis-pinned a superseded generation; drop and retry
+	}
+	return v
+}
+
+// releaseVisibleFiles drops a pin taken by acquireVisibleFiles. Last reader: delete files
+func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
+	if v.refcnt.Add(-1) == 0 {
+		a.reclaimRetired()
+	}
+}
+
+// reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
+// collecting retired files for physical delete. Physical delete happen out of `dirtyFilesLock`
+func (a *Aggregator) reclaimRetiredLocked() (toDelete []*FilesItem) {
+	cur := a.visible.Load()
+	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+		toDelete = append(toDelete, h.retired...)
+		h.retired = nil
+		a.oldestVisible = h.next
+	}
+	return toDelete
+}
+
+func (a *Aggregator) reclaimRetired() {
+	a.dirtyFilesLock.Lock()
+	toDelete := a.reclaimRetiredLocked()
+	a.dirtyFilesLock.Unlock()
+	closeAndRemoveFiles(toDelete)
+}
+
+func closeAndRemoveFiles(files []*FilesItem) {
+	for _, f := range files {
+		f.closeFilesAndRemove()
+	}
+}
+
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	v := a.visible.Load()
+	v := a.acquireVisibleFiles()
 	ac := &AggregatorRoTx{
 		a:        a,
+		visible:  v,
 		iisCount: a.iisCount,
 		_leakID:  a.leakDetector.Add(),
 	}
@@ -2478,7 +2529,8 @@ func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	at.a.leakDetector.Del(at._leakID)
+	a := at.a
+	a.leakDetector.Del(at._leakID)
 	at.a = nil
 
 	for _, d := range at.d {
@@ -2488,6 +2540,11 @@ func (at *AggregatorRoTx) Close() {
 	}
 	for _, ii := range at.standaloneIIs() {
 		ii.Close()
+	}
+
+	if at.visible != nil {
+		a.releaseVisibleFiles(at.visible)
+		at.visible = nil
 	}
 }
 
