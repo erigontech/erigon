@@ -178,35 +178,40 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 		eg.Go(func() error {
 			var resp EthGetLogs
 			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
+			baseOK := true
 			if res.Err != nil {
 				if failFast {
 					return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
-				} else {
-					log.Error("[ethGetLogsInvariants]", "could not get modified accounts (Erigon)", "blockNum", bn, "error", res.Err.Error())
 				}
+				log.Error("[ethGetLogsInvariants] could not get modified accounts (Erigon)", "blockNum", bn, "error", res.Err.Error())
+				baseOK = false
 			}
 			if resp.Error != nil {
 				if failFast {
 					return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
-				} else {
-					log.Error("[ethGetLogsInvariants] error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
 				}
+				log.Error("[ethGetLogsInvariants] error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
+				baseOK = false
 			}
-			if err := noDuplicates(resp.Result); err != nil {
-				if failFast {
-					return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
-				} else {
-					log.Error("[ethGetLogsInvariants] eth_getLogs: noDuplicates", "blockNum", bn, "error", err.Error())
+			if baseOK {
+				if err := noDuplicates(resp.Result); err != nil {
+					if failFast {
+						return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
+					} else {
+						log.Error("[ethGetLogsInvariants] eth_getLogs: noDuplicates", "blockNum", bn, "error", err.Error())
+					}
 				}
 			}
 
 			sawAddr := map[common.Address]struct{}{}
 			topicsByPos := [4]map[common.Hash]struct{}{{}, {}, {}, {}}
-			for _, l := range resp.Result {
-				sawAddr[l.Address] = struct{}{}
-				for pos, t := range l.Topics {
-					if pos < 4 {
-						topicsByPos[pos][t] = struct{}{}
+			if baseOK {
+				for _, l := range resp.Result {
+					sawAddr[l.Address] = struct{}{}
+					for pos, t := range l.Topics {
+						if pos < 4 {
+							topicsByPos[pos][t] = struct{}{}
+						}
 					}
 				}
 			}
