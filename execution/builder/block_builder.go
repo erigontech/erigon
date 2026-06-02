@@ -17,7 +17,9 @@
 package builder
 
 import (
+	"bytes"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,14 +77,27 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 	go func() {
 		timer := time.NewTimer(time.Duration(maxBuildTimeSecs) * time.Second)
 		defer timer.Stop()
-		select {
-		case <-timer.C:
-			log.Warn("Stopping block builder due to max build time exceeded")
-			_, _ = builder.Stop()
-			log.Debug("Stopped block builder due to max build time exceeded")
-			return
-		case <-terminated:
-			return
+		// Build-hang diagnostic: at half the max build time, before the
+		// stop-and-discard cycle, dump all goroutines so we can see which
+		// goroutine the build is stuck on. Lets us diagnose the hive
+		// Re-Org Back into Canonical Chain hang.
+		halfTimer := time.NewTimer(time.Duration(maxBuildTimeSecs/2) * time.Second)
+		defer halfTimer.Stop()
+		for {
+			select {
+			case <-halfTimer.C:
+				var buf bytes.Buffer
+				_ = pprof.Lookup("goroutine").WriteTo(&buf, 1)
+				log.Warn("Block builder slow — dumping goroutines", "payloadId", fmt.Sprintf("%x", param.PayloadId), "stacks", buf.String())
+				continue
+			case <-timer.C:
+				log.Warn("Stopping block builder due to max build time exceeded")
+				_, _ = builder.Stop()
+				log.Debug("Stopped block builder due to max build time exceeded")
+				return
+			case <-terminated:
+				return
+			}
 		}
 	}()
 
