@@ -104,7 +104,11 @@ func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, fr
 	}
 }
 
-func TestBlockRetireSkipsWhenPrunedDBStartsAfterSnapshots(t *testing.T) {
+// TestBlockRetireSkipsOnGap verifies that the block retirement 
+// logic correctly prevents freezing when there is a gap between the last block available 
+// in the snapshots and the first block still present in the database. If this gap exists, 
+// we cannot retire blocks because the history is not contiguous.
+func TestBlockRetireSkipsOnGap(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -142,7 +146,10 @@ func TestBlockRetireSkipsWhenPrunedDBStartsAfterSnapshots(t *testing.T) {
 	require.False(t, hasEnough)
 }
 
-func TestBlockRetireAllowsContiguousDBAfterSnapshots(t *testing.T) {
+// TestBlockRetireContiguous ensures that block retirement is allowed 
+// to proceed when the database block history starts exactly where the snapshots end. 
+// This is the correct, contiguous state where we can transition retired blocks.
+func TestBlockRetireContiguous(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -180,7 +187,12 @@ func TestBlockRetireAllowsContiguousDBAfterSnapshots(t *testing.T) {
 	require.True(t, hasEnough)
 }
 
-func TestBlockRetireKeepsIndexedSubsegmentsVisible(t *testing.T) {
+// TestBlockRetireFallback verifies that if a merged segment is written 
+// to disk but its index is not generated yet, the node restart will not hide the smaller 
+// subsegments. These subsegments must remain visible so that block retirement can keep 
+// running without getting stuck. Once the unindexed covering segment is deleted or indexed, 
+// the visibility should remain stable.
+func TestBlockRetireFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -271,7 +283,12 @@ func TestBlockRetireKeepsIndexedSubsegmentsVisible(t *testing.T) {
 	require.True(t, hasEnough)
 }
 
-func TestBlockRetireKeepsVisibilityWithAllTypesOverlapped(t *testing.T) {
+// TestBlockRetireAllOverlapped tests a scenario where all block 
+// snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments 
+// on disk. Under the alignMin setting, we must verify that all three types correctly 
+// fall back to their indexed subsegments and maintain the correct visible range, allowing 
+// block retirement to proceed.
+func TestBlockRetireAllOverlapped(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()

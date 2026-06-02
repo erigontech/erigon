@@ -865,39 +865,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
 }
 
-func TestOpenFolderKeepsUnindexedOverlapInDirty(t *testing.T) {
-	logger := testlog.Logger(t, log.LvlCrit)
-	dir, require := t.TempDir(), require.New(t)
-	createFile := func(from, to uint64, name snaptype.Type) {
-		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
-	}
 
-	createFile(0, 500_000, snaptype2.Headers)
-	createFile(0, 500_000, snaptype2.Bodies)
-	createFile(0, 500_000, snaptype2.Transactions)
-	createFile(500_000, 1_000_000, snaptype2.Headers)
-	createFile(500_000, 1_000_000, snaptype2.Bodies)
-	createFile(500_000, 1_000_000, snaptype2.Transactions)
-	createTestSegmentOnlyFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
-	defer s.Close()
-
-	require.NoError(s.OpenFolder())
-	require.Equal(3, s.dirty[snaptype2.Enums.Transactions].Len())
-	// Headers and Bodies are not affected by the unindexed Transactions overlap.
-	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
-	require.Equal(2, s.dirty[snaptype2.Enums.Bodies].Len())
-	visibleTxn := s.visible.Load().segments[snaptype2.Enums.Transactions]
-	require.Len(visibleTxn, 2)
-	// The two visible segments must be the indexed subsegments, not the unindexed covering file.
-	require.Equal(uint64(0), visibleTxn[0].from)
-	require.Equal(uint64(500_000), visibleTxn[0].to)
-	require.Equal(uint64(500_000), visibleTxn[1].from)
-	require.Equal(uint64(1_000_000), visibleTxn[1].to)
-	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
-}
 
 func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
@@ -1073,7 +1041,12 @@ func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir st
 	}
 }
 
-func TestOpenFolderPromotesCoveringSegmentOnceIndexed(t *testing.T) {
+// TestOpenFolderPromotesCovering is written to verify that if there is 
+// a new merged segment on disk but it is not indexed yet, we should keep using our 
+// smaller indexed subsegments. Once the merged segment index is also built and available, 
+// we should automatically promote the merged segment and stop using the subsegments.
+// This ensures that readers always have continuous access to block data.
+func TestOpenFolderPromotesCovering(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64, name snaptype.Type) {
@@ -1094,6 +1067,12 @@ func TestOpenFolderPromotesCoveringSegmentOnceIndexed(t *testing.T) {
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
+	// Here, we verify that all files (both subsegments and unindexed covering segments)
+	// are loaded into dirty, but only indexed segments are visible.
+	require.Equal(3, s.dirty[snaptype2.Enums.Transactions].Len())
+	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
+	require.Equal(2, s.dirty[snaptype2.Enums.Bodies].Len())
+
 	visibleTxn := s.visible.Load().segments[snaptype2.Enums.Transactions]
 	require.Len(visibleTxn, 2)
 	require.Equal(uint64(0), visibleTxn[0].from)
@@ -1102,6 +1081,7 @@ func TestOpenFolderPromotesCoveringSegmentOnceIndexed(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxn[1].to)
 	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
 
+	// Build the index for the covering segment now to promote it.
 	createTestIdxFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
 
 	require.NoError(s.OpenFolder())
@@ -1111,3 +1091,47 @@ func TestOpenFolderPromotesCoveringSegmentOnceIndexed(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxnAfter[0].to)
 	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
 }
+
+// TestOverlapNoTruncation checks that having a fully indexed covering segment 
+// alongside its subsegments (both present in the dirty list) does not trigger 
+// gap/overlap protection for the next contiguous segment. Previously, the subsegments 
+// were appended after the covering segment in the visible list, causing the gap detector 
+// to truncate the entire remainder of the visible chain.
+func TestOverlapNoTruncation(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+
+	createFile(0, 500_000, snaptype2.Headers)
+	createFile(0, 500_000, snaptype2.Bodies)
+	createFile(0, 500_000, snaptype2.Transactions)
+
+	createFile(500_000, 1_000_000, snaptype2.Headers)
+	createFile(500_000, 1_000_000, snaptype2.Bodies)
+	createFile(500_000, 1_000_000, snaptype2.Transactions)
+
+	createFile(0, 1_000_000, snaptype2.Headers)
+	createFile(0, 1_000_000, snaptype2.Bodies)
+	createFile(0, 1_000_000, snaptype2.Transactions)
+
+	createFile(1_000_000, 1_500_000, snaptype2.Headers)
+	createFile(1_000_000, 1_500_000, snaptype2.Bodies)
+	createFile(1_000_000, 1_500_000, snaptype2.Transactions)
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenFolder())
+	visibleTxn := s.visible.Load().segments[snaptype2.Enums.Transactions]
+
+	require.Len(visibleTxn, 2)
+	require.Equal(uint64(0), visibleTxn[0].from)
+	require.Equal(uint64(1_000_000), visibleTxn[0].to)
+	require.Equal(uint64(1_000_000), visibleTxn[1].from)
+	require.Equal(uint64(1_500_000), visibleTxn[1].to)
+	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+}
+

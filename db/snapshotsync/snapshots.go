@@ -792,6 +792,11 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 				continue
 			}
 
+			// If the new segment is a subset of the already visible one, skip it
+			if len(newVisibleSegments) > 0 && sn.isSubSetOf(newVisibleSegments[len(newVisibleSegments)-1].src) {
+				continue
+			}
+
 			//protect from overlaps
 			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
