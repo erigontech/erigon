@@ -190,8 +190,8 @@ func TestBlockRetireContiguous(t *testing.T) {
 // TestBlockRetireFallback verifies that if a merged segment is written 
 // to disk but its index is not generated yet, the node restart will not hide the smaller 
 // subsegments. These subsegments must remain visible so that block retirement can keep 
-// running without getting stuck. Once the unindexed covering segment is deleted or indexed, 
-// the visibility should remain stable.
+// running without getting stuck (fixes issue #21472). Once the unindexed covering segment 
+// is deleted or indexed, the visibility should remain stable.
 func TestBlockRetireFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
@@ -288,7 +288,7 @@ func TestBlockRetireFallback(t *testing.T) {
 // snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments 
 // on disk. Under the alignMin setting, we must verify that all three types correctly 
 // fall back to their indexed subsegments and maintain the correct visible range, allowing 
-// block retirement to proceed.
+// block retirement to proceed (related to issue #21472).
 func TestBlockRetireAllOverlapped(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)

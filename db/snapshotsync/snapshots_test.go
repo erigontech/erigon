@@ -1096,7 +1096,7 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 // alongside its subsegments (both present in the dirty list) does not trigger 
 // gap/overlap protection for the next contiguous segment. Previously, the subsegments 
 // were appended after the covering segment in the visible list, causing the gap detector 
-// to truncate the entire remainder of the visible chain.
+// to truncate the entire remainder of the visible chain (fixes issue #21472).
 func TestOverlapNoTruncation(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)
