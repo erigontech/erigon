@@ -939,8 +939,16 @@ func detectCollapseSiblings(
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+	type collapseCandidate struct {
+		siblingPath  []byte
+		branchPrefix []byte
+	}
+	var candidates []collapseCandidate
+	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
+		candidates = append(candidates, collapseCandidate{
+			siblingPath:  common.Copy(hashedKeyPath),
+			branchPrefix: common.Copy(branchPrefix),
+		})
 	})
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
@@ -953,6 +961,21 @@ func detectCollapseSiblings(
 	}
 
 	sdCtx.SetCollapseTracer(nil)
+
+	// A collapse refilled by a later insert in the same block leaves a final branch
+	// with >=2 children; its sibling is not in the witness, so drop it.
+	for _, c := range candidates {
+		childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
+		}
+		if childCount >= 2 {
+			log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
+				"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
+			continue
+		}
+		siblingPaths = append(siblingPaths, c.siblingPath)
+	}
 	return siblingPaths, nil
 }
 
