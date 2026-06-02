@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -54,10 +56,17 @@ import (
 )
 
 const (
-	rewardTraceType = "reward"
-	rewardTypeBlock = "block"
-	rewardTypeUncle = "uncle"
+	rewardTraceType      = "reward"
+	rewardTypeBlock      = "block"
+	rewardTypeUncle      = "uncle"
+	rewardTypeWithdrawal = "withdrawal"
 )
+
+type withdrawalBalanceDiff struct {
+	address common.Address
+	prev    uint256.Int
+	amount  uint256.Int
+}
 
 // Transaction implements trace_transaction
 func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
@@ -224,7 +233,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
+	traces, wdiffs, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +265,22 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		blockHash := block.Hash()
 		tr.BlockHash = &common.Hash{}
 		copy(tr.BlockHash[:], blockHash[:])
+		tr.BlockNumber = new(uint64)
+		*tr.BlockNumber = block.NumberU64()
+		tr.Type = rewardTraceType
+		tr.TraceAddress = []int{}
+		out = append(out, tr)
+	}
+
+	for _, wd := range wdiffs {
+		var tr ParityTrace
+		rewardAction := &RewardTraceAction{}
+		rewardAction.Author = wd.address
+		rewardAction.RewardType = rewardTypeWithdrawal
+		rewardAction.Value.ToInt().Set(wd.amount.ToBig())
+		tr.Action = rewardAction
+		bh := block.Hash()
+		tr.BlockHash = &bh
 		tr.BlockNumber = new(uint64)
 		*tr.BlockNumber = block.NumberU64()
 		tr.Type = rewardTraceType
@@ -793,7 +818,7 @@ func (api *TraceAPIImpl) callBlock(
 	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, protocolrules.SystemCall, error) {
+) ([]*TraceCallResult, []withdrawalBalanceDiff, protocolrules.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -816,7 +841,7 @@ func (api *TraceAPIImpl) callBlock(
 		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if ok {
 			borStateSyncTxn = bortypes.NewBorTransaction()
@@ -835,12 +860,12 @@ func (api *TraceAPIImpl) callBlock(
 
 	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	stateCache := shards.NewStateCache(
 		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
@@ -853,10 +878,10 @@ func (api *TraceAPIImpl) callBlock(
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	msgs := make([]*types.Message, len(txs))
@@ -872,7 +897,7 @@ func (api *TraceAPIImpl) callBlock(
 			txnHash = txn.Hash()
 			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 			if err != nil {
-				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
+				return nil, nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
 		}
 
@@ -922,7 +947,29 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	if cmErr != nil {
-		return nil, nil, cmErr
+		return nil, nil, nil, cmErr
+	}
+
+	// Collect balance diffs for beacon chain withdrawals (post-Shanghai).
+	// prev is only read by callers that request stateDiff (sequential path); skip the
+	// GetBalance call for trace-only callers to avoid unnecessary state reads.
+	var wdiffs []withdrawalBalanceDiff
+	for _, w := range block.Withdrawals() {
+		var prev uint256.Int
+		if hasStateDiff {
+			var err error
+			prev, err = ibs.GetBalance(accounts.InternAddress(w.Address))
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		var amountWei uint256.Int
+		amountWei.Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+		wdiffs = append(wdiffs, withdrawalBalanceDiff{
+			address: w.Address,
+			prev:    prev,
+			amount:  amountWei,
+		})
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -930,7 +977,7 @@ func (api *TraceAPIImpl) callBlock(
 		return ret, err
 	}
 
-	return traces, syscall, nil
+	return traces, wdiffs, syscall, nil
 }
 
 type blockTraceTxJob struct {
