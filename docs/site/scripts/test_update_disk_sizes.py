@@ -151,6 +151,47 @@ class ArtifactParsingTests(unittest.TestCase):
             self.assertEqual(result["networks"]["gnosis"]["minimal"]["display"], "234.57 GB")
             self.assertEqual(result["networks"]["gnosis"]["minimal"]["source"], "ci")
 
+    def test_mainnet_archive_artifact(self):
+        """Test parsing disk-usage-mainnet-archive.txt (archive mode accepted)"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifacts_dir = Path(tmpdir) / "artifacts"
+            artifacts_dir.mkdir()
+
+            # Create artifact file
+            artifact = artifacts_dir / "disk-usage-mainnet-archive.txt"
+            artifact.write_text("2025696615783")
+
+            # Create initial JSON
+            json_path = Path(tmpdir) / "disk-sizes.json"
+            initial_data = {
+                "networks": {
+                    "mainnet": {
+                        "archive": {"bytes": 0, "display": "0 MB", "measured_at": "2025-01-01", "source": "manual"}
+                    }
+                }
+            }
+            json_path.write_text(json.dumps(initial_data, indent=2))
+
+            # Run the main logic
+            import sys
+            old_argv = sys.argv
+            try:
+                sys.argv = ["update-disk-sizes.py", str(artifacts_dir), str(json_path), "archive"]
+                u.main()
+            except SystemExit:
+                pass
+            finally:
+                sys.argv = old_argv
+
+            # Verify JSON was updated
+            with open(json_path) as f:
+                result = json.load(f)
+
+            self.assertEqual(result["networks"]["mainnet"]["archive"]["bytes"], 2025696615783)
+            self.assertEqual(result["networks"]["mainnet"]["archive"]["display"], "2.03 TB")
+            self.assertEqual(result["networks"]["mainnet"]["archive"]["source"], "ci")
+            self.assertIn("ci_last_updated", result)
+
     def test_unknown_chain_skipped(self):
         """Test that unknown chains are skipped without error"""
         with tempfile.TemporaryDirectory() as tmpdir:

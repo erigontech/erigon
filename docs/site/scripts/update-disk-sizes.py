@@ -11,7 +11,7 @@ Usage:
 Arguments:
     artifacts-dir  Directory containing disk-usage-<chain>-<mode>.txt files
     json-path      Path to disk-sizes.json
-    prune-mode     'full' or 'minimal'
+    prune-mode     'full', 'minimal', or 'archive'
 """
 import json
 import sys
@@ -40,8 +40,8 @@ def main() -> None:
     json_path = Path(sys.argv[2])
     prune_mode = sys.argv[3]
 
-    if prune_mode not in ("full", "minimal"):
-        print(f"Error: prune-mode must be 'full' or 'minimal', got {prune_mode!r}")
+    if prune_mode not in ("full", "minimal", "archive"):
+        print(f"Error: prune-mode must be 'full', 'minimal', or 'archive', got {prune_mode!r}")
         sys.exit(1)
 
     today = date.today().isoformat()

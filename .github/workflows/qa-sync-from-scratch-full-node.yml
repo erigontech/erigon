@@ -1,11 +1,11 @@
-name: QA - Sync from scratch (minimal node)
+name: QA - Sync from scratch (full node)
 
 on:
   push:
     branches:
       - 'release/3.*'
   schedule:
-    - cron: '0 0 * * *'  # Run every night at 00:00 AM UTC
+    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
   workflow_dispatch:     # Run manually
 
 concurrency:
@@ -13,19 +13,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  minimal-node-sync-from-scratch-test:
+  full-node-sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 1440  # 24 hours
     strategy:
       fail-fast: false
       matrix:
-        chain: [ mainnet, gnosis ]  # Chain name as specified on the erigon command line
+        include:
+          - chain: mainnet   # Chain name as specified on the erigon command line
+            total_time_seconds: 82800  # 23 hours (1h buffer before job timeout)
+          - chain: gnosis
+            total_time_seconds: 64800  # 18 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      TOTAL_TIME_SECONDS: ${{ matrix.total_time_seconds }}
       CHAIN: ${{ matrix.chain }}
 
     steps:
@@ -50,17 +54,17 @@ jobs:
         id: test_step
         run: |
           set +e # Disable exit on error
-          
+
           # Run Erigon, wait sync and check ability to maintain sync
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN minimal_node
-          
+            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN full_node
+
           # Capture monitoring script exit status
           test_exit_status=$?
-          
+
           # Save the subsection reached status
           echo "test_executed=true" >> "$GITHUB_OUTPUT"
-          
+
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "Tests completed successfully"
@@ -89,7 +93,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch ${{ github.ref_name }} \
-            --test_name sync-from-scratch-minimal-node \
+            --test_name sync-from-scratch-full-node \
             --chain $CHAIN \
             --runner ${{ runner.name }} \
             --outcome $TEST_RESULT \
@@ -127,15 +131,15 @@ jobs:
           rm -rf "$ERIGON_DATA_DIR/temp"
           # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
           BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
-          echo "Disk usage for $CHAIN minimal: ${BYTES} bytes"
-          echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
+          echo "Disk usage for $CHAIN full: ${BYTES} bytes"
+          echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-full.txt
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         uses: actions/upload-artifact@v6
         with:
-          name: disk-usage-${{ env.CHAIN }}-minimal
-          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
+          name: disk-usage-${{ env.CHAIN }}-full
+          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-full.txt
 
       - name: Clean up Erigon data directory
         if: always()
@@ -146,5 +150,3 @@ jobs:
         if: always()
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-          
-

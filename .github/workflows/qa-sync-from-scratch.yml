@@ -41,6 +41,13 @@ jobs:
       TRACKING_TIME_SECONDS: ${{ matrix.tracking_time_seconds || 7200 }} # default 2 hours
       TOTAL_TIME_SECONDS: ${{ matrix.total_time_seconds || 43200 }} # 12 hours
       CHAIN: ${{ matrix.chain }}
+      # This workflow syncs an ARCHIVE node (the RPC integration tests that run
+      # against it need full history). The harness defaulted to archive already;
+      # we now pass it explicitly and label the disk-usage artifact accordingly.
+      # full is measured by qa-sync-from-scratch-full-node.yml; minimal by
+      # qa-sync-from-scratch-minimal-node.yml.
+      NODE_TYPE: archive_node
+      MODE: archive
       ERIGON_ASSERT: true
 
     steps:
@@ -68,7 +75,7 @@ jobs:
 
         # Run Erigon, wait sync and check ability to maintain sync
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $NODE_TYPE
 
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -137,16 +144,21 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       run: |
         set -euo pipefail
-        BYTES=$(du -sb "$ERIGON_DATA_DIR" | awk '{print $1}')
-        echo "Disk usage for $CHAIN full: ${BYTES} bytes"
-        echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-full.txt
+        # Erigon has stopped by now. Drop the external-sort scratch dir (peaks
+        # ~100 GB during sync, cleaned on the next startup) so we report the
+        # durable on-disk footprint, not the transient sync peak.
+        rm -rf "$ERIGON_DATA_DIR/temp"
+        # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
+        BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
+        echo "Disk usage for $CHAIN $MODE: ${BYTES} bytes"
+        echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
 
     - name: Upload disk usage
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v6
       with:
-        name: disk-usage-${{ env.CHAIN }}-full
-        path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-full.txt
+        name: disk-usage-${{ env.CHAIN }}-${{ env.MODE }}
+        path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
 
     - name: Clean up Erigon data directory
       if: always()
