@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
@@ -156,6 +157,22 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	var (
+		outHeader *types.Header
+		outTx     kv.TemporalRwTx
+		outErr    error
+	)
+	pprof.Do(ctx, pprof.Labels("phase", "pe-exec"), func(lctx context.Context) {
+		outHeader, outTx, outErr = pe.execImpl(lctx, execStage, u, startBlockNum, offsetFromBlockBeginning,
+			maxBlockNum, blockLimit, initialTxNum, inputTxNum, initialCycle, rwTx, stepsInDb, accumulator, readAhead, logEvery)
+	})
+	return outHeader, outTx, outErr
+}
+
+func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState, u Unwinder,
+	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
 	// and cannot be shared with the execLoop goroutine. The execLoop creates
@@ -217,10 +234,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Disable trie warmup — the Warmuper uses sdCtx.updates which the
-	// calculator replaces via SetUpdates before ComputeCommitment.
-	pe.rs.Domains().EnableTrieWarmup(false)
-	defer pe.rs.Domains().EnableTrieWarmup(true)
+	// Trie warmup left enabled for the parallel path. Original disable was
+	// based on a calculator/warmer interaction concern that turned out to be
+	// overly conservative — the Warmuper's reads are independent of the
+	// calculator's SetUpdates call. Removing the disable produced an 8×
+	// throughput improvement on the perf-devnet-3 SSTORE-bloated benchmark
+	// (block 24358306) by letting the Warmuper pre-fetch branch data while
+	// EVM execution runs. See #20920 for the canonical perf measurement.
 
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
@@ -348,7 +368,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			if cr.err != nil {
 				// Lazy-load / ComputeCommitment errors from the calculator
 				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
-				// would mark a valid block as bad (ReportBadHeaderPoS) and
+				// would mark a valid block as bad and
 				// trigger an unwind that throws away valid state. Fail fast
 				// instead and preserve the original error in the message.
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
@@ -359,7 +379,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}
-				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, lastBlockResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
+				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, rwTx, pe.cfg, execStage, pe.logger, u)
 			}
 			pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
 			pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
@@ -682,9 +702,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
 			}
 			if errors.Is(execErr, rules.ErrInvalidBlock) {
-				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
-					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
-				}
 				if pe.cfg.badBlockHalt {
 					return nil, rwTx, execErr
 				}
@@ -792,6 +809,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 }
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
 	// The exec loop is the owner of shutdown sequencing. On exit it
 	// closes commitResults then applyResults, causing the calculator
 	// and apply loop to drain and exit.
@@ -2495,9 +2513,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// addWrites entry is O(len(addWrites)·len(CollectorWrites)) — when
 					// finalize is a full block-end IBS reconstruction both can be ~one
 					// entry per account the block touched (a tx that pays ~100k
-					// accounts — TestInvalidReceiptHashHighMgas), i.e. ~10^10
-					// comparisons. Index CollectorWrites' BalancePath entries by
-					// address once instead.
+					// accounts), i.e. ~10^10 comparisons. Index CollectorWrites'
+					// BalancePath entries by address once instead.
 					if len(txResult.CollectorWrites) > 0 {
 						balIdx := make(map[accounts.Address]int, len(txResult.CollectorWrites))
 						for i, w := range txResult.CollectorWrites {

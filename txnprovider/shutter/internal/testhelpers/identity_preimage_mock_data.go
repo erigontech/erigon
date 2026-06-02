@@ -66,8 +66,10 @@ func MakeSlotIdentityPreimage(slot uint64) (*shutter.IdentityPreimage, error) {
 	// zeros as well). This ensures the block identity preimage is always alphanumerically before
 	// any transaction identity preimages, because sender addresses cannot be that small.
 	var buf bytes.Buffer
-	buf.Write(common.BigToHash(common.Big0).Bytes())
-	buf.Write(common.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
+	zeroHash := common.BigToHash(common.Big0)
+	slotHash := common.BigToHash(new(big.Int).SetUint64(slot))
+	buf.Write(zeroHash[:])
+	buf.Write(slotHash[12:])
 	return shutter.IdentityPreimageFromBytes(buf.Bytes())
 }
 

@@ -254,6 +254,14 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 					if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 						return err
 					}
+					// Drive FCU after each batch so execution + prune can drain
+					// BlockTransaction as InsertBlocks proceeds. Without this,
+					// the entire backfill (potentially 100k+ blocks → 20+ GB
+					// of tx data) accumulates in chaindata before any drain
+					// can occur.
+					if lastInsertedBlock != nil {
+						p.doForkChoiceUpdate(ctx, lastInsertedBlock)
+					}
 					blocksBatch = []*types.Block{}
 				}
 			}
@@ -290,10 +298,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		}
 	}
 
-	// Trigger a single ForkChoiceUpdate after all batches are flushed.
-	// Calling FCU inside insertBatch between batches destroys the EL's
-	// in-memory overlay that accumulates TDs across batches, causing
-	// "parent's total difficulty not found" on the next InsertBlocks call.
 	if lastInsertedBlock != nil {
 		p.doForkChoiceUpdate(ctx, lastInsertedBlock)
 	}
@@ -363,12 +367,18 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(v) < 33 {
+		return nil, fmt.Errorf("persistent block value too short: have %d, want at least 33", len(v))
+	}
 
 	version := clparams.StateVersion(v[0])
 	parentRoot := common.BytesToHash(v[1:33])
 	requestsHash := common.Hash{}
 
 	if version >= clparams.ElectraVersion {
+		if len(v) < 65 {
+			return nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least 65", len(v))
+		}
 		requestsHash = common.BytesToHash(v[33:65])
 		v = v[65:]
 	} else {

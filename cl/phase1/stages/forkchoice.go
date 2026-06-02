@@ -72,8 +72,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)

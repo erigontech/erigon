@@ -410,6 +410,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if size != 32 { // AuRa
+		// Reused *Header may carry stale MixDigest/Nonce from a previous
+		// non-AuRa decode; Hash() encoding depends on which branch is set.
+		h.MixDigest = common.Hash{}
+		h.Nonce = BlockNonce{}
 		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
@@ -417,6 +421,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
+		// Symmetric: clear any stale AuRa fields so EncodeRLP's
+		// len(AuRaSeal)>0 branch select stays correct.
+		h.AuRaStep = 0
+		h.AuRaSeal = h.AuRaSeal[:0]
 		if err = s.ReadBytes(h.MixDigest[:]); err != nil {
 			return fmt.Errorf("read MixDigest: %w", err)
 		}
@@ -1183,7 +1191,7 @@ func CopyHeader(h *Header) *Header {
 	}
 	if h.WithdrawalsHash != nil {
 		cpy.WithdrawalsHash = new(common.Hash)
-		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
+		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash[:])
 	}
 	if h.BlobGasUsed != nil {
 		blobGasUsed := *h.BlobGasUsed
@@ -1195,15 +1203,15 @@ func CopyHeader(h *Header) *Header {
 	}
 	if h.ParentBeaconBlockRoot != nil {
 		cpy.ParentBeaconBlockRoot = new(common.Hash)
-		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot.Bytes())
+		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
 		cpy.RequestsHash = new(common.Hash)
-		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
+		cpy.RequestsHash.SetBytes(h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
 		cpy.BlockAccessListHash = new(common.Hash)
-		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash.Bytes())
+		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
 		slotNumber := *h.SlotNumber

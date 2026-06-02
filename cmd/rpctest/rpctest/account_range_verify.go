@@ -109,7 +109,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(accountDumpBucket, addr.Bytes(), b)
+				err = db.Put(accountDumpBucket, addr[:], b)
 				if err != nil {
 					return err
 				}
