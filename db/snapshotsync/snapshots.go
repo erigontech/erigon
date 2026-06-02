@@ -568,6 +568,34 @@ type RoSnapshots struct {
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
+
+	// (type, from, to) of files a producer is currently building — a merge
+	// output, a dump, or a missed-index rebuild. The data file can be on disk
+	// before its index exists; openers skip these and other builders can't
+	// claim the same file, so nobody creates a duplicate segment or races the
+	// owner's index build.
+	rangesInProgress sync.Map // rangeKey -> struct{}
+}
+
+type rangeKey struct {
+	enum     snaptype.Enum
+	from, to uint64
+}
+
+// TryAcquireRange atomically claims (enum, from, to) for building. Returns false
+// if another builder already holds it, in which case the caller must skip it.
+func (s *RoSnapshots) TryAcquireRange(enum snaptype.Enum, from, to uint64) bool {
+	_, loaded := s.rangesInProgress.LoadOrStore(rangeKey{enum, from, to}, struct{}{})
+	return !loaded
+}
+
+func (s *RoSnapshots) ReleaseRange(enum snaptype.Enum, from, to uint64) {
+	s.rangesInProgress.Delete(rangeKey{enum, from, to})
+}
+
+func (s *RoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool {
+	_, ok := s.rangesInProgress.Load(rangeKey{enum, from, to})
+	return ok
 }
 
 type snapshotVisible struct {
@@ -1095,6 +1123,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		if !s.HasType(f.Type) {
 			continue
 		}
+		if s.isInProgress(f.Type.Enum(), f.From, f.To) {
+			continue
+		}
 
 		segtype := s.dirty[f.Type.Enum()]
 		if segtype == nil {
@@ -1474,6 +1505,11 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				if segment.IsIndexed() {
 					continue
 				}
+				// Skip if a merge/dump/another recovery is already building this
+				// (type, range); otherwise claim it so we don't double-build.
+				if !s.TryAcquireRange(t, segment.From(), segment.To()) {
+					continue
+				}
 				info := segment.FileInfo(dir)
 
 				newIdxBuilt = true
@@ -1483,6 +1519,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				indexBuilder := s.IndexBuilder(t.Type())
 
 				g.Go(func() error {
+					defer s.ReleaseRange(info.Type.Enum(), info.From, info.To)
 					p := &background.Progress{}
 					ps.Add(p)
 					defer notifySegmentIndexingFinished(info.Name())
