@@ -4,40 +4,40 @@
     "mainnet": {
       "archive": {
         "bytes": null,
-        "display": "1.77 TB",
-        "measured_at": "2025-09-01",
+        "display": "2.03 TB",
+        "measured_at": "2026-06-02",
         "source": "manual"
       },
       "full": {
         "bytes": null,
-        "display": "920 GB",
-        "measured_at": "2025-09-01",
+        "display": "1.2 TB",
+        "measured_at": "2026-06-02",
         "source": "manual"
       },
       "minimal": {
         "bytes": null,
-        "display": "350 GB",
-        "measured_at": "2025-09-01",
+        "display": "360 GB",
+        "measured_at": "2026-06-02",
         "source": "manual"
       }
     },
     "gnosis": {
       "archive": {
         "bytes": null,
-        "display": "539 GB",
-        "measured_at": "2025-09-01",
+        "display": "605 GB",
+        "measured_at": "2026-06-02",
         "source": "manual"
       },
       "full": {
         "bytes": null,
-        "display": "462 GB",
-        "measured_at": "2025-09-01",
+        "display": "645 GB",
+        "measured_at": "2026-06-02",
         "source": "manual"
       },
       "minimal": {
         "bytes": null,
-        "display": "128 GB",
-        "measured_at": "2025-09-01",
+        "display": "186 GB",
+        "measured_at": "2026-06-02",
         "source": "manual"
       }
     }
