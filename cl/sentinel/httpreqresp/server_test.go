@@ -62,6 +62,25 @@ func TestMaxResponseBodySize(t *testing.T) {
 	}
 }
 
+// Do must not retain the handler's write buffer: callers such as http.Error hand Write fmt's
+// pooled buffer, which is reused after the call returns. If Do aliased it, a concurrent reuse of
+// that buffer would race with a caller reading resp.Body (the handshake.ValidatePeer path).
+func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := []byte("hello")
+		_, _ = w.Write(buf)
+		copy(buf, "XXXXX") // simulate fmt reusing its pooled buffer after Write returns
+	})
+	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	require.NoError(t, err)
+	resp, err := Do(h, req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body), "Do must copy, not alias, the handler's write buffer")
+}
+
 // fetchPeerResponse stands up two libp2p hosts, has the peer answer the given topic
 // with a success code byte followed by payloadSize bytes, and returns the status code, the
 // REQRESP-RESPONSE-CODE header, and the body the req/resp handler surfaces to the caller.

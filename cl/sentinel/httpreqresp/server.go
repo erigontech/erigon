@@ -125,12 +125,22 @@ func (w *captureWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
+	w.body = append(w.body, b...)
+	return len(b), nil
+}
+
+// adoptBody takes ownership of b as the response body without copying it; the caller must not
+// reuse b afterwards. Write copies instead, because callers such as http.Error pass fmt's pooled
+// buffer, which is reused once the call returns.
+func (w *captureWriter) adoptBody(b []byte) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
 	if w.body == nil {
 		w.body = b
 	} else {
 		w.body = append(w.body, b...)
 	}
-	return len(b), nil
 }
 
 func (w *captureWriter) result() *http.Response {
@@ -248,8 +258,10 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Set the peer's response code only on success: on the 413/400 paths above it must be
 		// absent so header-gating callers (handshake.ValidatePeer) can't read it as a peer success.
 		w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(code[0])))
-		// the first write to w will call code 200
-		if _, err := w.Write(respBody); err != nil {
+		// the first write to w will call code 200; hand the buffer off without a copy when we can.
+		if cw, ok := w.(*captureWriter); ok {
+			cw.adoptBody(respBody)
+		} else if _, err := w.Write(respBody); err != nil {
 			http.Error(w, "Writing Stream Response: "+err.Error(), http.StatusBadRequest)
 			return
 		}
