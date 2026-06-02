@@ -2099,11 +2099,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		beaconCfg.DenebForkEpoch = 0
 		beaconCfg.ElectraForkEpoch = 0
 		beaconCfg.FuluForkEpoch = 0
-		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
-		if slotTime < 2 {
-			slotTime = 2
-		}
-		beaconCfg.SecondsPerSlot = slotTime
+		beaconCfg.SecondsPerSlot = max(uint64(ctx.Int(DevSlotTimeFlag.Name)), 2)
 		beaconCfg.InitializeForkSchedule()
 		genesisTime := uint64(time.Now().Unix())
 		// Compute the EL genesis block hash so the beacon state's Eth1Data

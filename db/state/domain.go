@@ -1229,10 +1229,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	// getLatestFromDb will discard them (step covered by files → fall through to
 	// files which have the pre-unwind value). Use the larger of the natural step
 	// and the first unfiled step. See #20169.
-	unwindStep := step
-	if currentFilesEndStep > unwindStep {
-		unwindStep = currentFilesEndStep
-	}
+	unwindStep := max(currentFilesEndStep, step)
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
 

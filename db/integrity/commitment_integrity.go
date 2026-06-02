@@ -522,10 +522,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		return derefCounts{}, nil
 	}
 	trace := logger.Enabled(ctx, log.LvlTrace)
-	workers := dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4)
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4), 1)
 	logger.Info("[integrity] CommitmentKvDeref", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum, "workers", workers)
 
 	// Open shared decompressors — each worker creates independent readers via MakeGetter()
