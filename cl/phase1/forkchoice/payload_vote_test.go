@@ -305,6 +305,10 @@ func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
 		block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 		f.MarkPayloadVerified(root, execHash, block)
 		require.True(t, f.IsPayloadVerified(root))
+
+		status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+		require.True(t, ok)
+		require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
 	})
 
 	t.Run("nil cache returns false", func(t *testing.T) {
@@ -331,7 +335,52 @@ func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
 	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
 	require.True(t, ok)
 	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), status)
+	status, ok = f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusInvalidated), status)
 	require.Equal(t, root, invalidatedHeader)
+}
+
+func TestStoreAnchorEnvelopePersistsWithoutMarkingVerified(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	execHash := common.HexToHash("0xabcd")
+	dumpedEnvelope := common.Hash{}
+
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.forkGraph = payloadVoteForkGraph{dumpedEnvelope: &dumpedEnvelope}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: root,
+			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
+		},
+	}
+
+	require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
+	require.False(t, f.IsPayloadVerified(root))
+	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
+	require.False(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(0), status)
+	require.Equal(t, root, dumpedEnvelope)
+}
+
+func TestStoreAnchorEnvelopeRejectsRootMismatch(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	otherRoot := common.HexToHash("0x9999")
+	execHash := common.HexToHash("0xabcd")
+
+	f := newPayloadVoteTestStore(t, root, true, false)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: otherRoot,
+			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
+		},
+	}
+
+	err := f.StoreAnchorEnvelope(root, envelope)
+	require.Error(t, err)
+	require.False(t, f.IsPayloadVerified(root))
+	_, ok := f.GetRecentExecutionPayloadStatus(execHash)
+	require.False(t, ok)
 }
 
 func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
@@ -356,12 +405,18 @@ func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verifi
 	}
 	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
 	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
+	require.NoError(t, err)
 
 	f := &ForkChoiceStore{
 		beaconCfg:                &clparams.MainnetBeaconConfig,
 		forkGraph:                payloadVoteForkGraph{hasEnvelope: hasEnvelope},
+		eth2Roots:                eth2Roots,
 		verifiedExecutionPayload: verifiedExecutionPayload,
 		executionPayloadStatus:   executionPayloadStatus,
+		payloadStatusByRoot:      payloadStatusByRoot,
 		optimisticStore:          optimistic.NewOptimisticStore(),
 	}
 	f.proposerBoostRoot.Store(common.Hash{})

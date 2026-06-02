@@ -490,6 +490,14 @@ func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.Signe
 	return cfg.executionClient.NewPayload(ctx, envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
 }
 
+func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
+		return false
+	}
+	status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatus(envelope.Message.Payload.BlockHash)
+	return ok && status == execution_client.PayloadStatusInvalidated
+}
+
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 	for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
 		if p.Block == nil || p.Envelope == nil || p.Envelope.Message == nil || p.Envelope.Message.Payload == nil {
@@ -561,6 +569,10 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
 			continue
 		}
+		if isGloasPayloadKnownInvalid(cfg, envelope) {
+			cfg.forkChoice.MarkPayloadInvalid(item.root, envelope.Message.Payload.BlockHash, item.block.Block)
+			continue
+		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
@@ -588,14 +600,14 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// insertion — so it must run regardless of SupportInsertion().
 	recoverMissingEnvelopes(ctx, cfg)
 
-	// Flush any collected blocks to the execution engine before ForkChoice.
-	// DrainPendingELPayloads and blockCollector require local insertion support.
-	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
+	if cfg.executionClient != nil {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
 		drainPendingGloasPayloads(ctx, cfg)
-		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
+		if cfg.executionClient.SupportInsertion() {
+			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
+			}
 		}
 	}
 
@@ -609,7 +621,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
-			if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
+			if cfg.executionClient != nil {
 				verifyUnverifiedGloasPayloads(ctx, cfg)
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before
