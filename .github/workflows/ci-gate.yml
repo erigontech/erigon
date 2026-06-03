@@ -18,6 +18,8 @@ on:
 concurrency:
   # For PRs: one run per branch; new push cancels the old run.
   # For push/merge_group/workflow_dispatch: unique per run so runs never cancel each other.
+  # merge_group orphans from queue reshuffles are cancelled by
+  # cancel-orphaned-merge-queue-runs.yml when the ephemeral branch is deleted.
   group: >-
     ${{
       github.event_name == 'pull_request' &&
@@ -28,26 +30,80 @@ concurrency:
 
 # actions: write lets merge-queue runs call `gh run cancel` on a leaf
 # failure so the gate doesn't stall waiting for still-running siblings.
+# pull-requests: write lets the gate call the `dequeuePullRequest` GraphQL
+# mutation on its own merge-group PR when a required check actually fails,
+# since GitHub does not auto-remove UNMERGEABLE entries from the queue.
 # Reusable leaves inherit these from the caller.
 permissions:
   actions: write
   contents: read
+  pull-requests: write
 
 jobs:
+  # Fast path: detect whether any non-docs files changed.
+  # For merge_group and workflow_dispatch always returns code=true/docs_site=true.
+  # Jobs guarded by `needs.changes.outputs.code != 'false'` are skipped
+  # for docs-only PRs, saving 20-30 min of unnecessary Go CI.
+  # Jobs guarded by `needs.changes.outputs.docs_site == 'true'` only run when
+  # docs/site/** is touched.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.check.outputs.code }}
+      docs_site: ${{ steps.check.outputs.docs_site }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docs_site=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename') \
+            || { echo "Failed to fetch PR files from GitHub API"; exit 1; }
+          # "code" = any file outside: docs/*, root-level llms*.txt, root-level *.md
+          # (nested *.md like execution/README.md still counts as a code change)
+          if echo "$files" | grep -qvE '^(docs/|llms[^/]*\.txt$|[^/]*\.md$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -qE '^docs/site/'; then
+            echo "docs_site=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_site=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
-    if: github.event_name == 'pull_request'
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/lint.yml
     secrets: inherit
 
   tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-all-erigon.yml
     secrets: inherit
 
   race-tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-all-erigon-race.yml
     secrets: inherit
 
+  eest-spec-tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
+    uses: ./.github/workflows/test-eest-spec.yml
+    secrets: inherit
+
   hive:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-hive.yml
     secrets: inherit
 
@@ -57,8 +113,15 @@ jobs:
     secrets: inherit
 
   caplin:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-integration-caplin.yml
     secrets: inherit
+
+  docs-site:
+    if: needs.changes.outputs.docs_site == 'true'
+    needs: [changes]
+    uses: ./.github/workflows/docs-site-build.yml
 
   # Only meaningful for PRs: needs github.event.pull_request.base.sha.
   large-files:
@@ -67,14 +130,20 @@ jobs:
     secrets: inherit
 
   bench:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-bench.yml
     secrets: inherit
 
   kurtosis:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-kurtosis-assertoor.yml
     secrets: inherit
 
   repro:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/reproducible-build.yml
     secrets: inherit
 
@@ -83,21 +152,26 @@ jobs:
     # (GitHub withholds non-GITHUB_TOKEN secrets from Dependabot even for same-repo PRs),
     # so skip the scan for those to avoid a guaranteed failure in ci-gate.
     if: |
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       github.actor != 'dependabot[bot]') ||
-      github.event_name != 'pull_request'
+      needs.changes.outputs.code != 'false' &&
+      ((github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor != 'dependabot[bot]') ||
+       github.event_name != 'pull_request')
+    needs: [changes]
     uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
   ci-gate:
     if: always()
     needs:
+      - changes
       - lint
       - tests
       - race-tests
+      - eest-spec-tests
       - hive
       - hive-eest
       - caplin
+      - docs-site
       - large-files
       - bench
       - kurtosis
@@ -106,12 +180,71 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo '${{ toJSON(needs) }}' > needs.json
           failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
           if [ -n "$failed" ]; then
-            echo "The following jobs failed or were cancelled:"
+            echo "The following gate jobs failed or were cancelled:"
             echo "$failed"
+            jobs=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate) || true
+            # The leaf that fast-cancelled the run is the true root cause; other failed steps may be collateral from that cancellation.
+            root=$(echo "$jobs" | jq -r '.jobs[] | select(any(.steps[]?; .name == "Cancel workflow run on failure" and .conclusion == "success")) | "::error title=CI root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
+            if [ -z "$root" ]; then
+              root=$(echo "$jobs" | jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | "::error title=CI root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
+            fi
+            echo "Root-cause job(s):"
+            echo "$root"
             exit 1
           fi
           echo "All required jobs passed or were skipped."
+
+      # GitHub does not auto-remove UNMERGEABLE entries from the merge queue
+      # when their required checks fail — they sit at the queue position with
+      # state UNMERGEABLE until someone manually dequeues. This step does that
+      # automatically on real failures (not queue-reshuffle cancellations,
+      # where all needs come back as `cancelled` and GitHub re-creates a fresh
+      # merge_group event for us).
+      - name: Dequeue failed merge-queue PR
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS: ${{ toJSON(needs) }}
+          REF: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          if ! echo "$NEEDS" | jq -e 'to_entries[] | select(.value.result == "failure")' > /dev/null; then
+            echo "No gate need failed (only cancellations) — likely a queue reshuffle, skipping dequeue."
+            exit 0
+          fi
+          pr_number=$(echo "$REF" | grep -oE 'pr-[0-9]+' | head -1 | cut -d- -f2)
+          if [ -z "$pr_number" ]; then
+            echo "::warning::Could not parse PR number from ref $REF"
+            exit 0
+          fi
+          # $owner/$name/$number/$id in the query strings are GraphQL variables, not shell.
+          # shellcheck disable=SC2016
+          pr_id=$(gh api graphql \
+            -F owner="$OWNER" \
+            -F name="$REPO_NAME" \
+            -F number="$pr_number" \
+            -f query='query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) { id }
+              }
+            }' --jq '.data.repository.pullRequest.id')
+          if [ -z "$pr_id" ] || [ "$pr_id" = "null" ]; then
+            echo "::warning::Could not resolve PR #$pr_number to a GraphQL node ID"
+            exit 0
+          fi
+          echo "Dequeuing PR #$pr_number ($pr_id) after ci-gate failure"
+          # shellcheck disable=SC2016
+          gh api graphql \
+            -F id="$pr_id" \
+            -f query='mutation($id: ID!) {
+              dequeuePullRequest(input: {id: $id}) {
+                mergeQueueEntry { position }
+              }
+            }' || echo "::warning::dequeuePullRequest mutation failed (already dequeued, or insufficient permissions)"

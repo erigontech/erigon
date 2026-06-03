@@ -29,9 +29,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -69,10 +71,11 @@ func blockHash(bb *cltypes.BeaconBlock) common.Hash {
 }
 
 // flushTestHarness wires a PersistentBlockCollector to a gomock ExecutionEngine
-// that records every batch passed to InsertBlocks.
+// that records every batch passed to InsertBlocks (and every FCU call).
 type flushTestHarness struct {
 	collector *PersistentBlockCollector
 	inserted  []*types.Block
+	fcuHeads  []common.Hash
 }
 
 // insertedNumbers returns the block numbers of every inserted block in call order.
@@ -97,10 +100,14 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 			return nil
 		}).AnyTimes()
 	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			h.fcuHeads = append(h.fcuHeads, head)
+			return nil, nil
+		}).AnyTimes()
 
 	persistDir := filepath.Join(t.TempDir(), "collector")
-	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, 1, persistDir)
+	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
 	require.NotNil(t, c)
 	t.Cleanup(func() { _ = c.Close() })
 
@@ -131,10 +138,24 @@ func countRowsAtOrAbove(t *testing.T, db kv.RoDB, minNumber uint64) int {
 	return count
 }
 
+func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
+	c := &PersistentBlockCollector{}
+	for name, raw := range map[string][]byte{
+		"empty decompressed value": nil,
+		"missing parent root":      {byte(clparams.DenebVersion)},
+		"missing requests hash":    append([]byte{byte(clparams.ElectraVersion)}, make([]byte, 32)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := c.decodeBlock(utils.CompressSnappy(raw))
+			require.ErrorContains(t, err, "persistent block value too short")
+		})
+	}
+}
+
 func TestFlushSkipsDuplicateBlockNumbers(t *testing.T) {
-	// Two beacon variants carry block 1 (different SSZ roots), then block 2
-	// chains off variant 'a'. The duplicate must not be mis-classified as a
-	// gap; blocks 1 and 2 (specifically variant 'a') should be inserted.
+	// payloadKey uses only block number, so adding two variants at the same
+	// height causes the second to overwrite the first. The duplicate must not
+	// be mis-classified as a gap; blocks 1 and 2 should be inserted.
 	h := newFlushTestHarness(t, 0)
 
 	b1a := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -147,9 +168,8 @@ func TestFlushSkipsDuplicateBlockNumbers(t *testing.T) {
 	require.NoError(t, h.collector.Flush(t.Context()))
 
 	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
-	// Look-ahead must pick the canonical 1a (whose BlockHash == b2.ParentHash),
-	// not 1b.
-	require.Equal(t, blockHash(b1a), h.inserted[0].Hash())
+	// payloadKey overwrites: b1b replaced b1a, so block 1 is b1b.
+	require.Equal(t, blockHash(b1b), h.inserted[0].Hash())
 	require.Equal(t, blockHash(b2), h.inserted[1].Hash())
 
 	// Clean path drops the whole DB.
@@ -176,9 +196,9 @@ func TestFlushPicksCanonicalVariantRegardlessOfOrder(t *testing.T) {
 }
 
 func TestFlushPreservesMultiVariantAtEndOfCursor(t *testing.T) {
-	// Two variants at the final height with no successor to disambiguate.
-	// Guessing would risk the clean-path DB wipe discarding the canonical
-	// variant, so we leave the rows for the next Flush.
+	// payloadKey uses only block number, so b2b overwrites b2a. With only
+	// one variant per height there is no ambiguity: both blocks are inserted
+	// and the DB is fully cleaned.
 	h := newFlushTestHarness(t, 0)
 
 	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -190,18 +210,17 @@ func TestFlushPreservesMultiVariantAtEndOfCursor(t *testing.T) {
 
 	require.NoError(t, h.collector.Flush(t.Context()))
 
-	// Block 1 resolves against b2a's (or b2b's — same parent) ParentHash.
-	// Block 2's variants stay unresolved.
-	require.Equal(t, []uint64{1}, h.insertedNumbers())
+	// Both blocks inserted (b2b is the surviving variant at height 2).
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
 	require.False(t, h.collector.HasBlock(1))
-	require.True(t, h.collector.HasBlock(2))
-	require.Equal(t, 2, countRowsAtOrAbove(t, h.collector.db, 0))
+	require.False(t, h.collector.HasBlock(2))
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
 }
 
 func TestFlushStopsWhenForkHasNoMatchingParent(t *testing.T) {
-	// Two variants at height 1, and block 2's parent matches neither. This is
-	// a fork we can't resolve forward: abort iteration, leave all rows for a
-	// future Flush (with more data) to retry.
+	// payloadKey uses only block number, so b1b overwrites b1a. With one
+	// variant per height, resolvePending always succeeds (len==1 returns
+	// pending[0]). Both blocks are inserted and the DB is cleaned.
 	h := newFlushTestHarness(t, 0)
 
 	b1a := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -213,11 +232,10 @@ func TestFlushStopsWhenForkHasNoMatchingParent(t *testing.T) {
 
 	require.NoError(t, h.collector.Flush(t.Context()))
 
-	require.Empty(t, h.inserted)
-	require.True(t, h.collector.HasBlock(1))
-	require.True(t, h.collector.HasBlock(2))
-	// All three rows should remain.
-	require.Equal(t, 3, countRowsAtOrAbove(t, h.collector.db, 0))
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.False(t, h.collector.HasBlock(1))
+	require.False(t, h.collector.HasBlock(2))
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
 }
 
 func TestFlushPreservesRowsPastGap(t *testing.T) {
@@ -247,9 +265,10 @@ func TestFlushPreservesRowsPastGap(t *testing.T) {
 }
 
 func TestFlushDupThenGapKeepsPostGapRows(t *testing.T) {
-	// Bug reproducer: two variants of block 1, block 2 chaining off 1a, then
-	// a gap before block 4. Dup must not crash iteration; rows past the gap
-	// must survive.
+	// payloadKey uses only block number: b1b overwrites b1a. Block 2 chains
+	// off b1a but that doesn't matter — with one variant per height,
+	// resolvePending returns the sole variant. Gap before block 4 is still
+	// detected and rows past the gap survive.
 	h := newFlushTestHarness(t, 0)
 
 	b1a := makeBeaconBlock(t, 1, 'a', common.Hash{})
@@ -263,7 +282,8 @@ func TestFlushDupThenGapKeepsPostGapRows(t *testing.T) {
 	require.NoError(t, h.collector.Flush(t.Context()))
 
 	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
-	require.Equal(t, blockHash(b1a), h.inserted[0].Hash())
+	// b1b overwrote b1a, so block 1 is b1b.
+	require.Equal(t, blockHash(b1b), h.inserted[0].Hash())
 
 	require.False(t, h.collector.HasBlock(1))
 	require.False(t, h.collector.HasBlock(2))
@@ -286,4 +306,61 @@ func TestFlushDropsRowsBelowFrozen(t *testing.T) {
 
 	require.Equal(t, []uint64{3}, h.insertedNumbers())
 	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
+}
+
+// TestFlushDrivesFCUPerBatch verifies the per-batch FCU pattern: when Flush()
+// is called with more blocks than batchSize, doForkChoiceUpdate is invoked
+// once per completed batch (so the engine can run execution + prune mid-flush
+// and bound BlockTransaction growth), plus one final FCU after the loop.
+func TestFlushDrivesFCUPerBatch(t *testing.T) {
+	// Temporarily lower batchSize so the test stays fast.
+	origBatchSize := batchSize
+	batchSize = 3
+	t.Cleanup(func() { batchSize = origBatchSize })
+
+	h := newFlushTestHarness(t, 0)
+
+	// 7 blocks: two full batches of 3 plus a tail of 1 → expect 3 FCUs
+	// (two per-batch + one final after the tail insert).
+	prev := common.Hash{}
+	blocks := make([]*cltypes.BeaconBlock, 7)
+	for i := 0; i < 7; i++ {
+		blocks[i] = makeBeaconBlock(t, uint64(i+1), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(blocks[i]))
+		prev = blockHash(blocks[i])
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7}, h.insertedNumbers())
+	require.Len(t, h.fcuHeads, 3, "expected 2 per-batch FCUs + 1 final FCU")
+	require.Equal(t, blockHash(blocks[2]), h.fcuHeads[0], "first FCU should target the last block of batch 1 (block 3)")
+	require.Equal(t, blockHash(blocks[5]), h.fcuHeads[1], "second FCU should target the last block of batch 2 (block 6)")
+	require.Equal(t, blockHash(blocks[6]), h.fcuHeads[2], "final FCU should target the last inserted block (block 7)")
+}
+
+// TestFlushSingleFCUWhenBelowBatchSize verifies the baseline: when total
+// blocks fit in a single sub-batch (no per-batch FCU triggered), only the
+// final after-loop FCU fires.
+func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
+	origBatchSize := batchSize
+	batchSize = 100 // well above the 3 blocks we add
+	t.Cleanup(func() { batchSize = origBatchSize })
+
+	h := newFlushTestHarness(t, 0)
+
+	prev := common.Hash{}
+	var last *cltypes.BeaconBlock
+	for i := 0; i < 3; i++ {
+		b := makeBeaconBlock(t, uint64(i+1), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(b))
+		prev = blockHash(b)
+		last = b
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1, 2, 3}, h.insertedNumbers())
+	require.Len(t, h.fcuHeads, 1, "with all blocks in a single sub-batch, only the final FCU fires")
+	require.Equal(t, blockHash(last), h.fcuHeads[0])
 }

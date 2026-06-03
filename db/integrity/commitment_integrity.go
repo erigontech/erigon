@@ -857,7 +857,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 	endTxNum := file.EndRootNum()
 	txCount := endTxNum - startTxNum
 	if numBuckets > txCount {
-		panic(fmt.Errorf("numBuckets %d is greater than total tx count %d", numBuckets, txCount))
+		return 0, fmt.Errorf("numBuckets %d is greater than total tx count %d in file %s", numBuckets, txCount, fileName)
 	}
 	bucketSize := txCount / numBuckets
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
@@ -2020,11 +2020,18 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 			valBuf := make([]byte, 0, 128)
 
-			for item := range workCh {
+			for {
+				var (
+					item hashWorkItem
+					ok   bool
+				)
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				default:
+				case item, ok = <-workCh:
+					if !ok {
+						return nil
+					}
 				}
 				if err := verifyHashItem(item, failFast, fileName, isReferencing,
 					preloadedAccValues, preloadedStoValues,
@@ -2035,7 +2042,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 					return err
 				}
 			}
-			return nil
 		})
 	}
 

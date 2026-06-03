@@ -128,7 +128,6 @@ type TrieDbState struct {
 	currentBuffer     *Buffer
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	hashBuilder       *trie.HashBuilder
 	incarnationMap    map[accounts.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
@@ -140,7 +139,6 @@ func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *
 		StateReader:       stateReader,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	return tds
@@ -172,7 +170,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
 		blockNr:        n,
-		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[accounts.Address]uint64),
 	}
 	return &cpy
@@ -215,7 +212,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	tds.tMu.Unlock()
@@ -240,7 +236,6 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder.Copy(),
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 }
@@ -391,7 +386,7 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 			panic("could not reproduce addrHash found in the map")
 		}
 		accountAddresses = append(accountAddresses, addressValue[:])
-		accountAddressHashes = append(accountAddressHashes, addrHash.Bytes())
+		accountAddressHashes = append(accountAddressHashes, addrHash[:])
 	}
 
 	// Create a slice of indices to track original positions

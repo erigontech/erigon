@@ -14,10 +14,6 @@ inputs:
     description: "Clone submodules (recursive shallow clone)"
     required: false
     default: 'false'
-  lfs:
-    description: "'false' to skip, 'tests' for test fixtures only"
-    required: false
-    default: 'false'
   cleanup-space:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
@@ -101,9 +97,6 @@ runs:
         filter: ${{ inputs.filter }}
         clean: false
         submodules: false
-        lfs: false
-      env:
-        GIT_LFS_SKIP_SMUDGE: 1
 
     - name: Unshallow current commit
       shell: bash
@@ -124,10 +117,7 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        hash=$( {
-          git ls-tree -r HEAD | awk '$2 == "commit" {print $3}'
-          git lfs ls-files --long 2>/dev/null | awk '{print $1}'
-        } | sort | sha256sum | cut -d' ' -f1)
+        hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule git objects cache
@@ -137,10 +127,9 @@ runs:
       with:
         path: |
           .git/modules
-          .git/lfs
-        key: gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}
+        key: gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}
         restore-keys: |
-          gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|
+          gitobjects|${{ runner.os }}|
 
     - name: Warn on submodule cache miss
       if: ${{ inputs.submodules == 'true' && steps.restore-submodules.outputs.cache-hit != 'true' }}
@@ -151,19 +140,7 @@ runs:
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
-      run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
-
-    - name: Pull LFS test fixtures
-      if: ${{ inputs.lfs == 'tests' }}
-      shell: bash
-      run: |
-        time git lfs pull --include='execution/tests/test-corners/**'
-        cd execution/tests/execution-spec-tests
-        # The eest-fixtures submodule contains many more LFS JSON files
-        # (benchmarks, devnet fixtures, stTimeConsuming, etc.) that the
-        # tests don't need. This filter is intentionally selective — it
-        # cannot be simplified to *.json without pulling all of them.
-        time git lfs pull --include='blockchain_tests/frontier/scenarios/*.json,blockchain_tests/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests/static/state_tests/stPreCompiledContracts/*.json,blockchain_tests/static/state_tests/stStackTests/*.json,state_tests/static/state_tests/stStackTests/*.json,blockchain_tests_devnet/**/eip7934_block_rlp_limit/**/*.json,blockchain_tests_devnet/**/eip4844_blobs/**/*.json'
+      run: time git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
 
     - name: Install git-restore-mtime
       shell: bash
@@ -255,8 +232,19 @@ runs:
     - name: Install dependencies on Linux
       if: ${{ runner.os == 'Linux' }}
       shell: bash
-      # Can't suppress "Reading database... from apt-get install. Also it's very slow...
-      run: sudo apt-get update -qq && sudo apt-get install -qq -y build-essential 2>/dev/null
+      # erigon only needs build-essential (gcc/make). The hosted runner image
+      # ships extra third-party apt repos (Google Chrome, Microsoft, …) that are
+      # periodically mid-mirror-sync and answer with a Packages.gz size mismatch,
+      # which fails `apt-get update` and so the whole job — the recurring
+      # "dl.google.com/linux/chrome-stable … File has unexpected size" flake.
+      # Drop those repos before updating (we never install from them) and let the
+      # remaining Ubuntu archive retry on transient blips.
+      # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
+      run: |
+        sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                   /etc/apt/sources.list.d/microsoft-prod.list || true
+        sudo apt-get update -qq -o Acquire::Retries=3 \
+          && sudo apt-get install -qq -y build-essential 2>/dev/null
 
     - name: Install make on Windows
       if: ${{ runner.os == 'Windows' }}
@@ -307,7 +295,7 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
         echo "ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
 
     - name: Display free disk space after setup

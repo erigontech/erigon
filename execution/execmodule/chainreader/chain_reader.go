@@ -23,6 +23,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -138,7 +140,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 	return h
 }
 
-func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *big.Int {
+func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *uint256.Int {
 	td, err := c.executionModule.GetTD(ctx, &hash, &number)
 	if err != nil {
 		log.Warn("[engine] GetTd", "err", err)
@@ -334,6 +336,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		SuggestedFeeRecipient: attributes.SuggestedFeeRecipient,
 		Withdrawals:           attributes.Withdrawals,
 		SlotNumber:            (*uint64)(attributes.SlotNumber),
+		TargetGasLimit:        (*uint64)(attributes.TargetGasLimit),
 		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
 	}
 	result, err := c.executionModule.AssembleBlock(context.Background(), params)

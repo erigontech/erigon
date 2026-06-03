@@ -378,6 +378,170 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 	require.True(t, found, "address must appear in BAL (tx0's write is a real change)")
 }
 
+// TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance is the
+// regression test for the bal-devnet-3 block-91648 BAL hash mismatch.
+//
+// Pattern reproduced from the production failure: a single user-tx balance
+// write to an address (the EIP-1559 burnt contract on this devnet — the zero
+// address) followed by a *later* BalancePath read of the same address with
+// the same value. The later read is the one the parallel executor's block-end
+// finalize emits when it spins up a fresh IntraBlockState — the cached state
+// objects from the per-tx execution aren't shared, so the finalize hits the
+// underlying state and observes the post-write value (or, in the validator
+// path, the value that was pre-populated into the version map from the BAL
+// sidecar).
+//
+// Before the fix, updateRead would seed initialBalanceValue from this
+// post-write read; applyToBalance's net-zero filter would then see the very
+// first recorded write equal to "initialBalanceValue" and drop it, producing
+// a BAL hash that disagreed with the header.
+func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000000"))
+	burned := *uint256.NewInt(0x16eaeb76) // value pulled from bal-devnet-3 block 91648
+
+	io := NewVersionedIO(2)
+
+	// Tx 1 burns the base fee to addr (value goes from pre-block balance to `burned`).
+	io.RecordWrites(Version{TxIndex: 1}, VersionedWrites{
+		&VersionedWrite{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}, Val: burned},
+	})
+
+	// A later BalancePath read of the same value — emitted by the fresh-IBS
+	// finalize / BAL pre-pop. Before the fix, this poisoned initialBalanceValue.
+	reads := ReadSet{}
+	reads.Set(VersionedRead{Address: addr, Path: BalancePath, Val: burned})
+	io.RecordReads(Version{TxIndex: 2}, reads)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address == addr {
+			found = true
+			require.Len(t, ac.BalanceChanges, 1,
+				"tx 1's burn write must remain in BAL — a post-write read with the same value must not seed initialBalanceValue and trigger the net-zero filter")
+			// blockAccessIndex = TxIndex+1, so tx 1 → Index=2.
+			require.Equal(t, uint32(2), ac.BalanceChanges[0].Index)
+			require.True(t, ac.BalanceChanges[0].Value.Eq(&burned),
+				"the surviving balance change must hold the actual burn value")
+		}
+	}
+	require.True(t, found, "burn target address must appear in BAL")
+}
+
+// TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL verifies the
+// EIP-7928 rule that, for a slot written multiple times in a block, a write
+// storing the value an earlier write already set is a no-op and must be
+// excluded from storage_changes — only value-changing writes are recorded.
+func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	valA := *uint256.NewInt(0x111)
+	valB := *uint256.NewInt(0x222)
+
+	io := NewVersionedIO(4)
+	write := func(txIndex int, v uint256.Int) {
+		io.RecordWrites(Version{TxIndex: txIndex}, VersionedWrites{
+			&VersionedWrite{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: txIndex}, Val: v},
+		})
+	}
+	write(0, valA) // slot: 0 -> A  (real change)
+	write(1, valB) // slot: A -> B  (real change)
+	write(2, valB) // slot: B -> B  (no-op)
+	write(3, valB) // slot: B -> B  (no-op)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address != addr {
+			continue
+		}
+		found = true
+		require.Lenf(t, ac.StorageChanges, 1, "one slot expected\n%s", bal.DebugString())
+		changes := ac.StorageChanges[0].Changes
+		require.Lenf(t, changes, 2,
+			"no-op repeated-value writes (idx 3,4) must be excluded from storage_changes\n%s", bal.DebugString())
+		require.Equal(t, uint32(1), changes[0].Index)
+		require.True(t, changes[0].Value.Eq(&valA))
+		require.Equal(t, uint32(2), changes[1].Index)
+		require.True(t, changes[1].Value.Eq(&valB))
+	}
+	require.True(t, found, "contract must appear in BAL")
+}
+
+// fallthroughStateReader returns a fixed account and a fixed storage value, so
+// a test can observe whether a versionedRead fell through to the underlying
+// state (vs. returning a version-map value or aborting).
+type fallthroughStateReader struct {
+	minimalStateReader
+	acct       *accounts.Account
+	storageKey accounts.StorageKey
+	storageVal uint256.Int
+}
+
+func (r *fallthroughStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return r.acct, nil
+}
+
+func (r *fallthroughStateReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if key == r.storageKey {
+		return r.storageVal, true, nil
+	}
+	return uint256.Int{}, false, nil
+}
+
+// TestVersionedIO_RemovedDependencyFallsThroughToStorage is the negative test
+// for the "RM DEP fallthrough" in versionedRead's MVReadResultNone branch
+// (versionedio.go).
+//
+// Scenario: a tx has recorded a MapRead of a storage slot whose version-map
+// cell was written by a prior tx. The prior tx is then re-executed and its
+// cell removed (the cell reads back as MVReadResultNone), leaving a stale
+// prior MapRead in the tx's readSet. A subsequent read of the same slot must
+// NOT abort with ErrDependency — that cascades into re-execution livelocks in
+// dense blocks. It must fall through to a storage read; the validator later
+// rejects the tx if that storage value disagrees with the prior tx's settled
+// value, so deferring to the validator is sound (the validator is the single
+// source of truth since skipCheck was removed — issue #21319).
+//
+// This test pins the fallthrough: removing it (restoring panic(ErrDependency))
+// makes the test panic.
+func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xfa11"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	storageVal := *uint256.NewInt(0xAA) // the underlying-state value the fallthrough must surface
+
+	acct := accounts.NewAccount()
+	sr := &fallthroughStateReader{acct: &acct, storageKey: key, storageVal: storageVal}
+	ibs := NewWithVersionMap(sr, NewVersionMap(nil))
+	ibs.SetTxContext(2, 0)
+
+	// Seed a stale prior MapRead of the slot — as if a now-removed prior-tx
+	// write had been observed at version (1,0) with a different value.
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{
+		Address: addr, Path: StoragePath, Key: key,
+		Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0},
+		Val: *uint256.NewInt(0xBB),
+	})
+
+	// The version map has no cell for this slot (the prior tx's write was
+	// removed), so versionedRead sees MVReadResultNone with the stale MapRead
+	// recorded — the exact RM-DEP-fallthrough condition.
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, storageVal, got,
+		"a read whose version-map dependency was removed must fall through to "+
+			"the underlying storage value, not abort or return the stale MapRead")
+}
+
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
 // that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
 // (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
@@ -390,8 +554,8 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	ibs.SetTxContext(1, 0)
 
 	// Establish nonce and code before selfdestruct — these should be dropped.
-	require.NoError(t, ibs.SetNonce(addr, 5))
-	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}))
+	require.NoError(t, ibs.SetNonce(addr, 5, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
 	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
@@ -602,6 +766,136 @@ func TestSetAccountBalanceOrDelete_OtherAddressWritesPreserved(t *testing.T) {
 	require.True(t, selfDestructFound, "target must have SelfDestructPath")
 }
 
+// TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount
+// regression-pins the addrHasAnyWrite guard added in #21017 (bug #2).
+//
+// Setup: the worker has already written addr's NoncePath at version V (e.g.
+// a miner-self-send tx where sender == coinbase; the worker bumps the sender
+// nonce). The writes slice contains the NoncePath entry but no BalancePath
+// entry. finalize then calls SetAccountBalanceOrDelete to credit the tip.
+//
+// Pre-fix (bug #2): no BalancePath match found → fell through to the
+// new-account branch and re-emitted all four account fields from the
+// pre-block snapshot acc, clobbering the worker's already-bumped Nonce
+// under last-wins downstream merge.
+//
+// Post-fix: addrHasAnyWrite=true short-circuits the new-account branch
+// and appends ONLY the BalancePath; existing NoncePath is preserved.
+func TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xA000"))
+	writes := VersionedWrites{
+		// Worker wrote NoncePath only (e.g. nonce-bump on a sender = coinbase tx).
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(42)},
+	}
+
+	// Pre-block snapshot of the account — stale nonce that must NOT clobber
+	// the worker's already-bumped value.
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 41 // stale; worker has it at 42
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	// Should be NoncePath (worker's) + BalancePath (newly appended).
+	// Must NOT re-emit Incarnation / CodeHash from the stale snapshot.
+	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
+
+	pathSet := map[AccountPath]bool{}
+	for _, w := range result {
+		require.Equal(t, addr, w.Address)
+		pathSet[w.Path] = true
+		if w.Path == NoncePath {
+			require.Equal(t, uint64(42), w.Val, "worker's nonce must NOT be clobbered by stale snapshot")
+		}
+		if w.Path == BalancePath {
+			bal := w.Val.(uint256.Int)
+			require.Equal(t, uint256.NewInt(500), &bal)
+		}
+	}
+	require.True(t, pathSet[NoncePath], "NoncePath must be preserved")
+	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
+	require.False(t, pathSet[IncarnationPath], "IncarnationPath must NOT be re-emitted from stale snapshot")
+	require.False(t, pathSet[CodeHashPath], "CodeHashPath must NOT be re-emitted from stale snapshot")
+}
+
+// TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount
+// covers the same addrHasAnyWrite guard for a CodeHash-only worker write.
+// Less common in practice (CREATE without balance change) but a real path
+// the guard must handle for completeness.
+func TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB000"))
+	workerCodeHash := accounts.InternCodeHash(common.HexToHash("0xcafe"))
+	writes := VersionedWrites{
+		// Worker wrote CodeHashPath only (e.g. CREATE installed new code).
+		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: workerCodeHash},
+	}
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 5
+	acc.Incarnation = 2
+	acc.CodeHash = accounts.EmptyCodeHash // stale; worker installed real code
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
+
+	pathSet := map[AccountPath]bool{}
+	for _, w := range result {
+		require.Equal(t, addr, w.Address)
+		pathSet[w.Path] = true
+		if w.Path == CodeHashPath {
+			require.Equal(t, workerCodeHash, w.Val, "worker's CodeHash must NOT be clobbered by stale snapshot")
+		}
+	}
+	require.True(t, pathSet[CodeHashPath], "CodeHashPath must be preserved")
+	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
+	require.False(t, pathSet[NoncePath], "NoncePath must NOT be re-emitted from stale snapshot")
+	require.False(t, pathSet[IncarnationPath], "IncarnationPath must NOT be re-emitted from stale snapshot")
+}
+
+// TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount
+// covers the same addrHasAnyWrite guard for an Incarnation-only worker write
+// (e.g. a SELFDESTRUCT-and-recreate that bumps incarnation without changing
+// other paths via this code path).
+func TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xC000"))
+	writes := VersionedWrites{
+		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: uint64(7)},
+	}
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 3
+	acc.Incarnation = 6 // stale; worker has it at 7
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Len(t, result, 2, "must append only BalancePath, not re-emit full account")
+
+	pathSet := map[AccountPath]bool{}
+	for _, w := range result {
+		require.Equal(t, addr, w.Address)
+		pathSet[w.Path] = true
+		if w.Path == IncarnationPath {
+			require.Equal(t, uint64(7), w.Val, "worker's incarnation must NOT be clobbered by stale snapshot")
+		}
+	}
+	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be preserved")
+	require.True(t, pathSet[BalancePath], "BalancePath must be appended")
+	require.False(t, pathSet[NoncePath], "NoncePath must NOT be re-emitted from stale snapshot")
+	require.False(t, pathSet[CodeHashPath], "CodeHashPath must NOT be re-emitted from stale snapshot")
+}
+
 // --- StripBalanceWrite tests ---
 
 // TestStripBalanceWrite_NoRead verifies that when the TX didn't read the
@@ -731,7 +1025,7 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(200), Reason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(200), BalanceChangeReason: tracing.BalanceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
@@ -782,7 +1076,7 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(1)},
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(1), NonceChangeReason: tracing.NonceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
@@ -810,8 +1104,8 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addrA, Path: BalancePath, Val: *uint256.NewInt(200), Reason: tracing.BalanceChangeUnspecified},
-		&VersionedWrite{Address: addrB, Path: NoncePath, Val: uint64(5)},
+		&VersionedWrite{Address: addrA, Path: BalancePath, Val: *uint256.NewInt(200), BalanceChangeReason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addrB, Path: NoncePath, Val: uint64(5), NonceChangeReason: tracing.NonceChangeUnspecified},
 		&VersionedWrite{Address: addrC, Path: StoragePath, Key: storageKey, Val: *uint256.NewInt(99)},
 	})
 	require.NoError(t, err)
@@ -838,7 +1132,7 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(100), Reason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(100), BalanceChangeReason: tracing.BalanceChangeUnspecified},
 	})
 	require.NoError(t, err)
 

@@ -28,6 +28,7 @@ type ViewHeadStateFn func(headState *state.CachingBeaconState) error
 //go:generate mockgen -typed=true -destination=./mock_services/synced_data_mock.go -package=mock_services . SyncedData
 type SyncedData interface {
 	OnHeadState(newState *state.CachingBeaconState) error
+	OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error
 	UnsetHeadState()
 	ViewHeadState(fn ViewHeadStateFn) error
 	ViewPreviousHeadState(fn ViewHeadStateFn) error

@@ -209,6 +209,10 @@ func (te *TipEvents) Run(ctx context.Context) error {
 
 	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		blockHashes := *message.Decoded
+		// A peer can send an empty NewBlockHashes packet; skip it to avoid the blockHashes[0] panics below.
+		if len(blockHashes) == 0 {
+			return
+		}
 
 		if te.blockEventsSpamGuard.Spam(message.PeerId, blockHashes[0].Hash, blockHashes[0].Number) {
 			return

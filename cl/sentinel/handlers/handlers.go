@@ -129,6 +129,11 @@ func NewConsensusHandlers(
 		// data column sidecars
 		hm[communication.DataColumnSidecarsByRangeProtocolV1] = c.dataColumnSidecarsByRangeHandler
 		hm[communication.DataColumnSidecarsByRootProtocolV1] = c.dataColumnSidecarsByRootHandler
+		// execution payload envelopes
+		hm[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = c.executionPayloadEnvelopesByRangeHandler
+		hm[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = c.executionPayloadEnvelopesByRootHandler
+		// blocks by head (consensus-specs PR #5181, Fulu)
+		hm[communication.BeaconBlocksByHeadProtocolV1] = c.beaconBlocksByHeadHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}

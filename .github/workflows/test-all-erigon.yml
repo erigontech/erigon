@@ -11,20 +11,33 @@ defaults:
 jobs:
   tests-mac-linux:
     strategy:
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-24.04
           - macos-15
           - windows-2025
+        # Run both serial and parallel exec paths every time so divergence is
+        # caught on the PR rather than after a release. The matrix entries
+        # spawn separate runners and run concurrently — wall-clock unchanged,
+        # runner-minutes doubled.
+        exec_mode:
+          - serial
+          - parallel
         include:
-          # eest_blockchain tests take ~1190s on the GitHub-hosted windows-2025
-          # runner (right at the 20m limit). Give Windows extra headroom to avoid
-          # marginal timeouts while keeping Linux/macOS at the tighter 20m.
+          # Windows GitHub-hosted runners run noticeably slower than Linux for
+          # this suite; give them extra headroom to avoid marginal timeouts
+          # while keeping Linux/macOS at the tighter 20m.
           - os: windows-2025
             test_timeout: 30m
             skip_execution_tests: 'true'
           - os: macos-15
             skip_execution_tests: 'true'
+    name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -42,15 +55,18 @@ jobs:
         id: erigon
         with:
           submodules: true
-          lfs: tests
           cleanup-space: true
           ramdisk: true
 
-      - name: Run all tests on ${{ matrix.os }}
+      - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
           SKIP_FLAKY_TESTS: 'true'
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
           ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
+          # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+          # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+          # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
             # Retry after clearing the Go build cache. Low disk space can cause
@@ -73,4 +89,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

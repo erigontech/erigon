@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -103,6 +104,15 @@ func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.Pend
 	sdc.pendingUpdate = upd
 }
 
+// PeekPendingUpdate returns the current pending update without taking ownership.
+// Returns nil if no pending update is set. Used by the parallel commitment
+// calculator to annotate the pending update with the block hash after a
+// per-block ComputeCommitment, so the next FlushPendingUpdates can route to
+// the exact (BlockNum, BlockHash) past changeset.
+func (sdc *SharedDomainsCommitmentContext) PeekPendingUpdate() *commitment.PendingCommitmentUpdate {
+	return sdc.pendingUpdate
+}
+
 // ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
 func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
 	if sdc.pendingUpdate != nil {
@@ -144,6 +154,23 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
 	sdc.patriciaTrie.SetTrace(trace)
+}
+
+// SetCapture enables/disables trie operation capture for diagnosis.
+func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
+	sdc.patriciaTrie.SetCapture(capture)
+}
+
+// GetUpdates returns the current updates buffer. Used by the commitment
+// calculator to swap in its accumulated touches.
+func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
+	return sdc.updates
+}
+
+// SetUpdates replaces the updates buffer. Used by the commitment calculator
+// to install its accumulated touches before calling ComputeCommitment.
+func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
+	sdc.updates = updates
 }
 
 // EnableWarmupCache enables/disables warmup cache during commitment processing.
@@ -223,6 +250,9 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
 	}
+	if dbg.TraceTouchKey {
+		fmt.Printf("TOUCHKEY %s key=%x val=%x\n", d, key, val)
+	}
 
 	switch d {
 	case kv.AccountsDomain:
@@ -263,6 +293,17 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	if ok {
 		hexPatriciaHashed.SetCollapseTracer(tracer)
 	}
+}
+
+// BranchChildCount returns the child count of the branch at nibblePrefix, read
+// from the in-memory commitment domain (post-compute state).
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+	key := nibbles.HexToCompact(nibblePrefix)
+	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	if err != nil {
+		return 0, err
+	}
+	return commitment.BranchData(enc).ChildCount(), nil
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
@@ -628,10 +669,17 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
-		txNum = uint64(0)
-		if blockNum > 0 {
-			txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
-		}
+		// blockNum=0 means genesis (block 0) executed — NOT "no progress".
+		// The "no progress" case is len(bnBytes)==0 (no SyncStageProgress
+		// entry at all) which is handled by the outer if branch leaving
+		// blockNum/txNum at their zero defaults. When the entry exists,
+		// blockNum is the last executed block and TxNums.Max(blockNum)
+		// returns its last txNum — for genesis, that's 1 (txIndex=-1 at
+		// txNum=0 + block-end at txNum=1, per genesiswrite.WriteGenesisBesideState
+		// which calls TxNums.Append(tx, 0, len(txs)+1)). Returning txNum=0
+		// for blockNum=0 would falsely match the "never executed" case and
+		// make exec3.go's skip logic re-execute genesis on subsequent cycles.
+		txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
 		if err != nil {
 			return 0, 0, err
 		}

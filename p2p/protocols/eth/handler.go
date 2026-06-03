@@ -20,7 +20,7 @@
 package eth
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -58,13 +58,20 @@ const (
 	// containing 200+ transactions nowadays, the practical limit will always
 	// be softResponseLimit.
 	maxReceiptsServe = 1024
+
+	// MaxBlockAccessListsServe is the maximum number of block access lists to
+	// serve for an eth/71 GetBlockAccessLists request (EIP-8159). The spec
+	// recommends a per-response cap of 2 MiB, which softResponseLimit already
+	// enforces; this cap limits the number of disk lookups even when
+	// individual BALs are small.
+	MaxBlockAccessListsServe = 1024
 )
 
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata
 // known about the host peer.
 type NodeInfo struct {
 	Network    uint64        `json:"network"`    // Ethereum network ID (1=mainnet, 11155111=Sepolia)
-	Difficulty *big.Int      `json:"difficulty"` // Total difficulty of the host's blockchain
+	Difficulty *uint256.Int  `json:"difficulty"` // Total difficulty of the host's blockchain
 	Genesis    common.Hash   `json:"genesis"`    // SHA3 hash of the host's genesis block
 	Config     *chain.Config `json:"config"`     // ChainDB configuration for the fork rules
 	Head       common.Hash   `json:"head"`       // Hex hash of the host's best owned block
@@ -74,7 +81,7 @@ type NodeInfo struct {
 func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash common.Hash, network uint64) *NodeInfo {
 	headHash := rawdb.ReadHeadHeaderHash(getter)
 	headNumber := rawdb.ReadHeaderNumber(getter, headHash)
-	var td *big.Int
+	var td *uint256.Int
 	if headNumber != nil {
 		td, _ = rawdb.ReadTd(getter, headHash, *headNumber)
 	}

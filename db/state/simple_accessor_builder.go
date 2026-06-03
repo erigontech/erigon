@@ -24,6 +24,7 @@ type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
 	GetBaseDataId() uint64
 	GetCount() uint64
+	Reset()
 	Close()
 }
 
@@ -194,6 +195,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 	defer s.kf.Close()
 
 	for {
+		iidq.Reset()
 		rs.SetProgress(p)
 		stream := iidq.GetStream(ctx)
 		defer stream.Close()
@@ -264,6 +266,10 @@ func (d *DecompressorIndexInputDataQuery) Count() uint64 {
 
 func (d *DecompressorIndexInputDataQuery) Metadata() NumMetadata {
 	return d.m
+}
+
+func (d *DecompressorIndexInputDataQuery) Reset() {
+	d.reader.Reset(0)
 }
 
 func (d *DecompressorIndexInputDataQuery) Close() {

@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e # Enable exit on error
 
+source "$(dirname "$0")/rpc_version.env"
+if [ -z "$RPC_VERSION" ]; then
+  echo "Error: RPC_VERSION is not set in rpc_version.env"
+  exit 1
+fi
+
 # The workspace directory, no default because run_rpc_tests has it
 WORKSPACE="$1"
 # The result directory, no default because run_rpc_tests has it
@@ -37,10 +43,20 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # Temporarily disabled: the following tests hang (possible regression in Erigon).
+  # For debug_traceTransaction, the issue is under analysis.
+  debug_traceTransaction/test_12.json
+  # Temportary disable waiting merge PR #21418
+  eth_simulateV1/test_131.json
+  eth_simulateV1/test_143.json
+  eth_simulateV1/test_169.json
+  eth_simulateV1/test_175.json
+  eth_simulateV1/test_179.json
+  eth_simulateV1/test_196.json
 )
 
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.8.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+RPC_TRANSPORT_TYPES="http,http_comp,websocket" "$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

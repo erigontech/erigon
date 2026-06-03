@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -314,6 +315,26 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
+	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
+	// snapshot domain state may be ahead of the Execution stage progress (which is 0
+	// on a fresh node until ExecV3 runs and self-corrects via SeekCommitment). During
+	// that startup window the RPC layer can resolve `latest` to genesis (exec=0) while
+	// the cached state reader serves snapshot-tip state — a state-vs-rules mismatch
+	// that crashed eth_call on Gnosis with "invalid opcode: SHR" (#21066).
+	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
+	// consistent view immediately, matching what ExecV3 would set on its first run.
+	if commitBlock := readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return fmt.Errorf("get Execution stage progress: %w", err)
+		}
+		if execProgress < commitBlock {
+			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+			}
+		}
+	}
+
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
 		txNumsReader := cfg.blockReader.TxnumReader()
@@ -427,8 +448,11 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return nil
+	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.ProduceE2 {
+	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		//TODO: initialSync maybe save files progress here
 
 		var minBlockNumber uint64
@@ -531,4 +555,21 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		filesDeleted = true
 	}
 	return filesDeleted, nil
+}
+
+// readCommitmentBlockFromDB reads the commitment domain's "state" key via a
+// temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
+// need a separate temporal RO tx to read domain data from snapshot files.
+// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
+func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
+	roTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0
+	}
+	defer roTx.Rollback()
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	if err != nil || len(v) < 16 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(v[8:16])
 }

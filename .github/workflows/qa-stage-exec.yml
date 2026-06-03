@@ -1,20 +1,64 @@
 name: QA - Stage Exec Smoke Test
 
 on:
+  schedule:
+    - cron: '0 4 * * *'  # Run daily at 04:00 UTC
   workflow_dispatch:     # Run manually
+  # Auto-fire on PRs that touch this workflow's own YAML so the exec-mode
+  # matrix change can be validated in-PR without a manual dispatch.
+  # Regular PRs that don't touch this file are unaffected.
+  pull_request:
+    paths:
+      - '.github/workflows/qa-stage-exec.yml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   stage-exec-test:
+    name: stage-exec-test (${{ matrix.mode_name }}, ${{ matrix.exec_mode }})
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each (mode_name, exec_mode) pair runs separately. The testbed
+        # data dir already disambiguates by mode_name; we extend it with
+        # exec_mode so serial+parallel entries don't clobber each other.
+        include:
+          - mode_name: resume-nonchaintip
+            extra_flags: ""
+            test_name: stage_exec_resume_nonchaintip
+            exec_mode: serial
+          - mode_name: resume-nonchaintip
+            extra_flags: ""
+            test_name: stage_exec_resume_nonchaintip
+            exec_mode: parallel
+          - mode_name: from-0
+            extra_flags: "--rm-state-all"
+            test_name: stage_exec_from_0
+            exec_mode: serial
+          - mode_name: from-0
+            extra_flags: "--rm-state-all"
+            test_name: stage_exec_from_0
+            exec_mode: parallel
+          - mode_name: chaintip
+            extra_flags: "--chaintip"
+            test_name: stage_exec_resume_chaintip
+            exec_mode: serial
+          - mode_name: chaintip
+            extra_flags: "--chaintip"
+            test_name: stage_exec_resume_chaintip
+            exec_mode: parallel
     env:
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir-${{ matrix.mode_name }}-${{ matrix.exec_mode }}
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TIMEOUT_SECONDS: 600
+      TIMEOUT_SECONDS: 360
       CHAIN: mainnet
+      # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+      # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+      # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
     - name: Check out repository
@@ -69,7 +113,9 @@ jobs:
         set +e
 
         python3 $ERIGON_QA_PATH/test_system/qa-tests/stage-exec/run_and_check_stage_exec.py \
-          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN \
+          --result-file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json \
+          ${{ matrix.extra_flags }}
 
         test_exit_status=$?
 
@@ -97,25 +143,25 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch ${{ github.ref_name }} \
-          --test_name stage_exec_resume_nonchaintip \
+          --test_name ${{ matrix.test_name }} \
           --chain $CHAIN \
           --runner ${{ runner.name }} \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: test-results
-        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+        name: test-results-${{ matrix.mode_name }}-${{ matrix.exec_mode }}
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json
 
     - name: Upload erigon logs
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: erigon-logs
+        name: erigon-logs-${{ matrix.mode_name }}-${{ matrix.exec_mode }}
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Delete Erigon Testbed Data Directory

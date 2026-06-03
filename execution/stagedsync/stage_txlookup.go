@@ -133,7 +133,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		for i, txn := range body.Transactions {
 			binary.BigEndian.PutUint64(data[8:], firstTxNumInBlock+uint64(i)+1)
-			if err := next(k, txn.Hash().Bytes(), data); err != nil {
+			txHash := txn.Hash()
+			if err := next(k, txHash[:], data); err != nil {
 				return err
 			}
 		}
@@ -201,6 +202,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	logPrefix := s.LogPrefix()
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
@@ -325,7 +329,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		}
 
 		for _, txn := range body.Transactions {
-			if err := next(k, txn.Hash().Bytes(), nil); err != nil {
+			txHash := txn.Hash()
+			if err := next(k, txHash[:], nil); err != nil {
 				return err
 			}
 		}

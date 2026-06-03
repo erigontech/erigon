@@ -47,8 +47,8 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 	bal.DebugPrint(file)
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
-	if !amsterdam && !experimental {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string) error {
+	if !isEIP7928 && !experimental {
 		return nil
 	}
 	if h == nil {
@@ -62,7 +62,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
 	}
 	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
-	if !amsterdam {
+	if !isEIP7928 {
 		return nil
 	}
 	// EIP-7928 size bound is only consensus-binding once Amsterdam activates.
@@ -70,16 +70,15 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	if h.BlockAccessListHash == nil {
-		return fmt.Errorf("block %d: missing block access list hash", blockNum)
+		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	headerBALHash := *h.BlockAccessListHash
 	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
 	if err != nil {
 		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 	}
-	// BAL data may not be stored for blocks downloaded via backward
-	// block downloader (p2p sync) since it does not carry BAL sidecars.
-	// Remove after eth/71 has been implemented.
+	// A stored BAL sidecar may be absent — eth/71 backfill is best-effort and
+	// never blocks stage progress — so cross-check it only when present.
 	if dbBALBytes != nil {
 		dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 		if err != nil {

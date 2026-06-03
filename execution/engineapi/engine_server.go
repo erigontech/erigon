@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -142,6 +141,7 @@ func (e *EngineServer) Start(
 ) error {
 	e.filters = filters
 	e.events = events
+	cli.AuthenticatedEngineRESTHandler = e.SSZRESTHandler()
 
 	var eg errgroup.Group
 	if !e.internalCL {
@@ -195,26 +195,48 @@ func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types
 	return withdrawals != nil
 }
 
-func (s *EngineServer) validatePayloadAttributes(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
-	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-		return &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
-	}
-	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-		return &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
-	}
-
+// validatePayloadAttributesPreFCU runs the request-level "wrong version of the
+// structure" checks defined by engine_forkchoiceUpdatedV2's Request section.
+// These are independent of fork-choice sync state and so MUST run before the
+// SYNCING short-circuit, otherwise a CL that sends mismatched-version attrs
+// would never see the spec-mandated -38003/-38005.
+func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // V1/V2 attrs MUST NOT carry parentBeaconBlockRoot
 	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
-		return &engine_helpers.InvalidPayloadAttributesErr
+		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
+	}
+	return nil
+}
+
+// validatePayloadAttributesPostFCU runs the checks the engine API spec defines
+// under "Extend point (8)" of engine_forkchoiceUpdatedV1, which the spec gates
+// on the head being VALID. They MUST run only after the SYNCING short-circuit,
+// so that an unknown head is reported as SYNCING (no -38003/-38005). See the
+// hive engine-cancun "Invalid PayloadAttributes, Missing BeaconRoot,
+// Syncing=True" tests for the canonical scenario.
+func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // V3 attrs require parentBeaconBlockRoot (cancun.md point 8.1)
+	}
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
+	}
+	// TODO: enable once tests catch up with glamsterdam-devnet-4 spec
+	// if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+	// 	return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	// }
+	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
 	}
 	return nil
 }
@@ -235,6 +257,7 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
+	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -252,7 +275,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
-	txs := [][]byte{}
+	txs := make([][]byte, 0, len(req.Transactions))
 	for _, transaction := range req.Transactions {
 		txs = append(txs, transaction)
 	}
@@ -327,13 +350,18 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var blockAccessList types.BlockAccessList
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion {
+	if version >= clparams.GloasVersion && !s.config.IsEIPDisabled(7928) {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		if len(req.BlockAccessList) == 0 {
-			blockAccessList = nil
-			header.BlockAccessListHash = &empty.BlockAccessListHash
+			blockAccessList = make(types.BlockAccessList, 0)
+			hash := empty.BlockAccessListHash
+			header.BlockAccessListHash = &hash
+			blockAccessListBytes, err = types.EncodeBlockAccessListBytes(blockAccessList)
+			if err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
+			}
 		} else {
 			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
@@ -412,7 +440,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if errors.Is(err, misc.ErrMaxBlobGasUsed) {
-			bad, latestValidHash := s.blockDownloader.IsBadHeader(req.ParentHash)
+			bad, latestValidHash, _ := s.blockDownloader.IsBadHeader(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
@@ -443,7 +471,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
+	// binaryTransactions cache so the downstream Block.RawBody() invocation
+	// inside InsertBlocksAndWaitWithAccessLists doesn't re-encode every tx
+	// via rlp.EncodeToBytes. Both slices reference the same underlying
+	// byte buffers from req.Transactions.
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
@@ -500,7 +533,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
-	var td *big.Int
+	var td *uint256.Int
 	if newPayload {
 		parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = s.chainRW.GetTd(ctx, parentHash, blockNumber-1)
@@ -523,7 +556,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
 		s.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
-		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash())
+		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash(), "invalid block number")
 		parentHash := parent.Hash()
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -532,18 +565,36 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
-	bad, lastValidHash := s.blockDownloader.IsBadHeader(blockHash)
+	bad, lastValidHash, cachedErr := s.blockDownloader.IsBadHeader(blockHash)
 	if bad {
 		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
 	} else if newPayload {
-		bad, lastValidHash = s.blockDownloader.IsBadHeader(parentHash)
+		bad, lastValidHash, cachedErr = s.blockDownloader.IsBadHeader(parentHash)
 		if bad {
 			s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
+			if cachedErr != "" {
+				cachedErr = fmt.Sprintf("ancestor %s rejected: %s", parentHash, cachedErr)
+			}
 		}
 	}
 	if bad {
-		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash)
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString("previously known bad block")}, nil
+		if cachedErr == "" {
+			// An earlier ReportBadHeader stored this block (or an ancestor)
+			// without a validation message — the original rejection
+			// category was lost. Returning the generic "previously known
+			// bad block" string here strips the category that downstream
+			// callers (eest's ErigonExceptionMapper, Lighthouse, etc.)
+			// rely on to bucket the failure, and rewriting the cache with
+			// that fallback permanently degrades the entry. Drop the
+			// useless entry and fall through to re-validation so the
+			// pipeline re-derives the specific error; the proper string
+			// will be re-cached via ReportBadHeader on the BadBlock path
+			// below (issues #21363 + #21364 Mode A).
+			s.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
+		} else {
+			s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
+		}
 	}
 
 	currentHeader := s.chainRW.CurrentHeader(ctx)
@@ -677,6 +728,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	defer engineForkchoiceUpdatedDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
@@ -725,13 +777,14 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
 	}
 
-	// Per the engine API spec, payloadAttributes must be validated against the
-	// fork schedule regardless of the fork-choice sync state. Doing this before
-	// the SYNCING short-circuit below lets the CL detect misconfigured attributes
-	// (e.g. fcuV2 with nil withdrawals at a Shanghai timestamp) even when the
-	// head is still syncing.
+	// engine_forkchoiceUpdatedV2's Request section makes the "wrong version of
+	// structure" rule independent of fork-choice sync state, so run those
+	// checks before the SYNCING short-circuit below. The remaining attribute
+	// checks live under "Extend point (8)" of engine_forkchoiceUpdatedV1,
+	// which the spec gates on the head being VALID — those run after the
+	// short-circuit so a SYNCING head is not turned into -38003/-38005.
 	if payloadAttributes != nil {
-		if err := s.validatePayloadAttributes(version, payloadAttributes); err != nil {
+		if err := s.validatePayloadAttributesPreFCU(version, payloadAttributes); err != nil {
 			return nil, err
 		}
 	}
@@ -739,6 +792,10 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	// No need for payload building
 	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
+	}
+
+	if err := s.validatePayloadAttributesPostFCU(version, payloadAttributes); err != nil {
+		return nil, err
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
@@ -769,7 +826,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
 	}
 
 	if version >= clparams.CapellaVersion {
@@ -778,6 +834,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	if version >= clparams.DenebVersion {
 		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
+	}
+
+	if version >= clparams.GloasVersion {
+		assembleParams.SlotNumber = (*uint64)(payloadAttributes.SlotNumber)
+		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
 	}
 
 	var assembled execmodule.AssembleBlockResult
@@ -982,7 +1043,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if status == execmodule.ExecutionStatusBadBlock {
-		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash)
+		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, common.Deref(validationErr))
 	}
 
 	resp := &engine_types.PayloadStatus{
@@ -1059,6 +1120,9 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		ep.SlotNumber = &sn
 	}
 	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
+		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
+		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
+		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
 			ep.BlockAccessList = encoded
@@ -1131,6 +1195,9 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
+	}
+	if status == execmodule.ExecutionStatusReorgTooDeep {
+		return nil, &engine_helpers.ReorgTooDeepErr
 	}
 	if status == execmodule.ExecutionStatusBusy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil

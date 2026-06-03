@@ -230,8 +230,8 @@ func (abi *ABI) overloadedEventName(rawName string) string {
 	return name
 }
 
-// MethodById looks up a method by the 4-byte id,
-// returns nil if none found.
+// MethodById looks up a method by the 4-byte id.
+// It returns an error if the id is too short or no method is found.
 func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 	if len(sigdata) < 4 {
 		return nil, fmt.Errorf("data too short (%d bytes) for abi method lookup", len(sigdata))
@@ -244,11 +244,11 @@ func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 	return nil, fmt.Errorf("no method with id: %#x", sigdata[:4])
 }
 
-// EventByID looks an event up by its topic hash in the
-// ABI and returns nil if none found.
+// EventByID looks an event up by its topic hash in the ABI.
+// It returns an error if no event is found.
 func (abi *ABI) EventByID(topic common.Hash) (*Event, error) {
 	for _, event := range abi.Events {
-		if bytes.Equal(event.ID.Bytes(), topic.Bytes()) {
+		if bytes.Equal(event.ID[:], topic[:]) {
 			return &event, nil
 		}
 	}

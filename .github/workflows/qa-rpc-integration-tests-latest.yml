@@ -14,18 +14,37 @@ on:
   push:
     branches:
       - 'release/3.*'
+  # Auto-fire on PRs that touch this workflow's own YAML so changes to the
+  # exec-mode matrix can be validated in-PR without a manual dispatch.
+  # Regular PRs that don't touch this file are unaffected.
+  pull_request:
+    paths:
+      - '.github/workflows/qa-rpc-integration-tests-latest.yml'
 
 jobs:
   mainnet-rpc-integ-tests-latest:
+    name: mainnet-rpc-integ-tests-latest (${{ matrix.exec_mode }})
     concurrency:
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
           format('{0}-{1}', github.workflow, github.run_id) ||
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
+    strategy:
+      fail-fast: false
+      # Self-hosted pool typically has a single rpc-latest-erigon runner; the
+      # workflow also touches shared state on the runner box (testbed datadir,
+      # reference datadir). max-parallel=1 forces the two matrix entries to
+      # run sequentially on the same runner — both still execute automatically,
+      # just one after the other (~2× wall-clock).
+      max-parallel: 1
+      matrix:
+        exec_mode:
+          - serial
+          - parallel
     env:
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -34,10 +53,19 @@ jobs:
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
+      # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+      # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+      # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Read RPC version
+        run: |
+          source .github/workflows/scripts/rpc_version.env
+          echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
 
       - name: Set reference data dir based on branch
         run: |
@@ -81,7 +109,7 @@ jobs:
         if: failure() && steps.preparing_step.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: preparing-step-logs
+          name: preparing-step-logs-${{ matrix.exec_mode }}
           path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -138,7 +166,7 @@ jobs:
         if: failure() && steps.pre_test_step.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: pre-test-logs
+          name: pre-test-logs-${{ matrix.exec_mode }}
           path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Run RPC Integration Tests
@@ -215,7 +243,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results
+          name: test-results-${{ matrix.exec_mode }}
           path: |
             ${{ env.TEST_RESULT_DIR }}
             ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
@@ -235,7 +263,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch ${{ github.ref_name }} \
-            --test_name rpc-integration-tests-latest \
+            --test_name rpc-integration-tests-latest${{ matrix.exec_mode == 'parallel' && '-parallel' || '' }} \
             --chain $CHAIN \
             --runner ${{ runner.name }} \
             --db_version $db_version \

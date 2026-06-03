@@ -20,13 +20,10 @@
 package tracing
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -49,9 +46,10 @@ type IntraBlockState interface {
 	GetBalance(accounts.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(accounts.Address) ([]byte, error)
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
-	GetRefund() mdgas.MdGas
+	GetRefund() uint64
 }
 
 // VMContext provides the context for the EVM execution.
@@ -72,7 +70,7 @@ type VMContext struct {
 // It contains the block as well as consensus related information.
 type BlockEvent struct {
 	Block     *types.Block
-	TD        *big.Int
+	TD        *uint256.Int
 	Finalized *types.Header
 	Safe      *types.Header
 }
@@ -138,6 +136,10 @@ type (
 	// will not be invoked.
 	OnSystemCallStartHook = func()
 
+	// OnSystemCallStartHookV2 is called when a system call is about to be executed. Refer
+	// to `OnSystemCallStartHook` for more information.
+	OnSystemCallStartHookV2 = func(vm *VMContext)
+
 	// OnSystemCallEndHook is called when a system call has finished executing. Today,
 	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
 	// beacon block root.
@@ -153,8 +155,14 @@ type (
 	// NonceChangeHook is called when the nonce of an account changes.
 	NonceChangeHook = func(addr accounts.Address, prev, new uint64)
 
+	// NonceChangeHookV2 is called when the nonce of an account changes.
+	NonceChangeHookV2 = func(addr accounts.Address, prev, new uint64, reason NonceChangeReason)
+
 	// CodeChangeHook is called when the code of an account changes.
 	CodeChangeHook = func(addr accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, codeHash accounts.CodeHash, code []byte)
+
+	// CodeChangeHookV2 is called when the code of an account changes.
+	CodeChangeHookV2 = func(addr accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, codeHash accounts.CodeHash, code []byte, reason CodeChangeReason)
 
 	// StorageChangeHook is called when the storage of an account changes.
 	StorageChangeHook = func(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int)
@@ -173,16 +181,19 @@ type Hooks struct {
 	OnFault     FaultHook
 	OnGasChange GasChangeHook
 	// Chain events
-	OnBlockchainInit  BlockchainInitHook
-	OnBlockStart      BlockStartHook
-	OnBlockEnd        BlockEndHook
-	OnGenesisBlock    GenesisBlockHook
-	OnSystemCallStart OnSystemCallStartHook
-	OnSystemCallEnd   OnSystemCallEndHook
+	OnBlockchainInit    BlockchainInitHook
+	OnBlockStart        BlockStartHook
+	OnBlockEnd          BlockEndHook
+	OnGenesisBlock      GenesisBlockHook
+	OnSystemCallStart   OnSystemCallStartHook
+	OnSystemCallStartV2 OnSystemCallStartHookV2
+	OnSystemCallEnd     OnSystemCallEndHook
 	// State events
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
+	OnNonceChangeV2 NonceChangeHookV2
 	OnCodeChange    CodeChangeHook
+	OnCodeChangeV2  CodeChangeHookV2
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
 	Flush           func(tx types.Transaction)
@@ -237,6 +248,9 @@ const (
 	// account within the same txn (captured at end of tx).
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
+	// BalanceChangeRevert is emitted when the balance is reverted back to a previous value due to call failure.
+	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
+	BalanceChangeRevert BalanceChangeReason = 15
 )
 
 // GasChangeReason is used to indicate the reason for a gas change, useful
@@ -301,4 +315,65 @@ const (
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
 	GasChangeIgnored GasChangeReason = 0xFF
+)
+
+// NonceChangeReason is used to indicate the reason for a nonce change.
+type NonceChangeReason byte
+
+//go:generate go run golang.org/x/tools/cmd/stringer -type=NonceChangeReason -trimprefix NonceChange -output gen_nonce_change_reason_stringer.go
+
+const (
+	NonceChangeUnspecified NonceChangeReason = 0
+
+	// NonceChangeGenesis is the nonce allocated to accounts at genesis.
+	NonceChangeGenesis NonceChangeReason = 1
+
+	// NonceChangeEoACall is the nonce change due to an EoA call.
+	NonceChangeEoACall NonceChangeReason = 2
+
+	// NonceChangeContractCreator is the nonce change of an account creating a contract.
+	NonceChangeContractCreator NonceChangeReason = 3
+
+	// NonceChangeNewContract is the nonce change of a newly created contract.
+	NonceChangeNewContract NonceChangeReason = 4
+
+	// NonceChangeAuthorization is the nonce change due to an EIP-7702 authorization.
+	NonceChangeAuthorization NonceChangeReason = 5
+
+	// NonceChangeRevert is emitted when the nonce is reverted back to a previous value due to call failure.
+	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
+	NonceChangeRevert NonceChangeReason = 6
+
+	// NonceChangeSelfdestruct is emitted when the nonce is reset to zero due to a self-destruct.
+	// Spelling (lowercase "d") matches geth; CodeChangeSelfDestruct uses capital "D" — same
+	// inconsistency carried for parity.
+	NonceChangeSelfdestruct NonceChangeReason = 7
+)
+
+// CodeChangeReason is used to indicate the reason for a code change.
+type CodeChangeReason byte
+
+//go:generate go run golang.org/x/tools/cmd/stringer -type=CodeChangeReason -trimprefix=CodeChange -output gen_code_change_reason_stringer.go
+
+const (
+	CodeChangeUnspecified CodeChangeReason = 0
+
+	// CodeChangeContractCreation is when a new contract is deployed via CREATE/CREATE2 operations.
+	CodeChangeContractCreation CodeChangeReason = 1
+
+	// CodeChangeGenesis is when contract code is set during blockchain genesis or initial setup.
+	CodeChangeGenesis CodeChangeReason = 2
+
+	// CodeChangeAuthorization is when code is set via EIP-7702 Set Code Authorization.
+	CodeChangeAuthorization CodeChangeReason = 3
+
+	// CodeChangeAuthorizationClear is when EIP-7702 delegation is cleared by setting to zero address.
+	CodeChangeAuthorizationClear CodeChangeReason = 4
+
+	// CodeChangeSelfDestruct is when contract code is cleared due to self-destruct.
+	CodeChangeSelfDestruct CodeChangeReason = 5
+
+	// CodeChangeRevert is emitted when the code is reverted back to a previous value due to call failure.
+	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
+	CodeChangeRevert CodeChangeReason = 6
 )

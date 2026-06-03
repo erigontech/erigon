@@ -121,8 +121,6 @@ func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCyc
 // tx. hasMore tells the impl whether another iteration follows — useful to
 // skip refreshing the tx on the final iter. May return (nil, nil) to leave
 // the loop's tx unchanged.
-// TODO: rename initialCycle to atTip (inverted polarity) across stage/prune
-// APIs so naming matches semantic.
 type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error)
 
 // PruneFn replaces the in-loop pe.sync.RunPrune call. It is called after
@@ -236,8 +234,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			// snapshot files advance as PFB processes frozen blocks.
 			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
 				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-					toTxNum := agg.EndTxNumMinimax() + agg.StepSize()
-					agg.BuildFilesInBackground(toTxNum)
+					agg.BuildFilesInBackground(agg.EndTxNumMinimax() + agg.StepSize())
 				}
 			}
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
