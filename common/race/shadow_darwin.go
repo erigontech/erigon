@@ -58,8 +58,12 @@ static int shadow_is_mapped(uint64_t shadow_addr) {
 // range for app range [abeg, aend), leaving already-mapped shadow untouched.
 static int map_shadow_holes(uint64_t abeg, uint64_t aend) {
 	long page = sysconf(_SC_PAGESIZE);
-	uint64_t sbeg = mem_to_shadow(abeg) & ~(uint64_t)(page - 1);
-	uint64_t send = (mem_to_shadow(aend) + page - 1) & ~(uint64_t)(page - 1);
+	if (page <= 0) {
+		return -1;
+	}
+	uint64_t mask = ~(uint64_t)(page - 1);
+	uint64_t sbeg = mem_to_shadow(abeg) & mask;
+	uint64_t send = (mem_to_shadow(aend) + page - 1) & mask;
 	uint64_t addr = sbeg;
 	while (addr < send) {
 		mach_vm_address_t q = addr;
