@@ -26,9 +26,10 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// TestWriteResultToMatchesJSONMarshal asserts the streamed result-response path produces output
-// byte-identical to json.Marshal of the same message, across id and result shapes.
-func TestWriteResultToMatchesJSONMarshal(t *testing.T) {
+// TestWriteToMatchesJSONMarshal asserts writeTo produces output byte-identical to json.Marshal of
+// the same message — for both the hand-written success fast path and the json.Marshal fallback
+// (errors, nil result, and other non-plain shapes).
+func TestWriteToMatchesJSONMarshal(t *testing.T) {
 	results := []string{
 		`{"a":1,"b":[1,2,3],"c":"0xdeadbeef"}`,
 		`"0x1234"`,
@@ -39,29 +40,29 @@ func TestWriteResultToMatchesJSONMarshal(t *testing.T) {
 		`12345`,
 	}
 	ids := []json.RawMessage{json.RawMessage("1"), json.RawMessage(`"abc-123"`), json.RawMessage("9007199254740991")}
+
+	var msgs []*jsonrpcMessage
 	for _, r := range results {
 		for _, id := range ids {
-			msg := &jsonrpcMessage{Version: vsn, ID: id, Result: json.RawMessage(r)}
-			require.True(t, msg.isPlainResult())
-
-			want, err := json.Marshal(msg)
-			require.NoError(t, err)
-
-			var buf bytes.Buffer
-			stream := jsonstream.New(&buf)
-			msg.writeResultTo(stream)
-			require.NoError(t, stream.Flush())
-
-			require.Equal(t, string(want), buf.String(), "result=%s id=%s", r, id)
+			msgs = append(msgs, &jsonrpcMessage{Version: vsn, ID: id, Result: json.RawMessage(r)})
 		}
 	}
-}
+	// non-plain messages take the json.Marshal fallback inside writeTo
+	msgs = append(msgs,
+		&jsonrpcMessage{Version: vsn, ID: json.RawMessage("1"), Error: &jsonError{Code: -32000, Message: "boom"}},
+		&jsonrpcMessage{Version: vsn, ID: json.RawMessage("2"), Error: &jsonError{Code: -1, Message: "with data", Data: "0xdeadbeef"}},
+		&jsonrpcMessage{Version: vsn, ID: json.RawMessage("3")},
+	)
 
-// TestIsPlainResult guards the fast-path predicate: only ordinary success responses qualify;
-// errors, requests and notifications fall back to json.Marshal.
-func TestIsPlainResult(t *testing.T) {
-	require.True(t, (&jsonrpcMessage{Version: vsn, ID: json.RawMessage("1"), Result: json.RawMessage("1")}).isPlainResult())
-	require.False(t, (&jsonrpcMessage{Version: vsn, ID: json.RawMessage("1"), Error: &jsonError{Code: -1, Message: "boom"}}).isPlainResult())
-	require.False(t, (&jsonrpcMessage{Version: vsn, ID: json.RawMessage("1"), Method: "eth_subscription", Params: json.RawMessage("{}")}).isPlainResult())
-	require.False(t, (&jsonrpcMessage{Version: vsn, Result: json.RawMessage("1")}).isPlainResult()) // no id
+	for _, msg := range msgs {
+		want, err := json.Marshal(msg)
+		require.NoError(t, err)
+
+		var buf bytes.Buffer
+		stream := jsonstream.New(&buf)
+		msg.writeTo(stream)
+		require.NoError(t, stream.Flush())
+
+		require.Equal(t, string(want), buf.String(), "want=%s", want)
+	}
 }

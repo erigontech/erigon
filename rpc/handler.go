@@ -276,12 +276,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			if answer.isPlainResult() {
-				answer.writeResultTo(stream)
-			} else {
-				buffer, _ := json.Marshal(answer)
-				stream.Write(buffer)
-			}
+			answer.writeTo(stream)
 		}
 		if needWriteStream {
 			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
@@ -709,17 +704,15 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	return nil
 }
 
-// isPlainResult reports whether msg is an ordinary successful result response (no error, not a
-// request/notification). Such a response can be written to the stream without re-marshalling the
-// already-encoded Result.
-func (msg *jsonrpcMessage) isPlainResult() bool {
-	return msg.Error == nil && msg.Result != nil && msg.ID != nil && msg.Version != "" && msg.Method == "" && msg.Params == nil
-}
-
-// writeResultTo writes the response envelope to the jsoniter stream and copies the already-encoded
-// Result verbatim, skipping stdlib's appendCompact re-scan of a potentially large result (the
-// engine_getBlobs payloads in issue #21226). Output is byte-identical to json.Marshal(msg).
-func (msg *jsonrpcMessage) writeResultTo(stream jsonstream.Stream) {
+// writeTo writes msg to the stream byte-identically to json.Marshal(msg). A success response's
+// Result is already-encoded JSON, so it is written directly instead of re-encoded; anything else
+// falls back to json.Marshal.
+func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
+	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
+		buf, _ := json.Marshal(msg)
+		_, _ = stream.Write(buf)
+		return
+	}
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(msg.Version)
