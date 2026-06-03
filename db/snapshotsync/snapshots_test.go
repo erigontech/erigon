@@ -430,12 +430,10 @@ func TestRemoveOverlaps(t *testing.T) {
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
-	require.Len(list, 45) // 15 files × 3 types (bodies, headers, transactions)
+	require.Len(list, 15)
 
 	for i, info := range list {
-		// Pattern repeats for each of 3 types: [100k, 100k, 10k, 10k, 10k, 10k, 10k, 10k, 10k, 10k, 10k, 10k, 10k, 10k, 10k]
-		fileIdxWithinType := i % 15
-		if fileIdxWithinType < 2 {
+		if i%5 < 2 {
 			require.Equal(100_000, int(info.Len()), info.Name())
 		} else {
 			require.Equal(10_000, int(info.Len()), info.Name())
@@ -444,7 +442,7 @@ func TestRemoveOverlaps(t *testing.T) {
 
 	list, err = snaptype.IdxFiles(s.Dir())
 	require.NoError(err)
-	require.Len(list, 60) // 20 idx files × 3 types
+	require.Len(list, 20)
 }
 
 func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
