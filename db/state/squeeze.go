@@ -883,10 +883,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 
-	// rebuild trie config: drives both the per-shard step cap below and the SharedDomains
-	// constructed inside the inner loop. Variant is set per-iteration depending on
-	// statecfg.ExperimentalConcurrentCommitment.
+	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
+	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
+	rebuildTrieCfg.EnableTrieWarmup = false
+	rebuildTrieCfg.EnableWarmupCache = false
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
