@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -164,7 +163,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, api.logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
+	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}

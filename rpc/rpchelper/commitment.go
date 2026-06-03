@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
@@ -95,7 +94,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, ttx, r.logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
+	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}

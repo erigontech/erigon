@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -129,7 +128,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	defer filterMb.Close()
-	filterSd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, filterMb, logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger, execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return err
 	}

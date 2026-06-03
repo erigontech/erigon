@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
@@ -325,7 +324,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.Root(), commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates())
 			if err != nil {
 				return nil, err
 			}
@@ -543,7 +542,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 		var stateWriter state.StateWriter
 		if opts.CommitmentHistoryEnabled {
-			sharedDomains, err = execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.Root(), commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates())
 			if err != nil {
 				return nil, err
 			}

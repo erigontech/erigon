@@ -128,12 +128,12 @@ Option ordering note: `WithTrieConfig` replaces the entire config including any 
 - Modify: `rpc/jsonrpc/debug_execution_witness.go` (:642, :1157)
 - Modify: `rpc/jsonrpc/receipts/receipts_generator.go` (:328, :546)
 
-- [ ] Replace each `execctx.NewSharedDomainsWithTrieConfig(ctx, tx, logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})` with `execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates())`.
-- [ ] Import cleanup — Go treats an unused import as a compile error, so this is mandatory and explicit (do NOT guess):
+- [x] Replace each `execctx.NewSharedDomainsWithTrieConfig(ctx, tx, logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})` with `execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates())`.
+- [x] Import cleanup — Go treats an unused import as a compile error, so this is mandatory and explicit (do NOT guess):
   - **Remove** the `commitment` import (it becomes fully unused) in: `testing_api.go`, `exec.go`, `builder.go`, `rpc/rpchelper/commitment.go`, `eth_call.go`, `eth_simulation.go`, `receipts_generator.go`.
   - **KEEP** the `commitment` import in: `debug_execution_witness.go` (still used at ~:987 `commitment.NibblesToString`) and `commitment_integrity.go` (multiple other `commitment.` uses remain).
   - `execctx` stays imported everywhere (still used by the `NewSharedDomains` / `WithoutDeferredBranchUpdates` call) — `PickTrieVariant` is a member access, not a separate import; no `execctx` import removal anywhere.
-- [ ] `go build ./...` for the touched packages compiles.
+- [x] `go build ./...` for the touched packages compiles (db/state fails only on the Task 4 squeeze.go sites, fixed next task).
 
 ### Task 4: Migrate the 4 custom-config sites to WithTrieConfig(cfg)
 

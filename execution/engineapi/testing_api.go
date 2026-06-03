@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	execctx "github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/state"
@@ -84,7 +83,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
 		}
 		defer dbTx.Rollback()
-		sd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, dbTx, t.logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
+		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger, execctx.WithoutDeferredBranchUpdates())
 		if err != nil {
 			return nil, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
 		}
