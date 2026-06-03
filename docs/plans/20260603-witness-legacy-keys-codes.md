@@ -152,12 +152,15 @@ effort.
 **Files:**
 - (no source changes)
 
-- [ ] `make erigon integration` builds clean
-- [ ] `make lint` clean (run repeatedly until stable; non-deterministic)
-- [ ] corpus regression: `ERIGON_WITNESS_MODE=canonical go test -count=1 -run
+- [x] `make erigon integration` builds clean (only the pre-existing mdbx cgo `-Wpedantic`
+      warning; both binaries built)
+- [x] `make lint` clean (this worktree: 0 issues; the 55 reported are all pre-existing in
+      the sibling worktree `../erigon-witness-codes-prestate/` — environmental)
+- [x] corpus regression: `ERIGON_WITNESS_MODE=canonical go test -timeout 40m -count=1 -run
       'TestExecutionSpecWitness/for_amsterdam' ./execution/tests/eest_zkevm_witness/...`
-      — no new failures vs the pre-change baseline (canonical State/Codes/Headers
-      unchanged; keys not compared)
+      — `ok` in 956.9s (the package DOES exist on this branch, contrary to the earlier
+      Context note; ran green, no new failures; default 600s timeout was insufficient so
+      `-timeout 40m` used; canonical State/Codes/Headers unchanged; keys not compared)
 
 > **Oracle acceptance (manual — NOT for the autonomous executor):** restarting the live
 > mainnet node and diffing against `~/dev/wit-oracle/` is environment-specific and not
@@ -190,6 +193,15 @@ effort.
   paths + retries, and diff vs `~/dev/wit-oracle/reth-legacy/`.
 - Assert: keys missing→0 AND extra→0 (system address `0xff…fe` absent); codes 7702 bucket
   missing→0 AND extra→0; state and headers unchanged.
+
+**API parity — `mode` request parameter (follow-up)**
+- Mirror the reference RPC: accept an optional `mode` 2nd parameter on
+  `debug_executionWitness` / `debug_executionWitnessByBlockHash` (`"legacy"` |
+  `"canonical"`, lowercase), overriding the `ERIGON_WITNESS_MODE` env default when
+  supplied. `resolveWitnessMode` becomes `resolveWitnessMode(modeParam *string)`:
+  request param wins, else env, else `legacy`. Thread the resolved mode through
+  `collectAccessedState` and (once implemented) the state builder. Keeps env as the
+  deployment default; per-call override matches the reference surface exactly.
 
 **Deferred work (separate efforts)**
 - State-node legacy gap (~46/block): empty nodes, storage-trie roots for untouched
