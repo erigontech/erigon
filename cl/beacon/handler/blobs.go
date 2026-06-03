@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -32,6 +33,11 @@ import (
 )
 
 var blobSidecarSSZLenght = (*cltypes.BlobSidecar)(nil).EncodingSizeSSZ()
+
+type caplinBlobSnapshotReader interface {
+	FrozenBlobs() uint64
+	ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error)
+}
 
 func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
@@ -57,19 +63,12 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("block not found"))
 	}
 
-	if a.caplinSnapshots != nil && *slot <= a.caplinSnapshots.FrozenBlobs() {
-		out, err := a.caplinSnapshots.ReadBlobSidecars(*slot)
-		if err != nil {
-			return nil, err
-		}
-		resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
-		for _, v := range out {
-			resp.Append(v)
-		}
-		return beaconhttp.NewBeaconResponse(resp), nil
-
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
 	}
-	out, found, err := a.blobStoage.ReadBlobSidecars(ctx, *slot, blockRoot)
+
+	out, found, err := a.readBlobSidecars(ctx, *slot, blockRoot, canonicalRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +101,17 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	}
 
 	return beaconhttp.NewBeaconResponse(resp), nil
+}
+
+func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+	if blockRoot == canonicalRoot && a.caplinSnapshots != nil && slot < a.caplinSnapshots.FrozenBlobs() {
+		sidecars, err := a.caplinSnapshots.ReadBlobSidecars(slot)
+		if err != nil {
+			return nil, false, err
+		}
+		return sidecars, len(sidecars) != 0, nil
+	}
+	return a.blobStoage.ReadBlobSidecars(ctx, slot, blockRoot)
 }
 
 func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -261,9 +271,14 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 
 	// collect the blobs
 	blobs := solid.NewStaticListSSZ[*cltypes.Blob](int(a.beaconChainCfg.MaxBlobCommittmentsPerBlock), int(cltypes.BYTES_PER_BLOB))
-	blobSidecars, _, err := a.blobStoage.ReadBlobSidecars(ctx, *slot, blockRoot)
+	blobSidecars, found, err := a.readBlobSidecars(ctx, *slot, blockRoot, canonicalRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+	}
+	if !found {
+		return beaconhttp.NewBeaconResponse(blobs).
+			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
+			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 	}
 	for _, index := range indicies {
 		if index >= uint64(len(blobSidecars)) {
