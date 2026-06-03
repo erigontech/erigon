@@ -17,13 +17,31 @@
 package storage
 
 import (
+	"context"
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
+
+// stubAggregator is a minimal StateAggregator that satisfies the
+// interface for tests where we only need a non-nil sentinel.
+// StepSize returns 390625 (the hoodi/mainnet step size); other methods
+// are inert.
+type stubAggregator struct{}
+
+func (stubAggregator) Files() []string                                     { return nil }
+func (stubAggregator) OpenFolder() error                                   { return nil }
+func (stubAggregator) BuildMissedAccessors(_ context.Context, _ int) error { return nil }
+func (stubAggregator) LockCollation()                                      {}
+func (stubAggregator) UnlockCollation()                                    {}
+func (stubAggregator) StepSize() uint64                                    { return 390625 }
+func (stubAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwTx, _ uint64) error {
+	return nil
+}
 
 // TestCollectFilesPastBlock_StraddleFileSurvives pins the contract
 // that fixed live-rig issue #2 from the 2026-06-01 cycle: the block
@@ -146,4 +164,52 @@ func TestCollectFilesPastBlock_AllPastRemoved(t *testing.T) {
 		[]string{"past-a.seg", "past-b.seg"},
 		got,
 		"every file whose FromBlock > toBlock must be collected; in-range stays")
+}
+
+// TestCollectFilesPastBlock_StateDomainFilesPastStepBoundary pins the
+// state-domain trim contract that was MISSING coverage before and was
+// the root cause of the post-mode-B catch-up wedge surfaced live on
+// hoodi 2026-06-02: state-domain files whose ToStep > stepBoundary
+// MUST be collected for removal, otherwise SeekCommitment sees the
+// snapshot's KeyCommitmentState at a higher txNum than the writable
+// shadow's mode-B anchor and returns ErrBehindCommitment → catch-up
+// downloader gives up → chain wedges at the unwind target.
+//
+// Aggregator is set to a sentinel (any non-nil value) because the
+// collect function only uses it as a "state trim is in scope" guard.
+func TestCollectFilesPastBlock_StateDomainFilesPastStepBoundary(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	files := []*snapshot.FileEntry{
+		// State files at step ranges spanning the boundary.
+		// Boundary step = 266 (kept). Past steps = 267+.
+		{Name: "domain/v1.0-commitment.0-256.kv", Domain: "commitment", FromStep: 0, ToStep: 256, Local: true},
+		{Name: "domain/v1.0-commitment.256-264.kv", Domain: "commitment", FromStep: 256, ToStep: 264, Local: true},
+		{Name: "domain/v1.0-commitment.264-266.kv", Domain: "commitment", FromStep: 264, ToStep: 266, Local: true},
+		{Name: "domain/v1.0-commitment.266-267.kv", Domain: "commitment", FromStep: 266, ToStep: 267, Local: true},
+		{Name: "domain/v1.0-accounts.266-267.kv", Domain: "accounts", FromStep: 266, ToStep: 267, Local: true},
+		{Name: "domain/v1.0-accounts.264-266.kv", Domain: "accounts", FromStep: 264, ToStep: 266, Local: true},
+	}
+	for _, e := range files {
+		require.NoError(t, inv.AddFile(e))
+	}
+
+	// Aggregator sentinel — collectFilesPastBlock only checks for non-nil.
+	// Any non-zero-pointer value works.
+	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
+	out := p.collectFilesPastBlock(2_912_500, 266)
+
+	got := make([]string, len(out))
+	for i, e := range out {
+		got[i] = e.Name
+	}
+	sort.Strings(got)
+
+	require.Equal(t,
+		[]string{
+			"domain/v1.0-accounts.266-267.kv",
+			"domain/v1.0-commitment.266-267.kv",
+		},
+		got,
+		"state-domain files with ToStep > stepBoundary must be collected; files at the boundary step or below stay")
 }

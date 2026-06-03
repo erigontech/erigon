@@ -140,8 +140,22 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 			continue
 		}
 		if newToBlock <= straddle.From {
-			// "Straddle" actually starts past toBlock — caller's
-			// strictly-past collector handles it.
+			// Aligned newTo lands at or below the straddle's lower
+			// bound — the would-be rebuilt range [From, newTo) is
+			// empty (or negative). Don't rebuild; trim the file
+			// entirely. seedLeftoverBlocks will seed
+			// [newToBlock = straddle.From, toBlock] into the writable
+			// DB from the OLD file (still on disk until
+			// FinalizeUnwind). The strictly-past collector misses
+			// this file because FromBlock ≤ toBlock — it's the
+			// straddle, not strictly past — so without queueing it
+			// here the stale .seg stays on disk and the catch-up
+			// downloader walks into blocks past the new head whose
+			// TD was wiped (live-rig 2026-06-02 wedge).
+			toRemoveStraddles = append(toRemoveStraddles, &storageSnapshotFileRef{Name: straddle.Name()})
+			for _, idxName := range straddle.Type.IdxFileNames(straddle.From, straddle.To) {
+				toRemoveStraddles = append(toRemoveStraddles, &storageSnapshotFileRef{Name: idxName})
+			}
 			continue
 		}
 		newFI, rerr := s.rebuild(ctx, *straddle, newToBlock, p.snapDir, p.snapTmpDir, p.ChainConfig, p.logger)

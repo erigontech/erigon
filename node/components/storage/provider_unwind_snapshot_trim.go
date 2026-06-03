@@ -185,21 +185,34 @@ func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.Tempor
 // over-trim everything.
 func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapshot.FileEntry {
 	var out []*snapshot.FileEntry
+	var blockHits, stateHits, stateScanned int
+	domainsScanned := 0
 
 	for _, e := range p.Inventory.BlockFiles() {
 		if e.FromBlock > toBlock {
 			out = append(out, e)
+			blockHits++
 		}
 	}
 
 	if p.Aggregator != nil {
 		for _, domain := range p.Inventory.Domains() {
+			domainsScanned++
 			for _, e := range p.Inventory.AllDomainFiles(domain) {
+				stateScanned++
 				if e.ToStep > stepBoundary {
 					out = append(out, e)
+					stateHits++
 				}
 			}
 		}
+	}
+	if p.logger != nil {
+		p.logger.Info("[storage] collectFilesPastBlock",
+			"toBlock", toBlock, "stepBoundary", stepBoundary,
+			"block_hits", blockHits, "state_hits", stateHits,
+			"state_scanned", stateScanned, "domains_scanned", domainsScanned,
+			"aggregator_nil", p.Aggregator == nil)
 	}
 
 	return out
