@@ -146,11 +146,11 @@ Option ordering note: `WithTrieConfig` replaces the entire config including any 
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] `grep -rn "NewSharedDomainsWithTrieConfig" --include=*.go` returns nothing.
-- [ ] `cd /Users/awskii/org/wrk/erigon-20559 && make erigon integration` builds clean.
-- [ ] `make lint` is clean — run repeatedly until stable (linter is non-deterministic).
-- [ ] Run the existing regression suites for touched areas: `go test ./db/state/... ./execution/commitment/... ./rpc/jsonrpc/...` (or `make test-short`) — all green, confirming no behavior change.
-- [ ] Confirm the 13 sites end up with defer OFF, warmup ON — by inspection of `DefaultTrieConfig()` flag flow through `WithoutDeferredBranchUpdates()` (`DefaultTrieConfig` sets warmup flags true; the option flips only `DeferBranchUpdates`). This restores the intended default warmup semantics the PR's zero-value path had regressed; it is not a literal source diff against `origin/main` (which has no `TrieConfig`).
+- [x] `grep -rn "NewSharedDomainsWithTrieConfig" --include=*.go` returns nothing.
+- [x] `cd /Users/awskii/org/wrk/erigon-20559 && make erigon integration` builds clean.
+- [x] `make lint` is clean — run repeatedly until stable (linter is non-deterministic). (Initial run reported 55 stale-cache issues from a removed sibling worktree; `golangci-lint cache clean` then two consecutive runs → 0 issues.)
+- [x] Run the existing regression suites for touched areas: `go test ./db/state/... ./execution/commitment/... ./rpc/jsonrpc/...` (or `make test-short`) — all green, confirming no behavior change.
+- [x] Confirm the 13 sites end up with defer OFF, warmup ON — by inspection of `DefaultTrieConfig()` flag flow through `WithoutDeferredBranchUpdates()` (`DefaultTrieConfig` sets warmup flags true; the option flips only `DeferBranchUpdates`). This restores the intended default warmup semantics the PR's zero-value path had regressed; it is not a literal source diff against `origin/main` (which has no `TrieConfig`).
 
 ### Task 6: [Final] Documentation and plan close-out
 
