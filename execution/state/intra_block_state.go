@@ -1985,13 +1985,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, balSource, balVersion, newObj.Balance())
 	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, incSource, incVersion, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
-	// Only emit on real contract creation. CreateAccount(false) leaves
-	// newObj.data.Incarnation at 0; emitting it would clobber a prior
-	// tx's SD-side IncarnationPath cell and break a same-block CREATE2's
-	// prevInc lookup.
-	if contractCreation {
-		versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
-	}
+	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
 	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
 		versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
 	}
