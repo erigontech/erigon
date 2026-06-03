@@ -1317,12 +1317,22 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err != nil {
 		return err
 	}
-	_, segmentsToRemove := findOverlaps(list)
+	keepSegments, segmentsToRemove := findOverlaps(list)
 
 	toRemove := make([]string, 0, len(segmentsToRemove))
 	for _, info := range segmentsToRemove {
 		toRemove = append(toRemove, info.Path)
 	}
+
+	// Close overlaps in memory before deleting them from disk to prevent Windows
+	// file-locking issues (mmap) and stale descriptors in dirty.
+	keepNames := make([]string, 0, len(keepSegments))
+	for _, info := range keepSegments {
+		keepNames = append(keepNames, info.Name())
+	}
+	s.dirtyLock.Lock()
+	s.closeWhatNotInList(keepNames)
+	s.dirtyLock.Unlock()
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
 	list, err = snaptype.IdxFiles(s.dir)
