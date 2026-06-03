@@ -154,8 +154,8 @@ Option ordering note: `WithTrieConfig` replaces the entire config including any 
 
 ### Task 6: [Final] Documentation and plan close-out
 
-- [ ] No README/CLAUDE.md change expected; confirm and skip if so.
-- [ ] Move this plan to `docs/plans/completed/`.
+- [x] No README/CLAUDE.md change expected; confirm and skip if so.
+- [x] Move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 
