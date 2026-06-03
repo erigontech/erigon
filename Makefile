@@ -90,7 +90,11 @@ GODEBUG ?= cgocheck=0
 default_test_timeout      := 20m
 default_test_race_timeout := 60m
 
-GOTEST_PACKAGES = ./...
+# The zkevm execution-witness corpus is a heavy, fixture-gated suite; it runs
+# only via its own `execution-eest-zkevm` test-group (which provisions the
+# tarball), not the default ./... sweep, so `make test-all`/`test-short` stay
+# fast and don't hard-fail when the zkevm fixtures aren't downloaded.
+GOTEST_PACKAGES = $(shell go list ./... | grep -v '/eest_zkevm_witness$$')
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
