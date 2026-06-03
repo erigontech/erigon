@@ -25,27 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-func worstCaseBundleV2() BlobsBundleV2 {
-	const blobs = 21
-	bundle := make(BlobsBundleV2, blobs)
-	for i := range bundle {
-		blob := make(hexutil.Bytes, sszBlobBytes)
-		for j := range blob {
-			blob[j] = byte(i + j)
-		}
-		proofs := make([]hexutil.Bytes, sszCellsPerExtBlob)
-		for c := range proofs {
-			p := make(hexutil.Bytes, sszKZGBytes)
-			for j := range p {
-				p[j] = byte(c + j)
-			}
-			proofs[c] = p
-		}
-		bundle[i] = &BlobAndProofV2{Blob: blob, CellProofs: proofs}
-	}
-	return bundle
-}
-
 func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 	full := worstCaseBundleV2()
 	cases := map[string]BlobsBundleV2{
@@ -88,30 +67,24 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 	}
 }
 
-// BenchmarkBlobsBundleV2Marshal compares the worst-case getBlobsV3 response (21 blobs, 128 cell
-// proofs each) encoded by stdlib reflection vs MarshalFastJSON.
-func BenchmarkBlobsBundleV2Marshal(b *testing.B) {
-	bundle := worstCaseBundleV2()
-	enc, _ := bundle.MarshalFastJSON()
-	size := int64(len(enc))
-
-	b.Run("stdlib_reflect", func(b *testing.B) {
-		slice := []*BlobAndProofV2(bundle)
-		b.SetBytes(size)
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			if _, err := json.Marshal(slice); err != nil {
-				b.Fatal(err)
-			}
+func worstCaseBundleV2() BlobsBundleV2 {
+	// getBlobs rejects more than 128 hashes per call (-38004), so 128 is the largest payload it serialises.
+	const blobs = 128
+	bundle := make(BlobsBundleV2, blobs)
+	for i := range bundle {
+		blob := make(hexutil.Bytes, sszBlobBytes)
+		for j := range blob {
+			blob[j] = byte(i + j)
 		}
-	})
-	b.Run("fast", func(b *testing.B) {
-		b.SetBytes(size)
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			if _, err := bundle.MarshalFastJSON(); err != nil {
-				b.Fatal(err)
+		proofs := make([]hexutil.Bytes, sszCellsPerExtBlob)
+		for c := range proofs {
+			p := make(hexutil.Bytes, sszKZGBytes)
+			for j := range p {
+				p[j] = byte(c + j)
 			}
+			proofs[c] = p
 		}
-	})
+		bundle[i] = &BlobAndProofV2{Blob: blob, CellProofs: proofs}
+	}
+	return bundle
 }

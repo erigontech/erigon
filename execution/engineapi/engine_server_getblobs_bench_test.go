@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package engineapitester_test
+package engineapi_test
 
 import (
 	"bytes"
@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -48,6 +49,10 @@ import (
 // transport for the largest payload mainnet currently permits, isolating the JSON serialization +
 // transport cost at the engine API surface (issue #21226) from the txpool lookup itself.
 func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
+	if os.Getenv("ERIGON_RUN_GETBLOBS_BENCH") == "" {
+		b.Skip("set ERIGON_RUN_GETBLOBS_BENCH=1 to run this full-node benchmark")
+	}
+
 	// mainnet's worst-case blobs per block (the bpo2 max), each with its full set of cell proofs.
 	const maxBlobs = 21
 
