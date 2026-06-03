@@ -792,7 +792,9 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 				continue
 			}
 
-			// If the new segment is a subset of the already visible one, skip it
+			// Fast path: if this indexed segment is fully covered by the last visible
+			// segment, skip it. The backward-removal loop below handles the general case,
+			// but this avoids unnecessary list mutations for the common subsegment order.
 			if len(newVisibleSegments) > 0 && sn.isSubSetOf(newVisibleSegments[len(newVisibleSegments)-1].src) {
 				continue
 			}
@@ -1238,8 +1240,9 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 		list = append(list, fName)
 	}
 
-	// NOTE: We must not call closeWhatNotInList(list) here because list only contains the requested types,
-	// which would incorrectly close segments of other types. Stale files are cleaned by OpenFolder.
+	// Do not call closeWhatNotInList(list) here. list only contains segments of the
+	// requested types; calling it would close all other types (e.g. Transactions) from dirty.
+	// Stale entries for the requested types are cleaned by the next OpenFolder call.
 	if err := s.openSegments(list, true, false); err != nil {
 		return err
 	}

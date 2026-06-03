@@ -277,7 +277,7 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		if haveGap {
 			// Log once per unique gap start.
 			if br.lastRetireGapStart.Swap(firstInDB) != firstInDB {
-				br.logger.Debug("[snapshots] skipping block snapshot retirement due to gap",
+				br.logger.Debug("skipping block snapshot retirement: db does not contain the next block after snapshots",
 					"nextBlockInSnapshots", nextBlockInSnapshots,
 					"firstBlockInDB", firstInDB,
 					"gapBlocks", firstInDB-nextBlockInSnapshots,

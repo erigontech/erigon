@@ -943,14 +943,12 @@ func TestViewPinsGeneration(t *testing.T) {
 	require.Same(oldSrc1, pinned[1].src)
 }
 
-// TestCloseWhatNotInListVsLiveViewDoesNotCrash reproduces a use-after-close in
-// the snapshot reopen path. After a merge writes a covering segment, the old
-// sub-segment files remain on disk but TypedSegments -> NoOverlaps drops them
-// from the listing. OpenFolder then hands that list to closeWhatNotInList,
-// which close()s those sub-segments — ignoring that a live View still holds a
-// refcount on them. The View's later Close hits closeAndRemoveFiles on the
-// now-nil decompressor and crashes. This is pure snapshotsync (no merge code),
-// so it fails on main.
+// TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that closeWhatNotInList
+// does not close a segment that a live View still holds a refcount on. After a
+// merge, integrateMergedDirtyFiles marks old sub-segments canDelete=true and
+// removes them from dirty. A concurrent OpenFolder then calls closeWhatNotInList
+// on those same segments — without the refcount guard (PR #21545), it would nil
+// the decompressor while the View still uses it, causing a panic on View.Close.
 func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -1041,11 +1039,8 @@ func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir st
 	}
 }
 
-// TestOpenFolderPromotesCovering is written to verify that if there is 
-// a new merged segment on disk but it is not indexed yet, we should keep using our 
-// smaller indexed subsegments. Once the merged segment index is also built and available, 
-// we should automatically promote the merged segment and stop using the subsegments.
-// This ensures that readers always have continuous access to block data.
+// Unindexed covering segment must not hide indexed subsegments. Once the covering
+// segment's index is built, it should be promoted to visible and the subsegments dropped.
 func TestOpenFolderPromotesCovering(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)
