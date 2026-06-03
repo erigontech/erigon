@@ -768,6 +768,18 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	// legacy carries the empty storage-trie node (0x80) once when some account has an
+	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
+	// canonical omits it. Added after stateless verification, which rejects the bare node.
+	if resolvedMode == witnessModeLegacy {
+		for _, node := range result.State {
+			if bytes.Contains(node, trie.EmptyRoot[:]) {
+				result.State = append(result.State, hexutil.Bytes{0x80})
+				break
+			}
+		}
+	}
+
 	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
 	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
 		return bytes.Compare(a, b)
@@ -1134,20 +1146,8 @@ func buildWitnessTrie(
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
 	}
-	// An account leaf ends with a0||storageRoot a0||codeHash, so its storage root is
-	// the 33-byte field at node[len-66:len-33]. Legacy carries the empty storage-trie
-	// node (0x80) once when some account has an empty storage root; canonical omits it.
-	emptyRootField := append([]byte{0x80 + 32}, trie.EmptyRoot[:]...)
-	sawEmptyStorage := false
 	for _, node := range allNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
-		if mode == witnessModeLegacy && !sawEmptyStorage && len(node) >= 66 &&
-			bytes.Equal(node[len(node)-66:len(node)-33], emptyRootField) {
-			sawEmptyStorage = true
-		}
-	}
-	if sawEmptyStorage {
-		encodedNodes = append(encodedNodes, hexutil.Bytes{0x80})
 	}
 	return encodedNodes, nil
 }
