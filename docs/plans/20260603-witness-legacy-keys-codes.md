@@ -168,10 +168,22 @@ effort.
 > Post-Completion.
 
 ### Task 4: Verify acceptance criteria (code-level)
-- [ ] keys field populated (non-nil, 20B addresses + 32B slots) in both modes
-- [ ] codes 7702 designators captured (legacy); canonical codes unchanged
-- [ ] EEST corpus green in canonical mode; build + lint clean
-- [ ] doc comments for `Keys`/`SortedKeys` updated to reflect populated keys
+- [x] keys field populated (non-nil, 20B addresses + 32B slots) in both modes —
+      `WitnessKeys` inits non-nil (`debug_execution_witness.go:837`), built from the
+      post-EIP-7928 `out.Addresses` (20B) + `out.Storage` slots (32B), deduped/sorted
+      (L908-924); assigned `result.Keys = accessed.WitnessKeys` (L679) with no `witnessMode`
+      gating
+- [x] codes 7702 designators captured (legacy); canonical codes unchanged —
+      `sdb.callCodeAccessHook(addr, code)` in `GetDelegatedDesignation`'s `ParseDelegation`
+      branch (`intra_block_state.go:837`) feeds `OnCodeAccess`→`AccessedCode`; legacy reads
+      `GetAccessedCode` (L940), canonical reads only `GetPreStateCode` (L931) so canonical
+      codes are unchanged by construction
+- [x] EEST corpus green in canonical mode; build + lint clean — validated in Task 3
+      (corpus `ok` 956.9s, `make erigon integration` clean); re-confirmed both packages
+      compile clean here (`go build ./rpc/jsonrpc/... ./execution/state/...`, exit 0)
+- [x] doc comments for `Keys`/`SortedKeys` updated to reflect populated keys —
+      `ExecutionWitnessResult.Keys` (L509-511) and `accessedState` doc / `SortedKeys`
+      (L751-753) both describe the populated standalone preimages
 
 ### Task 5: [Final] Documentation and plan close-out
 - [ ] update the witness memory note with keys + 7702 outcomes and residual
