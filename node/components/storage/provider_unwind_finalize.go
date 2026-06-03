@@ -81,11 +81,25 @@ func (p *Provider) FinalizeUnwind() error {
 		}
 	}
 
-	// Refresh the in-memory snapshot view if a rebuild happened.
-	// AllSnapshots.OpenFolder re-scans snapDir, picks up the rebuilt
-	// file, and drops the deleted old file from the visible set.
+	// Refresh the in-memory snapshot view whenever files changed —
+	// either trimmed (staged) or rebuilt. AllSnapshots.OpenFolder
+	// re-scans snapDir, picks up any rebuilt files, and (via
+	// closeWhatNotInList → DirtySegment.close → Decompressor.Close →
+	// mmap.Munmap) releases the mmap for files that were deleted from
+	// disk. Without this refresh on the trim-only path the process
+	// keeps serving the OLD (deleted) inode via its still-mapped
+	// segments — Linux keeps an unlinked inode alive until every
+	// reference drops — so reads continue to return blocks that
+	// should now be unreachable. Live-rig 2026-06-03: post-mode-B
+	// with the empty-rebuild-range fix (04c568a71d) deleted the
+	// straddle .seg/.idx files from disk but the running process
+	// served blocks past the unwind target via `(deleted)` mmaps,
+	// wedging the catch-up downloader until restart.
+	//
 	// Best-effort: a refresh failure is recoverable on next restart.
-	if rebuilt != nil && p.AllSnapshots != nil {
+	hadTrim := staged != nil && len(staged.names) > 0
+	hadRebuild := rebuilt != nil
+	if (hadTrim || hadRebuild) && p.AllSnapshots != nil {
 		if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.FinalizeUnwind: AllSnapshots.OpenFolder failed (continuing — restart will refresh)", "err", err)
 		}
