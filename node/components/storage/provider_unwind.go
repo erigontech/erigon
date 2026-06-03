@@ -132,16 +132,35 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
 	}
 
-	// 6. Verify the DB image is consistent with the unwind target
+	// 6. Regenerate every state-domain boundary-step .kv so the
+	//    on-disk content reflects the unwind target. Without this the
+	//    boundary-step file's KeyCommitmentState record (at the
+	//    file's max txNum, encoding the pre-unwind chain tip) shadows
+	//    the writable shadow's mode-B anchor and the catch-up
+	//    downloader wedges with ErrBehindCommitment. Stages .regen
+	//    files for FinalizeUnwind to atomically swap + rebuild
+	//    accessors against post-commit. See
+	//    docs/plans/20260603-mode-b-boundary-step-regen-plan.md.
+	lastTxNum, err := rawdbv3.TxNums.Max(ctx, opts.Tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: lookup lastTxNum: %w", err)
+	}
+	pendingRegen, err := p.regenerateBoundaryStepFiles(ctx, opts.Tx, toBlock, lastTxNum, recompute.encodedTrieState)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: regenerate boundary-step files: %w", err)
+	}
+	if pendingRegen != nil {
+		p.pendingTrimLock.Lock()
+		p.pendingRegen = pendingRegen
+		p.pendingTrimLock.Unlock()
+	}
+
+	// 7. Verify the DB image is consistent with the unwind target
 	//    before the tx commits. Catches silent wipe-completeness gaps
 	//    in any of the sub-ops above; a failure here rolls the whole
 	//    mode-B back via the caller's AbortUnwind, which is far better
 	//    than leaving a half-unwound DB that surfaces hours later as
 	//    a wrong-block-data or wrong-state-root error.
-	lastTxNum, err := rawdbv3.TxNums.Max(ctx, opts.Tx, toBlock)
-	if err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: verify lookup lastTxNum: %w", err)
-	}
 	if err := verifyPostUnwindDBImage(ctx, opts.Tx, toBlock, lastTxNum); err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: %w", err)
 	}

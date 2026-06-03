@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"os"
 
 	"github.com/erigontech/erigon/common/dir"
 )
@@ -48,11 +49,14 @@ func (p *Provider) FinalizeUnwind() error {
 	p.pendingTrimLock.Lock()
 	staged := p.pendingTrim
 	rebuilt := p.pendingRebuild
+	regen := p.pendingRegen
 	p.pendingTrim = nil
 	p.pendingRebuild = nil
+	p.pendingRegen = nil
 	p.pendingTrimLock.Unlock()
 
-	if (staged == nil || len(staged.names) == 0) && rebuilt == nil {
+	hadRegen := regen != nil && len(regen.pairs) > 0
+	if (staged == nil || len(staged.names) == 0) && rebuilt == nil && !hadRegen {
 		return nil
 	}
 
@@ -81,25 +85,73 @@ func (p *Provider) FinalizeUnwind() error {
 		}
 	}
 
+	// Boundary-step state-domain regen swap. Each pair was prepared
+	// during Provider.Unwind as <finalPath>.regen — atomically rename
+	// it over the original via a .old dance so the running process's
+	// mmap of the old inode gets released by AllSnapshots.OpenFolder
+	// (which keys close-decisions on FILE NAME, not inode). Without
+	// the .old dance the new file inode replaces the old one under
+	// the same filename, OpenFolder doesn't close the old mmap, and
+	// reads keep serving pre-regen content until restart.
+	//
+	// Sequence per pair:
+	//   1. rename finalPath → finalPath.old   (old inode now anonymous-named)
+	//   2. AllSnapshots.OpenFolder()           (closes old mmap — file at finalPath is gone)
+	//   3. rename regenPath → finalPath        (new inode at the live name)
+	// Then a single Aggregator.BuildMissedAccessors rebuilds .kvi/.bt/
+	// .kvei against the new content (old accessors were left in place
+	// pointing at the OLD inode's offsets, which is wrong; rebuild
+	// invalidates them).  Then a second OpenFolder picks up the new
+	// content's mmap. Finally .old is unlinked, freeing the old inode.
+	if hadRegen {
+		for _, pair := range regen.pairs {
+			oldSidecar := pair.finalPath + ".old"
+			if err := os.Rename(pair.finalPath, oldSidecar); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .kv → .old failed (continuing — regen will be retried on next mode-B)", "err", err, "path", pair.finalPath)
+			}
+		}
+		if p.AllSnapshots != nil {
+			if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: pre-regen OpenFolder failed (continuing — restart will refresh)", "err", err)
+			}
+		}
+		for _, pair := range regen.pairs {
+			if err := os.Rename(pair.regenPath, pair.finalPath); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .regen → .kv failed (continuing — restart will recover from .old)", "err", err, "regen", pair.regenPath, "final", pair.finalPath)
+			}
+		}
+		if p.Aggregator != nil {
+			if err := p.Aggregator.BuildMissedAccessors(context.Background(), 1); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: BuildMissedAccessors failed (continuing — accessors will be built on next process start)", "err", err)
+			}
+		}
+		for _, pair := range regen.pairs {
+			oldSidecar := pair.finalPath + ".old"
+			if err := dir.RemoveFile(oldSidecar); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldSidecar)
+			}
+		}
+	}
+
 	// Refresh the in-memory snapshot view whenever files changed —
-	// either trimmed (staged) or rebuilt. AllSnapshots.OpenFolder
-	// re-scans snapDir, picks up any rebuilt files, and (via
-	// closeWhatNotInList → DirtySegment.close → Decompressor.Close →
-	// mmap.Munmap) releases the mmap for files that were deleted from
-	// disk. Without this refresh on the trim-only path the process
-	// keeps serving the OLD (deleted) inode via its still-mapped
-	// segments — Linux keeps an unlinked inode alive until every
-	// reference drops — so reads continue to return blocks that
-	// should now be unreachable. Live-rig 2026-06-03: post-mode-B
-	// with the empty-rebuild-range fix (04c568a71d) deleted the
-	// straddle .seg/.idx files from disk but the running process
-	// served blocks past the unwind target via `(deleted)` mmaps,
-	// wedging the catch-up downloader until restart.
+	// either trimmed (staged), rebuilt, or regenerated.
+	// AllSnapshots.OpenFolder re-scans snapDir, picks up any new/
+	// regenerated files, and (via closeWhatNotInList →
+	// DirtySegment.close → Decompressor.Close → mmap.Munmap) releases
+	// the mmap for files that were deleted from disk. Without this
+	// refresh on the trim-only path the process keeps serving the OLD
+	// (deleted) inode via its still-mapped segments — Linux keeps an
+	// unlinked inode alive until every reference drops — so reads
+	// continue to return blocks that should now be unreachable.
+	// Live-rig 2026-06-03: post-mode-B with the empty-rebuild-range
+	// fix (04c568a71d) deleted the straddle .seg/.idx files from disk
+	// but the running process served blocks past the unwind target via
+	// `(deleted)` mmaps, wedging the catch-up downloader until restart.
 	//
 	// Best-effort: a refresh failure is recoverable on next restart.
 	hadTrim := staged != nil && len(staged.names) > 0
 	hadRebuild := rebuilt != nil
-	if (hadTrim || hadRebuild) && p.AllSnapshots != nil {
+	if (hadTrim || hadRebuild || hadRegen) && p.AllSnapshots != nil {
 		if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.FinalizeUnwind: AllSnapshots.OpenFolder failed (continuing — restart will refresh)", "err", err)
 		}
@@ -114,7 +166,11 @@ func (p *Provider) FinalizeUnwind() error {
 		if rebuilt != nil {
 			rebuildCount = len(rebuilt.paths)
 		}
-		p.logger.Info("[storage] Provider.FinalizeUnwind: deferred snapshot-trim ops executed", "deleted", fileCount, "rebuilt", rebuildCount)
+		regenCount := 0
+		if regen != nil {
+			regenCount = len(regen.pairs)
+		}
+		p.logger.Info("[storage] Provider.FinalizeUnwind: deferred snapshot-trim ops executed", "deleted", fileCount, "rebuilt", rebuildCount, "regenerated", regenCount)
 	}
 	return nil
 }
@@ -134,8 +190,10 @@ func (p *Provider) AbortUnwind() {
 	p.pendingTrimLock.Lock()
 	staged := p.pendingTrim
 	rebuilt := p.pendingRebuild
+	regen := p.pendingRegen
 	p.pendingTrim = nil
 	p.pendingRebuild = nil
+	p.pendingRegen = nil
 	p.pendingTrimLock.Unlock()
 
 	if rebuilt != nil {
@@ -144,7 +202,18 @@ func (p *Provider) AbortUnwind() {
 		}
 	}
 
-	if (staged != nil && len(staged.names) > 0) || rebuilt != nil {
+	// Regen .regen files were written during Unwind but not yet swapped
+	// into place — they're tx-orphan FS artifacts on rollback. Drop them
+	// so the pre-mode-B datadir is byte-identical to before the call.
+	regenCount := 0
+	if regen != nil {
+		for _, pair := range regen.pairs {
+			_ = dir.RemoveFile(pair.regenPath)
+			regenCount++
+		}
+	}
+
+	if (staged != nil && len(staged.names) > 0) || rebuilt != nil || regenCount > 0 {
 		if p.logger != nil {
 			stagedCount := 0
 			if staged != nil {
@@ -154,7 +223,7 @@ func (p *Provider) AbortUnwind() {
 			if rebuilt != nil {
 				rebuiltCount = len(rebuilt.paths)
 			}
-			p.logger.Info("[storage] Provider.AbortUnwind: staged ops dropped", "staged", stagedCount, "rebuiltFilesDeleted", rebuiltCount)
+			p.logger.Info("[storage] Provider.AbortUnwind: staged ops dropped", "staged", stagedCount, "rebuiltFilesDeleted", rebuiltCount, "regenFilesDeleted", regenCount)
 		}
 	}
 }

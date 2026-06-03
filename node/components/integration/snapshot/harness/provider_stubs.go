@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/services"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
 )
@@ -41,6 +42,7 @@ func (mockAggregator) StepSize() uint64                                { return 
 func (mockAggregator) WipeWritableShadowPast(context.Context, kv.TemporalRwTx, uint64) error {
 	return nil
 }
+func (mockAggregator) DomainCompression(kv.Domain) seg.FileCompression { return seg.CompressNone }
 
 // noopDBEventNotifier is the harness stand-in for shards.Events — the
 // Provider only forwards OnNewSnapshot through it, which the harness has

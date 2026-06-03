@@ -236,6 +236,15 @@ type Provider struct {
 	// drained by Finalize / Abort).
 	pendingRebuild *pendingRebuildState
 
+	// pendingRegen lists the boundary-step state-domain regenerations
+	// mode-B staged for atomic post-commit execution. FinalizeUnwind
+	// renames each .regen → .kv + rebuilds accessors against the new
+	// content + refreshes the snapshot view. AbortUnwind unlinks the
+	// .regen files on tx rollback. Guarded by pendingTrimLock (shared
+	// with the other two pending slots — Provider.Unwind is
+	// single-flight so the lock is purely a memory-ordering fence).
+	pendingRegen *pendingRegenState
+
 	logger log.Logger
 }
 
@@ -255,6 +264,11 @@ type pendingTrimState struct {
 type pendingRebuildState struct {
 	paths []string // absolute paths to all new files (.seg + .idx + .idx variants)
 }
+
+// pendingRegen field is added to Provider alongside pendingTrim /
+// pendingRebuild; see Provider struct above. The state lives in
+// provider_unwind_state_regen_wire.go (pendingRegenState) so the
+// regen orchestrator can populate it without circular imports.
 
 // Deps holds all external dependencies needed by Initialize.
 // backend.go calls SetUpBlockReader and passes the results here.

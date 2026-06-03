@@ -316,6 +316,14 @@ func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 }
 func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
+// DomainCompression returns the seg.FileCompression used for the
+// domain's .kv primary files. Mode-B's boundary-step regeneration
+// in node/components/storage needs this to write replacement .kv
+// files in the same wire format as the originals.
+func (a *Aggregator) DomainCompression(domain kv.Domain) seg.FileCompression {
+	return a.d[domain].Compression
+}
+
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {

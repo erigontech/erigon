@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 // StateAggregator is the subset of db/state.Aggregator that the storage
@@ -51,4 +52,11 @@ type StateAggregator interface {
 	// Production *state.Aggregator satisfies this structurally; mocks
 	// implement it as a no-op (the harness has no real state).
 	WipeWritableShadowPast(ctx context.Context, tx kv.TemporalRwTx, lastTxNum uint64) error
+
+	// DomainCompression returns the per-domain seg.FileCompression
+	// used for the domain's .kv primary files. Mode-B's boundary-step
+	// regeneration (Phase 3) needs this so the rewritten .kv matches
+	// the original's wire format. Production *state.Aggregator
+	// returns a.Cfg(domain).Compression; mocks return CompressNone.
+	DomainCompression(domain kv.Domain) seg.FileCompression
 }

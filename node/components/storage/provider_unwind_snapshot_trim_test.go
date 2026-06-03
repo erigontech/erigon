@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -41,6 +42,9 @@ func (stubAggregator) UnlockCollation()                                    {}
 func (stubAggregator) StepSize() uint64                                    { return 390625 }
 func (stubAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwTx, _ uint64) error {
 	return nil
+}
+func (stubAggregator) DomainCompression(_ kv.Domain) seg.FileCompression {
+	return seg.CompressNone
 }
 
 // TestCollectFilesPastBlock_StraddleFileSurvives pins the contract
