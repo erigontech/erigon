@@ -73,8 +73,11 @@ func TestExecutionSpecWitness(t *testing.T) {
 
 	// zkevm@v0.4.0 charges EIP-8037 AUTH_BASE state gas on EIP-7702 clears of an
 	// undelegated authority; current spec (and tests-bal@v7.2.0) refund it, so
-	// these fixtures' expected gas is stale. Remove when the corpus is bumped.
+	// these fixtures' expected gas is stale and block import diverges. Marked as
+	// expected failures (not skipped) so the fixtures still load and run, and a
+	// corpus bump that fixes the gas surfaces loudly as "succeeded unexpectedly".
 	// https://github.com/erigontech/erigon/issues/21563
+	const staleAuthBaseGas = "stale zkevm@v0.4.0 EIP-7702 AUTH_BASE gas, see #21563"
 	for _, p := range []string{
 		`delegation_clearing\.json/.*undelegated_account`,
 		`delegation_clearing_and_set\.json/.*undelegated_account`,
@@ -86,26 +89,33 @@ func TestExecutionSpecWitness(t *testing.T) {
 		`blobhash_opcode_contexts_tx_types\.json/.*tx_type_4`,
 		`bal_7702_null_address_delegation_no_code_change`,
 	} {
-		tm.SkipLoad(p)
+		tm.Fails(p, staleAuthBaseGas)
 	}
 
 	// The eip8025_optional_proofs witness_validation_* fixtures are stateless-verifier
 	// negative tests: each stores a deliberately mutated executionWitness, so producer
-	// comparison always diverges. Need a stateless-verify consumer mode; until then skip.
+	// comparison always diverges. Marked as expected failures (not skipped) until a
+	// stateless-verify consumer mode exists; the fixtures keep running in the meantime.
 	// https://github.com/erigontech/erigon/issues/21566
+	const verifierNegative = "verifier-negative witness fixture needs a stateless-verify consumer, see #21566"
 	for _, p := range []string{
 		`witness_validation_(codes|headers|state)/[a-z0-9_]+_(missing|extra|malformed)_`,
 		`witness_headers/witness_headers_extra_unused_older_ancestor`,
 	} {
-		tm.SkipLoad(p)
+		tm.Fails(p, verifierNegative)
 	}
 
 	tm.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
-		runWitnessTest(t, test)
+		if err := tm.CheckFailure(t, runWitnessTest(t, test)); err != nil {
+			t.Error(err)
+		}
 	})
 }
 
-func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) {
+// runWitnessTest returns a non-nil error for test-outcome failures (block import
+// or witness divergence) so the caller can route them through CheckFailure; true
+// infrastructure problems (DB transactions) remain hard fatals.
+func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) error {
 	t.Helper()
 
 	// Every zkevm block carries a blockAccessList, so the runner needs the BAL
@@ -114,7 +124,7 @@ func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) {
 
 	m, err := test.RunWithTester(t)
 	if err != nil {
-		t.Fatalf("block test failed: %v", err)
+		return fmt.Errorf("block test failed: %w", err)
 	}
 
 	rwTx, err := m.DB.BeginRw(m.Ctx)
@@ -150,40 +160,42 @@ func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) {
 
 		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), nil)
 		if err != nil {
-			t.Fatalf("ExecutionWitness(block %d): %v", blockNum, err)
+			return fmt.Errorf("ExecutionWitness(block %d): %w", blockNum, err)
 		}
 		if res == nil {
-			t.Fatalf("ExecutionWitness(block %d): nil result", blockNum)
+			return fmt.Errorf("ExecutionWitness(block %d): nil result", blockNum)
 		}
 
-		compareWitness(t, blockNum, expected, res)
+		if err := compareWitness(blockNum, expected, res); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func compareWitness(t *testing.T, blockNum uint64, expected *testutil.ExpectedWitness, res *jsonrpc.ExecutionWitnessResult) {
-	t.Helper()
-
+func compareWitness(blockNum uint64, expected *testutil.ExpectedWitness, res *jsonrpc.ExecutionWitnessResult) error {
 	if !equalMultiset(expected.State, res.State) {
-		t.Errorf("block %d state witness mismatch:\n  expected (%d):\n%s\n  got (%d):\n%s",
+		return fmt.Errorf("block %d state witness mismatch:\n  expected (%d):\n%s\n  got (%d):\n%s",
 			blockNum, len(expected.State), formatBytes(expected.State), len(res.State), formatBytes(res.State))
 	}
 	if !equalMultiset(expected.Codes, res.Codes) {
-		t.Errorf("block %d codes witness mismatch:\n  expected (%d):\n%s\n  got (%d):\n%s",
+		return fmt.Errorf("block %d codes witness mismatch:\n  expected (%d):\n%s\n  got (%d):\n%s",
 			blockNum, len(expected.Codes), formatBytes(expected.Codes), len(res.Codes), formatBytes(res.Codes))
 	}
 
 	expectedHeaders, err := expectedHeaderHashes(expected)
 	if err != nil {
-		t.Fatalf("block %d decode expected header: %v", blockNum, err)
+		return fmt.Errorf("block %d decode expected header: %w", blockNum, err)
 	}
 	gotHeaders, err := rpcHeaderHashes(res)
 	if err != nil {
-		t.Fatalf("block %d read rpc header hash: %v", blockNum, err)
+		return fmt.Errorf("block %d read rpc header hash: %w", blockNum, err)
 	}
 	if !equalHashMultiset(expectedHeaders, gotHeaders) {
-		t.Errorf("block %d headers witness mismatch:\n  expected (%d):\n%s\n  got (%d):\n%s",
+		return fmt.Errorf("block %d headers witness mismatch:\n  expected (%d):\n%s\n  got (%d):\n%s",
 			blockNum, len(expectedHeaders), formatHashes(expectedHeaders), len(gotHeaders), formatHashes(gotHeaders))
 	}
+	return nil
 }
 
 func equalMultiset(a, b []hexutil.Bytes) bool {
