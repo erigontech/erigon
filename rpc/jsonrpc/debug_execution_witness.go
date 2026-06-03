@@ -506,8 +506,8 @@ type ExecutionWitnessResult struct {
 	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
 	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
-	// Keys is reserved for future use; omitted while empty so the response matches
-	// the canonical {state, codes, headers} shape.
+	// Keys holds the standalone preimages of every accessed account address (20B) and
+	// storage slot (32B), matching the reference legacy witness; populated in both modes.
 	Keys []hexutil.Bytes `json:"keys,omitempty"`
 	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
 	// back to the oldest block reached via BLOCKHASH.
@@ -676,6 +676,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
 		Codes:          accessed.SortedCodes,
+		Keys:           accessed.WitnessKeys,
 		headerByNumber: make(map[uint64]*types.Header),
 	}
 
@@ -747,10 +748,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 // accessedState summarizes everything the witness needs from a recorded execution:
 // the deduplicated set of accessed accounts/storage/code addresses, the sorted code
 // blobs that go into result.Codes, and the pre-state code reads that feed witness
-// trie generation. SortedKeys is built for symmetry with PR #21227 but currently
-// vestigial — result.Keys is intentionally always null per Geth compatibility.
+// trie generation. WitnessKeys holds the standalone preimages (20B addresses, 32B
+// slots) that go into result.Keys. SortedKeys is the internal composite-key encoding
+// (addr, addr‖slot) kept for symmetry with PR #21227 and is not emitted.
 type accessedState struct {
 	SortedKeys  []hexutil.Bytes
+	WitnessKeys []hexutil.Bytes
 	Addresses   map[common.Address]struct{}
 	Storage     map[common.Address]map[common.Hash]struct{}
 	CodeAddrs   map[common.Address]struct{}
@@ -831,6 +834,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		Storage:     make(map[common.Address]map[common.Hash]struct{}),
 		CodeAddrs:   make(map[common.Address]struct{}),
 		SortedCodes: []hexutil.Bytes{},
+		WitnessKeys: []hexutil.Bytes{},
 		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
 	}
 
@@ -900,6 +904,24 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		return bytes.Compare(a, b)
 	})
 	out.SortedKeys = sortedKeys
+
+	witnessKeySet := make(map[string]struct{}, len(out.Addresses))
+	for addr := range out.Addresses {
+		witnessKeySet[string(addr[:])] = struct{}{}
+	}
+	for _, keys := range out.Storage {
+		for key := range keys {
+			witnessKeySet[string(key[:])] = struct{}{}
+		}
+	}
+	witnessKeys := make([]hexutil.Bytes, 0, len(witnessKeySet))
+	for k := range witnessKeySet {
+		witnessKeys = append(witnessKeys, []byte(k))
+	}
+	slices.SortFunc(witnessKeys, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
+	out.WitnessKeys = witnessKeys
 
 	allCodesByHash := make(map[common.Hash][]byte)
 	emptyEntry := false

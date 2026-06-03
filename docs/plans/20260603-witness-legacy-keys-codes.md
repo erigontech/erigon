@@ -104,22 +104,24 @@ effort.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add a `WitnessKeys []hexutil.Bytes` field to the `accessedState` struct (init to
+- [x] add a `WitnessKeys []hexutil.Bytes` field to the `accessedState` struct (init to
       empty non-nil slice), distinct from the vestigial `SortedKeys`
-- [ ] in `collectAccessedState`, build `WitnessKeys` **after** the EIP-7928
+- [x] in `collectAccessedState`, build `WitnessKeys` **after** the EIP-7928
       system-address pruning, sourced from the filtered `out.Addresses` (each 20B) and
       `out.Storage[addr]` slot sets (each 32B); dedupe globally and sort with
       `bytes.Compare`. Do NOT source from `rs.AccessedAccounts`/`rs.AccessedStorage`
       (would leak the system address)
-- [ ] assign `result.Keys = accessed.WitnessKeys` where the result is constructed
+- [x] assign `result.Keys = accessed.WitnessKeys` where the result is constructed
       (mirror the `Codes: accessed.SortedCodes` wiring); ensure non-nil
-- [ ] confirm this runs identically in both modes (no `witnessMode` gating on keys)
-- [ ] update the now-stale doc comments: `ExecutionWitnessResult.Keys` (was "reserved /
+- [x] confirm this runs identically in both modes (no `witnessMode` gating on keys)
+- [x] update the now-stale doc comments: `ExecutionWitnessResult.Keys` (was "reserved /
       omitted while empty") and the `accessedState.SortedKeys` "result.Keys is
       intentionally always null" note — reflect that `Keys` is now populated with accessed
       address/slot preimages
-- [ ] `make erigon` builds clean; `make lint` clean (no new comments beyond the doc fixes
-      above)
+- [x] `make erigon` builds clean; `make lint` clean (no new comments beyond the doc fixes
+      above) — package lints 0 issues; the 55 `make lint` errors are pre-existing and
+      entirely in the sibling worktree `../erigon-witness-codes-prestate/`, reproduced
+      identically with this change stashed (environmental, not introduced here)
 
 ### Task 2: Record EIP-7702 designator in delegation resolution
 
