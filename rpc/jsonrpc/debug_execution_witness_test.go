@@ -102,25 +102,25 @@ func hasEmptyCode(accessed *accessedState) bool {
 	return false
 }
 
-// TestEmptyCodeTrigger_OnlyOnCodeLoad asserts the legacy empty-`0x` entry is
-// emitted only when empty bytecode is materialized for execution (a code-load via
-// ReadAccountCode), not on a plain empty-account data read (ReadAccountData).
-func TestEmptyCodeTrigger_OnlyOnCodeLoad(t *testing.T) {
+// TestEmptyCodeTrigger_OnAccountLoad asserts the legacy empty-`0x` entry is
+// emitted when an empty-code account is materialized, which happens on a plain
+// account load (ReadAccountData) as well as on a code load (ReadAccountCode).
+func TestEmptyCodeTrigger_OnAccountLoad(t *testing.T) {
 	emptyAcc := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{
 		emptyAcc: {Nonce: 1},
 	}}
 
-	t.Run("data read does not trigger", func(t *testing.T) {
+	t.Run("data read triggers", func(t *testing.T) {
 		rs := NewRecordingState(inner)
 		if _, err := rs.ReadAccountData(accounts.InternAddress(emptyAcc)); err != nil {
 			t.Fatal(err)
 		}
-		if rs.emptyCodeAccessed {
-			t.Error("emptyCodeAccessed set by a plain account data read")
+		if !rs.emptyCodeAccessed {
+			t.Error("emptyCodeAccessed not set by an empty-code account data read")
 		}
-		if hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
-			t.Error("empty 0x code entry emitted without a code load")
+		if !hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("empty 0x code entry missing after an empty-code account load")
 		}
 	})
 

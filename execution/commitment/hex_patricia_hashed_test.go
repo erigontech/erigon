@@ -2442,6 +2442,22 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		assertLegacyStorageMaterialized(t, builder, addrWithStorage)
 	})
 
+	t.Run("LegacyStorageRootMaterialization_Branch", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addrWithStorage := common.Copy(plainKeysList[0])
+		storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 0, 6)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+		for sl := 0; sl < len(storageKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrWithStorage), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+		}
+
+		assertLegacyStorageMaterialized(t, builder, addrWithStorage)
+	})
+
 	t.Run("JustRoot", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)
 
