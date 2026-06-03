@@ -463,7 +463,7 @@ var EmbeddedWebseeds = map[string][]string{
 	networkname.Gnosis:   {"v1:https://erigon34-v1-snapshots-gnosis.erigon.network"},
 	networkname.Chiado:   {"v1:https://erigon34-v1-snapshots-chiado.erigon.network"},
 	networkname.Hoodi:    {"v1:https://erigon34-v1-snapshots-hoodi.erigon.network"},
-	networkname.Bloatnet: {"v1:https://erigon34-v1-snapshots-bloatnet.erigon.network"},
+	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
 // GetEmbeddedWebseeds returns the webseed URLs for a single chain.
