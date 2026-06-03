@@ -63,7 +63,7 @@ type CallMsg struct {
 	TipCap         *uint256.Int          // EIP-1559 max_priority_fee_per_gas
 	AccessList     types.AccessList      // EIP-2930 access list
 	BlobHashes     []common.Hash         // EIP-4844 versioned blob hashes
-	Authorizations []types.Authorization // EIP-3074 authorizations
+	Authorizations []types.Authorization // EIP-7702 authorizations
 }
 
 // ContractCaller defines the methods needed to allow operating with a contract on a read
