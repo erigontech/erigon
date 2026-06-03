@@ -55,11 +55,9 @@ type DomainPutter = stateifs.DomainPutter
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
 
-// CollapseTracer is a callback invoked when a trie node collapse occurs during updates to commitment.
-// When a FullNode is reduced to a single child (updateKindPropagate), the remaining child
-// may be a HashNode that needs to be resolved for proper witness generation.
-// The callback receives the hashed key path (in nibble format) to the remaining child.
-type CollapseTracer func(hashedKeyPath []byte)
+// CollapseTracer is invoked when a trie node collapses during a commitment update.
+// hashedKeyPath is the surviving child's nibble path; branchPrefix is the collapsing branch's.
+type CollapseTracer func(hashedKeyPath, branchPrefix []byte)
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
@@ -204,6 +202,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.capture = nil
 	hph.trace = false
 	hph.traceDomain = false
+	hph.collapseTracer = nil
 
 	// flags
 	hph.memoizationOff = false
@@ -2403,7 +2402,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		fmt.Printf("[collapse] found at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
 			parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
 	}
-	hph.collapseTracer(siblingPath)
+	hph.collapseTracer(siblingPath, common.Copy(hph.currentKey[:depth]))
 }
 
 // detectCascadingCollapseAtRow detects a FullNode→ShortNode collapse caused by
@@ -2427,7 +2426,7 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 		fmt.Printf("[cascade-collapse] found at row=%d depth=%d: survivingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, hashedExtLen=%d\n",
 			row, depth, survivingNibble, compactSibling, len(siblingPath), survivingCell.hashLen, survivingCell.hashedExtLen)
 	}
-	hph.collapseTracer(siblingPath)
+	hph.collapseTracer(siblingPath, common.Copy(hph.currentKey[:depth]))
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
