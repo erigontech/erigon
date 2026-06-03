@@ -54,6 +54,11 @@ func NewConcurrentPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *
 
 	for i := range p.mounts {
 		p.mounts[i] = p.root.SpawnSubTrie(ctx, i)
+		// Mounts fold into the root, so their fold/load stats must land in the
+		// single metrics object Process writes to CSV.
+		if p.root.metrics.writeCommitmentMetrics {
+			p.mounts[i].metrics = p.root.metrics
+		}
 	}
 	return p
 }
