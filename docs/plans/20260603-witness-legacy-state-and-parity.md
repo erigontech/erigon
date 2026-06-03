@@ -214,10 +214,12 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
 
 ### Task 5: Canonical corpus regression
 **Files:** (no source changes)
-- [ ] `make erigon integration` + `make lint` clean
-- [ ] `ERIGON_WITNESS_MODE=canonical go test -count=1 -timeout 40m -run
+- [x] `make erigon integration` + `make lint` clean (erigon + integration built clean; lint:
+      55 pre-existing issues all in sibling worktree `../erigon-witness-codes-prestate/`, none
+      in this repo)
+- [x] `ERIGON_WITNESS_MODE=canonical go test -count=1 -timeout 40m -run
       'TestExecutionSpecWitness/for_amsterdam' ./execution/tests/eest_zkevm_witness/...` —
-      no new failures vs baseline
+      no new failures vs baseline (`ok ... 976.695s`, exit 0)
 
 ### Task 6: Verify acceptance criteria (code-level)
 - [ ] keys emit only existing-account addresses; unit test green
