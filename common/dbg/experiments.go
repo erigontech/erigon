@@ -113,6 +113,7 @@ var (
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
+	Exec3NoncePreWrites   = EnvBool("EXEC3_NONCE_PREWRITES", true)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)

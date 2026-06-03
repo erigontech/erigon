@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -1130,11 +1131,23 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// concurrency
 			break
 		default:
+			txn := t.Tx()
+			if txn == nil {
+				break
+			}
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
 			}
-			if !sender.IsNil() {
+			if sender.IsNil() {
+				break
+			}
+			if dbg.Exec3NoncePreWrites && txn.Type() != types.AccountAbstractionTxType && txn.GetNonce() < math.MaxUint64 {
+				// The tx declares its own output nonce, so pre-write it and
+				// schedule optimistically: a same-sender successor reads it
+				// instead of waiting on a scheduler dependency.
+				executor.versionMap.Write(sender, state.NoncePath, accounts.NilKey, t.Version(), txn.GetNonce()+1, true)
+			} else {
 				if tx, ok := prevSenderTx[sender]; ok {
 					executor.execTasks.addDependency(tx, i)
 					executor.execTasks.clearPending(i)
