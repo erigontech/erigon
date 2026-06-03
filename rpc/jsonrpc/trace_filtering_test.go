@@ -259,5 +259,54 @@ func TestReplayBlockTransactionsWithdrawalStateDiff(t *testing.T) {
 	// Code and nonce must be "=" (unchanged).
 	require.Equal(t, "=", wdDiff.Code)
 	require.Equal(t, "=", wdDiff.Nonce)
+}
 
+// TestReplayBlockTransactionsMultiWithdrawalSameAddr verifies that multiple
+// withdrawals to the same address are collapsed into a single stateDiff entry.
+func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
+	const (
+		wd1Gwei = uint64(500_000)
+		wd2Gwei = uint64(300_000)
+	)
+	withdrawalAddr := common.HexToAddress("0xbebebebebebebebebebebebebebebebebebebebe")
+	bankFunds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: bankFunds}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(generated)
+	require.NoError(t, err)
+	blk := generated.Blocks[0]
+
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	n := rpc.BlockNumber(blk.NumberU64())
+	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+
+	last := results[len(results)-1]
+	require.NotNil(t, last.StateDiff)
+
+	internedAddr := internedAddress(withdrawalAddr.Hex())
+	wdDiff, ok := last.StateDiff[internedAddr]
+	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
+	require.Len(t, last.StateDiff, 1, "expected one collapsed entry for the repeated address")
+
+	balDiff, ok := wdDiff.Balance.(*StateDiffBalance)
+	require.True(t, ok, "balance diff has unexpected type: %T", wdDiff.Balance)
+
+	expectedDelta := new(big.Int).Mul(new(big.Int).SetUint64(wd1Gwei+wd2Gwei), big.NewInt(1e9))
+	delta := new(big.Int).Sub(balDiff.To.ToInt(), balDiff.From.ToInt())
+	require.Equal(t, expectedDelta, delta,
+		"multi-withdrawal delta mismatch: from=%s to=%s expected delta=%s",
+		balDiff.From.ToInt(), balDiff.To.ToInt(), expectedDelta)
+	require.Equal(t, "=", wdDiff.Code)
+	require.Equal(t, "=", wdDiff.Nonce)
 }

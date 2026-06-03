@@ -950,9 +950,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, nil, cmErr
 	}
 
-	// Collect balance diffs for beacon chain withdrawals (post-Shanghai).
-	// prev is only read by callers that request stateDiff (sequential path); skip the
-	// GetBalance call for trace-only callers to avoid unnecessary state reads.
+	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
 	var wdiffs []withdrawalBalanceDiff
 	for _, w := range block.Withdrawals() {
 		var prev uint256.Int
