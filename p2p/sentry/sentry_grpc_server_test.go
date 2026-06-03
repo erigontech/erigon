@@ -1462,3 +1462,80 @@ func TestGrpcServer_PeerEvents_ReplayFiltersByVersion(t *testing.T) {
 	require.Len(t, stream.events, 1, "PeerEvents replay must only emit Connect for the ETH68 peer")
 	require.Equal(t, sentryproto.PeerEvent_Connect, stream.events[0].EventId)
 }
+
+// countingMsgReadWriter counts WriteMsg calls; ReadMsg is never used by the
+// outbound write path under test.
+type countingMsgReadWriter struct {
+	mu     sync.Mutex
+	writes int
+}
+
+func (w *countingMsgReadWriter) ReadMsg() (p2p.Msg, error) {
+	return p2p.Msg{}, io.EOF
+}
+
+func (w *countingMsgReadWriter) WriteMsg(msg p2p.Msg) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes++
+	return nil
+}
+
+func (w *countingMsgReadWriter) count() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writes
+}
+
+// TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites: in shared
+// p2p.Server mode there is one GrpcServer per eth version, all backed by one
+// PeerStore, and clients (e.g. the txpool) fan SendMessageById out across
+// every sentry. The message must reach the peer once — via the sentry whose
+// version the peer negotiated — not once per sentry.
+func TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites(t *testing.T) {
+	shared := NewPeerStore()
+	versions := []uint{direct.ETH69, direct.ETH70, direct.ETH71}
+	servers := make([]*GrpcServer, 0, len(versions))
+	for _, v := range versions {
+		ss := &GrpcServer{
+			statusReady: make(chan struct{}),
+			ethVersion:  v,
+			logger:      log.New(),
+			Protocols: []p2p.Protocol{{
+				Name:      eth.ProtocolName,
+				Version:   v,
+				FromProto: eth.FromProto[v],
+			}},
+		}
+		ss.peers.Store(NewPeerStore())
+		ss.SetSharedPeerStore(shared)
+		servers = append(servers, ss)
+	}
+
+	pi, peerID := newTestPeerInfoWithEth(t)
+	rw := &countingMsgReadWriter{}
+	pi.SetEthRw(rw)
+	pi.SetEthProtocol(direct.ETH70)
+	store := servers[0].peers.Load()
+	store.mu.Lock()
+	store.peers[peerID] = pi
+	store.mu.Unlock()
+
+	req := &sentryproto.SendMessageByIdRequest{
+		PeerId: gointerfaces.ConvertHashToH512(peerID),
+		Data: &sentryproto.OutboundMessageData{
+			Id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+			Data: []byte{0xc0},
+		},
+	}
+	for _, ss := range servers {
+		_, err := ss.SendMessageById(context.Background(), req)
+		require.NoError(t, err)
+	}
+
+	// Writes happen on the peer's async worker; wait for the first, then
+	// allow a settle window to catch duplicates from the other sentries.
+	require.Eventually(t, func() bool { return rw.count() >= 1 }, time.Second, 5*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	require.Equal(t, 1, rw.count(), "peer negotiated eth/70: only the eth/70 sentry must write")
+}
