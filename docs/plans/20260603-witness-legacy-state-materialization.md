@@ -154,8 +154,8 @@ Canonical mode path is untouched. The witness `RootHash()` must be unchanged.
 
 ### Task 4: Canonical corpus regression (proves canonical unchanged only)
 **Files:** (no source changes)
-- [ ] `make erigon integration` + `make lint` clean
-- [ ] `go test -count=1 -timeout 40m -run 'TestExecutionSpecWitness/for_amsterdam'
+- [x] `make erigon integration` + `make lint` clean
+- [x] `go test -count=1 -timeout 40m -run 'TestExecutionSpecWitness/for_amsterdam'
       ./execution/tests/eest_zkevm_witness/...` — no new failures. NOTE: the corpus test
       hard-codes `t.Setenv("ERIGON_WITNESS_MODE","canonical")` (witness_test.go:52), so it
       only proves the canonical path is byte-identical; it does NOT exercise legacy. The
