@@ -202,7 +202,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	cfg.EnableTrieWarmup = bt.trieWarmup
 	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
-	sd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, bt.logger, cfg)
+	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
 		return err
 	}

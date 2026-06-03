@@ -141,8 +141,8 @@ Option ordering note: `WithTrieConfig` replaces the entire config including any 
 - Modify: `db/state/squeeze.go` (:483 rebuildCfg, :590 flushCfg, :994 iterTrieCfg)
 - Modify: `execution/commitment/backtester/backtester.go` (:205 cfg)
 
-- [ ] Wrap each existing config in `execctx.WithTrieConfig(...)`: `execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(rebuildCfg))` etc. Leave the cfg-building lines (including their explicit `Variant`) intact — `WithTrieConfig` replaces the whole config so their variant is honored.
-- [ ] `go build ./db/state/... ./execution/commitment/backtester/...` compiles.
+- [x] Wrap each existing config in `execctx.WithTrieConfig(...)`: `execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(rebuildCfg))` etc. Leave the cfg-building lines (including their explicit `Variant`) intact — `WithTrieConfig` replaces the whole config so their variant is honored.
+- [x] `go build ./db/state/... ./execution/commitment/backtester/...` compiles.
 
 ### Task 5: Verify acceptance criteria
 
