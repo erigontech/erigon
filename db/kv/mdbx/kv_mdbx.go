@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	_ "github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -176,6 +177,10 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
 	if tb != nil {
+		// Tests open many envs in parallel; a 16GB VA reservation each piles
+		// file mappings into the Go race heap's address window ("too many
+		// address space collisions for -race mode").
+		opts.mapSize = 1 * datasize.GB
 		opts.dirtySpace = uint64(2 * datasize.MB)
 	}
 	opts.shrinkThreshold = 0 // disable
