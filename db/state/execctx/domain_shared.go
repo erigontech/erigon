@@ -174,13 +174,14 @@ func PickTrieVariant() commitment.TrieVariant {
 	return commitment.VariantHexPatriciaTrie
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
-	trieCfg := commitment.DefaultTrieConfig()
-	trieCfg.Variant = PickTrieVariant()
-	return NewSharedDomainsWithTrieConfig(ctx, tx, logger, trieCfg)
-}
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
+	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
+	o.trieCfg.Variant = PickTrieVariant()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	trieCfg := o.trieCfg
 
-func NewSharedDomainsWithTrieConfig(ctx context.Context, tx kv.TemporalTx, logger log.Logger, trieCfg commitment.TrieConfig) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,

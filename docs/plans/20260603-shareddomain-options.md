@@ -110,10 +110,10 @@ Option ordering note: `WithTrieConfig` replaces the entire config including any 
 **Files:**
 - Modify: `db/state/execctx/domain_shared.go`
 
-- [ ] Replace the wrapper `NewSharedDomains` (lines ~177–181) and `NewSharedDomainsWithTrieConfig` (lines ~183–211) with a single variadic `NewSharedDomains(ctx, tx, logger, opts ...SharedDomainOption)`.
-- [ ] Build base config inside: `o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}`, `o.trieCfg.Variant = PickTrieVariant()`, apply opts, pass `o.trieCfg` to `commitmentdb.NewSharedDomainsCommitmentContext`.
-- [ ] Confirm no caller passes a 4th positional arg to `NewSharedDomains` (variadic is additive): `grep -rn "NewSharedDomains(" --include=*.go | grep -v WithTrieConfig` — spot-check a few of the 122 plain callers compile unchanged.
-- [ ] `go build ./db/state/execctx/...` compiles; `NewSharedDomainsWithTrieConfig` no longer exists.
+- [x] Replace the wrapper `NewSharedDomains` (lines ~177–181) and `NewSharedDomainsWithTrieConfig` (lines ~183–211) with a single variadic `NewSharedDomains(ctx, tx, logger, opts ...SharedDomainOption)`.
+- [x] Build base config inside: `o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}`, `o.trieCfg.Variant = PickTrieVariant()`, apply opts, pass `o.trieCfg` to `commitmentdb.NewSharedDomainsCommitmentContext`.
+- [x] Confirm no caller passes a 4th positional arg to `NewSharedDomains` (variadic is additive): plain callers compile unchanged; only the 17 `NewSharedDomainsWithTrieConfig` sites fail (migrated in Tasks 3/4).
+- [x] `go build ./db/state/execctx/...` compiles; `NewSharedDomainsWithTrieConfig` no longer exists.
 
 ### Task 3: Migrate the 13 read-only/one-shot sites to WithoutDeferredBranchUpdates()
 
