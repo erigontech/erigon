@@ -223,7 +223,7 @@ func TestMergeSnapshots(t *testing.T) {
 		s.OpenSegments(snaptype2.BlockSnapshotTypes, true)
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Len(Ranges, 3)
-		// NOTE: TestMergeSnapshots calls Merge with doIndex=false. 
+		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
 		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
 		// and the subsegments marked canDelete=true will also be skipped, causing visible
 		// segments to drop to 0 until BuildMissedIndices/OpenFolder runs. This is expected
@@ -865,8 +865,6 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
 }
 
-
-
 func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)
@@ -1087,10 +1085,10 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 	require.Equal(uint64(1_000_000-1), s.SegmentsMax())
 }
 
-// TestOverlapNoTruncation checks that having a fully indexed covering segment 
-// alongside its subsegments (both present in the dirty list) does not trigger 
-// gap/overlap protection for the next contiguous segment. Previously, the subsegments 
-// were appended after the covering segment in the visible list, causing the gap detector 
+// TestOverlapNoTruncation checks that having a fully indexed covering segment
+// alongside its subsegments (both present in the dirty list) does not trigger
+// gap/overlap protection for the next contiguous segment. Previously, the subsegments
+// were appended after the covering segment in the visible list, causing the gap detector
 // to truncate the entire remainder of the visible chain (fixes issue #21472).
 func TestOverlapNoTruncation(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
@@ -1129,4 +1127,3 @@ func TestOverlapNoTruncation(t *testing.T) {
 	require.Equal(uint64(1_500_000), visibleTxn[1].to)
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
 }
-
