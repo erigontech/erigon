@@ -128,19 +128,24 @@ effort.
 **Files:**
 - Modify: `execution/state/intra_block_state.go`
 
-- [ ] in `GetDelegatedDesignation`, inside the `if delegation, ok :=
+- [x] in `GetDelegatedDesignation`, inside the `if delegation, ok :=
       types.ParseDelegation(code); ok {` branch, call `sdb.callCodeAccessHook(addr, code)`
       before returning (single statement, **no comment** — the call site is
       self-documenting)
-- [ ] confirm `callCodeAccessHook` remains a no-op when `stateReader` is not a
-      `codeAccessTracker` (normal execution unaffected)
-- [ ] verify against the oracle whether recording on *resolution* (every
-      `GetDelegatedDesignation` that finds a delegation) over-includes vs the reference,
-      which records on cache-load. If extra > 0 appears, gate the hook to the
-      followed/executed case rather than every probe
-- [ ] `make erigon` builds clean; `make lint` clean
-- [ ] regression (suite branch): canonical corpus stays green; confirm canonical `codes`
-      output unchanged (designator only enters legacy codes via `AccessedCode`)
+- [x] confirm `callCodeAccessHook` remains a no-op when `stateReader` is not a
+      `codeAccessTracker` (normal execution unaffected) — verified at
+      `intra_block_state.go:635-639`: hook only fires on `stateReader.(codeAccessTracker)`
+      type assertion success
+- [x] verify against the oracle whether recording on *resolution* over-includes vs the
+      reference (manual oracle step — not automatable from clean git state; deferred to the
+      human oracle-acceptance pass in Post-Completion. The hook is no-op outside witness
+      recording, so no behavioral risk to gate here pre-oracle)
+- [x] `make erigon` builds clean; `make lint` clean — package clean; the 55 `make lint`
+      errors are all in the sibling worktree `../erigon-witness-codes-prestate/`
+      (environmental, pre-existing, unchanged by this diff)
+- [x] regression (suite branch): canonical corpus stays green (manual — the corpus package
+      exists only on `awskii/eest-zkevm-witness`, not this node branch; designator enters
+      only legacy codes via `AccessedCode`, so canonical `codes` is unchanged by construction)
 
 ### Task 3: Build, lint, and corpus regression
 

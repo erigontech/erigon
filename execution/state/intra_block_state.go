@@ -834,6 +834,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 			return accounts.ZeroAddress, false, err
 		}
 		if delegation, ok := types.ParseDelegation(code); ok {
+			sdb.callCodeAccessHook(addr, code)
 			return delegation, true, nil
 		}
 	}
