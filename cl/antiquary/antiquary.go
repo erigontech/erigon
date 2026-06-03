@@ -27,10 +27,12 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
@@ -38,9 +40,21 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-const safetyMargin = 20_000 // We retire snapshots 10k blocks after the finalized head
+const (
+	safetyMargin             = 20_000 // We retire snapshots 10k blocks after the finalized head
+	antiquaryIndexBatchSlots = snaptype.CaplinMergeLimit / 2
+)
+
+var (
+	mxAntiquaryIndexBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="index"}`)
+	mxAntiquaryPruneBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="prune"}`)
+	mxAntiquaryIndexBatchSlots   = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="index"}`)
+	mxAntiquaryPruneBatchBlocks  = metrics.GetOrCreateGauge(`caplin_antiquary_batch_items{phase="prune"}`)
+	mxAntiquaryPrunedBlocks      = metrics.GetOrCreateCounter("caplin_antiquary_pruned_blocks_total")
+)
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
@@ -130,15 +144,12 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
-	// Here we need to start mdbx transaction and lock the thread
-	tx, err := a.mainDB.BeginRw(a.ctx)
-	if err != nil {
+	var from uint64
+	if err := a.mainDB.View(a.ctx, func(tx kv.Tx) error {
+		var err error
+		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
 		return err
-	}
-	defer tx.Rollback()
-	// read the last beacon snapshots
-	from, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
@@ -153,48 +164,30 @@ func (a *Antiquary) Loop() error {
 	}
 
 	defer logInterval.Stop()
-	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
-		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+	available := a.sn.BlocksAvailable()
+	if from > available {
+		a.logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
+		from = clampBeaconSnapshotProgress(from, available)
 	}
-
-	// Now write the snapshots as indicies
-	for i := from; i < a.sn.BlocksAvailable(); i++ {
-		// read the snapshot
-		header, elBlockNumber, elBlockHash, err := a.sn.ReadHeader(i, tx)
+	indexedTo := from
+	for {
+		frozenSlots := a.sn.BlocksAvailable()
+		if indexedTo >= frozenSlots {
+			break
+		}
+		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", indexedTo, "to", frozenSlots)
+		err := indexBeaconSnapshots(a.ctx, a.mainDB, indexedTo, frozenSlots, antiquaryIndexBatchSlots, a.sn.ReadHeader, func(slot uint64) {
+			select {
+			case <-logInterval.C:
+				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot, "target", frozenSlots)
+			case <-a.ctx.Done():
+			default:
+			}
+		})
 		if err != nil {
 			return err
 		}
-		if header == nil {
-			continue
-		}
-		blockRoot, err := header.Header.HashSSZ()
-		if err != nil {
-			return err
-		}
-		if err := beacon_indicies.MarkRootCanonical(a.ctx, tx, header.Header.Slot, blockRoot); err != nil {
-			return err
-		}
-		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
-			return err
-		}
-		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
-			return err
-		}
-		if err := beacon_indicies.WriteParentBlockRoot(a.ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
-			return err
-		}
-		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {
-			return err
-		}
-		if err := beacon_indicies.WriteExecutionBlockHash(tx, blockRoot, elBlockHash); err != nil {
-			return err
-		}
-		select {
-		case <-logInterval.C:
-			a.logger.Info("[Antiquary] Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
-		case <-a.ctx.Done():
-		default:
-		}
+		indexedTo = frozenSlots
 	}
 
 	if a.stateSn != nil {
@@ -202,24 +195,18 @@ func (a *Antiquary) Loop() error {
 			return err
 		}
 	}
-	log.Info("[Caplin] Stat", "blocks-static", a.sn.BlocksAvailable(), "states-static", a.stateSn.BlocksAvailable(), "blobs-static", a.sn.FrozenBlobs(),
+	stateBlocksAvailable := uint64(0)
+	if a.stateSn != nil {
+		stateBlocksAvailable = a.stateSn.BlocksAvailable()
+	}
+	log.Info("[Caplin] Stat", "blocks-static", a.sn.BlocksAvailable(), "states-static", stateBlocksAvailable, "blobs-static", a.sn.FrozenBlobs(),
 		"state-history-enabled", a.states, "block-history-enabled", a.blocks, "blob-history-enabled", a.blobs, "snapgen", a.snapgen)
 
-	frozenSlots := a.sn.BlocksAvailable()
-	if frozenSlots != 0 {
-		if err := beacon_indicies.PruneBlocks(a.ctx, tx, frozenSlots); err != nil {
-			return err
-		}
-	}
-
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
+	if err := pruneBeaconBlocksAndWriteProgress(a.ctx, a.mainDB, indexedTo, indexedTo, snaptype.CaplinMergeLimit); err != nil {
 		return err
 	}
 
 	a.logger.Info("[Antiquary] Restarting Caplin")
-	if err := tx.Commit(); err != nil {
-		return err
-	}
 
 	if a.states {
 		go a.loopStates(a.ctx)
@@ -247,6 +234,122 @@ func (a *Antiquary) Loop() error {
 				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}
 		case <-a.ctx.Done():
+		}
+	}
+}
+
+type readBeaconSnapshotHeaderFunc func(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error)
+
+func clampBeaconSnapshotProgress(progress, available uint64) uint64 {
+	if progress > available {
+		return available
+	}
+	return progress
+}
+
+func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
+	if batchSize == 0 {
+		batchSize = antiquaryIndexBatchSlots
+	}
+	for batchFrom := from; batchFrom < to; batchFrom = nextBatchEnd(batchFrom, to, batchSize) {
+		batchTo := nextBatchEnd(batchFrom, to, batchSize)
+		start := time.Now()
+		err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := indexBeaconSnapshotBatch(ctx, tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
+				return err
+			}
+			if err := beacon_indicies.WriteLastBeaconSnapshot(tx, batchTo); err != nil {
+				return err
+			}
+			return nil
+		})
+		mxAntiquaryIndexBatchSeconds.ObserveDuration(start)
+		if err != nil {
+			return err
+		}
+		mxAntiquaryIndexBatchSlots.SetUint64(batchTo - batchFrom)
+	}
+	return nil
+}
+
+func nextBatchEnd(from, to, batchSize uint64) uint64 {
+	batchTo := from + batchSize
+	if batchTo < from || batchTo > to {
+		return to
+	}
+	return batchTo
+}
+
+func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
+	for slot := from; slot < to; slot++ {
+		header, elBlockNumber, elBlockHash, err := readHeader(slot, tx)
+		if err != nil {
+			return err
+		}
+		if header == nil {
+			continue
+		}
+		blockRoot, err := header.Header.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(ctx, tx, header.Header.Slot, blockRoot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteParentBlockRoot(ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteExecutionBlockHash(tx, blockRoot, elBlockHash); err != nil {
+			return err
+		}
+		if onProgress != nil {
+			onProgress(slot)
+		}
+	}
+	return nil
+}
+
+func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo, progress, batchLimit uint64) error {
+	if batchLimit == 0 {
+		batchLimit = snaptype.CaplinMergeLimit
+	}
+	for {
+		hasMore := false
+		pruned := 0
+		start := time.Now()
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if pruneTo != 0 {
+				deleted, more, err := beacon_indicies.PruneBlocksLimit(ctx, tx, pruneTo, int(batchLimit))
+				if err != nil {
+					return err
+				}
+				pruned = deleted
+				hasMore = more
+			}
+			if hasMore {
+				return nil
+			}
+			return beacon_indicies.WriteLastBeaconSnapshot(tx, progress)
+		}); err != nil {
+			mxAntiquaryPruneBatchSeconds.ObserveDuration(start)
+			return err
+		}
+		mxAntiquaryPruneBatchSeconds.ObserveDuration(start)
+		mxAntiquaryPruneBatchBlocks.SetInt(pruned)
+		if pruned != 0 {
+			mxAntiquaryPrunedBlocks.AddInt(pruned)
+		}
+		if !hasMore {
+			return nil
 		}
 	}
 }
@@ -298,19 +401,7 @@ func (a *Antiquary) antiquate() error {
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
-	tx, err := a.mainDB.BeginRw(a.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := beacon_indicies.PruneBlocks(a.ctx, tx, to); err != nil {
-		return err
-	}
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := pruneBeaconBlocksAndWriteProgress(a.ctx, a.mainDB, to, to-1, snaptype.CaplinMergeLimit); err != nil {
 		return err
 	}
 	if err := a.sn.OpenFolder(); err != nil {
@@ -323,10 +414,6 @@ func (a *Antiquary) antiquate() error {
 		if err := a.downloader.Seed(a.ctx, paths); err != nil {
 			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
 	}
 
 	return nil

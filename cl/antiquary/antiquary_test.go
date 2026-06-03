@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"testing"
 
@@ -27,14 +28,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 func newTestCollector(t *testing.T) *etl.Collector {
@@ -60,6 +64,101 @@ func collectAll(t *testing.T, c *etl.Collector) map[string][]byte {
 		return next(nil, nil, nil)
 	}, etl.TransformArgs{})
 	return result
+}
+
+func TestClampBeaconSnapshotProgress(t *testing.T) {
+	require.Equal(t, uint64(10), clampBeaconSnapshotProgress(10, 12))
+	require.Equal(t, uint64(12), clampBeaconSnapshotProgress(12, 12))
+	require.Equal(t, uint64(8), clampBeaconSnapshotProgress(12, 8))
+}
+
+type countingRwDB struct {
+	kv.RwDB
+	commits int
+}
+
+func (db *countingRwDB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	if err := db.RwDB.Update(ctx, f); err != nil {
+		return err
+	}
+	db.commits++
+	return nil
+}
+
+func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
+	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := &countingRwDB{RwDB: baseDB}
+	ctx := context.Background()
+	to := uint64(snaptype.CaplinMergeLimit + 2)
+
+	readHeader := func(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+		stateRoot := common.Hash{byte(slot % 251)}
+		parentRoot := common.Hash{byte((slot + 1) % 251)}
+		return &cltypes.SignedBeaconBlockHeader{
+			Header: &cltypes.BeaconBlockHeader{
+				Slot:       slot,
+				Root:       stateRoot,
+				ParentRoot: parentRoot,
+			},
+		}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+	}
+
+	require.NoError(t, indexBeaconSnapshots(ctx, db, 0, to, antiquaryIndexBatchSlots, readHeader, nil))
+	require.Equal(t, 3, db.commits)
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, to, progress)
+
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, to-1)
+		require.NoError(t, err)
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, slot)
+		require.Equal(t, to-1, *slot)
+		number, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, number)
+		require.Equal(t, to, *number)
+		return nil
+	}))
+}
+
+func TestIndexBeaconSnapshotsDoesNotAdvanceProgressOnFailedBatch(t *testing.T) {
+	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := &countingRwDB{RwDB: baseDB}
+	ctx := context.Background()
+	to := uint64(snaptype.CaplinMergeLimit + 2)
+	failingSlot := uint64(antiquaryIndexBatchSlots)
+	wantErr := errors.New("read header failed")
+
+	readHeader := func(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+		if slot == failingSlot {
+			return nil, 0, common.Hash{}, wantErr
+		}
+		return &cltypes.SignedBeaconBlockHeader{
+			Header: &cltypes.BeaconBlockHeader{
+				Slot:       slot,
+				Root:       common.Hash{byte(slot % 251)},
+				ParentRoot: common.Hash{byte((slot + 1) % 251)},
+			},
+		}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+	}
+
+	require.ErrorIs(t, indexBeaconSnapshots(ctx, db, 0, to, antiquaryIndexBatchSlots, readHeader, nil), wantErr)
+	require.Equal(t, 1, db.commits)
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, failingSlot, progress)
+
+		rootBytes, err := tx.GetOne(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(failingSlot))
+		require.NoError(t, err)
+		require.Empty(t, rootBytes)
+		return nil
+	}))
 }
 
 func TestAntiquateFullUint64List(t *testing.T) {
