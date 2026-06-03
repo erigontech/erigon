@@ -162,9 +162,9 @@ Canonical mode path is untouched. The witness `RootHash()` must be unchanged.
       legacy materialization is gated solely by the unit test (Task 1) + the manual oracle.
 
 ### Task 5: Verify acceptance criteria (code-level)
-- [ ] legacy materializes storage-root nodes (empty/single/multi); canonical byte-identical
-- [ ] `RootHash()` unchanged across modes; root-invariant + materialization unit tests green
-- [ ] canonical corpus green; build + lint clean
+- [x] legacy materializes storage-root nodes (empty/single/multi); canonical byte-identical
+- [x] `RootHash()` unchanged across modes; root-invariant + materialization unit tests green
+- [x] canonical corpus green; build + lint clean
 
 ### Task 6: [Final] Documentation and plan close-out
 - [ ] update the witness memory note with the materialization outcome
