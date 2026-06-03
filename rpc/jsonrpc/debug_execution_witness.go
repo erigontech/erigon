@@ -71,6 +71,11 @@ type RecordingState struct {
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
+
+	// The system address is touched as msg.sender on every block's system calls;
+	// that alone is not a witness access. A real opcode access during a user tx
+	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
+	systemAddrTouchedInTx bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -93,6 +98,10 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
+
+// MarkSystemAddrTouchedInTx records that a user transaction accessed the system
+// address via an opcode, so it is kept in the witness even without a state change.
+func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -601,6 +610,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		ibs.SetTxContext(blockNum, txIndex)
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		// A user tx that accesses the system address via an opcode keeps it in the
+		// witness; the per-tx access set captures this even on state-cache hits.
+		if acc := ibs.AccessedAddresses(); acc != nil {
+			if _, ok := acc[params.SystemAddress]; ok {
+				recordingState.MarkSystemAddrTouchedInTx()
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
@@ -839,7 +855,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
-		if !reallyChanged && !hasStorage && !existenceChanged {
+		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrTouchedInTx {
 			delete(out.Addresses, sysAddr)
 		}
 	}
@@ -939,9 +955,18 @@ func detectCollapseSiblings(
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+	type collapseCandidate struct {
+		siblingPath  []byte
+		branchPrefix []byte
+	}
+	var candidates []collapseCandidate
+	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
+		candidates = append(candidates, collapseCandidate{
+			siblingPath:  common.Copy(hashedKeyPath),
+			branchPrefix: common.Copy(branchPrefix),
+		})
 	})
+	defer sdCtx.SetCollapseTracer(nil)
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
@@ -952,7 +977,22 @@ func detectCollapseSiblings(
 		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
 	}
 
-	sdCtx.SetCollapseTracer(nil)
+	// The canonical witness (insert-before-delete order) does not touch the sibling of
+	// a branch whose net block change leaves it with >=2 children; erigon's replay can
+	// transiently collapse such a branch, so drop those siblings to match membership.
+	siblingPaths = make([][]byte, 0, len(candidates))
+	for _, c := range candidates {
+		childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
+		}
+		if childCount >= 2 {
+			log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
+				"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
+			continue
+		}
+		siblingPaths = append(siblingPaths, c.siblingPath)
+	}
 	return siblingPaths, nil
 }
 
