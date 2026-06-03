@@ -167,8 +167,8 @@ Canonical mode path is untouched. The witness `RootHash()` must be unchanged.
 - [x] canonical corpus green; build + lint clean
 
 ### Task 6: [Final] Documentation and plan close-out
-- [ ] update the witness memory note with the materialization outcome
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update the witness memory note with the materialization outcome
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Manual / external — no checkboxes*
