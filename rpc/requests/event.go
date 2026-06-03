@@ -22,8 +22,8 @@ import (
 	"fmt"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {

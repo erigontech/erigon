@@ -16,8 +16,8 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	common "github.com/erigontech/erigon/common"
+	event "github.com/erigontech/erigon/common/event"
 	types "github.com/erigontech/erigon/execution/types"
-	event "github.com/erigontech/erigon/p2p/event"
 	uint256 "github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )

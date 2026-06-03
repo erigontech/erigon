@@ -28,8 +28,8 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 var (
