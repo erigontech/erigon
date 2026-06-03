@@ -45,16 +45,14 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// BenchmarkEngineGetBlobsV3WorstCasePayload measures engine_getBlobsV3 over the real JSON-RPC
-// transport for the largest payload mainnet currently permits, isolating the JSON serialization +
-// transport cost at the engine API surface (issue #21226) from the txpool lookup itself.
+// BenchmarkEngineGetBlobsV3WorstCasePayload gives e2e measurements for engine_getBlobsV3.
 func BenchmarkEngineGetBlobsV3WorstCasePayload(b *testing.B) {
 	if os.Getenv("ERIGON_RUN_GETBLOBS_BENCH") == "" {
 		b.Skip("set ERIGON_RUN_GETBLOBS_BENCH=1 to run this full-node benchmark")
 	}
 
-	// mainnet's worst-case blobs per block (the bpo2 max), each with its full set of cell proofs.
-	const maxBlobs = 21
+	// getBlobs rejects more than 128 hashes per call (-38004), so 128 is the largest payload it serves.
+	const maxBlobs = 128
 
 	logger := testlog.Logger(b, log.LvlError)
 	ctx := context.Background()
