@@ -154,9 +154,7 @@ func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.enableWarmupCache = cfg.EnableWarmupCache
 	hph.memoizationOff = cfg.MemoizationOff
-	if cfg.CsvMetricsFilePrefix != "" {
-		hph.metrics.EnableCsvMetrics(cfg.CsvMetricsFilePrefix)
-	}
+	hph.metrics.SetCsvMetrics(cfg.CsvMetricsFilePrefix)
 }
 
 func newHexPatriciaHashed() *HexPatriciaHashed {
