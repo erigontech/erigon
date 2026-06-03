@@ -37,6 +37,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -464,6 +465,39 @@ func makeP2PServer(
 	return &p2p.Server{Config: p2pConfig}, nil
 }
 
+const (
+	// maxBlockHashesPerMsg caps the [hash, number] entries accepted in one NewBlockHashes packet; peers exceeding it are disconnected.
+	maxBlockHashesPerMsg = 4096
+	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
+	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
+	// newBlockHashesBurst and newBlockHashesRate bound how frequently one peer may send NewBlockHashes packets before it is disconnected.
+	newBlockHashesBurst            = 30
+	newBlockHashesRate  rate.Limit = 10
+)
+
+// newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
+func newBlockHashesExceedsCap(payload []byte) bool {
+	pos, listLen, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return false
+	}
+	end := pos + listLen
+	count := 0
+	for pos < end {
+		var entryLen int
+		pos, entryLen, err = rlp.ParseList(payload, pos)
+		if err != nil {
+			return false
+		}
+		pos += entryLen
+		count++
+		if count > maxBlockHashesPerMsg {
+			return true
+		}
+	}
+	return false
+}
+
 func runPeer(
 	ctx context.Context,
 	peerID [64]byte,
@@ -487,6 +521,8 @@ func runPeer(
 			logger.Trace("Peer disconnected", "id", hex.EncodeToString(peerID[:]), "name", peerInfo.peer.Fullname())
 		}
 	}()
+
+	newBlockHashesLimiter := rate.NewLimiter(newBlockHashesRate, newBlockHashesBurst)
 
 	for {
 		if !peerPrinted {
@@ -601,6 +637,14 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
+			if msg.Size > maxNewBlockHashesBytes {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: oversized NewBlockHashes %d > %d", msg.Size, maxNewBlockHashesBytes))
+			}
+			if !newBlockHashesLimiter.Allow() {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: NewBlockHashes rate limit exceeded")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -608,7 +652,9 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
 			}
-			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
+			if newBlockHashesExceedsCap(b) {
+				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: NewBlockHashes exceeds %d entries", maxBlockHashesPerMsg))
+			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
