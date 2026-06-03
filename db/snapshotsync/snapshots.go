@@ -792,11 +792,24 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 				continue
 			}
 
-			// Fast path: if this indexed segment is fully covered by the last visible
-			// segment, skip it. The backward-removal loop below handles the general case,
-			// but this avoids unnecessary list mutations for the common subsegment order.
-			if len(newVisibleSegments) > 0 && sn.isSubSetOf(newVisibleSegments[len(newVisibleSegments)-1].src) {
-				continue
+			if len(newVisibleSegments) > 0 {
+				last := newVisibleSegments[len(newVisibleSegments)-1].src
+				// Same [from,to) range but different version: keep the newer one.
+				// Both pass the isSubSetOf check (equal ranges are not subsets), so without
+				// this guard both would be appended, causing the gap detector to truncate
+				// everything after the duplicate start.
+				if last.from == sn.from && last.to == sn.to {
+					if last.version.Less(sn.version) {
+						newVisibleSegments[len(newVisibleSegments)-1].src = sn
+					}
+					continue
+				}
+				// if this indexed segment is fully covered by the last visible
+				// segment, skip it. The backward-removal loop below handles the general case,
+				// but this avoids unnecessary list mutations for the common subsegment order.
+				if sn.isSubSetOf(last) {
+					continue
+				}
 			}
 
 			//protect from overlaps

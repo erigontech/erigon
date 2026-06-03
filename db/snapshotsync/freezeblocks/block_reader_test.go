@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
@@ -104,9 +105,9 @@ func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, fr
 	}
 }
 
-// TestBlockRetireSkipsOnGap verifies that the block retirement 
-// logic correctly prevents freezing when there is a gap between the last block available 
-// in the snapshots and the first block still present in the database. If this gap exists, 
+// TestBlockRetireSkipsOnGap verifies that the block retirement
+// logic correctly prevents freezing when there is a gap between the last block available
+// in the snapshots and the first block still present in the database. If this gap exists,
 // we cannot retire blocks because the history is not contiguous.
 func TestBlockRetireSkipsOnGap(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -146,8 +147,8 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 	require.False(t, hasEnough)
 }
 
-// TestBlockRetireContiguous ensures that block retirement is allowed 
-// to proceed when the database block history starts exactly where the snapshots end. 
+// TestBlockRetireContiguous ensures that block retirement is allowed
+// to proceed when the database block history starts exactly where the snapshots end.
 // This is the correct, contiguous state where we can transition retired blocks.
 func TestBlockRetireContiguous(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -187,10 +188,10 @@ func TestBlockRetireContiguous(t *testing.T) {
 	require.True(t, hasEnough)
 }
 
-// TestBlockRetireFallback verifies that if a merged segment is written 
-// to disk but its index is not generated yet, the node restart will not hide the smaller 
-// subsegments. These subsegments must remain visible so that block retirement can keep 
-// running without getting stuck (fixes issue #21472). Once the unindexed covering segment 
+// TestBlockRetireFallback verifies that if a merged segment is written
+// to disk but its index is not generated yet, the node restart will not hide the smaller
+// subsegments. These subsegments must remain visible so that block retirement can keep
+// running without getting stuck (fixes issue #21472). Once the unindexed covering segment
 // is deleted or indexed, the visibility should remain stable.
 func TestBlockRetireFallback(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -266,7 +267,7 @@ func TestBlockRetireFallback(t *testing.T) {
 
 	// Removing the unindexed overlap leaves the same indexed subsegments visible.
 	unindexedOverlap := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
-	require.NoError(t, os.Remove(unindexedOverlap))
+	require.NoError(t, dir.RemoveFile(unindexedOverlap))
 
 	restoredSnapshots := NewRoSnapshots(cfg, tmpDir, logger)
 	require.NoError(t, restoredSnapshots.OpenFolder())
@@ -284,10 +285,10 @@ func TestBlockRetireFallback(t *testing.T) {
 	require.True(t, hasEnough)
 }
 
-// TestBlockRetireAllOverlapped tests a scenario where all block 
-// snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments 
-// on disk. Under the alignMin setting, we must verify that all three types correctly 
-// fall back to their indexed subsegments and maintain the correct visible range, allowing 
+// TestBlockRetireAllOverlapped tests a scenario where all block
+// snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments
+// on disk. Under the alignMin setting, we must verify that all three types correctly
+// fall back to their indexed subsegments and maintain the correct visible range, allowing
 // block retirement to proceed (related to issue #21472).
 func TestBlockRetireAllOverlapped(t *testing.T) {
 	tmpDir := t.TempDir()
