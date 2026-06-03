@@ -220,15 +220,21 @@ func NewFuncCodec(conn deadlineCloser, encode, decode func(v any) error) ServerC
 	return codec
 }
 
+// rawResponse is a pre-assembled, already-valid JSON response the codec writes verbatim,
+// skipping json.Encoder's redundant appendCompact re-scan; a distinct type keeps that path opt-in.
+type rawResponse []byte
+
+// MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
+func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
+
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
 func NewCodec(conn Conn) ServerCodec {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	// The handler assembles each response as already-compact json.RawMessage; write it verbatim to skip json.Encoder's redundant appendCompact re-scan.
 	encode := func(v any) error {
-		raw, ok := v.(json.RawMessage)
+		raw, ok := v.(rawResponse)
 		if !ok {
 			return enc.Encode(v)
 		}

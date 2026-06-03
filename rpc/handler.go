@@ -284,7 +284,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 			}
 		}
 		if needWriteStream {
-			h.conn.WriteJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
 		} else {
 			stream.Write([]byte("\n"))
 		}
