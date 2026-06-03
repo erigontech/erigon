@@ -462,3 +462,53 @@ func TestGetStorageValues_PrunedBlockReturnsError(t *testing.T) {
 // bnhPtr returns a pointer to a BlockNumberOrHash, for the state methods whose
 // block parameter is now optional (*rpc.BlockNumberOrHash).
 func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
+
+// TestStateMethods_OmittedBlockDefaultsToLatest verifies that an omitted (nil)
+// block selector is treated identically to an explicit "latest" selector for each
+// state method (per execution-apis: the Block parameter is optional, default
+// 'latest'). This exercises the orLatest(nil) path directly.
+func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
+	a := assert.New(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	balNil, err := api.GetBalance(ctx, addr, nil)
+	a.NoError(err)
+	balLatest, err := api.GetBalance(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(balLatest, balNil)
+
+	codeNil, err := api.GetCode(ctx, addr, nil)
+	a.NoError(err)
+	codeLatest, err := api.GetCode(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(codeLatest, codeNil)
+
+	nonceNil, err := api.GetTransactionCount(ctx, addr, nil)
+	a.NoError(err)
+	nonceLatest, err := api.GetTransactionCount(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(nonceLatest, nonceNil)
+
+	storageNil, err := api.GetStorageAt(ctx, addr, "0x0", nil)
+	a.NoError(err)
+	storageLatest, err := api.GetStorageAt(ctx, addr, "0x0", &latest)
+	a.NoError(err)
+	a.Equal(storageLatest, storageNil)
+
+	proofNil, err := api.GetProof(ctx, addr, nil, nil)
+	a.NoError(err)
+	proofLatest, err := api.GetProof(ctx, addr, nil, &latest)
+	a.NoError(err)
+	a.Equal(proofLatest, proofNil)
+
+	req := map[common.Address][]common.Hash{addr: {{}}}
+	svNil, err := api.GetStorageValues(ctx, req, nil)
+	a.NoError(err)
+	svLatest, err := api.GetStorageValues(ctx, req, &latest)
+	a.NoError(err)
+	a.Equal(svLatest, svNil)
+}
