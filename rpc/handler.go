@@ -276,8 +276,12 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			buffer, _ := json.Marshal(answer)
-			stream.Write(buffer)
+			if answer.isPlainResult() {
+				answer.writeResultTo(stream)
+			} else {
+				buffer, _ := json.Marshal(answer)
+				stream.Write(buffer)
+			}
 		}
 		if needWriteStream {
 			h.conn.WriteJSON(cp.ctx, json.RawMessage(stream.Buffer()))
@@ -703,6 +707,29 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	}
 	stream.WriteObjectEnd()
 	return nil
+}
+
+// isPlainResult reports whether msg is an ordinary successful result response (no error, not a
+// request/notification). Such a response can be written to the stream without re-marshalling the
+// already-encoded Result.
+func (msg *jsonrpcMessage) isPlainResult() bool {
+	return msg.Error == nil && msg.Result != nil && msg.ID != nil && msg.Version != "" && msg.Method == "" && msg.Params == nil
+}
+
+// writeResultTo writes the response envelope to the jsoniter stream and copies the already-encoded
+// Result verbatim, skipping stdlib's appendCompact re-scan of a potentially large result (the
+// engine_getBlobs payloads in issue #21226). Output is byte-identical to json.Marshal(msg).
+func (msg *jsonrpcMessage) writeResultTo(stream jsonstream.Stream) {
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString(msg.Version)
+	stream.WriteMore()
+	stream.WriteObjectField("id")
+	_, _ = stream.Write(msg.ID)
+	stream.WriteMore()
+	stream.WriteObjectField("result")
+	_, _ = stream.Write(msg.Result)
+	stream.WriteObjectEnd()
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

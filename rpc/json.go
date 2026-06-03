@@ -104,8 +104,23 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
+// fastJSONResult is an RPC method result that marshals itself to JSON bytes without reflection.
+// The handler uses those bytes verbatim (and writeResultTo copies them to the stream raw), which
+// avoids reflection and the appendCompact re-scan that large responses would otherwise pay.
+type fastJSONResult interface {
+	MarshalFastJSON() ([]byte, error)
+}
+
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	enc, err := json.Marshal(result)
+	var (
+		enc []byte
+		err error
+	)
+	if fm, ok := result.(fastJSONResult); ok {
+		enc, err = fm.MarshalFastJSON()
+	} else {
+		enc, err = json.Marshal(result)
+	}
 	if err != nil {
 		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)
@@ -213,7 +228,20 @@ func NewCodec(conn Conn) ServerCodec {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return NewFuncCodec(conn, enc.Encode, dec.Decode)
+	// The handler assembles each response into a json.RawMessage; write it verbatim (plus the
+	// trailing newline json.Encoder would add) instead of running json.Encoder over it, which
+	// re-scans the whole payload through appendCompact — a large cost for engine_getBlobs
+	// responses (issue #21226). The buffer is already compact, escaped JSON. Newline and payload
+	// go out in one Write so a single Read on the connection still sees the full framed response.
+	encode := func(v any) error {
+		raw, ok := v.(json.RawMessage)
+		if !ok {
+			return enc.Encode(v)
+		}
+		_, err := conn.Write(append(raw, '\n'))
+		return err
+	}
+	return NewFuncCodec(conn, encode, dec.Decode)
 }
 
 func (c *jsonCodec) remoteAddr() string {
