@@ -775,10 +775,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 // the deduplicated set of accessed accounts/storage/code addresses, the sorted code
 // blobs that go into result.Codes, and the pre-state code reads that feed witness
 // trie generation. WitnessKeys holds the standalone preimages (20B addresses, 32B
-// slots) that go into result.Keys. SortedKeys is the internal composite-key encoding
-// (addr, addr‖slot) kept for symmetry with PR #21227 and is not emitted.
+// slots) that go into result.Keys.
 type accessedState struct {
-	SortedKeys  []hexutil.Bytes
 	WitnessKeys []hexutil.Bytes
 	Addresses   map[common.Address]struct{}
 	Storage     map[common.Address]map[common.Hash]struct{}
@@ -915,21 +913,6 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 			delete(out.Addresses, sysAddr)
 		}
 	}
-
-	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
-	for addr := range out.Addresses {
-		sortedKeys = append(sortedKeys, addr[:])
-	}
-	for addr, keys := range out.Storage {
-		for key := range keys {
-			composite := append(addr[:], key[:]...)
-			sortedKeys = append(sortedKeys, composite)
-		}
-	}
-	slices.SortFunc(sortedKeys, func(a, b hexutil.Bytes) int {
-		return bytes.Compare(a, b)
-	})
-	out.SortedKeys = sortedKeys
 
 	witnessKeySet := make(map[string]struct{}, len(out.Addresses))
 	for addr := range out.Addresses {
