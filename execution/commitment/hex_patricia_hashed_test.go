@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
 // randSrc and randMu removed — generateKeyWithHashedPrefix now uses per-call
@@ -2360,6 +2361,86 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			}
 		}
 	}
+
+	// assertLegacyStorageMaterialized builds the trie, witnesses the given account
+	// in both canonical and legacy modes, and checks that legacy materializes the
+	// account's storage-root node (instead of a HashNode) without changing the root.
+	assertLegacyStorageMaterialized := func(t *testing.T, builder *UpdateBuilder, accountPlainKey []byte) {
+		t.Helper()
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph.SetTrace(false)
+
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		stateRoot, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		genWitness := func(legacy bool) (*trie.Trie, []byte) {
+			toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+			defer toWitness.Close()
+			toWitness.TouchPlainKey(string(accountPlainKey), nil, toProcess.TouchAccount)
+			wt, root, err := hph.GenerateWitness(ctx, toWitness, nil, legacy, "")
+			require.NoError(t, err)
+			return wt, root
+		}
+
+		canonicalTrie, canonicalRoot := genWitness(false)
+		legacyTrie, legacyRoot := genWitness(true)
+
+		require.Equal(t, stateRoot, canonicalRoot, "canonical witness root must equal state root")
+		require.Equal(t, canonicalRoot, legacyRoot, "legacy witness root must equal canonical root")
+
+		hashedKey := KeyToHexNibbleHash(accountPlainKey)
+
+		legacyAcc, ok := legacyTrie.GetNode(hashedKey).(*trie.AccountNode)
+		require.True(t, ok, "legacy witness must contain an AccountNode for the witnessed account")
+		require.NotNil(t, legacyAcc.Storage, "account has non-empty storage; legacy must materialize the storage root")
+		_, isHash := legacyAcc.Storage.(*trie.HashNode)
+		require.False(t, isHash, "legacy storage root must be a materialized node, not a HashNode")
+
+		materializedRoot := trie.NewInMemoryTrie(legacyAcc.Storage).Root()
+		require.Equal(t, legacyAcc.Account.Root[:], materializedRoot,
+			"materialized storage node hashed in isolation must equal the account's storage root")
+
+		canonAcc, ok := canonicalTrie.GetNode(hashedKey).(*trie.AccountNode)
+		require.True(t, ok, "canonical witness must contain an AccountNode for the witnessed account")
+		_, canonIsHash := canonAcc.Storage.(*trie.HashNode)
+		require.True(t, canonIsHash, "canonical storage root must remain a HashNode (mode-gated)")
+	}
+
+	t.Run("LegacyStorageRootMaterialization_Single", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addrWithStorage := common.Copy(plainKeysList[0])
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+		builder.Storage(common.Bytes2Hex(addrWithStorage), "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470", "00044c45500c49b2a2a5dde8dfc7d1e71c894b7b9081866bfd33d5552deed470")
+
+		assertLegacyStorageMaterialized(t, builder, addrWithStorage)
+	})
+
+	t.Run("LegacyStorageRootMaterialization_Multi", func(t *testing.T) {
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+		addrWithStorage := common.Copy(plainKeysList[0])
+		storageKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 4, 2)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+		for sl := 0; sl < len(storageKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrWithStorage), common.Bytes2Hex(storageKeysList[sl]), common.Bytes2Hex(storageKeysList[sl]))
+		}
+
+		assertLegacyStorageMaterialized(t, builder, addrWithStorage)
+	})
 
 	t.Run("JustRoot", func(t *testing.T) {
 		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 1)

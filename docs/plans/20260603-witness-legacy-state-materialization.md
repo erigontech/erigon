@@ -107,16 +107,16 @@ Canonical mode path is untouched. The witness `RootHash()` must be unchanged.
 **Files:**
 - Modify: `execution/commitment/hex_patricia_hashed_test.go`
 
-- [ ] extend `Test_WitnessTrie_GenerateWitness` with a legacy case, reusing the existing
+- [x] extend `Test_WitnessTrie_GenerateWitness` with a legacy case, reusing the existing
       `StorageSingleton` (single untouched slot) and `StorageSubtrieWithCommonPrefix`
       (multi-slot) fixtures over `MockState` (no live DB)
-- [ ] assert (currently failing): in legacy mode `AccountNode.Storage` is a materialized
+- [x] assert (currently failing): in legacy mode `AccountNode.Storage` is a materialized
       node (not `*trie.HashNode`) for both accounts
-- [ ] assert the materialized node's own hash equals `storageRootHash`
+- [x] assert the materialized node's own hash equals `storageRootHash`
       (`trie.NewInMemoryTrie(storageNode).Root()` == the cell's storage root) — pins content,
       not just the Go type
-- [ ] assert `RootHash()` in legacy == canonical (root unchanged)
-- [ ] confirm it runs without `-short` and fails for the right reason (materialization
+- [x] assert `RootHash()` in legacy == canonical (root unchanged)
+- [x] confirm it runs without `-short` and fails for the right reason (materialization
       missing), not a setup error
 
 ### Task 2: Materialize empty + single-slot storage roots (legacy)
