@@ -29,6 +29,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/event"
 )
 
 var (
@@ -100,7 +101,7 @@ type ContractFilterer interface {
 
 	// SubscribeFilterLogs creates a background log filtering operation, returning
 	// a subscription immediately, which can be used to stream the found events.
-	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
+	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error)
 }
 
 // DeployBackend wraps the operations needed by WaitMined and WaitDeployed.

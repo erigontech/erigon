@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -80,8 +81,8 @@ type RequestGenerator interface {
 	SendTransaction(signedTx types.Transaction) (common.Hash, error)
 	SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
-	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
-	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error)
+	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error)
+	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error)
 	TxpoolContent() (int, int, int, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
@@ -393,7 +394,7 @@ func post(ctx context.Context, client *http.Client, url, method, request string,
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error) {
+func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error) {
 	if req.subscriptionClient == nil {
 		err := retryConnects(ctx, func(ctx context.Context) error {
 			var err error

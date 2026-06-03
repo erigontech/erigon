@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -598,7 +599,7 @@ type MockContractBackend struct {
 func (cb *MockContractBackend) PrepareMocks() {
 	cb.EXPECT().
 		SubscribeFilterLogs(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, q ethereum.FilterQuery, s chan<- types.Log) (ethereum.Subscription, error) {
+		DoAndReturn(func(_ context.Context, q ethereum.FilterQuery, s chan<- types.Log) (event.Subscription, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			addrStrs := make([]string, 0, len(q.Addresses))

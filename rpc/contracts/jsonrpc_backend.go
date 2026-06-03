@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -91,6 +92,6 @@ func (b JsonRpcBackend) FilterLogs(ctx context.Context, query ethereum.FilterQue
 	return b.client.FilterLogs(ctx, query)
 }
 
-func (b JsonRpcBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (b JsonRpcBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	return b.client.SubscribeFilterLogs(ctx, query, ch)
 }

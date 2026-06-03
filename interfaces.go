@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package ethereum defines interfaces for interacting with Ethereum.
+// Package ethereum defines types for interacting with Ethereum.
 package ethereum
 
 import (
@@ -32,21 +32,6 @@ import (
 
 // NotFound is returned by API methods if the requested item does not exist.
 var NotFound = errors.New("not found")
-
-// TODO: move subscription to package event
-
-// Subscription represents an event subscription where events are
-// delivered on a data channel.
-type Subscription interface {
-	// Unsubscribe cancels the sending of events to the data channel
-	// and closes the error channel.
-	Unsubscribe()
-	// Err returns the subscription error channel. The error channel receives
-	// a value if there is an issue with the subscription (e.g. the network connection
-	// delivering the events has been closed). Only one value will ever be sent.
-	// The error channel is closed by Unsubscribe.
-	Err() <-chan error
-}
 
 // CallMsg contains parameters for contract calls.
 type CallMsg struct {

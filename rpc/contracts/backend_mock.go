@@ -17,6 +17,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	common "github.com/erigontech/erigon/common"
 	types "github.com/erigontech/erigon/execution/types"
+	event "github.com/erigontech/erigon/p2p/event"
 	uint256 "github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -318,10 +319,10 @@ func (c *MockBackendSendTransactionCall) DoAndReturn(f func(context.Context, typ
 }
 
 // SubscribeFilterLogs mocks base method.
-func (m *MockBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (m *MockBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SubscribeFilterLogs", ctx, query, ch)
-	ret0, _ := ret[0].(ethereum.Subscription)
+	ret0, _ := ret[0].(event.Subscription)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -339,19 +340,19 @@ type MockBackendSubscribeFilterLogsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBackendSubscribeFilterLogsCall) Return(arg0 ethereum.Subscription, arg1 error) *MockBackendSubscribeFilterLogsCall {
+func (c *MockBackendSubscribeFilterLogsCall) Return(arg0 event.Subscription, arg1 error) *MockBackendSubscribeFilterLogsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendSubscribeFilterLogsCall) Do(f func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
+func (c *MockBackendSubscribeFilterLogsCall) Do(f func(context.Context, ethereum.FilterQuery, chan<- types.Log) (event.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendSubscribeFilterLogsCall) DoAndReturn(f func(context.Context, ethereum.FilterQuery, chan<- types.Log) (ethereum.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
+func (c *MockBackendSubscribeFilterLogsCall) DoAndReturn(f func(context.Context, ethereum.FilterQuery, chan<- types.Log) (event.Subscription, error)) *MockBackendSubscribeFilterLogsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

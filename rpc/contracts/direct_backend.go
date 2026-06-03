@@ -143,7 +143,7 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuer
 	return res, nil
 }
 
-func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	resc, closec := make(chan any), make(chan any)
 	ctx = rpc.ContextWithNotifier(ctx, rpc.NewLocalNotifier("eth", resc, closec))
 	_, err := b.api.Logs(ctx, filters.FilterCriteria(query))
