@@ -107,7 +107,25 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		return fmt.Errorf("TruncateTd(%d): %w", toBlock+1, err)
 	}
 
-	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Execution} {
+	// Reset every chain-block-following stage's progress to toBlock.
+	// Stages whose progress tracks the chain head — Headers, Bodies,
+	// BlockHashes, Senders, Execution, TxLookup, Finish — must not
+	// remain at a higher value than the unwind target: post-unwind
+	// the chain "is at" toBlock, so any stage cursor past toBlock is
+	// an invariant violation. The verifier (Phase 0) catches misses
+	// here, but it's cheaper to set them right than to lean on the
+	// assertion. Forward-leaning stages (OtterSync / CustomTrace /
+	// WitnessProcessing) track the snapshot or index frontier rather
+	// than the chain head and are deliberately not touched.
+	for _, stage := range []stages.SyncStage{
+		stages.Headers,
+		stages.BlockHashes,
+		stages.Bodies,
+		stages.Senders,
+		stages.Execution,
+		stages.TxLookup,
+		stages.Finish,
+	} {
 		if err := stages.SaveStageProgress(tx, stage, toBlock); err != nil {
 			return fmt.Errorf("SaveStageProgress(%s, %d): %w", stage, toBlock, err)
 		}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 )
 
 // UnwindOpts holds the per-call inputs Provider.Unwind needs that it
@@ -129,6 +130,20 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	//    guarantees these writes land without orphan dups.
 	if err := p.ensureCommitmentAtBlockApply(ctx, opts.Tx, toBlock, recompute); err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
+	}
+
+	// 6. Verify the DB image is consistent with the unwind target
+	//    before the tx commits. Catches silent wipe-completeness gaps
+	//    in any of the sub-ops above; a failure here rolls the whole
+	//    mode-B back via the caller's AbortUnwind, which is far better
+	//    than leaving a half-unwound DB that surfaces hours later as
+	//    a wrong-block-data or wrong-state-root error.
+	lastTxNum, err := rawdbv3.TxNums.Max(ctx, opts.Tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: verify lookup lastTxNum: %w", err)
+	}
+	if err := verifyPostUnwindDBImage(ctx, opts.Tx, toBlock, lastTxNum); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: %w", err)
 	}
 
 	return nil
