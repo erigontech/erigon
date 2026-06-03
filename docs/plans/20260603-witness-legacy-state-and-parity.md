@@ -116,14 +116,15 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify/Create: `rpc/jsonrpc/debug_execution_witness_test.go` (or nearest existing jsonrpc test)
 
-- [ ] write a failing unit test for `RecordingState.accountExists`: cases exists / deleted /
+- [x] write a failing unit test for `RecordingState.accountExists`: cases exists / deleted /
       nonexistent (nil inner) / created-in-block (overlay) / created-then-deleted
-- [ ] add `RecordingState.accountExists(addr) bool`: overlay non-nil; else not in
+- [x] add `RecordingState.accountExists(addr) bool`: overlay non-nil; else not in
       `DeletedAccounts` AND `rs.inner.ReadAccountData(addr)` non-nil (use the inner reader,
       mirror L875)
-- [ ] in `collectAccessedState`, gate 20B address entries in `WitnessKeys` on
+- [x] in `collectAccessedState`, gate 20B address entries in `WitnessKeys` on
       `accountExists`; leave 32B slots and the unique global-dedup set unchanged
-- [ ] tests pass; build + `make lint` clean
+- [x] tests pass; build + `make lint` clean (lint: 55 pre-existing issues in sibling
+      worktree only; none in changed files)
 
 ### Task 2: Codes — narrow the empty-`0x` trigger
 

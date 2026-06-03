@@ -408,6 +408,21 @@ func (s *RecordingState) CreateContract(address accounts.Address) error {
 	return nil
 }
 
+// accountExists reports whether the account exists in the post-state: present and
+// non-nil in the write overlay, otherwise not deleted and present in the inner
+// (pre-block) reader. The inner reader is read directly so the check does not
+// re-mark AccessedAccounts.
+func (s *RecordingState) accountExists(addr common.Address) bool {
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return false
+	}
+	if acc, ok := s.accountOverlay[addr]; ok {
+		return acc != nil
+	}
+	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
+	return err == nil && acc != nil
+}
+
 // --- Query methods ---
 
 // GetAccessedKeys returns all accessed account addresses and storage keys (reads + writes)
@@ -907,6 +922,9 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 
 	witnessKeySet := make(map[string]struct{}, len(out.Addresses))
 	for addr := range out.Addresses {
+		if !rs.accountExists(addr) {
+			continue
+		}
 		witnessKeySet[string(addr[:])] = struct{}{}
 	}
 	for _, keys := range out.Storage {
