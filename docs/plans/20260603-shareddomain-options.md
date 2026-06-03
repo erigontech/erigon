@@ -102,8 +102,8 @@ Option ordering note: `WithTrieConfig` replaces the entire config including any 
 **Files:**
 - Create: `db/state/execctx/options.go`
 
-- [ ] Create `db/state/execctx/options.go` with `sharedDomainOptions` struct, `SharedDomainOption` type, `WithTrieConfig`, and `WithoutDeferredBranchUpdates` (one-line godoc each, per repo no-comment-bloat rule).
-- [ ] `go build ./db/state/execctx/...` compiles (functions unused at this point is fine — they're exported).
+- [x] Create `db/state/execctx/options.go` with `sharedDomainOptions` struct, `SharedDomainOption` type, `WithTrieConfig`, and `WithoutDeferredBranchUpdates` (one-line godoc each, per repo no-comment-bloat rule).
+- [x] `go build ./db/state/execctx/...` compiles (functions unused at this point is fine — they're exported).
 
 ### Task 2: Collapse the two constructors into one variadic NewSharedDomains
 
