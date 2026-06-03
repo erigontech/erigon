@@ -1825,3 +1825,228 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
 	require.NoError(t, err)
 }
+
+// TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
+// pattern: InsertBlocks(batch) → ForkChoiceUpdate(last block of batch),
+// repeated for each batch. Verifies parent TD continuity across batches —
+// the "parent's total difficulty not found" failure mode the collector
+// comment warns about does not actually occur on the catch-up path.
+func TestInsertBlocksWithBatchedFCU(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+
+	const totalBlocks = 30
+	const batchSize = 10
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, totalBlocks)
+
+	for start := 0; start < totalBlocks; start += batchSize {
+		end := start + batchSize
+		batch := chainPack.Blocks[start:end]
+
+		insRes, err := insertBlocks(ctx, m.ExecModule, batch)
+		require.NoError(t, err, "batch [%d..%d] InsertBlocks", start+1, end)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+
+		last := batch[len(batch)-1].Header()
+		fcuRes, err := updateForkChoice(ctx, m.ExecModule, last)
+		require.NoError(t, err, "batch [%d..%d] FCU on block %d", start+1, end, last.Number.Uint64())
+		require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+			"FCU on block %d should succeed; validationError=%q", last.Number.Uint64(), fcuRes.ValidationError)
+
+		// After each batch's FCU, TxNums + execution must have advanced to
+		// the batch tip. The next batch's first block reads its parent's TD
+		// from this committed state.
+		require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			lastTxNumBlock, _, err := rawdbv3.TxNums.Last(tx)
+			require.NoError(t, err)
+			require.Equal(t, last.Number.Uint64(), lastTxNumBlock, "TxNums.Last after batch ending at %d", last.Number.Uint64())
+
+			execProg, err := stages.GetStageProgress(tx, stages.Execution)
+			require.NoError(t, err)
+			require.Equal(t, last.Number.Uint64(), execProg, "Execution stage progress after batch ending at %d", last.Number.Uint64())
+
+			// First block of the just-inserted batch should have a readable TD
+			// (asserts the rawdb.WriteTd in InsertBlocks made it to DB).
+			firstOfBatch := batch[0].HeaderNoCopy()
+			td, err := rawdb.ReadTd(tx, firstOfBatch.Hash(), firstOfBatch.Number.Uint64())
+			require.NoError(t, err)
+			require.NotNil(t, td, "TD for block %d must be readable across the batch boundary", firstOfBatch.Number.Uint64())
+			return nil
+		}))
+	}
+}
+
+// runBatchedFCUBadBlockRecovery is the shared body for the foreground- and
+// background-commit variants of the bad-block recovery test. Both FCU
+// cleanup branches — local SD close (foreground) and the additional
+// currentContext reset (background) — must leave the next InsertBlocks+FCU
+// cycle able to recover.
+func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	opts := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	}
+	if bgCommit {
+		opts = append(opts, execmoduletester.WithFcuBackgroundCommit())
+	}
+	m := execmoduletester.New(t, opts...)
+
+	// Under background commit, a commit (including the genesis InsertBlocks inside
+	// New) lands asynchronously after the call returns. These polls let DB reads
+	// wait for the commit goroutine; both return immediately under foreground
+	// commit. Transient read errors are treated as "not ready yet" and retried.
+	waitForGenesis := func() {
+		require.Eventually(t, func() bool {
+			var funded bool
+			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+				if err != nil {
+					return err
+				}
+				funded = len(v) > 0
+				return nil
+			})
+			return err == nil && funded
+		}, 15*time.Second, 10*time.Millisecond, "genesis commit did not land")
+	}
+	waitForBlock := func(blockNum uint64) {
+		require.Eventually(t, func() bool {
+			var done bool
+			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				last, _, err := rawdbv3.TxNums.Last(tx)
+				if err != nil {
+					return err
+				}
+				done = last >= blockNum
+				return nil
+			})
+			return err == nil && done
+		}, 15*time.Second, 10*time.Millisecond, "commit of block %d did not land", blockNum)
+	}
+	// Genesis must be committed before GenerateChain reads its state.
+	waitForGenesis()
+
+	// Build a 6-block chain. First 5 are committed normally; block 6 is the
+	// recovery target.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 6)
+
+	// Phase 1: insert + FCU blocks 1..5 normally so state is at 5.
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[:5])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[4].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
+	waitForBlock(5)
+
+	// Phase 2: forge a "bad block 6" sharing the canonical parent (block 5's
+	// hash) but with a corrupted state root. InsertBlocks accepts it
+	// (header-write only); FCU on it triggers execution which computes the
+	// real post-state root, finds the mismatch and returns BadBlock.
+	goodHeader6 := chainPack.Blocks[5].HeaderNoCopy()
+	badHeader6 := types.CopyHeader(goodHeader6)
+	badHeader6.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock6 := types.NewBlockFromNetwork(badHeader6, &types.Body{
+		Transactions: chainPack.Blocks[5].Transactions(),
+		Uncles:       chainPack.Blocks[5].Uncles(),
+		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
+	})
+
+	badRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{badBlock6})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, badRes, "InsertBlocks writes the header without validating state root")
+
+	fcuBad, err := updateForkChoice(ctx, m.ExecModule, badBlock6.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcuBad.Status,
+		"FCU on the bad block must return BadBlock (state-root mismatch); got %s validationError=%q", fcuBad.Status, fcuBad.ValidationError)
+
+	// Phase 3: recovery — insert the real block 6 and FCU on it. This must
+	// succeed even though the bad-block FCU just closed the local
+	// SharedDomains. The persistent e.currentContext is either still
+	// pointing to the prior SD (foreground) or has been nil'd (background);
+	// both paths must let the next InsertBlocks re-initialize the overlay
+	// cleanly.
+	recoverIns, err := insertBlocks(ctx, m.ExecModule, []*types.Block{chainPack.Blocks[5]})
+	require.NoError(t, err, "InsertBlocks of the good block after a bad-block FCU must not error")
+	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverIns)
+
+	recoverFcu, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[5].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverFcu.Status,
+		"FCU on the good block after recovery must succeed; validationError=%q", recoverFcu.ValidationError)
+	waitForBlock(6)
+
+	// State must be at the good block 6 — TxNums.Last and Execution progress
+	// both at 6, parent TD readable.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastTxNumBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), lastTxNumBlock)
+
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), execProg)
+
+		td, err := rawdb.ReadTd(tx, chainPack.Blocks[5].Hash(), 6)
+		require.NoError(t, err)
+		require.NotNil(t, td)
+		return nil
+	}))
+}
+
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground covers the
+// foreground-commit cleanup path: a bad-block FCU closes the local
+// SharedDomains while the persistent currentContext remains, and the next
+// InsertBlocks must re-initialize the overlay on top of it.
+func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground(t *testing.T) {
+	runBatchedFCUBadBlockRecovery(t, false)
+}
+
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background covers the
+// background-commit cleanup path, where the bad-block FCU additionally resets
+// currentContext. Commits land asynchronously, so the shared body polls
+// committed state before asserting (see waitForGenesis/waitForBlock).
+func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background(t *testing.T) {
+	runBatchedFCUBadBlockRecovery(t, true)
+}

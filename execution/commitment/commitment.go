@@ -750,6 +750,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 
 type BranchData []byte
 
+// ChildCount returns the number of children present in the branch.
+func (branchData BranchData) ChildCount() int {
+	if len(branchData) < 4 {
+		return 0
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+}
+
 func (branchData BranchData) String() string {
 	if len(branchData) == 0 {
 		return ""

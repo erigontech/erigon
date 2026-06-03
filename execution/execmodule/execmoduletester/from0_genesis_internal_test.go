@@ -164,7 +164,6 @@ func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModule
 		false, /*badBlockHalt*/
 		emt.Dirs,
 		emt.BlockReader,
-		emt.sentriesClient.Hd,
 		emt.cfg.Genesis,
 		emt.cfg.Sync,
 		false, /*experimentalBAL*/
