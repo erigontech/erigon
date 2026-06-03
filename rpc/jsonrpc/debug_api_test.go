@@ -799,7 +799,13 @@ func TestExecutionWitness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.Nil(t, result.Keys, "Keys must remain nil (Geth compatibility)")
+		require.NotNil(t, result.Keys, "Keys must be populated with accessed address/slot preimages")
+		for i, k := range result.Keys {
+			require.Contains(t, []int{20, 32}, len(k), "key %d must be a 20B address or 32B slot preimage", i)
+			if i > 0 {
+				require.Negative(t, bytes.Compare(result.Keys[i-1], k), "keys must be sorted and deduplicated")
+			}
+		}
 		if len(result.Headers) > 0 {
 			require.Contains(t, result.headerByNumber, uint64(0), "parent header (block 0) must be present in lookup map when Headers is non-empty")
 		}

@@ -47,6 +47,10 @@ func fixturesDir() string {
 }
 
 func TestExecutionSpecWitness(t *testing.T) {
+	// The zkevm corpus fixtures are the minimized canonical witness format, so the
+	// producer must run in canonical mode regardless of the deployment default.
+	t.Setenv("ERIGON_WITNESS_MODE", "canonical")
+
 	// debug_executionWitness requires the historical-commitment schema; enable it
 	// before any test DB is built and restore the prior schema once all subtests
 	// (including the corpus walk) have finished.
