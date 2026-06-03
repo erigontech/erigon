@@ -132,11 +132,11 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 
-- [ ] write a failing unit test asserting the empty-`0x` entry appears only when empty
+- [x] write a failing unit test asserting the empty-`0x` entry appears only when empty
       bytecode is materialized for execution (not on a plain empty-account data read)
-- [ ] move/narrow the `emptyCodeAccessed` trigger from `ReadAccountData` to the
+- [x] move/narrow the `emptyCodeAccessed` trigger from `ReadAccountData` to the
       execution code-load path; canonical unaffected
-- [ ] tests pass; build + `make lint` clean
+- [x] tests pass; build + `make lint` clean
 
 ### Task 3: State — legacy node materialization (mode-gated)
 

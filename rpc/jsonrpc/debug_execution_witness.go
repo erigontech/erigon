@@ -142,11 +142,6 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return acc, nil
 	}
 	acc, err := s.inner.ReadAccountData(address)
-	if acc != nil && acc.IsEmptyCodeHash() {
-		// Loading an empty-code account materializes the empty bytecode; legacy
-		// mode emits that single empty entry.
-		s.emptyCodeAccessed = true
-	}
 	if s.tracing(addr) {
 		if acc != nil {
 			fmt.Printf("[TRACE] ReadAccountData %s -> inner nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)

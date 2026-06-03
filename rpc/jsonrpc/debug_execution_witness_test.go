@@ -91,6 +91,53 @@ func TestRecordingState_accountExists(t *testing.T) {
 	}
 }
 
+// hasEmptyCode reports whether the legacy code set carries the single empty `0x`
+// bytecode entry.
+func hasEmptyCode(accessed *accessedState) bool {
+	for _, c := range accessed.SortedCodes {
+		if len(c) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEmptyCodeTrigger_OnlyOnCodeLoad asserts the legacy empty-`0x` entry is
+// emitted only when empty bytecode is materialized for execution (a code-load via
+// ReadAccountCode), not on a plain empty-account data read (ReadAccountData).
+func TestEmptyCodeTrigger_OnlyOnCodeLoad(t *testing.T) {
+	emptyAcc := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{
+		emptyAcc: {Nonce: 1},
+	}}
+
+	t.Run("data read does not trigger", func(t *testing.T) {
+		rs := NewRecordingState(inner)
+		if _, err := rs.ReadAccountData(accounts.InternAddress(emptyAcc)); err != nil {
+			t.Fatal(err)
+		}
+		if rs.emptyCodeAccessed {
+			t.Error("emptyCodeAccessed set by a plain account data read")
+		}
+		if hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("empty 0x code entry emitted without a code load")
+		}
+	})
+
+	t.Run("code load triggers", func(t *testing.T) {
+		rs := NewRecordingState(inner)
+		if _, err := rs.ReadAccountCode(accounts.InternAddress(emptyAcc)); err != nil {
+			t.Fatal(err)
+		}
+		if !rs.emptyCodeAccessed {
+			t.Error("emptyCodeAccessed not set by a code load")
+		}
+		if !hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("empty 0x code entry missing after a code load")
+		}
+	})
+}
+
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
 // key is emitted only for accounts that exist post-state; accessed-but-nonexistent
 // addresses are excluded, while their accessed storage slots are still emitted.
