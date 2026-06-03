@@ -733,6 +733,8 @@ func newTestPeerInfoWithEth(t *testing.T) (*PeerInfo, [64]byte) {
 	t.Cleanup(rw.Close)
 
 	pi := NewPeerInfo(peer)
+	// Stop the per-peer worker goroutine started by NewPeerInfo.
+	t.Cleanup(pi.Close)
 	pi.SetEthRw(rw)
 	// Mark eth handshake as done so WaitForEth returns immediately.
 	pi.SetEthProtocol(direct.ETH68)
