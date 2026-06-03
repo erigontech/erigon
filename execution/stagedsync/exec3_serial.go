@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -100,7 +101,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 		var ok bool
-		b, ok = exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+		b, ok = se.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 		if b == nil || !ok {
 			b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
 			if err != nil {
@@ -202,15 +203,22 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !bytes.Equal(rh, header.Root.Bytes()) {
-				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+			if !bytes.Equal(rh, header.Root[:]) {
+				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root[:], header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-			panic(fmt.Sprintf("stopping: block %d complete", blockNum))
-			//return fmt.Errorf("stopping: block %d complete", blockNum)
+			se.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", se.logPrefix), "block", blockNum)
+			// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
+			// capture state at exactly N blocks executed. The DB is left as it
+			// was *before* this block was applied so the next run reproduces
+			// the stop point with the same input. panic() (the prior implementation)
+			// unwinds defers and fires the very commit we're trying to skip.
+			// Mirrors the design documented in PR #19803 — debug only, never set
+			// in production.
+			os.Exit(0)
 		}
 
 		if offsetFromBlockBeginning > 0 {
@@ -250,7 +258,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"commitment", times.ComputeCommitment,
 			)
 			stateCache.PrintStatsAndReset()
-			if isBatchFull {
+			if isBatchFull && blockNum != maxBlockNum {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
 		}
@@ -280,11 +288,9 @@ func (se *serialExecutor) LogExecution() {
 	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	se.committedGas.Add(int64(committedGas))
-	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+func (se *serialExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
@@ -421,13 +427,14 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
-				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts
+				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
+				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-					if err := se.getPostValidator().Process(blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := protocol.BlockPostValidation(blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -487,9 +494,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
-			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
-				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
-			}
 			if se.cfg.badBlockHalt {
 				return false, err
 			}
@@ -552,7 +556,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 		if !txTask.HistoryExecution {
 			if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
-				txTask.BalanceIncreaseSet, txTask.Rules()); err != nil {
+				txTask.BalanceIncreaseSet, txTask.Rules(), nil); err != nil {
 				return false, err
 			}
 			if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, applyReceipt, se.blobGasUsed,

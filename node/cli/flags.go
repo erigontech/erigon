@@ -18,7 +18,6 @@ package cli
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -264,7 +263,7 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if bufsize := ctx.String(EtlBufferSizeFlag.Name); bufsize != "" {
 		sizeVal := datasize.ByteSize(0)
 		if err := (&sizeVal).UnmarshalText([]byte(bufsize)); err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = sizeVal
 	}
@@ -333,53 +332,73 @@ func applyBloatnetDefaults(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
-	pruneMode := f.String(PruneModeFlag.Name, PruneModeFlag.DefaultText, PruneModeFlag.Usage)
-	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
-	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
+	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
+	pruneBlockDistance := cobraUint64ValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)
+	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
 
-	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
-	if pruneBlockDistance != nil {
-		blockDistance = *pruneBlockDistance
-	}
-	if pruneDistance != nil {
-		distance = *pruneDistance
-	}
-
-	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
 	cfg.Prune = mode
 
-	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
-		err := cfg.BatchSize.UnmarshalText([]byte(*v))
+	if v := cobraStringValueOrDefault(f, BatchSizeFlag.Name, BatchSizeFlag.Value); v != "" {
+		err := cfg.BatchSize.UnmarshalText([]byte(v))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 
-	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
+	if v := cobraStringValueOrDefault(f, EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value); v != "" {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal
-		err := size.UnmarshalText([]byte(*v))
+		err := size.UnmarshalText([]byte(v))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
 	}
 
-	cfg.StateStream = true
-	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
-		cfg.StateStream = false
-	}
-	if v := f.Bool(ExperimentalBALFlag.Name, false, ExperimentalBALFlag.Usage); v != nil {
-		cfg.ExperimentalBAL = *v
-	}
+	cfg.StateStream = !cobraBoolValueOrDefault(f, StateStreamDisableFlag.Name, StateStreamDisableFlag.Value)
+	cfg.ExperimentalBAL = cobraBoolValueOrDefault(f, ExperimentalBALFlag.Name, ExperimentalBALFlag.Value)
 
-	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {
+	if cobraBoolValueOrDefault(f, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value) {
 		cfg.ChaosMonkey = true
 	}
+}
+
+func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetString(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetBool(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {

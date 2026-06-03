@@ -12,8 +12,7 @@ Support only remote-miners.
 
 ## Implementation details
 
-* mining implemented as independent 🔬[Staged Sync](/eth/stagedsync/)
-* stages are declared in `eth/stagedsync/stagebuilder.go:MiningStages`
+* mining implemented as independent 🔬[Staged Sync](/execution/stagedsync/)
 * mining work done inside 1 db transaction which RollingBack after block prepared and `--miner.notify` notifications
   sent
 

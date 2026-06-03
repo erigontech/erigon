@@ -228,11 +228,13 @@ func (bt *BlockTest) Run(t *testing.T) error {
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	genesisHash := m.Genesis.Hash()
+	if genesisHash != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", genesisHash[:6], bt.json.Genesis.Hash[:6])
 	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	genesisRoot := m.Genesis.Root()
+	if genesisRoot != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", genesisRoot[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
 	validBlocks, err := bt.insertBlocks(m)
@@ -266,15 +268,17 @@ func (bt *BlockTest) RunCLI() error {
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
-	defer m.DB.Close()
+	defer m.Close()
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	genesisHash := m.Genesis.Hash()
+	if genesisHash != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", genesisHash[:6], bt.json.Genesis.Hash[:6])
 	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	genesisRoot := m.Genesis.Root()
+	if genesisRoot != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", genesisRoot[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
 	validBlocks, err := bt.insertBlocks(m)
@@ -515,7 +519,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, &balance2)
 		}
 		for loc, val := range acct.Storage {
-			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
+			val1 := uint256.NewInt(0).SetBytes(val[:])
 			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
 			if !val1.Eq(&val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)

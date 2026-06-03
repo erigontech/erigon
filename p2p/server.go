@@ -368,12 +368,19 @@ func (s *sharedUDPConn) Close() error {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
+func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	if srv.running.Load() {
 		return errors.New("server already running")
 	}
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
+
+	srv.running.Store(true)
+	defer func() {
+		if err != nil {
+			srv.running.Store(false)
+		}
+	}()
 
 	srv.logger = logger
 	if srv.clock == nil {
@@ -419,8 +426,8 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	}
 	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
+	srv.startListenLoop(srv.quitCtx)
 
-	srv.running.Store(true)
 	srv.loopWG.Add(1)
 	go srv.run()
 	return nil
@@ -662,14 +669,19 @@ func (srv *Server) setupListening(ctx context.Context) error {
 			}()
 		}
 	}
+	return nil
+}
 
+func (srv *Server) startListenLoop(ctx context.Context) {
+	if srv.listener == nil {
+		return
+	}
 	srv.loopWG.Add(1)
 	go func() {
 		defer dbg.LogPanic()
 		defer srv.loopWG.Done()
 		srv.listenLoop(ctx)
 	}()
-	return nil
 }
 
 // doPeerOp runs fn on the main loop.
@@ -777,7 +789,6 @@ running:
 		case <-logTimer.C:
 			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
 			vals = append(vals, srv.listAndResetErrors()...)
-
 			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}

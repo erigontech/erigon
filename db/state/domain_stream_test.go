@@ -332,7 +332,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 
 // TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues is the LargeValues
 // counterpart to TestDomainLatestIterFile_PrefersFilesOverDB.  It uses
-// CodeDomain (LargeValues: true) so that both initCursorMDBX branches and both
+// CodeDomain (LargeValues: true) so that both initCursorOnDB branches and both
 // advanceInFiles DB_CURSOR branches are exercised.
 //
 // For LargeValues domains the DB key layout is:

@@ -221,6 +221,6 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	log.Debug(name+" cache stats",
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
-		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
+		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }

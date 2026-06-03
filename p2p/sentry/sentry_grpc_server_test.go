@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -13,8 +14,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	grpcmetadata "google.golang.org/grpc/metadata"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -540,13 +543,14 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 	if err != nil {
 		panic(err)
 	}
+	if headTd == nil {
+		headTd = new(uint256.Int)
+	}
 
-	headTd256 := new(uint256.Int)
-	headTd256.SetFromBig(headTd)
 	heightForks, timeForks := forkid.GatherForks(genesis.Config, genesis.Timestamp)
 	s.statusData = &sentryproto.StatusData{
 		NetworkId:       1,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd),
 		BestHash:        gointerfaces.ConvertHashToH256(head.Hash()),
 		MaxBlockHeight:  head.Number.Uint64(),
 		MaxBlockTime:    head.Time,
@@ -585,9 +589,9 @@ func TestForkIDSplit68(t *testing.T) {
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
 		ctx           = context.Background()
-		configNoFork  = &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: big.NewInt(1)}
+		configNoFork  = &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
 		configProFork = &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        common.NewUint64(1),
 			TangerineWhistleBlock: common.NewUint64(2),
 			SpuriousDragonBlock:   common.NewUint64(2),
@@ -685,7 +689,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 		}
 	}()
 
-	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: big.NewInt(1)}
+	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
@@ -728,7 +732,8 @@ func newTestPeerInfoWithEth(t *testing.T) (*PeerInfo, [64]byte) {
 	rw := NewRLPReadWriter()
 	t.Cleanup(rw.Close)
 
-	pi := NewPeerInfo(peer, rw)
+	pi := NewPeerInfo(peer)
+	pi.SetEthRw(rw)
 	// Mark eth handshake as done so WaitForEth returns immediately.
 	pi.SetEthProtocol(direct.ETH68)
 
@@ -812,4 +817,648 @@ func TestRunWitPeer_MalformedNewWitnessHashesMsg(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("runWitPeer did not return within timeout")
 	}
+}
+
+func freshNewBlockHashesMsg(t *testing.T, entries int) p2p.Msg {
+	t.Helper()
+	pkt := make(eth.NewBlockHashesPacket, entries)
+	for i := range pkt {
+		pkt[i].Number = uint64(i)
+		pkt[i].Hash[0] = byte(i)
+	}
+	b, err := rlp.EncodeToBytes(pkt)
+	require.NoError(t, err)
+	return p2p.Msg{
+		Code:    eth.NewBlockHashesMsg,
+		Size:    uint32(len(b)),
+		Payload: io.NopCloser(bytes.NewReader(b)),
+	}
+}
+
+// TestRunPeer_OversizedNewBlockHashesKicksPeer verifies the sentry framing
+// layer drops an oversized NewBlockHashes packet and disconnects the peer
+// before the payload is forwarded to any subscriber.
+func TestRunPeer_OversizedNewBlockHashesKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	sendCh := make(chan struct{}, 1)
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sendCh <- struct{}{} }
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	oversize := make([]byte, maxNewBlockHashesBytes+1)
+	rw.readCh <- p2p.Msg{
+		Code:    eth.NewBlockHashesMsg,
+		Size:    uint32(len(oversize)),
+		Payload: io.NopCloser(bytes.NewReader(oversize)),
+	}
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	select {
+	case peerErr := <-errCh:
+		require.NotNil(t, peerErr, "expected a PeerError for oversized NewBlockHashes")
+		assert.Equal(t, p2p.PeerErrorMessageSizeLimit, peerErr.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPeer did not return within timeout")
+	}
+
+	select {
+	case <-sendCh:
+		t.Fatal("oversized NewBlockHashes must not be forwarded to subscribers")
+	default:
+	}
+}
+
+// TestRunPeer_TooManyNewBlockHashesEntriesKicksPeer verifies a packet that
+// stays under the byte cap but carries more than maxBlockHashesPerMsg entries
+// is rejected and the peer disconnected.
+func TestRunPeer_TooManyNewBlockHashesEntriesKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	sendCh := make(chan struct{}, 1)
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sendCh <- struct{}{} }
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	msg := freshNewBlockHashesMsg(t, maxBlockHashesPerMsg+1)
+	require.LessOrEqual(t, int(msg.Size), maxNewBlockHashesBytes, "packet must pass the byte cap to exercise the entry cap")
+	rw.readCh <- msg
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	select {
+	case peerErr := <-errCh:
+		require.NotNil(t, peerErr, "expected a PeerError for too many NewBlockHashes entries")
+		assert.Equal(t, p2p.PeerErrorMessageSizeLimit, peerErr.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPeer did not return within timeout")
+	}
+
+	select {
+	case <-sendCh:
+		t.Fatal("over-cap NewBlockHashes must not be forwarded to subscribers")
+	default:
+	}
+}
+
+// TestRunPeer_NewBlockHashesFloodKicksPeer verifies a peer flooding compliant
+// NewBlockHashes packets past the per-peer rate limit is disconnected.
+func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) {}
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	assertKicked := func(peerErr *p2p.PeerError) {
+		require.NotNil(t, peerErr, "expected a PeerError for NewBlockHashes flood")
+		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+	}
+
+	for i := 0; i < newBlockHashesBurst+10; i++ {
+		select {
+		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
+		case peerErr := <-errCh:
+			assertKicked(peerErr)
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out feeding NewBlockHashes packets")
+		}
+	}
+
+	select {
+	case peerErr := <-errCh:
+		assertKicked(peerErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPeer did not kick flooding peer within timeout")
+	}
+}
+
+// TestRunPeer_NormalNewBlockHashesForwarded verifies compliant NewBlockHashes
+// traffic is forwarded to subscribers and not penalized.
+func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	logger := log.Root()
+
+	const want = 5
+	sent := make(chan struct{}, want)
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sent <- struct{}{} }
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+	peerCap := p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68}
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
+	}()
+
+	for i := 0; i < want; i++ {
+		rw.readCh <- freshNewBlockHashesMsg(t, 1)
+	}
+
+	for i := 0; i < want; i++ {
+		select {
+		case <-sent:
+		case peerErr := <-errCh:
+			t.Fatalf("runPeer kicked peer for compliant NewBlockHashes traffic: %v", peerErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for forwarded NewBlockHashes")
+		}
+	}
+}
+
+// minimalP2PServer returns an un-networked p2p.Server (no discovery, no
+// dial, no listener) suitable for tests that only need a non-nil Server
+// to inject into a GrpcServer.
+func minimalP2PServer(t *testing.T) *p2p.Server {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	return &p2p.Server{Config: p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+	}}
+}
+
+// minimalP2PServerWithListener returns a p2p.Server bound to an ephemeral
+// loopback port. The bound address lets lifecycle tests observe Stop by
+// dialling the port: connect succeeds while the listener is up and is
+// refused once the Server has shut it down. Avoids relying on Start-after-
+// Stop, which p2p.Server documents as unsupported.
+func minimalP2PServerWithListener(t *testing.T) *p2p.Server {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	return &p2p.Server{Config: p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+		ListenAddr:      "127.0.0.1:0",
+	}}
+}
+
+// listenerReachable returns true if a TCP dial to the given peer-server's
+// listener succeeds within 200ms. Used by lifecycle tests to verify Stop
+// without depending on Start-after-Stop.
+func listenerReachable(t *testing.T, srv *p2p.Server) bool {
+	t.Helper()
+	addr := srv.NodeInfo().ListenAddr
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+// TestGrpcServer_SetP2PServer_FlagsAndIdempotency verifies the SetP2PServer
+// hook flips the external flag correctly and refuses a second injection.
+func TestGrpcServer_SetP2PServer_FlagsAndIdempotency(t *testing.T) {
+	srv := minimalP2PServer(t)
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+
+	require.NoError(t, ss.SetP2PServer(srv))
+	require.True(t, ss.external)
+	require.Same(t, srv, ss.getP2PServer())
+
+	// A second SetP2PServer must error — ownership is decided up front.
+	require.Error(t, ss.SetP2PServer(srv))
+}
+
+// TestGrpcServer_PeersFiltersByProtocol covers the per-sentry filter on
+// Peers: a GrpcServer only reports peers whose negotiated eth version
+// matches its own. Three entries — one matching this sentry's version,
+// one ghost (protocol == 0), one on a different eth version — only the
+// matching entry comes through.
+func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
+	srv := minimalP2PServer(t)
+	ss := &GrpcServer{
+		statusReady: make(chan struct{}),
+		ethVersion:  direct.ETH68,
+		Protocols:   []p2p.Protocol{{Name: eth.ProtocolName, Version: direct.ETH68}},
+	}
+	ss.peers.Store(NewPeerStore())
+	require.NoError(t, ss.SetP2PServer(srv))
+
+	store := ss.peers.Load()
+
+	// Owned-by-this-sentry: protocol matches.
+	owned, _ := newTestPeerInfoWithEth(t)
+	var ownedKey [64]byte
+	ownedKey[0] = 0x42
+	store.peers[ownedKey] = owned
+
+	// Ghost: no protocol set anywhere yet (RLPx-only / in-flight handshake).
+	ghost, _ := newTestPeerInfoWithEth(t)
+	ghost.protocol = 0
+	ghost.witProtocol = 0
+	var ghostKey [64]byte
+	ghostKey[0] = 0x43
+	store.peers[ghostKey] = ghost
+
+	// Owned-by-another-sentry: eth Run for a different version populated
+	// this PeerInfo (shared PeerStore in shared-Server mode).
+	otherVersion, _ := newTestPeerInfoWithEth(t)
+	otherVersion.protocol = direct.ETH69
+	var otherKey [64]byte
+	otherKey[0] = 0x44
+	store.peers[otherKey] = otherVersion
+
+	reply, err := ss.Peers(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, reply.Peers, 1, "only the entry matching this sentry's eth version should be reported")
+}
+
+// TestGrpcServer_SharedPeerStore_VisibleToEthAndWit covers the central
+// invariant of SetSharedPeerStore: two GrpcServers backing one p2p.Server,
+// after the swap, see the same PeerInfo when one of them calls
+// getOrCreatePeer. That's what unblocks wit/0's WaitForEth in shared-
+// Server mode — eth/* runs on a different sentry but populates the same
+// PeerInfo's protocol field.
+func TestGrpcServer_SharedPeerStore_VisibleToEthAndWit(t *testing.T) {
+	shared := NewPeerStore()
+	ethSentry := &GrpcServer{statusReady: make(chan struct{})}
+	ethSentry.peers.Store(NewPeerStore())
+	witSentry := &GrpcServer{statusReady: make(chan struct{})}
+	witSentry.peers.Store(NewPeerStore())
+	ethSentry.SetSharedPeerStore(shared)
+	witSentry.SetSharedPeerStore(shared)
+
+	pi, peerID := newTestPeerInfoWithEth(t)
+	store := ethSentry.peers.Load()
+	store.mu.Lock()
+	store.peers[peerID] = pi
+	store.mu.Unlock()
+
+	// witSentry shares the same store, so the entry placed via ethSentry
+	// must be visible through witSentry too.
+	got := witSentry.getPeer(peerID)
+	require.NotNil(t, got, "shared PeerStore: wit-side sentry must see entry placed by eth-side sentry")
+	require.Same(t, pi, got)
+}
+
+// TestGrpcServer_ProtocolForMessageID_ResolvesByMessageId guards the
+// disambiguation that writePeer relies on: eth and wit reuse the same
+// numeric msg codes (e.g. 0x01 is both eth.NewBlockHashesMsg and
+// wit.NewWitnessHashesMsg). Routing by numeric code would always pick
+// the eth Protocol entry when eth is registered first, sending wit
+// frames at the wrong RLPx offset. Looking up by sentryproto.MessageId
+// (which is globally unique) avoids the collision.
+func TestGrpcServer_ProtocolForMessageID_ResolvesByMessageId(t *testing.T) {
+	ss := &GrpcServer{
+		Protocols: []p2p.Protocol{
+			{
+				Name:      eth.ProtocolName,
+				Version:   direct.ETH69,
+				FromProto: eth.FromProto[direct.ETH69],
+			},
+			{
+				Name:      wit.ProtocolName,
+				Version:   wit.ProtocolVersions[0],
+				FromProto: wit.FromProto[wit.ProtocolVersions[0]],
+			},
+		},
+	}
+
+	name, version := ss.protocolForMessageID(sentryproto.MessageId_NEW_BLOCK_HASHES_66)
+	require.Equal(t, eth.ProtocolName, name)
+	require.Equal(t, uint(direct.ETH69), version)
+
+	// wit.NewWitnessHashesMsg shares the same numeric code (0x01) as
+	// eth.NewBlockHashesMsg. The MessageId-based lookup must still
+	// resolve to wit here.
+	name, version = ss.protocolForMessageID(sentryproto.MessageId_NEW_WITNESS_HASHES_W0)
+	require.Equal(t, wit.ProtocolName, name)
+	require.Equal(t, wit.ProtocolVersions[0], version)
+}
+
+// TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close
+// leaves an externally-injected Server running — the coordinator owns its
+// lifecycle. We dial the listener before and after Close: it must still
+// accept connections after Close because the external Server is alive.
+func TestGrpcServer_CloseDoesNotStopExternalServer(t *testing.T) {
+	srv := minimalP2PServerWithListener(t)
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+	t.Cleanup(srv.Stop)
+
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	require.NoError(t, ss.SetP2PServer(srv))
+	require.True(t, listenerReachable(t, srv), "listener should be up before Close")
+
+	ss.Close()
+
+	require.True(t, listenerReachable(t, srv),
+		"GrpcServer.Close must not stop an externally-injected p2p.Server")
+}
+
+// TestGrpcServer_CloseStopsOwnedServer covers the inverse: when the
+// GrpcServer created its own Server (legacy lazy path), Close stops it.
+// We dial the listener after Close and expect the connection to be refused.
+func TestGrpcServer_CloseStopsOwnedServer(t *testing.T) {
+	srv := minimalP2PServerWithListener(t)
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	ss.p2pServerLock.Lock()
+	ss.p2pServer = srv
+	ss.p2pServerLock.Unlock()
+	require.True(t, listenerReachable(t, srv), "listener should be up before Close")
+
+	ss.Close()
+
+	require.False(t, listenerReachable(t, srv),
+		"GrpcServer.Close (owned server) must close the listener")
+}
+
+// TestGrpcServer_AwaitStatus_ReturnsExistingImmediately covers the fast path
+// where a *usable* statusData (statusUsable: NetworkId != 0 && ForkData != nil)
+// has already been populated by SetStatus.
+func TestGrpcServer_AwaitStatus_ReturnsExistingImmediately(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+		statusData: &sentryproto.StatusData{
+			NetworkId: 42,
+			ForkData:  &sentryproto.Forks{},
+		},
+	}
+	got := ss.awaitStatus(2 * time.Second)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(42), got.NetworkId)
+}
+
+// TestGrpcServer_AwaitStatus_IgnoresPartialStatus exercises the validity
+// gate shared with SetStatus: a non-nil but partial statusData (missing
+// ForkData / zero NetworkId) must NOT be returned to handshakers — they
+// would proceed with garbage and fail the eth handshake anyway.
+func TestGrpcServer_AwaitStatus_IgnoresPartialStatus(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+		statusData:  &sentryproto.StatusData{NetworkId: 42}, // ForkData nil
+	}
+	got := ss.awaitStatus(50 * time.Millisecond)
+	require.Nil(t, got, "partial status (no ForkData) must not satisfy awaitStatus")
+}
+
+// TestGrpcServer_AwaitStatus_TimesOutWhenUnset verifies that awaitStatus
+// returns nil when SetStatus never arrives, so Protocol.Run can bail out
+// after the configured window instead of blocking forever.
+func TestGrpcServer_AwaitStatus_TimesOutWhenUnset(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+	}
+	start := time.Now()
+	got := ss.awaitStatus(50 * time.Millisecond)
+	require.Nil(t, got)
+	require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+}
+
+// TestGrpcServer_AwaitStatus_UnblocksOnSetStatus verifies that awaitStatus
+// returns the freshly-set statusData as soon as the statusReady signal fires
+// — the central startup-window fix.
+func TestGrpcServer_AwaitStatus_UnblocksOnSetStatus(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+	}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		ss.statusDataLock.Lock()
+		ss.statusData = &sentryproto.StatusData{
+			NetworkId: 7,
+			ForkData:  &sentryproto.Forks{},
+		}
+		ss.statusDataLock.Unlock()
+		close(ss.statusReady)
+	}()
+	got := ss.awaitStatus(2 * time.Second)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(7), got.NetworkId)
+}
+
+// TestGrpcServer_SetStatus_NilStatusReadyIsSafe guards against panics in
+// callers that instantiate GrpcServer directly without using NewGrpcServer
+// (some tests do this). SetStatus closes the statusReady channel; close(nil)
+// would panic, so the close is nil-guarded.
+func TestGrpcServer_SetStatus_NilStatusReadyIsSafe(t *testing.T) {
+	srv := minimalP2PServer(t)
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+	t.Cleanup(srv.Stop)
+
+	// Build a minimal but valid status payload (genesis + empty forks lists).
+	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
+	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	gspecNoFork := &types.Genesis{Config: configNoFork}
+	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+
+	ss := &GrpcServer{} // zero-value statusReady (nil channel)
+	require.NoError(t, ss.SetP2PServer(srv))
+
+	require.NotPanics(t, func() {
+		_, _ = ss.SetStatus(context.Background(), &sentryproto.StatusData{
+			ForkData: &sentryproto.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
+		})
+	})
+}
+
+// TestGrpcServer_SetStatus_RejectsNilForkData covers the gRPC-entrypoint
+// hardening: SetStatus is reachable over the wire from cmd/sentry, so a
+// malformed StatusData (nil or missing ForkData) must return an error
+// instead of nil-panicking on the ForkData dereference.
+func TestGrpcServer_SetStatus_RejectsNilForkData(t *testing.T) {
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+
+	// Nil StatusData.
+	require.NotPanics(t, func() {
+		_, err := ss.SetStatus(context.Background(), nil)
+		require.Error(t, err)
+	})
+
+	// Non-nil StatusData but nil ForkData.
+	require.NotPanics(t, func() {
+		_, err := ss.SetStatus(context.Background(), &sentryproto.StatusData{NetworkId: 1})
+		require.Error(t, err)
+	})
+}
+
+// TestGrpcServer_SetP2PServer_RejectsNil guards the lifecycle invariant
+// flagged by review: a nil server flipping external=true would later
+// cause Close() to skip Stop() on whatever Server the lazy SetStatus path
+// built — a real listener/goroutine leak. Reject at the door instead.
+func TestGrpcServer_SetP2PServer_RejectsNil(t *testing.T) {
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	require.Error(t, ss.SetP2PServer(nil))
+	require.False(t, ss.external, "external must not flip when SetP2PServer rejects the input")
+}
+
+// mockPeerEventsStream is a minimal sentryproto.Sentry_PeerEventsServer
+// implementation that collects sent PeerEvents in-memory.
+type mockPeerEventsStream struct {
+	ctx    context.Context
+	mu     sync.Mutex
+	events []*sentryproto.PeerEvent
+}
+
+func (m *mockPeerEventsStream) Send(e *sentryproto.PeerEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, e)
+	return nil
+}
+func (m *mockPeerEventsStream) Context() context.Context         { return m.ctx }
+func (m *mockPeerEventsStream) SetHeader(grpcmetadata.MD) error  { return nil }
+func (m *mockPeerEventsStream) SendHeader(grpcmetadata.MD) error { return nil }
+func (m *mockPeerEventsStream) SetTrailer(grpcmetadata.MD)       {}
+func (m *mockPeerEventsStream) SendMsg(any) error                { return nil }
+func (m *mockPeerEventsStream) RecvMsg(any) error                { return nil }
+
+// TestGrpcServer_FindBestPeersWithPermit_FiltersVersion verifies that
+// findBestPeersWithPermit only considers peers whose negotiated eth version
+// matches the sentry's own ethVersion when the shared PeerStore is in use.
+func TestGrpcServer_FindBestPeersWithPermit_FiltersVersion(t *testing.T) {
+	ss := &GrpcServer{
+		statusReady: make(chan struct{}),
+		ethVersion:  direct.ETH68,
+	}
+	ss.peers.Store(NewPeerStore())
+	store := ss.peers.Load()
+
+	// ETH68 peer — should be selected.
+	pi68, _ := newTestPeerInfoWithEth(t)
+	var key68 [64]byte
+	key68[0] = 0x11
+	store.peers[key68] = pi68
+
+	// ETH69 peer — must be ignored by this ETH68 sentry.
+	pi69, _ := newTestPeerInfoWithEth(t)
+	pi69.protocol = direct.ETH69
+	var key69 [64]byte
+	key69[0] = 0x22
+	store.peers[key69] = pi69
+
+	// in-flight (protocol==0) — must also be ignored.
+	pi0, _ := newTestPeerInfoWithEth(t)
+	pi0.protocol = 0
+	var key0 [64]byte
+	key0[0] = 0x33
+	store.peers[key0] = pi0
+
+	got := ss.findBestPeersWithPermit(10)
+	require.Len(t, got, 1, "findBestPeersWithPermit must only return peers matching this sentry's eth version")
+}
+
+// TestGrpcServer_FindPeerByMinBlock_FiltersVersion verifies that
+// findPeerByMinBlock skips peers from other eth protocol versions in the
+// shared PeerStore.
+func TestGrpcServer_FindPeerByMinBlock_FiltersVersion(t *testing.T) {
+	ss := &GrpcServer{
+		statusReady: make(chan struct{}),
+		ethVersion:  direct.ETH68,
+	}
+	ss.peers.Store(NewPeerStore())
+	store := ss.peers.Load()
+
+	// ETH69 peer with a known min block — if the filter is absent, the
+	// ETH68 sentry would select this peer for GetBlockHeaders and encode
+	// the request with ETH68 codes, causing a protocol error on the
+	// remote side.
+	pi69, _ := newTestPeerInfoWithEth(t)
+	pi69.protocol = direct.ETH69
+	pi69.minBlock = 0 // minBlock 0 satisfies any findPeerByMinBlock(0) call
+	var key69 [64]byte
+	key69[0] = 0x11
+	store.peers[key69] = pi69
+
+	_, found := ss.findPeerByMinBlock(0)
+	require.False(t, found, "findPeerByMinBlock must not return a peer from a different eth version")
+}
+
+// TestGrpcServer_PeerEvents_ReplayFiltersByVersion verifies that the
+// replay pass inside PeerEvents only emits Connect events for peers
+// whose negotiated eth version matches this sentry's ethVersion.
+func TestGrpcServer_PeerEvents_ReplayFiltersByVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ss := &GrpcServer{
+		ctx:          ctx,
+		statusReady:  make(chan struct{}),
+		ethVersion:   direct.ETH68,
+		peersStreams: NewPeersStreams(),
+	}
+	ss.peers.Store(NewPeerStore())
+	store := ss.peers.Load()
+
+	// ETH68 peer — should appear in the replay.
+	pi68, _ := newTestPeerInfoWithEth(t)
+	var key68 [64]byte
+	key68[0] = 0x10
+	store.peers[key68] = pi68
+
+	// ETH69 peer — must NOT appear (different version).
+	pi69, _ := newTestPeerInfoWithEth(t)
+	pi69.protocol = direct.ETH69
+	var key69 [64]byte
+	key69[0] = 0x20
+	store.peers[key69] = pi69
+
+	// in-flight (protocol==0) — must NOT appear.
+	pi0, _ := newTestPeerInfoWithEth(t)
+	pi0.protocol = 0
+	var key0 [64]byte
+	key0[0] = 0x30
+	store.peers[key0] = pi0
+
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	stream := &mockPeerEventsStream{ctx: streamCtx}
+
+	done := make(chan error, 1)
+	go func() { done <- ss.PeerEvents(nil, stream) }()
+
+	// Give the replay goroutine time to flush, then cancel the stream.
+	time.Sleep(50 * time.Millisecond)
+	streamCancel()
+	require.NoError(t, <-done)
+
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	require.Len(t, stream.events, 1, "PeerEvents replay must only emit Connect for the ETH68 peer")
+	require.Equal(t, sentryproto.PeerEvent_Connect, stream.events[0].EventId)
 }

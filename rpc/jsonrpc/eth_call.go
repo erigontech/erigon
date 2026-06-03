@@ -494,7 +494,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// touch account
-	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
+	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
 	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof")
@@ -516,14 +516,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// get account proof
-	accountProof, err := proofTrie.Prove(crypto.Keccak256(address.Bytes()), 0, false)
+	accountProof, err := proofTrie.Prove(crypto.Keccak256(address[:]), 0, false)
 	if err != nil {
 		return nil, err
 	}
 	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
 
 	// get account data from the trie
-	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
+	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address[:]))
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
@@ -545,7 +545,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
+	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
@@ -575,15 +575,15 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 		proof.StorageProof[i].Key = getKey(storageKey)
 		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
+		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.HashData(address.Bytes())
-		keyHash := crypto.HashData(storageKey.Hash.Bytes())
+		addrHash := crypto.HashData(address[:])
+		keyHash := crypto.HashData(storageKey.Hash[:])
 		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, addrHash[:]...)
 		fullKey = append(fullKey, keyHash[:]...)
@@ -798,8 +798,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
-		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
+	blockRoot := block.Root()
+	if !bytes.Equal(newStateRoot[:], blockRoot[:]) {
+		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot[:], blockRoot[:])
 	}
 	witnessBufBytes := witnessBuffer.Bytes()
 	witnessBufBytesCopy := common.Copy(witnessBufBytes)
@@ -913,9 +914,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
-	// Add 'from', 'to', precompiles to the exclusion list
+	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.
+	// 'to' is intentionally not excluded: its storage slots must appear in the
+	// access list so they are warmed (EIP-2929 warms the address, not its slots).
 	excl[*args.From] = struct{}{}
-	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc.Value()] = struct{}{}
 	}
@@ -937,7 +939,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if err != nil {
 				continue
 			}
-			if (!auth.ChainID.IsZero() && auth.ChainID.ToBig().Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
 			data.Reset()
@@ -956,6 +958,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		ibs := state.New(stateReader)
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
@@ -999,9 +1004,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				errString = res.Err.Error()
 			}
 			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
+			if args.To != nil {
+				optimizeWarmAddrAndAdjustGas(accessList, to)
+			}
 			if optimizeGas != nil && *optimizeGas {
-				optimizeWarmAddrInAccessList(accessList, *args.From)
-				optimizeWarmAddrInAccessList(accessList, to)
 				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
 				for addr := range tracer.CreatedContracts() {
 					if !tracer.UsedBeforeCreation(addr) {
@@ -1043,4 +1049,23 @@ func optimizeWarmAddrInAccessList(accessList *accessListResult, addr common.Addr
 
 func removeIndex(s types.AccessList, index int) types.AccessList {
 	return append(s[:index], s[index+1:]...)
+}
+
+// optimizeWarmAddrAndAdjustGas removes a zero-slot entry for addr from the access list
+// and subtracts TxAccessListAddressGas from GasUsed. Use for the recipient address:
+// EIP-2929 pre-warms it for free, so an address-only entry is pure intrinsic-gas overhead
+// with no EVM benefit. Entries with storage keys are left untouched.
+func optimizeWarmAddrAndAdjustGas(accessList *accessListResult, addr common.Address) {
+	for i, entry := range *accessList.Accesslist {
+		if entry.Address != addr {
+			continue
+		}
+		if len(entry.StorageKeys) == 0 {
+			if uint64(accessList.GasUsed) >= params.TxAccessListAddressGas {
+				accessList.GasUsed -= hexutil.Uint64(params.TxAccessListAddressGas)
+			}
+			*accessList.Accesslist = removeIndex(*accessList.Accesslist, i)
+		}
+		return
+	}
 }

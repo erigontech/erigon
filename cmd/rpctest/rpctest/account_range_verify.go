@@ -50,8 +50,18 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 			return
 		}
 	}
-	resultsKV := mdbx.New(dbcfg.ChainDB, logger).Path(tmpDataDir).MustOpen()
-	gethKV := mdbx.New(dbcfg.ChainDB, logger).Path(gethDataDir).MustOpen()
+	// accountDumpBucket is a local-only bucket used by this debug tool to
+	// JSON-dump eth_accountRange results for erigon/geth comparison. It is
+	// not part of the chain schema; we override the default ChainDB table
+	// config so the temp DB contains only this single bucket.
+	const accountDumpBucket = "AccountDump"
+	bucketsCfg := func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{accountDumpBucket: {}}
+	}
+	resultsKV := mdbx.New(dbcfg.ChainDB, logger).Path(tmpDataDir).WithTableCfg(bucketsCfg).MustOpen()
+	defer resultsKV.Close()
+	gethKV := mdbx.New(dbcfg.ChainDB, logger).Path(gethDataDir).WithTableCfg(bucketsCfg).MustOpen()
+	defer gethKV.Close()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,
@@ -99,7 +109,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(kv.E2AccountsHistory, addr.Bytes(), b)
+				err = db.Put(accountDumpBucket, addr[:], b)
 				if err != nil {
 					return err
 				}
@@ -142,13 +152,13 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 		return
 	}
 	defer gethTx.Rollback()
-	tgCursor, err := tgTx.Cursor(kv.E2AccountsHistory)
+	tgCursor, err := tgTx.Cursor(accountDumpBucket)
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
 	defer tgCursor.Close()
-	gethCursor, err := gethTx.Cursor(kv.E2AccountsHistory)
+	gethCursor, err := gethTx.Cursor(accountDumpBucket)
 	if err != nil {
 		log.Error(err.Error())
 		return

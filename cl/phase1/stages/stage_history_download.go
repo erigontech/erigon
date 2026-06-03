@@ -84,6 +84,18 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 	}
 }
 
+// elBackfillFinished reports whether the EL history backfill reached its floor:
+// the beacon slot, or for a snapshot gap the EL block number (compared to elBlock).
+func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64) bool {
+	if destinationSlot != math.MaxUint64 && slot <= destinationSlot {
+		return true
+	}
+	if destinationBlock != math.MaxUint64 && elBlock != 0 && elBlock <= destinationBlock {
+		return true
+	}
+	return false
+}
+
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
@@ -106,25 +118,45 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var initialBeaconBlock *cltypes.SignedBeaconBlock
 
 	var currEth1Progress atomic.Int64
+	// initialEth1Progress holds the EL block number of the first (highest) beacon block seen.
+	// Used for logging; kept separate to avoid accessing ExecutionPayload on GLOAS blocks.
+	var initialEth1Progress atomic.Int64
 
 	destinationSlotForEL := uint64(math.MaxUint64)
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	}
+	// EL block-number floor for snapshot-gap backfill, kept separate from the
+	// beacon-slot destinationSlotForEL since the units must not be mixed.
+	destinationBlockForEL := uint64(math.MaxUint64)
 	// Set up onNewBlock callback
-	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
+	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
 		if err != nil {
 			return false, err
 		}
 		defer tx.Rollback()
-		// handle the case where the block is a CL block including an execution payload
-		if blk.Version() >= clparams.BellatrixVersion {
+
+		// Track EL block number for progress logging and batch-commit cadence.
+		if blk.Version() >= clparams.GloasVersion {
+			if envelope != nil {
+				currEth1Progress.Store(int64(envelope.Message.Payload.BlockNumber))
+			}
+		} else if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
 		if initialBeaconBlock == nil {
 			initialBeaconBlock = blk
+			// Record initial EL block number for the logging goroutine.
+			if blk.Version() >= clparams.GloasVersion {
+				if envelope != nil {
+					initialEth1Progress.Store(int64(envelope.Message.Payload.BlockNumber))
+				}
+			} else if blk.Version() >= clparams.BellatrixVersion {
+				initialEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
+			}
 		}
 
 		slot := blk.Block.Slot
@@ -133,6 +165,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
+			}
+			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks
+			// because the payload is in the envelope, not the block body. Write them here now
+			// that we have the envelope.
+			if blk.Version() >= clparams.GloasVersion && envelope != nil {
+				blockRoot, hashErr := blk.Block.HashSSZ()
+				if hashErr != nil {
+					return false, hashErr
+				}
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
+					return false, err
+				}
 			}
 		}
 		// we need to backfill an equivalent number of blobs to the blocks
@@ -146,36 +190,67 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
 
-			payload := blk.Block.Body.ExecutionPayload
-			hasELBlock := frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
-			if !hasELBlock {
-				hasELBlock, err = cfg.engine.HasBlock(ctx, payload.BlockHash)
-				if err != nil {
-					return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+			// [New in Gloas:EIP7732] EMPTY blocks carry no EL payload; skip EL insertion.
+			isGloasEmpty := blk.Version() >= clparams.GloasVersion && envelope == nil
+			if !isGloasEmpty {
+				var payloadBlockHash common.Hash
+				var payloadBlockNumber uint64
+				if blk.Version() >= clparams.GloasVersion {
+					payloadBlockHash = envelope.Message.Payload.BlockHash
+					payloadBlockNumber = envelope.Message.Payload.BlockNumber
+				} else {
+					payloadBlockHash = blk.Block.Body.ExecutionPayload.BlockHash
+					payloadBlockNumber = blk.Block.Body.ExecutionPayload.BlockNumber
 				}
-			}
 
-			if !hasELBlock {
-				if err := cfg.executionBlocksCollector.AddBlock(blk.Block); err != nil {
-					return false, fmt.Errorf("error adding block to execution blocks collector: %s", err)
+				hasELBlock := frozenBlocksInEL > payloadBlockNumber
+				if !hasELBlock {
+					hasELBlock, err = cfg.engine.HasBlock(ctx, payloadBlockHash)
+					if err != nil {
+						return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+					}
 				}
-				if currEth1Progress.Load()%100 == 0 {
-					return false, tx.Commit()
+
+				if !hasELBlock {
+					if blk.Version() >= clparams.GloasVersion {
+						if err := cfg.executionBlocksCollector.AddGloasBlock(blk.Block, envelope); err != nil {
+							return false, fmt.Errorf("error adding gloas block to execution blocks collector: %s", err)
+						}
+					} else {
+						if err := cfg.executionBlocksCollector.AddBlock(blk.Block); err != nil {
+							return false, fmt.Errorf("error adding block to execution blocks collector: %s", err)
+						}
+					}
+					if currEth1Progress.Load()%100 == 0 {
+						return false, tx.Commit()
+					}
 				}
+				if hasELBlock && !cfg.caplinConfig.ArchiveBlocks {
+					return hasDownloadEnoughForImmediateBlobsBackfilling, tx.Commit()
+				}
+				hasFinishedDownloadingElBlocks.Store(hasELBlock)
 			}
-			if hasELBlock && !cfg.caplinConfig.ArchiveBlocks {
-				return hasDownloadEnoughForImmediateBlobsBackfilling, tx.Commit()
-			}
-			hasFinishedDownloadingElBlocks.Store(hasELBlock)
+			// For GLOAS EMPTY blocks, hasFinishedDownloadingElBlocks is left unchanged.
 		} else {
 			hasFinishedDownloadingElBlocks.Store(true)
 		}
+
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
-			isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
+			if blk.Version() >= clparams.GloasVersion {
+				if envelope != nil {
+					isInElSnapshots = frozenBlocksInEL > envelope.Message.Payload.BlockNumber
+				} else {
+					// GLOAS EMPTY: no EL block for this slot; EL chain did not advance.
+					// Keep isInElSnapshots=false so we continue backwards to find the next FULL block.
+					isInElSnapshots = false
+				}
+			} else {
+				isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
+			}
 			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
-				destinationSlotForEL = frozenBlocksInEL - 1
+				destinationBlockForEL = frozenBlocksInEL - 1
 			}
 		}
 
@@ -184,7 +259,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		return hasDownloadEnoughForImmediateBlobsBackfilling &&
 				(!cfg.caplinConfig.ArchiveBlocks || slot <= cfg.sn.SegmentsMax()) &&
-				(slot <= destinationSlotForEL || isInElSnapshots),
+				(elBackfillFinished(slot, uint64(currEth1Progress.Load()), destinationSlotForEL, destinationBlockForEL) || isInElSnapshots),
 			tx.Commit()
 	})
 
@@ -242,8 +317,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					logArgs = append(logArgs, "frozenBlocks", cfg.engine.FrozenBlocks(ctx))
 					if !isDownloadingForBeacon {
-						// If we are not backfilling, we are in the EL phase
-						highestBlockSeen = initialBeaconBlock.Block.Body.ExecutionPayload.BlockNumber
+						// If we are not backfilling, we are in the EL phase.
+						// [Modified in Gloas:EIP7732] Use initialEth1Progress to avoid nil ExecutionPayload access.
+						highestBlockSeen = uint64(initialEth1Progress.Load())
 
 						h, err := cfg.engine.CurrentHeader(ctx)
 						if err != nil || h == nil {
@@ -263,7 +339,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					toprocess := highestBlockSeen - lowestBlockToReach
+					// Genesis block (0) is never collected, so the lowest reachable
+					// EL block number is 1. Clamp to avoid an off-by-one that makes
+					// progress stall at N-1/N.
+					effectiveLowest := max(lowestBlockToReach, 1)
+					toprocess := highestBlockSeen - effectiveLowest
 					processed := highestBlockSeen - uint64(currEth1Progress.Load())
 					remaining := float64(toprocess - processed)
 					log.Info("Downloading Execution History", "progress",
@@ -287,7 +367,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	go func() {
 		for !cfg.downloader.Finished() {
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
-				log.Debug("closing backfilling routine", "err", err)
+				log.Warn("closing backfilling routine", "err", err)
 				return
 			}
 		}

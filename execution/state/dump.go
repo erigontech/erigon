@@ -228,11 +228,12 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 				loc := k[20:]
 				account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 				h, _ := common.HashData(loc)
-				t.Update(h.Bytes(), common.Copy(vs))
+				t.Update(h[:], common.Copy(vs))
 			}
 			r.Close()
 
-			account.Root = t.Hash().Bytes()
+			tHash := t.Hash()
+			account.Root = tHash[:]
 		}
 		account.Address = &addr
 		seckey, secErr := common.HashData(addr[:])

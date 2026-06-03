@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -39,6 +38,7 @@ const (
 	ExecutionStatusMissingSegment    ExecutionStatus = 3
 	ExecutionStatusInvalidForkchoice ExecutionStatus = 4
 	ExecutionStatusBusy              ExecutionStatus = 5
+	ExecutionStatusReorgTooDeep      ExecutionStatus = 6
 )
 
 func (s ExecutionStatus) String() string {
@@ -55,6 +55,8 @@ func (s ExecutionStatus) String() string {
 		return "InvalidForkchoice"
 	case ExecutionStatusBusy:
 		return "Busy"
+	case ExecutionStatusReorgTooDeep:
+		return "ReorgTooDeep"
 	default:
 		return fmt.Sprintf("ExecutionStatus(%d)", int32(s))
 	}
@@ -201,7 +203,7 @@ type ExecutionModule interface {
 	// GetTD returns the total difficulty for the block identified by
 	// blockHash and/or blockNumber.  Pass nil for an unknown argument.
 	// Returns nil (no error) when the block is not found.
-	GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*big.Int, error)
+	GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*uint256.Int, error)
 
 	// --- Module state -----------------------------------------------------
 

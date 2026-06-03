@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error) {
@@ -34,14 +36,30 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 	}
 	defer tx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	b, senders, err := api.getBlockWithSenders(ctx, number, tx)
-	if err != nil {
-		return nil, err
+	var (
+		b       *types.Block
+		senders []common.Address
+	)
+	if number == rpc.PendingBlockNumber {
+		b, senders, err = api.getBlockWithSenders(ctx, number, tx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+			return nil, err
+		}
+		b, senders, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if b == nil {
 		return nil, nil
@@ -63,7 +81,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, err
 	}
 	if blockNumber == nil {
-		return nil, fmt.Errorf("couldn't find block number for hash %v", hash.Bytes())
+		return nil, fmt.Errorf("couldn't find block number for hash %v", hash[:])
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)

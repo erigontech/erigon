@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -113,16 +114,15 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
-	// done is closed when the goroutine fully returns — after all defers
-	// (shared-state cleanup, semaphore release) have run. When we receive
-	// a non-Busy result, we wait on done so the caller can safely acquire
-	// the semaphore for a follow-up operation like AssembleBlock.
-	done := make(chan struct{})
 
 	// Spawn the actual forkchoice work using the module's background context so
-	// it is not cancelled when the caller's context times out.
+	// it is not cancelled when the caller's context times out. We return as soon
+	// as the result lands on outcomeCh — for a merge-extending fork at tip the
+	// result is sent before flush/commit, so the consensus client is not blocked
+	// on the EL commit. The forkchoice goroutine releases the semaphore only after
+	// all cleanup defers have run, so any follow-up op (AssembleBlock, next FCU)
+	// that acquires the semaphore observes fully-settled state.
 	go func() {
-		defer close(done)
 		if err := e.updateForkChoice(e.bacgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
@@ -130,7 +130,6 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 
 	select {
 	case outcome := <-outcomeCh:
-		<-done
 		return outcome.result, outcome.err
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
@@ -187,11 +186,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// overlay (MemoryMutation) which implements kv.TemporalRwTx. No MDBX write
 	// lock is held during pipeline execution — a brief RwTx is opened only at
 	// commit time to flush everything atomically.
-	roTx, err := e.db.BeginTemporalRo(ctx)
+	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic // deferred via closure below (bg-commit path sets roTx=nil after ownership transfer)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
-	defer func() { roTx.Rollback() }() // closure: CommitCycle may reassign roTx
+	defer func() {
+		if roTx != nil {
+			roTx.Rollback()
+		}
+	}() // closure: CommitCycle may reassign roTx; bg-commit path sets it to nil after ownership transfer
 
 	// Check if InsertBlocks already created a block overlay with data
 	// (headers, bodies, TDs, canonical hashes).
@@ -213,6 +216,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	if currentContext != nil {
 		currentContext.SetInMemHistoryReads(inMemHistoryReads)
+		// Wire the state cache so canonical execution reads benefit from
+		// the per-execution Account/Storage/Code cache. Previously only
+		// ValidateChain (fork validation, exec_module.go) set this, leaving
+		// the canonical execution path running uncached against the aggTx.
+		currentContext.SetStateCache(e.stateCache)
 	}
 
 	defer func() {
@@ -291,8 +299,27 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	if fcuHeader.Number.Sign() > 0 {
-		if canonicalHash == blockHash && fcuHeader.Number.Uint64() >= finishProgressBefore {
-			// if block hash is part of the canonical chain and execution is not ahead, treat as no-op.
+		var finalisedBlockNum uint64
+		lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)
+		if lastKnownFinalisedHash != (common.Hash{}) {
+			bn, err := e.blockReader.HeaderNumber(ctx, tx, lastKnownFinalisedHash)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if bn == nil {
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusInvalidForkchoice,
+				}, false)
+			}
+			finalisedBlockNum = *bn
+		}
+		// as per https://github.com/ethereum/execution-apis/pull/786
+		// we short circuit reorgs if:
+		//   1. the head is an ancestor of the last finalised block
+		//   2. the head is a duplicate FCU (e.g. CLs sending the same FCU repeatedly)
+		if canonicalHash == blockHash &&
+			(fcuHeader.Number.Uint64() < finalisedBlockNum || fcuHeader.Number.Uint64() == finishProgressBefore) {
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
@@ -351,25 +378,43 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		unwindTarget := currentParentNumber
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if unwindTarget < minUnwindableBlock {
-			e.logger.Info("Reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
-			unwindTarget = minUnwindableBlock
+
+		// Determine current canonical tip from TxNums. If unwindTarget is at or
+		// above the canonical tip, there's nothing above to roll back — skip the
+		// unwind path entirely and proceed straight to forward-filling new
+		// canonicals. This is the recovery path when chaindata canonical lags
+		// state's commitBlock (e.g. after a snapshot/state misalignment), where
+		// the conservative minUnwindable check would otherwise reject the FCU
+		// as ReorgTooDeep even though no state actually needs unwinding.
+		lastCanonicalBlock, _, errLast := rawdbv3.TxNums.Last(tx)
+		if errLast != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errLast, false)
 		}
 
-		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		// Run the unwind
-		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if unwindTarget < lastCanonicalBlock {
+			minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if unwindTarget < minUnwindableBlock {
+				e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusReorgTooDeep,
+				}, false)
+			}
+
+			if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			// Run the unwind
+			if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
+				err = fmt.Errorf("updateForkChoice: %w", err)
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
 		}
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
@@ -480,9 +525,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if !initialCycle {
 				return nil
 			}
-			// Catchup: drain pipeline prune on a real RW tx (own tx via
-			// UpdateTemporal in runForkchoicePrune). initialCycle=true so
-			// PruneExecutionStage uses the catchup budget.
+			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
 			if _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
@@ -635,8 +678,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			go func() {
 				defer e.semaphore.Release(1)
 				defer bgSD.Close()
+				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
+				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
+				// defer is a safety net — Rollback is idempotent.
 				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, finishProgressBefore, isSynced, initialCycle)
+				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
 				if err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}
@@ -647,7 +693,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}()
 		} else {
-			ct, err := e.runForkchoiceFlushCommit(currentContext, finishProgressBefore, isSynced)
+			// Foreground commit: pass the outer roTx so it gets released
+			// between Flush and Commit (same openTxs=2→1 optimization as
+			// the bg-commit path).
+			ct, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
@@ -696,10 +745,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 // runPostForkchoice runs flush+commit+UpdateHead+prune in a background goroutine.
 // Notifications have already been dispatched inline from the overlay.
-func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
+func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.TemporalTx, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
-		commitTimings, err := e.runForkchoiceFlushCommit(sd, finishProgressBefore, isSynced)
+		commitTimings, err := e.runForkchoiceFlushCommit(sd, bgRoTx, finishProgressBefore, isSynced)
 		if err != nil {
 			return err
 		}
@@ -765,7 +814,15 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
 // (block overlay + domain mem), commits, then updates the sentry head.
-func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {
+//
+// roTxToCloseBeforeCommit (may be nil) is released between Flush and Commit so
+// the commit transaction observes openTxs=1 in MDBX rather than 2. This lets
+// MDBX GC reclaim pages freed during the commit window immediately, instead of
+// pinning them behind the still-open RO reader until the next commit. SD.Flush
+// only writes in-memory state to rwTx and does not read from the RO tx, so
+// closing it after Flush is safe. Rollback is idempotent, so callers keep their
+// outer `defer roTx.Rollback()` as a safety net.
+func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
 
 	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
@@ -778,6 +835,9 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishP
 		return nil, err
 	}
 	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+	if roTxToCloseBeforeCommit != nil {
+		roTxToCloseBeforeCommit.Rollback()
+	}
 	commitStart := time.Now()
 	if err := rwTx.Commit(); err != nil {
 		return nil, err
@@ -805,15 +865,33 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
-	if err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
-		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
-			return err
+
+	// Kick collation (build files) + prune via the same path that
+	// stageloop.StageLoopIteration uses. Without this call from the FCU
+	// path, files would never advance once the node is at tip — execution
+	// keeps writing to MDBX above the file boundary, but no new file is
+	// built so the data above never becomes prunable. Result: MDBX grows
+	// unbounded (commitment domain especially) until the next initial-cycle
+	// trip through StageLoopIteration. CollateAndPrune internally
+	// opens its own RW tx and calls the pruneFn callback inside it.
+	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
+			// Same adaptive prune budget as PruneExecutionStage (stage_execute.go):
+			// base = SecondsPerSlot/3, +200ms per 100 prunable steps, capped at 2/3 slot.
+			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
+			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
+			pruneTimeout := baseTimeout + time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond
+			if pruneTimeout > maxTimeout {
+				pruneTimeout = maxTimeout
+			}
+			if err := agg.CollateAndPrune(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
+			}, e.logger); err != nil {
+				return nil, err
+			}
 		}
-		return nil
-	}); err != nil {
-		return nil, err
 	}
+
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
 	if len(timings) > 0 {
 		timings = append(timings, "initialCycle", initialCycle)

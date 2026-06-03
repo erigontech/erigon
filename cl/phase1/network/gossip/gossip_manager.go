@@ -303,6 +303,15 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 
 	slotLookahead := uint64(8)
 	for {
+		// Wait for the next slot tick before checking. This ensures that
+		// RegisterGossipServices has completed before we attempt to
+		// re-subscribe topics for an upcoming fork.
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
 		upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
@@ -311,7 +320,7 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			continue
 		}
 		if upcomingForkDigest != forkDigest {
-			log.Debug("[GossipManager] upcoming fork digest", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
+			log.Info("[GossipManager] upcoming fork digest change detected", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
 			oldForkDigest := fmt.Sprintf("%x", forkDigest)
 
 			// Start goroutine to unsubscribe old topics after delay
@@ -336,13 +345,10 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			}(oldForkDigest)
 
 			// subscribe new topics immediately
-			g.subscribeUpcomingTopics(upcomingForkDigest)
+			if err := g.subscribeUpcomingTopics(upcomingForkDigest); err != nil {
+				log.Warn("[GossipManager] failed to subscribe upcoming topics", "err", err)
+			}
 			forkDigest = upcomingForkDigest
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 		}
 	}
 }
@@ -371,11 +377,15 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 				return err
 			}
 		}
+		if err := g.p2p.Pubsub().RegisterTopicValidator(newTopic, prevTopicHandle.validator); err != nil {
+			topicHandle.Close()
+			return err
+		}
 		if err := g.subscriptions.Add(newTopic, topicHandle, prevTopicHandle.validator); err != nil {
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil {
+		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil && !errors.Is(err, ErrExpiryInThePast) {
 			return err
 		}
 	}
@@ -393,6 +403,9 @@ func extractTopicName(topic string) string {
 
 func extractSubnetIndexByGossipTopic(name string) int {
 	// e.g blob_sidecar_3, we want to extract 3
+	if name == "" {
+		return -1
+	}
 	// reject if last character is not a number
 	if !unicode.IsNumber(rune(name[len(name)-1])) {
 		return -1

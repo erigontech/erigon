@@ -380,8 +380,8 @@ func TestDupSortPrune_MultipleDupsAllInRange(t *testing.T) {
 }
 
 // TestDupSortPrune_MixedDupsPartialRange: each user-key has dups at multiple
-// steps, some in range and some beyond. Exercises the partial-overlap
-// selective-deletion branch of tableScanningPrune.
+// steps, some in range and some beyond. Exercises the selective-deletion path
+// (line ~378 in prune.go).
 func TestDupSortPrune_MixedDupsPartialRange(t *testing.T) {
 	db := openTestDupSortDB(t)
 	defer db.Close()

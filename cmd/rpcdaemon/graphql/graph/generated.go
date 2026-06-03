@@ -14,6 +14,7 @@ import (
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/scalar"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -31,15 +32,9 @@ type ResolverRoot interface {
 	Account() AccountResolver
 	Block() BlockResolver
 	Mutation() MutationResolver
+	Pending() PendingResolver
 	Query() QueryResolver
-}
-
-type AccountResolver interface {
-	Storage(ctx context.Context, obj *model.Account, slot string) (string, error)
-}
-
-type BlockResolver interface {
-	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
+	Transaction() TransactionResolver
 }
 
 type DirectiveRoot struct {
@@ -62,9 +57,11 @@ type ComplexityRoot struct {
 	Block struct {
 		Account           func(childComplexity int, address string) int
 		BaseFeePerGas     func(childComplexity int) int
+		BlobGasUsed       func(childComplexity int) int
 		Call              func(childComplexity int, data model.CallData) int
 		Difficulty        func(childComplexity int) int
 		EstimateGas       func(childComplexity int, data model.CallData) int
+		ExcessBlobGas     func(childComplexity int) int
 		ExtraData         func(childComplexity int) int
 		GasLimit          func(childComplexity int) int
 		GasUsed           func(childComplexity int) int
@@ -86,11 +83,13 @@ type ComplexityRoot struct {
 		ReceiptsRoot      func(childComplexity int) int
 		StateRoot         func(childComplexity int) int
 		Timestamp         func(childComplexity int) int
+		TotalDifficulty   func(childComplexity int) int
 		TransactionAt     func(childComplexity int, index int) int
 		TransactionCount  func(childComplexity int) int
 		Transactions      func(childComplexity int) int
 		TransactionsRoot  func(childComplexity int) int
 		Withdrawals       func(childComplexity int) int
+		WithdrawalsRoot   func(childComplexity int) int
 	}
 
 	CallResult struct {
@@ -121,7 +120,7 @@ type ComplexityRoot struct {
 
 	Query struct {
 		Block                func(childComplexity int, number *string, hash *string) int
-		Blocks               func(childComplexity int, from *uint64, to *uint64) int
+		Blocks               func(childComplexity int, from uint64, to *uint64) int
 		ChainID              func(childComplexity int) int
 		GasPrice             func(childComplexity int) int
 		Logs                 func(childComplexity int, filter model.FilterCriteria) int
@@ -139,6 +138,8 @@ type ComplexityRoot struct {
 
 	Transaction struct {
 		AccessList           func(childComplexity int) int
+		BlobGasPrice         func(childComplexity int) int
+		BlobGasUsed          func(childComplexity int) int
 		Block                func(childComplexity int) int
 		CreatedContract      func(childComplexity int, block *uint64) int
 		CumulativeGasUsed    func(childComplexity int) int
@@ -152,6 +153,7 @@ type ComplexityRoot struct {
 		Index                func(childComplexity int) int
 		InputData            func(childComplexity int) int
 		Logs                 func(childComplexity int) int
+		MaxFeePerBlobGas     func(childComplexity int) int
 		MaxFeePerGas         func(childComplexity int) int
 		MaxPriorityFeePerGas func(childComplexity int) int
 		Nonce                func(childComplexity int) int
@@ -174,12 +176,27 @@ type ComplexityRoot struct {
 	}
 }
 
+type AccountResolver interface {
+	Storage(ctx context.Context, obj *model.Account, slot string) (string, error)
+}
+type BlockResolver interface {
+	TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error)
+	Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error)
+	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
+	Call(ctx context.Context, obj *model.Block, data model.CallData) (*model.CallResult, error)
+	EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error)
+}
 type MutationResolver interface {
 	SendRawTransaction(ctx context.Context, data string) (string, error)
 }
+type PendingResolver interface {
+	Account(ctx context.Context, obj *model.Pending, address string) (*model.Account, error)
+	Call(ctx context.Context, obj *model.Pending, data model.CallData) (*model.CallResult, error)
+	EstimateGas(ctx context.Context, obj *model.Pending, data model.CallData) (uint64, error)
+}
 type QueryResolver interface {
 	Block(ctx context.Context, number *string, hash *string) (*model.Block, error)
-	Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error)
+	Blocks(ctx context.Context, from uint64, to *uint64) ([]*model.Block, error)
 	Pending(ctx context.Context) (*model.Pending, error)
 	Transaction(ctx context.Context, hash string) (*model.Transaction, error)
 	Logs(ctx context.Context, filter model.FilterCriteria) ([]*model.Log, error)
@@ -187,6 +204,10 @@ type QueryResolver interface {
 	MaxPriorityFeePerGas(ctx context.Context) (string, error)
 	Syncing(ctx context.Context) (*model.SyncState, error)
 	ChainID(ctx context.Context) (string, error)
+}
+type TransactionResolver interface {
+	From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
+	To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
 }
 
 type executableSchema graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot]
@@ -269,6 +290,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Block.BaseFeePerGas(childComplexity), true
+	case "Block.blobGasUsed":
+		if e.ComplexityRoot.Block.BlobGasUsed == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Block.BlobGasUsed(childComplexity), true
 	case "Block.call":
 		if e.ComplexityRoot.Block.Call == nil {
 			break
@@ -297,6 +324,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Block.EstimateGas(childComplexity, args["data"].(model.CallData)), true
+	case "Block.excessBlobGas":
+		if e.ComplexityRoot.Block.ExcessBlobGas == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Block.ExcessBlobGas(childComplexity), true
 	case "Block.extraData":
 		if e.ComplexityRoot.Block.ExtraData == nil {
 			break
@@ -438,6 +471,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Block.Timestamp(childComplexity), true
+	case "Block.totalDifficulty":
+		if e.ComplexityRoot.Block.TotalDifficulty == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Block.TotalDifficulty(childComplexity), true
 	case "Block.transactionAt":
 		if e.ComplexityRoot.Block.TransactionAt == nil {
 			break
@@ -473,6 +512,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Block.Withdrawals(childComplexity), true
+	case "Block.withdrawalsRoot":
+		if e.ComplexityRoot.Block.WithdrawalsRoot == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Block.WithdrawalsRoot(childComplexity), true
 
 	case "CallResult.data":
 		if e.ComplexityRoot.CallResult.Data == nil {
@@ -608,7 +653,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Query.Blocks(childComplexity, args["from"].(*uint64), args["to"].(*uint64)), true
+		return e.ComplexityRoot.Query.Blocks(childComplexity, args["from"].(uint64), args["to"].(*uint64)), true
 	case "Query.chainID":
 		if e.ComplexityRoot.Query.ChainID == nil {
 			break
@@ -688,6 +733,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Transaction.AccessList(childComplexity), true
+	case "Transaction.blobGasPrice":
+		if e.ComplexityRoot.Transaction.BlobGasPrice == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Transaction.BlobGasPrice(childComplexity), true
+	case "Transaction.blobGasUsed":
+		if e.ComplexityRoot.Transaction.BlobGasUsed == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Transaction.BlobGasUsed(childComplexity), true
 	case "Transaction.block":
 		if e.ComplexityRoot.Transaction.Block == nil {
 			break
@@ -776,6 +833,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Transaction.Logs(childComplexity), true
+	case "Transaction.maxFeePerBlobGas":
+		if e.ComplexityRoot.Transaction.MaxFeePerBlobGas == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Transaction.MaxFeePerBlobGas(childComplexity), true
 	case "Transaction.maxFeePerGas":
 		if e.ComplexityRoot.Transaction.MaxFeePerGas == nil {
 			break
@@ -1157,7 +1220,7 @@ func (ec *executionContext) field_Query_block_args(ctx context.Context, rawArgs 
 func (ec *executionContext) field_Query_blocks_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "from", ec.unmarshalOLong2ᚖuint64)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "from", ec.unmarshalNLong2uint64)
 	if err != nil {
 		return nil, err
 	}
@@ -1610,6 +1673,8 @@ func (ec *executionContext) fieldContext_Block_parent(_ context.Context, field g
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -1634,6 +1699,12 @@ func (ec *executionContext) fieldContext_Block_parent(_ context.Context, field g
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawalsRoot":
+				return ec.fieldContext_Block_withdrawalsRoot(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Block_blobGasUsed(ctx, field)
+			case "excessBlobGas":
+				return ec.fieldContext_Block_excessBlobGas(ctx, field)
 			case "withdrawals":
 				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
@@ -1711,7 +1782,7 @@ func (ec *executionContext) _Block_transactionCount(ctx context.Context, field g
 			return obj.TransactionCount, nil
 		},
 		nil,
-		ec.marshalOInt2ᚖint,
+		ec.marshalOLong2ᚖuint64,
 		true,
 		false,
 	)
@@ -1724,7 +1795,7 @@ func (ec *executionContext) fieldContext_Block_transactionCount(_ context.Contex
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2101,6 +2172,35 @@ func (ec *executionContext) fieldContext_Block_difficulty(_ context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _Block_totalDifficulty(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Block_totalDifficulty,
+		func(ctx context.Context) (any, error) {
+			return obj.TotalDifficulty, nil
+		},
+		nil,
+		ec.marshalNBigInt2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Block_totalDifficulty(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Block",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type BigInt does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Block_ommerCount(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2111,7 +2211,7 @@ func (ec *executionContext) _Block_ommerCount(ctx context.Context, field graphql
 			return obj.OmmerCount, nil
 		},
 		nil,
-		ec.marshalOInt2ᚖint,
+		ec.marshalOLong2ᚖuint64,
 		true,
 		false,
 	)
@@ -2124,7 +2224,7 @@ func (ec *executionContext) fieldContext_Block_ommerCount(_ context.Context, fie
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2190,6 +2290,8 @@ func (ec *executionContext) fieldContext_Block_ommers(_ context.Context, field g
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -2214,6 +2316,12 @@ func (ec *executionContext) fieldContext_Block_ommers(_ context.Context, field g
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawalsRoot":
+				return ec.fieldContext_Block_withdrawalsRoot(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Block_blobGasUsed(ctx, field)
+			case "excessBlobGas":
+				return ec.fieldContext_Block_excessBlobGas(ctx, field)
 			case "withdrawals":
 				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
@@ -2283,6 +2391,8 @@ func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, fiel
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -2307,6 +2417,12 @@ func (ec *executionContext) fieldContext_Block_ommerAt(ctx context.Context, fiel
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawalsRoot":
+				return ec.fieldContext_Block_withdrawalsRoot(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Block_blobGasUsed(ctx, field)
+			case "excessBlobGas":
+				return ec.fieldContext_Block_excessBlobGas(ctx, field)
 			case "withdrawals":
 				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
@@ -2432,6 +2548,12 @@ func (ec *executionContext) fieldContext_Block_transactions(_ context.Context, f
 				return ec.fieldContext_Transaction_raw(ctx, field)
 			case "rawReceipt":
 				return ec.fieldContext_Transaction_rawReceipt(ctx, field)
+			case "maxFeePerBlobGas":
+				return ec.fieldContext_Transaction_maxFeePerBlobGas(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Transaction_blobGasUsed(ctx, field)
+			case "blobGasPrice":
+				return ec.fieldContext_Transaction_blobGasPrice(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Transaction", field.Name)
 		},
@@ -2446,7 +2568,8 @@ func (ec *executionContext) _Block_transactionAt(ctx context.Context, field grap
 		field,
 		ec.fieldContext_Block_transactionAt,
 		func(ctx context.Context) (any, error) {
-			return obj.TransactionAt, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().TransactionAt(ctx, obj, fc.Args["index"].(int))
 		},
 		nil,
 		ec.marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction,
@@ -2459,8 +2582,8 @@ func (ec *executionContext) fieldContext_Block_transactionAt(ctx context.Context
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "hash":
@@ -2515,6 +2638,12 @@ func (ec *executionContext) fieldContext_Block_transactionAt(ctx context.Context
 				return ec.fieldContext_Transaction_raw(ctx, field)
 			case "rawReceipt":
 				return ec.fieldContext_Transaction_rawReceipt(ctx, field)
+			case "maxFeePerBlobGas":
+				return ec.fieldContext_Transaction_maxFeePerBlobGas(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Transaction_blobGasUsed(ctx, field)
+			case "blobGasPrice":
+				return ec.fieldContext_Transaction_blobGasPrice(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Transaction", field.Name)
 		},
@@ -2540,7 +2669,8 @@ func (ec *executionContext) _Block_logs(ctx context.Context, field graphql.Colle
 		field,
 		ec.fieldContext_Block_logs,
 		func(ctx context.Context) (any, error) {
-			return obj.Logs, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Logs(ctx, obj, fc.Args["filter"].(model.BlockFilterCriteria))
 		},
 		nil,
 		ec.marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ,
@@ -2553,8 +2683,8 @@ func (ec *executionContext) fieldContext_Block_logs(ctx context.Context, field g
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "index":
@@ -2645,7 +2775,8 @@ func (ec *executionContext) _Block_call(ctx context.Context, field graphql.Colle
 		field,
 		ec.fieldContext_Block_call,
 		func(ctx context.Context) (any, error) {
-			return obj.Call, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Call(ctx, obj, fc.Args["data"].(model.CallData))
 		},
 		nil,
 		ec.marshalOCallResult2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult,
@@ -2658,8 +2789,8 @@ func (ec *executionContext) fieldContext_Block_call(ctx context.Context, field g
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "data":
@@ -2693,7 +2824,8 @@ func (ec *executionContext) _Block_estimateGas(ctx context.Context, field graphq
 		field,
 		ec.fieldContext_Block_estimateGas,
 		func(ctx context.Context) (any, error) {
-			return obj.EstimateGas, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().EstimateGas(ctx, obj, fc.Args["data"].(model.CallData))
 		},
 		nil,
 		ec.marshalNLong2uint64,
@@ -2706,8 +2838,8 @@ func (ec *executionContext) fieldContext_Block_estimateGas(ctx context.Context, 
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Long does not have child fields")
 		},
@@ -2779,6 +2911,93 @@ func (ec *executionContext) fieldContext_Block_raw(_ context.Context, field grap
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Bytes does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Block_withdrawalsRoot(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Block_withdrawalsRoot,
+		func(ctx context.Context) (any, error) {
+			return obj.WithdrawalsRoot, nil
+		},
+		nil,
+		ec.marshalOBytes322ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Block_withdrawalsRoot(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Block",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Bytes32 does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Block_blobGasUsed(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Block_blobGasUsed,
+		func(ctx context.Context) (any, error) {
+			return obj.BlobGasUsed, nil
+		},
+		nil,
+		ec.marshalOLong2ᚖuint64,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Block_blobGasUsed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Block",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Long does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Block_excessBlobGas(ctx context.Context, field graphql.CollectedField, obj *model.Block) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Block_excessBlobGas,
+		func(ctx context.Context) (any, error) {
+			return obj.ExcessBlobGas, nil
+		},
+		nil,
+		ec.marshalOLong2ᚖuint64,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Block_excessBlobGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Block",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2920,7 +3139,7 @@ func (ec *executionContext) _Log_index(ctx context.Context, field graphql.Collec
 			return obj.Index, nil
 		},
 		nil,
-		ec.marshalNInt2int,
+		ec.marshalNLong2uint64,
 		true,
 		true,
 	)
@@ -2933,7 +3152,7 @@ func (ec *executionContext) fieldContext_Log_index(_ context.Context, field grap
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -3125,6 +3344,12 @@ func (ec *executionContext) fieldContext_Log_transaction(_ context.Context, fiel
 				return ec.fieldContext_Transaction_raw(ctx, field)
 			case "rawReceipt":
 				return ec.fieldContext_Transaction_rawReceipt(ctx, field)
+			case "maxFeePerBlobGas":
+				return ec.fieldContext_Transaction_maxFeePerBlobGas(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Transaction_blobGasUsed(ctx, field)
+			case "blobGasPrice":
+				return ec.fieldContext_Transaction_blobGasPrice(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Transaction", field.Name)
 		},
@@ -3183,7 +3408,7 @@ func (ec *executionContext) _Pending_transactionCount(ctx context.Context, field
 			return obj.TransactionCount, nil
 		},
 		nil,
-		ec.marshalNInt2int,
+		ec.marshalNLong2uint64,
 		true,
 		true,
 	)
@@ -3196,7 +3421,7 @@ func (ec *executionContext) fieldContext_Pending_transactionCount(_ context.Cont
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -3278,6 +3503,12 @@ func (ec *executionContext) fieldContext_Pending_transactions(_ context.Context,
 				return ec.fieldContext_Transaction_raw(ctx, field)
 			case "rawReceipt":
 				return ec.fieldContext_Transaction_rawReceipt(ctx, field)
+			case "maxFeePerBlobGas":
+				return ec.fieldContext_Transaction_maxFeePerBlobGas(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Transaction_blobGasUsed(ctx, field)
+			case "blobGasPrice":
+				return ec.fieldContext_Transaction_blobGasPrice(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Transaction", field.Name)
 		},
@@ -3292,7 +3523,8 @@ func (ec *executionContext) _Pending_account(ctx context.Context, field graphql.
 		field,
 		ec.fieldContext_Pending_account,
 		func(ctx context.Context) (any, error) {
-			return obj.Account, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Pending().Account(ctx, obj, fc.Args["address"].(string))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -3305,8 +3537,8 @@ func (ec *executionContext) fieldContext_Pending_account(ctx context.Context, fi
 	fc = &graphql.FieldContext{
 		Object:     "Pending",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -3344,7 +3576,8 @@ func (ec *executionContext) _Pending_call(ctx context.Context, field graphql.Col
 		field,
 		ec.fieldContext_Pending_call,
 		func(ctx context.Context) (any, error) {
-			return obj.Call, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Pending().Call(ctx, obj, fc.Args["data"].(model.CallData))
 		},
 		nil,
 		ec.marshalOCallResult2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐCallResult,
@@ -3357,8 +3590,8 @@ func (ec *executionContext) fieldContext_Pending_call(ctx context.Context, field
 	fc = &graphql.FieldContext{
 		Object:     "Pending",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "data":
@@ -3392,7 +3625,8 @@ func (ec *executionContext) _Pending_estimateGas(ctx context.Context, field grap
 		field,
 		ec.fieldContext_Pending_estimateGas,
 		func(ctx context.Context) (any, error) {
-			return obj.EstimateGas, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Pending().EstimateGas(ctx, obj, fc.Args["data"].(model.CallData))
 		},
 		nil,
 		ec.marshalNLong2uint64,
@@ -3405,8 +3639,8 @@ func (ec *executionContext) fieldContext_Pending_estimateGas(ctx context.Context
 	fc = &graphql.FieldContext{
 		Object:     "Pending",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Long does not have child fields")
 		},
@@ -3486,6 +3720,8 @@ func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field 
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -3510,6 +3746,12 @@ func (ec *executionContext) fieldContext_Query_block(ctx context.Context, field 
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawalsRoot":
+				return ec.fieldContext_Block_withdrawalsRoot(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Block_blobGasUsed(ctx, field)
+			case "excessBlobGas":
+				return ec.fieldContext_Block_excessBlobGas(ctx, field)
 			case "withdrawals":
 				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
@@ -3538,7 +3780,7 @@ func (ec *executionContext) _Query_blocks(ctx context.Context, field graphql.Col
 		ec.fieldContext_Query_blocks,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Query().Blocks(ctx, fc.Args["from"].(*uint64), fc.Args["to"].(*uint64))
+			return ec.Resolvers.Query().Blocks(ctx, fc.Args["from"].(uint64), fc.Args["to"].(*uint64))
 		},
 		nil,
 		ec.marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ,
@@ -3591,6 +3833,8 @@ func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -3615,6 +3859,12 @@ func (ec *executionContext) fieldContext_Query_blocks(ctx context.Context, field
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawalsRoot":
+				return ec.fieldContext_Block_withdrawalsRoot(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Block_blobGasUsed(ctx, field)
+			case "excessBlobGas":
+				return ec.fieldContext_Block_excessBlobGas(ctx, field)
 			case "withdrawals":
 				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
@@ -3753,6 +4003,12 @@ func (ec *executionContext) fieldContext_Query_transaction(ctx context.Context, 
 				return ec.fieldContext_Transaction_raw(ctx, field)
 			case "rawReceipt":
 				return ec.fieldContext_Transaction_rawReceipt(ctx, field)
+			case "maxFeePerBlobGas":
+				return ec.fieldContext_Transaction_maxFeePerBlobGas(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Transaction_blobGasUsed(ctx, field)
+			case "blobGasPrice":
+				return ec.fieldContext_Transaction_blobGasPrice(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Transaction", field.Name)
 		},
@@ -4211,7 +4467,7 @@ func (ec *executionContext) _Transaction_index(ctx context.Context, field graphq
 			return obj.Index, nil
 		},
 		nil,
-		ec.marshalOInt2ᚖint,
+		ec.marshalOLong2ᚖuint64,
 		true,
 		false,
 	)
@@ -4224,7 +4480,7 @@ func (ec *executionContext) fieldContext_Transaction_index(_ context.Context, fi
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -4237,7 +4493,8 @@ func (ec *executionContext) _Transaction_from(ctx context.Context, field graphql
 		field,
 		ec.fieldContext_Transaction_from,
 		func(ctx context.Context) (any, error) {
-			return obj.From, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().From(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4250,8 +4507,8 @@ func (ec *executionContext) fieldContext_Transaction_from(ctx context.Context, f
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4289,7 +4546,8 @@ func (ec *executionContext) _Transaction_to(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Transaction_to,
 		func(ctx context.Context) (any, error) {
-			return obj.To, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().To(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4302,8 +4560,8 @@ func (ec *executionContext) fieldContext_Transaction_to(ctx context.Context, fie
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4597,6 +4855,8 @@ func (ec *executionContext) fieldContext_Transaction_block(_ context.Context, fi
 				return ec.fieldContext_Block_mixHash(ctx, field)
 			case "difficulty":
 				return ec.fieldContext_Block_difficulty(ctx, field)
+			case "totalDifficulty":
+				return ec.fieldContext_Block_totalDifficulty(ctx, field)
 			case "ommerCount":
 				return ec.fieldContext_Block_ommerCount(ctx, field)
 			case "ommers":
@@ -4621,6 +4881,12 @@ func (ec *executionContext) fieldContext_Transaction_block(_ context.Context, fi
 				return ec.fieldContext_Block_rawHeader(ctx, field)
 			case "raw":
 				return ec.fieldContext_Block_raw(ctx, field)
+			case "withdrawalsRoot":
+				return ec.fieldContext_Block_withdrawalsRoot(ctx, field)
+			case "blobGasUsed":
+				return ec.fieldContext_Block_blobGasUsed(ctx, field)
+			case "excessBlobGas":
+				return ec.fieldContext_Block_excessBlobGas(ctx, field)
 			case "withdrawals":
 				return ec.fieldContext_Block_withdrawals(ctx, field)
 			}
@@ -4936,7 +5202,7 @@ func (ec *executionContext) _Transaction_type(ctx context.Context, field graphql
 			return obj.Type, nil
 		},
 		nil,
-		ec.marshalOInt2ᚖint,
+		ec.marshalOLong2ᚖuint64,
 		true,
 		false,
 	)
@@ -4949,7 +5215,7 @@ func (ec *executionContext) fieldContext_Transaction_type(_ context.Context, fie
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -5048,6 +5314,93 @@ func (ec *executionContext) fieldContext_Transaction_rawReceipt(_ context.Contex
 	return fc, nil
 }
 
+func (ec *executionContext) _Transaction_maxFeePerBlobGas(ctx context.Context, field graphql.CollectedField, obj *model.Transaction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Transaction_maxFeePerBlobGas,
+		func(ctx context.Context) (any, error) {
+			return obj.MaxFeePerBlobGas, nil
+		},
+		nil,
+		ec.marshalOBigInt2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Transaction_maxFeePerBlobGas(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Transaction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type BigInt does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Transaction_blobGasUsed(ctx context.Context, field graphql.CollectedField, obj *model.Transaction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Transaction_blobGasUsed,
+		func(ctx context.Context) (any, error) {
+			return obj.BlobGasUsed, nil
+		},
+		nil,
+		ec.marshalOLong2ᚖuint64,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Transaction_blobGasUsed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Transaction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Long does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Transaction_blobGasPrice(ctx context.Context, field graphql.CollectedField, obj *model.Transaction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Transaction_blobGasPrice,
+		func(ctx context.Context) (any, error) {
+			return obj.BlobGasPrice, nil
+		},
+		nil,
+		ec.marshalOBigInt2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Transaction_blobGasPrice(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Transaction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type BigInt does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Withdrawal_index(ctx context.Context, field graphql.CollectedField, obj *model.Withdrawal) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -5058,7 +5411,7 @@ func (ec *executionContext) _Withdrawal_index(ctx context.Context, field graphql
 			return obj.Index, nil
 		},
 		nil,
-		ec.marshalNInt2int,
+		ec.marshalNLong2uint64,
 		true,
 		true,
 	)
@@ -5071,7 +5424,7 @@ func (ec *executionContext) fieldContext_Withdrawal_index(_ context.Context, fie
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -5087,7 +5440,7 @@ func (ec *executionContext) _Withdrawal_validator(ctx context.Context, field gra
 			return obj.Validator, nil
 		},
 		nil,
-		ec.marshalNInt2int,
+		ec.marshalNLong2uint64,
 		true,
 		true,
 	)
@@ -5100,7 +5453,7 @@ func (ec *executionContext) fieldContext_Withdrawal_validator(_ context.Context,
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -6843,28 +7196,59 @@ func (ec *executionContext) _Account(ctx context.Context, sel ast.SelectionSet, 
 		case "address":
 			out.Values[i] = ec._Account_address(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "balance":
 			out.Values[i] = ec._Account_balance(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionCount":
 			out.Values[i] = ec._Account_transactionCount(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "code":
 			out.Values[i] = ec._Account_code(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "storage":
-			out.Values[i] = ec._Account_storage(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Account_storage(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -6902,56 +7286,56 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "number":
 			out.Values[i] = ec._Block_number(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "hash":
 			out.Values[i] = ec._Block_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "parent":
 			out.Values[i] = ec._Block_parent(ctx, field, obj)
 		case "nonce":
 			out.Values[i] = ec._Block_nonce(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionsRoot":
 			out.Values[i] = ec._Block_transactionsRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionCount":
 			out.Values[i] = ec._Block_transactionCount(ctx, field, obj)
 		case "stateRoot":
 			out.Values[i] = ec._Block_stateRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "receiptsRoot":
 			out.Values[i] = ec._Block_receiptsRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "miner":
 			out.Values[i] = ec._Block_miner(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "extraData":
 			out.Values[i] = ec._Block_extraData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasLimit":
 			out.Values[i] = ec._Block_gasLimit(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasUsed":
 			out.Values[i] = ec._Block_gasUsed(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "baseFeePerGas":
 			out.Values[i] = ec._Block_baseFeePerGas(ctx, field, obj)
@@ -6960,22 +7344,27 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "timestamp":
 			out.Values[i] = ec._Block_timestamp(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "logsBloom":
 			out.Values[i] = ec._Block_logsBloom(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "mixHash":
 			out.Values[i] = ec._Block_mixHash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "difficulty":
 			out.Values[i] = ec._Block_difficulty(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "totalDifficulty":
+			out.Values[i] = ec._Block_totalDifficulty(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "ommerCount":
 			out.Values[i] = ec._Block_ommerCount(ctx, field, obj)
@@ -6986,39 +7375,200 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "ommerHash":
 			out.Values[i] = ec._Block_ommerHash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactions":
 			out.Values[i] = ec._Block_transactions(ctx, field, obj)
 		case "transactionAt":
-			out.Values[i] = ec._Block_transactionAt(ctx, field, obj)
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_transactionAt(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "logs":
-			out.Values[i] = ec._Block_logs(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_logs(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "account":
-			out.Values[i] = ec._Block_account(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_account(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "call":
-			out.Values[i] = ec._Block_call(ctx, field, obj)
-		case "estimateGas":
-			out.Values[i] = ec._Block_estimateGas(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_call(ctx, field, obj)
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "estimateGas":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_estimateGas(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "rawHeader":
 			out.Values[i] = ec._Block_rawHeader(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "raw":
 			out.Values[i] = ec._Block_raw(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "withdrawalsRoot":
+			out.Values[i] = ec._Block_withdrawalsRoot(ctx, field, obj)
+		case "blobGasUsed":
+			out.Values[i] = ec._Block_blobGasUsed(ctx, field, obj)
+		case "excessBlobGas":
+			out.Values[i] = ec._Block_excessBlobGas(ctx, field, obj)
 		case "withdrawals":
 			out.Values[i] = ec._Block_withdrawals(ctx, field, obj)
 		default:
@@ -7215,22 +7765,115 @@ func (ec *executionContext) _Pending(ctx context.Context, sel ast.SelectionSet, 
 		case "transactionCount":
 			out.Values[i] = ec._Pending_transactionCount(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactions":
 			out.Values[i] = ec._Pending_transactions(ctx, field, obj)
 		case "account":
-			out.Values[i] = ec._Pending_account(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Pending_account(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "call":
-			out.Values[i] = ec._Pending_call(ctx, field, obj)
-		case "estimateGas":
-			out.Values[i] = ec._Pending_estimateGas(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Pending_call(ctx, field, obj)
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "estimateGas":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Pending_estimateGas(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -7556,31 +8199,93 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "hash":
 			out.Values[i] = ec._Transaction_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "nonce":
 			out.Values[i] = ec._Transaction_nonce(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "index":
 			out.Values[i] = ec._Transaction_index(ctx, field, obj)
 		case "from":
-			out.Values[i] = ec._Transaction_from(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_from(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "to":
-			out.Values[i] = ec._Transaction_to(ctx, field, obj)
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_to(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "value":
 			out.Values[i] = ec._Transaction_value(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasPrice":
 			out.Values[i] = ec._Transaction_gasPrice(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "maxFeePerGas":
 			out.Values[i] = ec._Transaction_maxFeePerGas(ctx, field, obj)
@@ -7591,12 +8296,12 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "gas":
 			out.Values[i] = ec._Transaction_gas(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "inputData":
 			out.Values[i] = ec._Transaction_inputData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "block":
 			out.Values[i] = ec._Transaction_block(ctx, field, obj)
@@ -7615,17 +8320,17 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "r":
 			out.Values[i] = ec._Transaction_r(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "s":
 			out.Values[i] = ec._Transaction_s(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "v":
 			out.Values[i] = ec._Transaction_v(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "type":
 			out.Values[i] = ec._Transaction_type(ctx, field, obj)
@@ -7634,13 +8339,19 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "raw":
 			out.Values[i] = ec._Transaction_raw(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "rawReceipt":
 			out.Values[i] = ec._Transaction_rawReceipt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "maxFeePerBlobGas":
+			out.Values[i] = ec._Transaction_maxFeePerBlobGas(ctx, field, obj)
+		case "blobGasUsed":
+			out.Values[i] = ec._Transaction_blobGasUsed(ctx, field, obj)
+		case "blobGasPrice":
+			out.Values[i] = ec._Transaction_blobGasPrice(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -8063,6 +8774,10 @@ func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋe
 	return ec._AccessTuple(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNAccount2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v model.Account) graphql.Marshaler {
+	return ec._Account(ctx, sel, &v)
+}
+
 func (ec *executionContext) marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
@@ -8267,13 +8982,13 @@ func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋ
 }
 
 func (ec *executionContext) unmarshalNLong2uint64(ctx context.Context, v any) (uint64, error) {
-	res, err := graphql.UnmarshalUint64(v)
+	res, err := scalar.UnmarshalUint64(v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) marshalNLong2uint64(ctx context.Context, sel ast.SelectionSet, v uint64) graphql.Marshaler {
 	_ = sel
-	res := graphql.MarshalUint64(v)
+	res := scalar.MarshalUint64(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
@@ -8718,24 +9433,6 @@ func (ec *executionContext) marshalOCallResult2ᚖgithubᚗcomᚋerigontechᚋer
 	return ec._CallResult(ctx, sel, v)
 }
 
-func (ec *executionContext) unmarshalOInt2ᚖint(ctx context.Context, v any) (*int, error) {
-	if v == nil {
-		return nil, nil
-	}
-	res, err := graphql.UnmarshalInt(v)
-	return &res, graphql.ErrorOnPath(ctx, err)
-}
-
-func (ec *executionContext) marshalOInt2ᚖint(ctx context.Context, sel ast.SelectionSet, v *int) graphql.Marshaler {
-	if v == nil {
-		return graphql.Null
-	}
-	_ = sel
-	_ = ctx
-	res := graphql.MarshalInt(*v)
-	return res
-}
-
 func (ec *executionContext) marshalOLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Log) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -8759,7 +9456,7 @@ func (ec *executionContext) unmarshalOLong2ᚖuint64(ctx context.Context, v any)
 	if v == nil {
 		return nil, nil
 	}
-	res, err := graphql.UnmarshalUint64(v)
+	res, err := scalar.UnmarshalUint64(v)
 	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
@@ -8769,7 +9466,7 @@ func (ec *executionContext) marshalOLong2ᚖuint64(ctx context.Context, sel ast.
 	}
 	_ = sel
 	_ = ctx
-	res := graphql.MarshalUint64(*v)
+	res := scalar.MarshalUint64(*v)
 	return res
 }
 

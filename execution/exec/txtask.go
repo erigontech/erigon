@@ -58,6 +58,7 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
+	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
@@ -75,6 +76,7 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+	BlockHeader() *types.Header
 
 	Rules() *chain.Rules
 
@@ -237,6 +239,10 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
+
+	// BlockStateCache holds pre-block account state for stable committed reads.
+	// Shared across all tasks in the same block. Set by the parallel executor.
+	BlockStateCache *state.BlockStateCache
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -346,6 +352,10 @@ func (t *TxTask) BlockRoot() common.Hash {
 	return t.Header.Root
 }
 
+func (t *TxTask) BlockHeader() *types.Header {
+	return t.Header
+}
+
 func (t *TxTask) BlockTime() uint64 {
 	if t.Header == nil {
 		return 0
@@ -378,7 +388,34 @@ func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	return t.gasPool
+	if t.gasPool != nil {
+		return t.gasPool
+	}
+	// Parallel exec paths never set the per-task gas pool because workers
+	// cannot safely share the block pool (SubGas is a write — concurrent
+	// workers would race on speculative tx depletion). The shared block
+	// pool is consumed in the post-execution validation loop.
+	//
+	// Returning nil here would make preCheck's CheckBlockGasInclusion
+	// silently no-op (gp==nil short-circuit), so a tx whose gas exceeds
+	// the block limit slips past that check and fails on the next one in
+	// preCheck order (CheckEip1559TxGasFeeCap → ErrFeeCapTooLow when
+	// feeCap < baseFee). Serial returns ErrGasLimitReached for the same
+	// tx; the eest engine matrix asserts the serial error variant and
+	// rejects the parallel one (issue surfaced on PR #21017's
+	// hive-eest parallel legs as GAS_ALLOWANCE_EXCEEDED vs
+	// INSUFFICIENT_MAX_FEE_PER_GAS).
+	//
+	// Hand out a fresh per-invocation pool sized to the block gas limit
+	// so CheckBlockGasInclusion fires for the "tx alone exceeds the block
+	// limit" case (pool depletion across multiple txs is still caught
+	// post-execution by the validation loop against the shared pool).
+	// Each Execute call gets its own pool, so retries at higher
+	// incarnations start with a fresh budget.
+	if t.Header == nil || t.Config == nil {
+		return nil
+	}
+	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
 }
 
 func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
@@ -407,6 +444,10 @@ func (t *TxTask) Dependencies() []int {
 
 func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
+}
+
+func (t *TxTask) GetBlockStateCache() *state.BlockStateCache {
+	return t.BlockStateCache
 }
 
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
@@ -640,6 +681,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	if len(result.ValidationResults) == 0 {
 		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+		return &result
 	}
 
 	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier

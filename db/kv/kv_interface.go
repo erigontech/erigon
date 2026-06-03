@@ -420,9 +420,13 @@ type Putter interface {
 
 // ---- Temporal part
 
-// Step - amount of txNums in the smallest file
+// A Step is the smallest batch of txs; the amount of txs it contains is defined by StepSize and it depends on
+// how the node was synced.
+//
+// This type represents a step in time across the chain history or an amount of steps.
 type Step uint64
 
+// Returns the txNum of the first tx in the step.
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
 type (
@@ -532,6 +536,7 @@ type TemporalMemBatch interface {
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	SetInMemHistoryReads(v bool)
+	InMemHistoryReads() bool
 }
 
 type WithFreezeInfo interface {

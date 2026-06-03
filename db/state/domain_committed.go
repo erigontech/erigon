@@ -293,6 +293,19 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	ma := accounts.dataReader(mergedAccount.decompressor)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
+	// Per-merge caches for findShortenedKey results. The same merged file is
+	// searched once per plain-key reference per commitment branch — and hot
+	// contracts (USDC, WETH, Uniswap routers, etc.) appear in many branches
+	// in the same merge range, so the same full key recurs many times. CPU
+	// profiling identified findShortenedKey → BtIndex.Get as ~52% of merge
+	// CPU; caching its results avoids the repeat B-tree descents.
+	//
+	// The merged file is read-only for the duration of this transformer, so
+	// (key → offset) is invariant within the closure. Both maps live only
+	// for the merge of one range; no cross-merge state.
+	storageKeyCache := make(map[string]uint64)
+	accountKeyCache := make(map[string]uint64)
+
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
 			return valBuf, nil
@@ -343,17 +356,24 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					}
 				}
 
-				shortenedKeyOffset, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
-				if !found {
-					if len(auxBuf) == length.Addr+length.Hash {
-						return auxBuf, nil // if plain key is lost, we can save original fullkey
-					}
-					// if shortened key lost, we can't continue
-					dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
-						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-						"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
+				var shortenedKeyOffset uint64
+				if cached, ok := storageKeyCache[string(auxBuf)]; ok {
+					shortenedKeyOffset = cached
+				} else {
+					var found bool
+					shortenedKeyOffset, found = storage.findShortenedKey(auxBuf, ms, mergedStorage)
+					if !found {
+						if len(auxBuf) == length.Addr+length.Hash {
+							return auxBuf, nil // if plain key is lost, we can save original fullkey
+						}
+						// if shortened key lost, we can't continue
+						dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
+							"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
+							"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
 
-					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
+						return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
+					}
+					storageKeyCache[string(auxBuf)] = shortenedKeyOffset
 				}
 				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
 				return shortened, nil
@@ -374,15 +394,22 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				}
 			}
 
-			shortenedKeyOffset, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)
-			if !found {
-				if len(auxBuf) == length.Addr {
-					return auxBuf, nil // if plain key is lost, we can save original fullkey
+			var shortenedKeyOffset uint64
+			if cached, ok := accountKeyCache[string(auxBuf)]; ok {
+				shortenedKeyOffset = cached
+			} else {
+				var found bool
+				shortenedKeyOffset, found = accounts.findShortenedKey(auxBuf, ma, mergedAccount)
+				if !found {
+					if len(auxBuf) == length.Addr {
+						return auxBuf, nil // if plain key is lost, we can save original fullkey
+					}
+					dt.d.logger.Crit("valTransform: replacement for full account key was not found",
+						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
+						"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
+					return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
 				}
-				dt.d.logger.Crit("valTransform: replacement for full account key was not found",
-					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
-				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+				accountKeyCache[string(auxBuf)] = shortenedKeyOffset
 			}
 			shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
 			return shortened, nil

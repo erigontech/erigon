@@ -22,7 +22,6 @@ package types
 import (
 	"errors"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -42,7 +41,7 @@ type DynamicFeeTransaction struct {
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return &tx.FeeCap }
 func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return &tx.TipCap }
-func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
@@ -334,7 +333,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 }
 
 type dynamicFeeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -345,7 +344,7 @@ type dynamicFeeTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *DynamicFeeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{

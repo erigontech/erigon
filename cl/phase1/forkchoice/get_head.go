@@ -23,10 +23,12 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
+	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -105,7 +107,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 }
 
 // GetHead returns the head of the fork choice store.
-// it can take an optional auxilliary state to determine the current weights instead of computing the justified state.
+// Dispatches to GLOAS or pre-GLOAS implementation based on current epoch.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
@@ -113,19 +115,121 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 		return f.headHash, f.headSlot, nil
 	}
 	f.mu.RUnlock()
+
+	// After checkpoint sync the justified root may predate the anchor and
+	// not exist in the fork graph. Both getHead and getHeadGloas depend on
+	// the justified root being present (for getCheckpointState and
+	// getFilteredBlockTree respectively). Return the anchor as head until
+	// forward sync produces a resolvable justified checkpoint.
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
+			"justifiedRoot", justifiedCheckpoint.Root)
+		return f.forkGraph.AnchorRoot(), f.forkGraph.AnchorSlot(), nil
+	}
+
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		return f.getHeadGloas()
+	}
+	return f.getHead(auxilliaryState)
+}
+
+// GetHeadPayloadStatus returns the payload status of the current head node.
+// Must be called after GetHead has been called (head is cached).
+func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.headPayloadStatus
+}
+
+// getHeadGloas returns the head using GLOAS fork choice rules.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+
+	// Get filtered block tree
+	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root)
+
+	// Start from justified checkpoint with PENDING status
+	head := ForkChoiceNode{
+		Root:          justifiedCheckpoint.Root,
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}
+
+	// Get weight store for weight calculation
+	ws := f.GetWeightStore()
+
+	for {
+		children := f.getNodeChildren(head, blocks)
+		if len(children) == 0 {
+			// No children, head is the result
+			header, hasHeader := f.forkGraph.GetHeader(head.Root)
+			if !hasHeader {
+				return common.Hash{}, 0, errors.New("no slot for head is stored")
+			}
+			f.headHash = head.Root
+			f.headSlot = header.Slot
+			f.headPayloadStatus = head.PayloadStatus
+			return f.headHash, f.headSlot, nil
+		}
+
+		// Find best child: max(children, key=(weight, root, tiebreaker))
+		bestChild := children[0]
+		bestWeight := ws.GetWeight(bestChild)
+		bestTiebreaker := f.getPayloadStatusTiebreaker(bestChild)
+
+		for i := 1; i < len(children); i++ {
+			child := children[i]
+			weight := ws.GetWeight(child)
+			tiebreaker := f.getPayloadStatusTiebreaker(child)
+
+			// Compare: weight first, then root, then tiebreaker
+			if weight > bestWeight {
+				bestChild = child
+				bestWeight = weight
+				bestTiebreaker = tiebreaker
+			} else if weight == bestWeight {
+				// Compare by root (lexicographically greater wins)
+				rootCmp := bytes.Compare(child.Root[:], bestChild.Root[:])
+				if rootCmp > 0 {
+					bestChild = child
+					bestWeight = weight
+					bestTiebreaker = tiebreaker
+				} else if rootCmp == 0 {
+					// Same root, compare by tiebreaker
+					if tiebreaker > bestTiebreaker {
+						bestChild = child
+						bestWeight = weight
+						bestTiebreaker = tiebreaker
+					}
+				}
+			}
+		}
+
+		head = bestChild
+	}
+}
+
+// getHead returns the head using pre-GLOAS fork choice rules.
+func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	var justificationState *checkpointState
 	var err error
-	// Take write lock here
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	if auxilliaryState == nil {
-		// See which validators can be used for attestation score
+		// Compute checkpoint state BEFORE acquiring f.mu: this operation
+		// can read a large state from disk, which would block the OnTick
+		// goroutine if done under the lock.
 		justificationState, err = f.getCheckpointState(justifiedCheckpoint)
 		if err != nil {
 			return common.Hash{}, 0, err
 		}
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
@@ -217,31 +321,39 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 		}
 		return isAnyViable
 	}
+	// Leaf node — viability per spec filter_block_tree.
+
+	// Spec get_voting_source: pick unrealized only for prior-epoch blocks
+	// (pull-up justification view); current/future-epoch blocks use the
+	// block's realized state checkpoint.
 	blockEpoch := f.computeEpochAtSlot(header.Slot)
 	var votingSource solid.Checkpoint
 	if currentEpoch > blockEpoch {
-		var has bool
 		votingSource, has = f.getUnrealizedJustification(blockRoot)
-		if !has {
-			return false
-		}
 	} else {
-		var has bool
 		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			return false
-		}
+	}
+	if !has {
+		return false
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
+
+	// Spec correct_justified:
+	//   store.justified_checkpoint.epoch == GENESIS_EPOCH
+	//   || voting_source.epoch == store.justified_checkpoint.epoch
+	//   || voting_source.epoch + 2 >= current_epoch
 	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch ||
 		votingSource.Epoch == justifiedCheckpoint.Epoch ||
 		votingSource.Epoch+2 >= currentEpoch
 
+	// Spec correct_finalized:
+	//   store.finalized_checkpoint.epoch == GENESIS_EPOCH
+	//   || store.finalized_checkpoint.root == get_checkpoint_block(block_root, finalized.epoch)
 	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch
 	if !finalizedOk {
 		finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-		finalizedOk = finalizedCheckpoint.Root == f.Ancestor(blockRoot, finalizedSlot)
+		finalizedOk = finalizedCheckpoint.Root == f.Ancestor(blockRoot, finalizedSlot).Root
 	}
 
 	if justifiedOk && finalizedOk {

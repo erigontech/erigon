@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -56,11 +55,14 @@ type mockIBS struct{}
 func (m *mockIBS) GetBalance(accounts.Address) (uint256.Int, error) { return uint256.Int{}, nil }
 func (m *mockIBS) GetNonce(accounts.Address) (uint64, error)        { return 0, nil }
 func (m *mockIBS) GetCode(accounts.Address) ([]byte, error)         { return nil, nil }
+func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
+	return accounts.NilCodeHash, nil
+}
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
 func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *mockIBS) GetRefund() mdgas.MdGas               { return mdgas.MdGas{} }
+func (m *mockIBS) GetRefund() uint64                    { return 0 }
 
 // captureOnOpcode runs a single OnOpcode call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
