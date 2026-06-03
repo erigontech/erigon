@@ -238,8 +238,8 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
       `go build ./rpc/jsonrpc/ ./execution/commitment/...` clean)
 
 ### Task 7: [Final] Documentation and plan close-out
-- [ ] update the witness memory note with outcomes
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update the witness memory note with outcomes
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Manual / external — no checkboxes*
