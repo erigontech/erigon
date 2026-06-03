@@ -112,9 +112,9 @@ type HexPatriciaHashed struct {
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
 
-	// witnessLegacy selects the full legacy witness format during GenerateWitness:
-	// storage-root nodes are materialized for untouched-storage accounts instead of
-	// being left as hash references. Canonical (false) keeps the minimized format.
+	// witnessLegacy carries the legacy/canonical mode into GenerateWitness; the
+	// legacy node materialization it will gate (storage-root nodes for
+	// untouched-storage accounts) is deferred, so the field is set but not yet read.
 	witnessLegacy bool
 
 	//processing metrics
