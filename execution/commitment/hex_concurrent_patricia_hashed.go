@@ -58,6 +58,7 @@ func NewConcurrentPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *
 		// single metrics object Process writes to CSV.
 		if p.root.metrics.writeCommitmentMetrics {
 			p.mounts[i].metrics = p.root.metrics
+			p.mounts[i].branchEncoder.setMetrics(p.root.metrics)
 		}
 	}
 	return p
@@ -198,6 +199,7 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
 		p.mounts[i].metrics = p.root.metrics
+		p.mounts[i].branchEncoder.setMetrics(p.root.metrics)
 	}
 }
 

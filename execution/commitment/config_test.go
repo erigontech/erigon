@@ -38,17 +38,23 @@ func TestDefaultTrieConfig(t *testing.T) {
 
 func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	cfg := TrieConfig{}
-	wantUnset := DefaultWarmupNumWorkers
-	if dbg.TipTrieWarmupers > 0 {
-		wantUnset = dbg.TipTrieWarmupers
-	}
-	if got := cfg.WarmupNumWorkersOrDefault(); got != wantUnset {
-		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", wantUnset, got)
+	if got := cfg.WarmupNumWorkersOrDefault(); got != dbg.TipTrieWarmupers {
+		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", dbg.TipTrieWarmupers, got)
 	}
 
 	cfg = TrieConfig{WarmupNumWorkers: 3}
 	if got := cfg.WarmupNumWorkersOrDefault(); got != 3 {
 		t.Errorf("WarmupNumWorkersOrDefault: expected 3, got %d", got)
+	}
+}
+
+func TestTrieConfig_WarmupNumWorkers_EnvDisable(t *testing.T) {
+	old := dbg.TipTrieWarmupers
+	dbg.TipTrieWarmupers = 0
+	defer func() { dbg.TipTrieWarmupers = old }()
+
+	if got := (TrieConfig{}).WarmupNumWorkersOrDefault(); got != 0 {
+		t.Errorf("explicit TIP_TRIE_WARMUPERS=0 must propagate as 0 (warmup disabled), got %d", got)
 	}
 }
 
