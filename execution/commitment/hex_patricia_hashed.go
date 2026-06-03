@@ -217,6 +217,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.capture = nil
 	hph.trace = false
 	hph.traceDomain = false
+	hph.collapseTracer = nil
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
