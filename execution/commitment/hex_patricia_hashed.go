@@ -1436,9 +1436,57 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 		account.Root = trie.EmptyRoot
 		accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
 	} else {
-		accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
+		var storageNode trie.Node = trie.NewHashNode(storageRootHash)
+		if hph.witnessLegacy {
+			materialized, err := hph.witnessMaterializeStorageRoot(c, depth, storageRootHash)
+			if err != nil {
+				return nil, err
+			}
+			if materialized != nil {
+				storageNode = materialized
+			}
+		}
+		accountNode = &trie.AccountNode{Account: account, Storage: storageNode, RootCorrect: true, Code: code, CodeSize: -1}
 	}
 	return accountNode, nil
+}
+
+// witnessMaterializeStorageRoot builds the materialized storage-root node for a
+// witnessed account whose storage slots were not touched this block, used only in
+// legacy mode. Returns nil to fall back to a HashNode (multi-slot branch is handled
+// separately). Never mutates traversal state.
+func (hph *HexPatriciaHashed) witnessMaterializeStorageRoot(c *cell, depth int16, storageRootHash []byte) (trie.Node, error) {
+	if c.storageAddrLen == 0 {
+		return nil, nil
+	}
+	if !c.loaded.storage() {
+		update, err := hph.storageFromCacheOrDB(c.storageAddr[:c.storageAddrLen])
+		if err != nil {
+			return nil, err
+		}
+		c.setFromUpdate(update)
+	}
+	var hashedKeyOffset int16
+	if depth >= 64 {
+		hashedKeyOffset = depth - 64
+	}
+	koffset := hph.accountKeyLen
+	if depth == 0 && c.accountAddrLen == 0 {
+		koffset = 0
+	}
+	var hashedKeyBuf [128]byte
+	if err := hashKey(hph.keccak, c.storageAddr[koffset:c.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
+		return nil, err
+	}
+	hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte
+	slotKey := common.Copy(hashedKeyBuf[:64-hashedKeyOffset+1])
+	storageNode := &trie.ShortNode{Key: slotKey, Val: trie.ValueNode(common.Copy(c.Storage[:c.StorageLen]))}
+
+	materializedRoot := trie.NewInMemoryTrie(storageNode).Root()
+	if !bytes.Equal(materializedRoot, storageRootHash) {
+		return nil, fmt.Errorf("materialized single-slot storage root(%x) != storageRootHash(%x)", materializedRoot, storageRootHash)
+	}
+	return storageNode, nil
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key

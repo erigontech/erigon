@@ -124,14 +124,14 @@ Canonical mode path is untouched. The witness `RootHash()` must be unchanged.
 **Files:**
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 
-- [ ] in `witnessCreateAccountNode`, gate on `hph.witnessLegacy`; empty storage stays
+- [x] in `witnessCreateAccountNode`, gate on `hph.witnessLegacy`; empty storage stays
       `Storage: nil`
-- [ ] single-slot: ensure the slot is loaded (`storageFromCacheOrDB` if
+- [x] single-slot: ensure the slot is loaded (`storageFromCacheOrDB` if
       `!c.loaded.storage()`), re-derive the hashed slot key (`hashKey` on `c.storageAddr`,
       ~L985-988) and build a `trie.ShortNode` from it + `c.Storage` (reuse ~L1518-1524) —
       attach instead of a `HashNode`
-- [ ] canonical path byte-identical (no change when `!hph.witnessLegacy`)
-- [ ] unit test single-slot assertions pass (incl. node-hash == storageRootHash);
+- [x] canonical path byte-identical (no change when `!hph.witnessLegacy`)
+- [x] unit test single-slot assertions pass (incl. node-hash == storageRootHash);
       root-invariant green; `make lint` clean
 
 ### Task 3: Materialize multi-slot storage-root branch (legacy)
