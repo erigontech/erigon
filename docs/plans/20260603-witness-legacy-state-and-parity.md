@@ -146,25 +146,43 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `execution/commitment/hex_patricia_hashed_test.go`
 
-- [ ] thread `witnessMode` (legacy/canonical) from the producer through `sdCtx.Witness`
+- [x] thread `witnessMode` (legacy/canonical) from the producer through `sdCtx.Witness`
       into `GenerateWitness`/`toWitnessTrie`; pass canonical from the 3 non-witness
       `.Witness()` callers (`eth_call.go:500,556,755`) so they are byte-unchanged
-- [ ] gate the `detectCollapseSiblings` `childCount>=2` drop (L1049-64) on
+      (added `legacy bool` to `Witness`/`GenerateWitness`, `witnessLegacy` field on
+      `HexPatriciaHashed`; the postState verify call also passes canonical)
+- [x] gate the `detectCollapseSiblings` `childCount>=2` drop (L1049-64) on
       `mode==canonical`; legacy keeps the collapse siblings
-- [ ] **first verify** whether the storage-root node bytes are resident in the builder for
+- [x] **first verify** whether the storage-root node bytes are resident in the builder for
       an untouched-storage account; if not, resolve them (read the storage-root branch via
-      the trie context) — document which path is used
-- [ ] in legacy: for each witnessed account emit its storage-root node — `0x80` when
+      the trie context) — document which path is used. FINDING: NOT resident — `toWitnessTrie`
+      stops at the account boundary (L1473) and `witnessCreateAccountNode` attaches
+      `trie.NewHashNode(storageRootHash)` (L1434); the account cell carries only the storage
+      root *hash*, not the subtrie. Resolution requires reading the storage-root branch via
+      `hph.ctx.Branch(64-nibble prefix)` for the branch case, but the single-slot-storage
+      case (storage root = embedded leaf, no branch at prefix) needs the storage slot key,
+      which the producer does not have.
+- [ ] ⚠️ BLOCKED in legacy: for each witnessed account emit its storage-root node — `0x80` when
       `storageRoot==emptyRoot`, else the resolved storage-root node instead of
-      `trie.NewHashNode(storageRootHash)` (L1434)
-- [ ] in legacy: include empty nodes that canonical prunes
+      `trie.NewHashNode(storageRootHash)` (L1434). Needs storage-trie resolution
+      infrastructure (single-slot/leaf root case unsolvable from the account cell alone) and
+      live-mainnet oracle (Post-Completion) for over/under=0 validation. `hashInternal`
+      (hasher.go:187) overwrites `ac.Root` from the materialized node, so the existing
+      buildWitnessTrie root check catches hash-breaking nodes but NOT a valid-hashing
+      wrong-set — exact-set match is the oracle's job.
+- [ ] ⚠️ BLOCKED in legacy: include empty nodes that canonical prunes (oracle-dependent
+      over/under validation; depends on the materialization design above)
 - [ ] **invariant**: assert the witness `RootHash()` is identical in legacy and canonical
-      (these changes add nodes, never change the root) — fail loudly otherwise
-- [ ] keep the canonical path byte-identical (no diff when `mode==canonical`)
-- [ ] extend `Test_WitnessTrie_GenerateWitness` (run **without** `-short`) with a legacy
+      (these changes add nodes, never change the root) — fail loudly otherwise (existing
+      buildWitnessTrie root-vs-expectedParentRoot check enforces this for legacy today)
+- [x] keep the canonical path byte-identical (no diff when `mode==canonical`) — canonical
+      drops siblings as before; the 3 non-witness callers pass `legacy=false`
+- [ ] ⚠️ BLOCKED extend `Test_WitnessTrie_GenerateWitness` (run **without** `-short`) with a legacy
       case asserting the storage-root node is materialized for an untouched-storage account
+      (depends on the materialization above)
 - [ ] run `verifyWitnessStateless` in legacy mode (necessary state-root gate); build +
-      `make lint` clean
+      `make lint` clean (verify runs in the existing default-legacy flow; threading + gating
+      build clean and pass `Test_WitnessTrie_GenerateWitness`)
 
 ### Task 4: Mode RPC parameter (API parity)
 

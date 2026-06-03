@@ -681,7 +681,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
-	accessed := collectAccessedState(recordingState, resolveWitnessMode())
+	mode := resolveWitnessMode()
+	accessed := collectAccessedState(recordingState, mode)
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
@@ -725,12 +726,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed)
+		block.Root(), accessed, mode)
 	if err != nil {
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -1015,6 +1016,7 @@ func detectCollapseSiblings(
 	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
+	mode witnessMode,
 ) (siblingPaths [][]byte, err error) {
 	// Set up split reader: commitment from block beginning, plain state from block end.
 	// withHistory=false so branch updates are written using PutBranch().
@@ -1062,16 +1064,19 @@ func detectCollapseSiblings(
 	// The canonical witness (insert-before-delete order) does not touch the sibling of
 	// a branch whose net block change leaves it with >=2 children; erigon's replay can
 	// transiently collapse such a branch, so drop those siblings to match membership.
+	// Legacy keeps every collapse sibling.
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
-		childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
-		if err != nil {
-			return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
-		}
-		if childCount >= 2 {
-			log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
-				"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
-			continue
+		if mode == witnessModeCanonical {
+			childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+			if err != nil {
+				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
+			}
+			if childCount >= 2 {
+				log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
+					"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
+				continue
+			}
 		}
 		siblingPaths = append(siblingPaths, c.siblingPath)
 	}
@@ -1094,6 +1099,7 @@ func buildWitnessTrie(
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
+	mode witnessMode,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
@@ -1113,7 +1119,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, mode == witnessModeLegacy, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1314,7 +1320,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 
 	// Generate the trie with correct storage roots
-	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState")
+	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, false /* legacy */, "debug_executionWitness_postState")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate post-state trie: %w", err)
 	}

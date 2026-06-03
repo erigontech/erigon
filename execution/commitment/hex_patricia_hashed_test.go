@@ -2261,7 +2261,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			toWitness.TouchHashedKey(hk)
 		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, false /* legacy */, "")
 		require.NoError(t, err)
 		_ = witnessTrie
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
@@ -2330,7 +2330,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			}
 		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, false /* legacy */, "")
 		require.NoError(t, err)
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
 		require.NotNil(t, rootWitness, "root witness should not be nil")
