@@ -3505,3 +3505,60 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 	require.Equal(t, root2Direct, root2Update,
 		"block 2 roots should match — sibling accounts must be encoded consistently")
 }
+
+// Legacy node materialization (mode-gated) may add nodes to the witness but must
+// never change its root: legacy and canonical witnesses reconstruct the same
+// state root. This guard fails loudly if a legacy-mode change perturbs the root.
+func Test_WitnessTrie_LegacyCanonicalRootInvariant(t *testing.T) {
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph.SetTrace(false)
+
+	ub := NewUpdateBuilder()
+	for nibble := range 8 {
+		addr := findAddressForNibble(nibble, 0)
+		ah := addrHex(addr)
+		ub.Balance(ah, uint64(nibble+1))
+		// Storage slots so each account has a non-empty storage root that the
+		// legacy materialization path would later expand.
+		for slot := range 2 {
+			loc := makeStorageLoc(nibble*10 + slot)
+			val := makeStorageLoc(nibble*10 + slot + 1)
+			ub.Storage(ah, loc, val)
+		}
+	}
+	plainKeys, updates := ub.Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+	stateRoot, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	// Witness the account keys (untouched storage) in both modes.
+	var accountKeys [][]byte
+	for _, pk := range plainKeys {
+		if len(pk) == length.Addr {
+			accountKeys = append(accountKeys, common.Copy(pk))
+		}
+	}
+	require.NotEmpty(t, accountKeys)
+
+	genRoot := func(legacy bool) []byte {
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		for _, pk := range accountKeys {
+			toWitness.TouchPlainKey(string(pk), nil, toProcess.TouchAccount)
+		}
+		_, root, err := hph.GenerateWitness(ctx, toWitness, nil, legacy, "")
+		require.NoError(t, err)
+		return root
+	}
+
+	canonicalRoot := genRoot(false)
+	legacyRoot := genRoot(true)
+
+	require.Equal(t, stateRoot, canonicalRoot, "canonical witness root must equal state root")
+	require.Equal(t, canonicalRoot, legacyRoot, "legacy witness root must equal canonical witness root")
+}

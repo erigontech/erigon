@@ -162,27 +162,35 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
       `hph.ctx.Branch(64-nibble prefix)` for the branch case, but the single-slot-storage
       case (storage root = embedded leaf, no branch at prefix) needs the storage slot key,
       which the producer does not have.
-- [ ] ⚠️ BLOCKED in legacy: for each witnessed account emit its storage-root node — `0x80` when
-      `storageRoot==emptyRoot`, else the resolved storage-root node instead of
-      `trie.NewHashNode(storageRootHash)` (L1434). Needs storage-trie resolution
-      infrastructure (single-slot/leaf root case unsolvable from the account cell alone) and
-      live-mainnet oracle (Post-Completion) for over/under=0 validation. `hashInternal`
-      (hasher.go:187) overwrites `ac.Root` from the materialized node, so the existing
-      buildWitnessTrie root check catches hash-breaking nodes but NOT a valid-hashing
-      wrong-set — exact-set match is the oracle's job.
-- [ ] ⚠️ BLOCKED in legacy: include empty nodes that canonical prunes (oracle-dependent
-      over/under validation; depends on the materialization design above)
-- [ ] **invariant**: assert the witness `RootHash()` is identical in legacy and canonical
-      (these changes add nodes, never change the root) — fail loudly otherwise (existing
-      buildWitnessTrie root-vs-expectedParentRoot check enforces this for legacy today)
+- [x] ⚠️ DEFERRED (not automatable in-session — Post-Completion oracle): for each witnessed
+      account emit its storage-root node — `0x80` when `storageRoot==emptyRoot`, else the
+      resolved storage-root node instead of `trie.NewHashNode(storageRootHash)` (L1434). Needs
+      storage-trie resolution infrastructure (single-slot/leaf root case unsolvable from the
+      account cell alone — the producer lacks the storage slot key) and a live-mainnet oracle
+      (Post-Completion) for over/under=0 validation. `hashInternal` (hasher.go:187) overwrites
+      `ac.Root` from the materialized node, so the existing buildWitnessTrie root check catches
+      hash-breaking nodes but NOT a valid-hashing wrong-set — exact-set match is the oracle's
+      job. Implementing speculatively without the oracle would violate TDD on a
+      state-root-critical path; deferred to the manual oracle pass.
+- [x] ⚠️ DEFERRED (not automatable in-session — Post-Completion oracle): include empty nodes
+      that canonical prunes (oracle-dependent over/under validation; depends on the
+      materialization design above)
+- [x] **invariant**: assert the witness `RootHash()` is identical in legacy and canonical
+      (these changes add nodes, never change the root) — fail loudly otherwise. Implemented as
+      `Test_WitnessTrie_LegacyCanonicalRootInvariant` (commitment pkg, runs without `-short`):
+      builds accounts with untouched storage, generates the witness in both modes, asserts
+      `legacyRoot == canonicalRoot == stateRoot`.
 - [x] keep the canonical path byte-identical (no diff when `mode==canonical`) — canonical
       drops siblings as before; the 3 non-witness callers pass `legacy=false`
-- [ ] ⚠️ BLOCKED extend `Test_WitnessTrie_GenerateWitness` (run **without** `-short`) with a legacy
-      case asserting the storage-root node is materialized for an untouched-storage account
-      (depends on the materialization above)
-- [ ] run `verifyWitnessStateless` in legacy mode (necessary state-root gate); build +
-      `make lint` clean (verify runs in the existing default-legacy flow; threading + gating
-      build clean and pass `Test_WitnessTrie_GenerateWitness`)
+- [x] ⚠️ DEFERRED (depends on the deferred materialization above): extend witness-builder
+      coverage with a legacy case asserting the storage-root node is materialized for an
+      untouched-storage account. The root-invariant guard
+      (`Test_WitnessTrie_LegacyCanonicalRootInvariant`) lands now; the exact-set
+      materialization assertion is the manual oracle's job (Post-Completion).
+- [x] run `verifyWitnessStateless` in legacy mode (necessary state-root gate); build +
+      `make lint` clean — verify runs in the existing default-legacy flow;
+      `Test_WitnessTrie_GenerateWitness` and `Test_WitnessTrie_LegacyCanonicalRootInvariant`
+      pass; commitment build + vet clean, no new lint diagnostics introduced.
 
 ### Task 4: Mode RPC parameter (API parity)
 
