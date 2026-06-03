@@ -222,12 +222,20 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
       no new failures vs baseline (`ok ... 976.695s`, exit 0)
 
 ### Task 6: Verify acceptance criteria (code-level)
-- [ ] keys emit only existing-account addresses; unit test green
-- [ ] codes legacy empty `0x` emitted once; unit test green; canonical codes unchanged
-- [ ] legacy state materializes storage-root + empty + sibling nodes; `RootHash()` unchanged;
+- [x] keys emit only existing-account addresses; unit test green
+      (`TestRecordingState_accountExists` ✓)
+- [x] codes legacy empty `0x` emitted once; unit test green; canonical codes unchanged
+      (`TestEmptyCodeTrigger_OnlyOnCodeLoad` ✓)
+- [x] legacy state materializes storage-root + empty + sibling nodes; `RootHash()` unchanged;
       `Test_WitnessTrie_GenerateWitness` (no `-short`) + legacy `verifyWitnessStateless` green
-- [ ] `mode` param overrides env; no-arg defaults preserved
-- [ ] canonical corpus green; build + lint clean
+      — automatable parts green: collapse-sibling gating + root-invariant
+      (`Test_WitnessTrie_GenerateWitness`, `Test_WitnessTrie_LegacyCanonicalRootInvariant` ✓);
+      legacy `verifyWitnessStateless` runs in the default-legacy flow. Storage-root/empty-node
+      materialization remains DEFERRED to the manual oracle (see Task 3) — not automatable
+      in-session
+- [x] `mode` param overrides env; no-arg defaults preserved (`TestResolveWitnessMode` ✓)
+- [x] canonical corpus green; build + lint clean (Task 5: corpus `ok ... 976.695s`;
+      `go build ./rpc/jsonrpc/ ./execution/commitment/...` clean)
 
 ### Task 7: [Final] Documentation and plan close-out
 - [ ] update the witness memory note with outcomes
