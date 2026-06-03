@@ -736,3 +736,40 @@ func TestEncodeUint256BufferOverflowPrevention(t *testing.T) {
 	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeUint256() — make sure this doesn't panic.
 	_ = header.Hash()
 }
+
+// A Block built from the binary engine_newPayload tx bytes must produce exactly
+// the same RawBody() encoding as one built without the cache; otherwise the stored
+// body and the EIP-7934 block-RLP-size check diverge for typed (EIP-2718) txs.
+func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
+	t.Parallel()
+	tr := NewTRand()
+	txTypes := []int{LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType}
+
+	binaryTxs := make(BinaryTransactions, len(txTypes))
+	txns := make([]Transaction, len(txTypes))
+	for i, txType := range txTypes {
+		// Blob/SetCode txs require a non-nil To, which RandTransaction picks
+		// at random — retry until we get one that round-trips.
+		for attempt := 0; txns[i] == nil && attempt < 1000; attempt++ {
+			var buf bytes.Buffer
+			if tr.RandTransaction(txType).MarshalBinary(&buf) != nil {
+				continue
+			}
+			binaryTxn := common.Copy(buf.Bytes())
+			if decoded, err := DecodeTransaction(binaryTxn); err == nil {
+				binaryTxs[i], txns[i] = binaryTxn, decoded
+			}
+		}
+		require.NotNilf(t, txns[i], "could not generate a decodable txType=%d", txType)
+	}
+
+	cached := NewBlockFromStorageWithBinaryTxs(common.Hash{}, &Header{}, txns, binaryTxs, nil, nil)
+	reference := NewBlockFromStorage(common.Hash{}, &Header{}, txns, nil, nil)
+
+	got, want := cached.RawBody(), reference.RawBody()
+	require.Len(t, got.Transactions, len(want.Transactions))
+	for i, txType := range txTypes {
+		require.Equalf(t, want.Transactions[i], got.Transactions[i],
+			"txType=%d: cached RawBody tx bytes must equal the rlp.EncodeToBytes form", txType)
+	}
+}
