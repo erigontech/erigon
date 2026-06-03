@@ -544,18 +544,34 @@ const (
 	witnessModeCanonical
 )
 
-// resolveWitnessMode reads ERIGON_WITNESS_MODE (default legacy).
-func resolveWitnessMode() witnessMode {
-	if dbg.EnvString("ERIGON_WITNESS_MODE", "legacy") == "canonical" {
-		return witnessModeCanonical
+// resolveWitnessMode resolves the witness mode with precedence: request param > env > legacy.
+// An explicit param value other than "legacy"/"canonical" is rejected.
+func resolveWitnessMode(modeParam *string) (witnessMode, error) {
+	if modeParam != nil {
+		switch *modeParam {
+		case "legacy":
+			return witnessModeLegacy, nil
+		case "canonical":
+			return witnessModeCanonical, nil
+		default:
+			return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
+		}
 	}
-	return witnessModeLegacy
+	if dbg.EnvString("ERIGON_WITNESS_MODE", "legacy") == "canonical" {
+		return witnessModeCanonical, nil
+	}
+	return witnessModeLegacy, nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
-func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	resolvedMode, err := resolveWitnessMode(mode)
+	if err != nil {
+		return nil, err
+	}
+
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -681,8 +697,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
-	mode := resolveWitnessMode()
-	accessed := collectAccessedState(recordingState, mode)
+	accessed := collectAccessedState(recordingState, resolvedMode)
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
@@ -726,12 +741,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, mode)
+		block.Root(), accessed, resolvedMode)
 	if err != nil {
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode)
 	if err != nil {
 		return nil, err
 	}

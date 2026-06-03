@@ -177,3 +177,54 @@ func TestCollectAccessedState_KeysOnlyExistingAccounts(t *testing.T) {
 		t.Error("expected storage slot key to still be emitted for nonexistent account")
 	}
 }
+
+func TestResolveWitnessMode(t *testing.T) {
+	str := func(s string) *string { return &s }
+
+	t.Run("param overrides env", func(t *testing.T) {
+		t.Setenv("ERIGON_WITNESS_MODE", "canonical")
+		got, err := resolveWitnessMode(str("legacy"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != witnessModeLegacy {
+			t.Errorf("param legacy should win over canonical env, got %v", got)
+		}
+
+		got, err = resolveWitnessMode(str("canonical"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != witnessModeCanonical {
+			t.Errorf("param canonical, got %v", got)
+		}
+	})
+
+	t.Run("unknown param rejected", func(t *testing.T) {
+		if _, err := resolveWitnessMode(str("bogus")); err == nil {
+			t.Error("expected error for unknown mode param")
+		}
+	})
+
+	t.Run("env used when param nil", func(t *testing.T) {
+		t.Setenv("ERIGON_WITNESS_MODE", "canonical")
+		got, err := resolveWitnessMode(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != witnessModeCanonical {
+			t.Errorf("nil param should fall back to canonical env, got %v", got)
+		}
+	})
+
+	t.Run("legacy default when param nil and env unset", func(t *testing.T) {
+		t.Setenv("ERIGON_WITNESS_MODE", "")
+		got, err := resolveWitnessMode(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != witnessModeLegacy {
+			t.Errorf("default should be legacy, got %v", got)
+		}
+	})
+}

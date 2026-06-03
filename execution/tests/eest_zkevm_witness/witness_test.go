@@ -148,7 +148,7 @@ func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) {
 			t.Fatalf("block index %d has a witness but no parseable block number", i)
 		}
 
-		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)))
+		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), nil)
 		if err != nil {
 			t.Fatalf("ExecutionWitness(block %d): %v", blockNum, err)
 		}

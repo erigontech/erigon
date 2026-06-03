@@ -197,13 +197,20 @@ KISS: minimal, mode-gated, guarded changes. **The canonical path must stay byte-
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add optional `mode *string` 2nd parameter to `ExecutionWitness` (lowercase
+- [x] add optional `mode *string` 2nd parameter to `ExecutionWitness` (lowercase
       `"legacy"`/`"canonical"`); confirm the RPC registration accepts an optional trailing param
-- [ ] change `resolveWitnessMode(mode *string)`: precedence param > env > legacy; reject
-      unknown values with a clear error
-- [ ] thread the resolved mode into `collectAccessedState` (done) and the builder path
-      (Task 3); no-arg call still defaults to env/legacy
-- [ ] build + `make lint` clean; manual sanity: `mode=canonical` reproduces canonical output
+      (pointer param = optional trailing arg, the existing erigon RPC convention; interface in
+      `debug_api.go` updated)
+- [x] change `resolveWitnessMode(mode *string)`: precedence param > env > legacy; reject
+      unknown values with a clear error (`TestResolveWitnessMode` covers param-overrides-env,
+      unknown-rejected, env-fallback, legacy-default)
+- [x] thread the resolved mode into `collectAccessedState` (done) and the builder path
+      (Task 3); no-arg call still defaults to env/legacy (resolved once at entry as
+      `resolvedMode`, passed to `collectAccessedState`/`detectCollapseSiblings`/`buildWitnessTrie`)
+- [x] build + `make lint` clean; manual sanity: `mode=canonical` reproduces canonical output
+      (build clean; lint: 55 pre-existing issues in sibling worktree only, none in changed files;
+      `mode=canonical` reproduces canonical via the byte-identical canonical path from Task 3 —
+      live RPC sanity is the Post-Completion oracle pass)
 
 ### Task 5: Canonical corpus regression
 **Files:** (no source changes)
