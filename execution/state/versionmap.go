@@ -80,16 +80,14 @@ func (k AccountKey) String() string {
 }
 
 type VersionMap struct {
-	mu     sync.RWMutex
-	s      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
-	trace  bool
-	HasBAL bool // When true, all significant writes are pre-populated from BAL
+	mu    sync.RWMutex
+	s     map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
+	trace bool
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 	vm := &VersionMap{
-		s:      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
-		HasBAL: len(changes) > 0,
+		s: map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
 	}
 	vm.WriteChanges(changes)
 	return vm
@@ -399,20 +397,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			// When BAL is present, significant writes for BalancePath,
-			// NoncePath, CodePath and StoragePath are pre-populated in the
-			// VersionMap before execution.
-			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
-				path == CodePath || path == StoragePath
-			if !vm.HasBAL || !isBALPrePopulatedPath {
-				if recursive && readVal == nil {
-					// Synthetic probe — outer entry's own validation covers it.
-				} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
-					// Value tiebreaker: a Done entry now exists where the read
-					// saw storage, but it holds the same value — read stays valid.
-				} else {
-					valid = VersionInvalid
-				}
+			if recursive && readVal == nil {
+				// Synthetic probe — outer entry's own validation covers it.
+			} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+				// Value tiebreaker: a Done entry now exists where the read
+				// saw storage, but it holds the same value — read stays valid.
+			} else {
+				valid = VersionInvalid
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
@@ -476,19 +467,10 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 							version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
-					// Account-existence changes are signalled by AddressPath
-					// MVReadResultDone (newObject in a prior tx),
-					// SelfDestructPath, or IncarnationPath. We cross-check
-					// SelfDestructPath and IncarnationPath here because under
-					// HasBAL the worker's AddressPath write is filtered out of
-					// the per-tx flush (BAL doesn't list AddressPath), so the
-					// MVReadResultDone arm can't catch the staleness on its
-					// own. IncarnationPath is the SPECIFIC signal — it's
-					// written only by CreateAccount and SelfDestruct, never by
-					// UpdateAccountData and never by BAL pre-population. Using
-					// BalancePath here (the prior implementation) overfires for
-					// every gas-paying same-sender tx and for any BAL-listed
-					// balance change, causing a retry storm under BAL.
+					// IncarnationPath is the specific signal that a prior tx
+					// created or destroyed this account — it's never written by
+					// UpdateAccountData — so a Done entry there invalidates this
+					// stale storage-fallback read. SelfDestructPath is checked first.
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					if valid == VersionValid {

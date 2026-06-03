@@ -264,10 +264,11 @@ func TestMVHashMapBasics(t *testing.T) {
 //   - coinbase.BalancePath: same shape as sender.BalancePath.
 //
 // This test reproduces the BAL retry storm seen on the point_evaluation
-// benchmark: with the current validateRead BalancePath cross-check on the
-// AddressPath MVReadResultNone branch, every tx K>=1 is invalidated solely
-// because BAL has a BalancePath entry below K, even though the underlying
-// AddressPath read from storage is unchanged.
+// benchmark: a BalancePath cross-check on the AddressPath MVReadResultNone
+// branch would invalidate every tx K>=1 solely because BAL has a BalancePath
+// entry below K, even though the underlying AddressPath read from storage is
+// unchanged. The IncarnationPath cross-check (the specific create/destruct
+// signal) does not fire here, so the reads validate without conflicts.
 func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	t.Parallel()
 
@@ -283,7 +284,6 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	}
 
 	vm := NewVersionMap(nil)
-	vm.HasBAL = true
 
 	for i := 0; i < numTxs; i++ {
 		vm.Write(sender, BalancePath, accounts.NilKey,
@@ -342,11 +342,10 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 }
 
 // TestNoBAL_SameSenderTxs_DetectsConflicts is the safety counterpart of
-// TestBALPrePop_SameSenderTxs_NoConflicts: when no BAL is supplied, removing
-// the BalancePath cross-check from validateRead's AddressPath MVReadResultNone
-// branch must NOT silently break the existing same-sender conflict-detection
-// path (which now relies entirely on the MVReadResultDone arm's
-// !vm.HasBAL || !isBALPrePopulatedPath gate + value-tiebreaker).
+// TestBALPrePop_SameSenderTxs_NoConflicts: when no BAL is supplied, the
+// same-sender conflict-detection path must still fire. It relies entirely on
+// the MVReadResultDone arm's value-tiebreaker (a StorageRead that now finds a
+// Done entry with a different value invalidates).
 //
 // Setup: 9 concurrent workers each read sender.BalancePath / sender.NoncePath
 // from storage at UnknownVersion (vm has no entries yet). Then tx 0 commits
@@ -370,7 +369,6 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	}
 
 	vm := NewVersionMap(nil)
-	require.False(t, vm.HasBAL, "test exercises the no-BAL path")
 
 	// Phase 1: 9 concurrent workers each read the sender's pre-block state
 	// from storage (vm has no entries). Each records a (BalancePath,
@@ -432,22 +430,12 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 // account as non-existent (AddressPath = StorageRead → nil), the stale read
 // must be invalidated.
 //
-// Under HasBAL + parallel exec, the worker's AddressPath write is filtered
-// out of the per-tx flush (the BAL doesn't list AddressPath, so normalize
-// drops it), so the AddressPath MVReadResultDone branch can't catch the
-// staleness on its own. PRs #19628/#19656 used BalancePath as the cross-check
-// signal — wrong, because BalancePath also fires for ordinary
-// UpdateAccountData on a pre-existing account and for BAL pre-population of
-// any balance-changing tx. That caused the same-sender BAL retry storm we
-// dropped the cross-check to fix.
-//
-// The CORRECT signal is IncarnationPath: it's written only by CreateAccount
-// and SelfDestruct (never by UpdateAccountData, never by BAL pre-pop). This
-// test asserts that when IncarnationPath has a Done entry at a prior txIdx,
-// a same-block AddressPath/StorageRead is invalidated.
-//
-// Status: red until validateRead grows an IncarnationPath cross-check in the
-// path == AddressPath / MVReadResultNone arm.
+// When a BAL is present the worker's AddressPath write is filtered out of the
+// per-tx flush (the BAL doesn't list AddressPath), so the AddressPath
+// MVReadResultDone branch can't catch the staleness on its own. The signal is
+// IncarnationPath — written only by CreateAccount and SelfDestruct, never by
+// UpdateAccountData or BAL pre-pop. This test asserts that a Done IncarnationPath
+// entry at a prior txIdx invalidates a same-block AddressPath/StorageRead.
 func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing.T) {
 	t.Parallel()
 
@@ -460,13 +448,12 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	}
 
 	vm := NewVersionMap(nil)
-	vm.HasBAL = true
 
 	// Simulate the post-flush state after tx 0 creates the account. The
 	// BAL pre-populated BalancePath / NoncePath / CodeHashPath; the worker
 	// additionally flushed IncarnationPath (which BAL doesn't pre-populate)
 	// because CreateAccount writes it. AddressPath was filtered out of the
-	// flush under HasBAL — that's the gap PR #19628 was trying to plug.
+	// flush when a BAL is present — the gap PR #19628 plugged.
 	vm.Write(addr, BalancePath, accounts.NilKey,
 		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
 	vm.Write(addr, NoncePath, accounts.NilKey,
@@ -493,11 +480,10 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 		"tx 1: a prior tx wrote IncarnationPath (account created/destroyed); the stale AddressPath storage-read MUST invalidate so the tx re-executes against the post-creation state")
 }
 
-// TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
-// true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
-// AddressPath means a real state change (e.g. account creation) from a
-// concurrent worker, and the read must be invalidated.
-func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
+// TestValidateRead_NoBypassForAddressPath verifies that a new MVReadResultDone
+// entry on AddressPath — a real state change (e.g. account creation) from a
+// concurrent worker — invalidates a storage-fallback read of that account.
+func TestValidateRead_NoBypassForAddressPath(t *testing.T) {
 	t.Parallel()
 
 	addr := getAddress(42)
@@ -509,7 +495,6 @@ func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 	}
 
 	vm := NewVersionMap(nil)
-	vm.HasBAL = true
 
 	// A concurrent worker wrote to AddressPath at txIndex 0.
 	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
@@ -527,13 +512,13 @@ func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 
 	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
 	require.Equal(t, VersionInvalid, valid,
-		"HasBAL should NOT bypass invalidation for AddressPath — new entry means real state change")
+		"AddressPath must not be bypassed — a new Done entry means a real state change")
 }
 
-// TestValidateRead_NoHasBAL_InvalidatesAllPaths verifies the baseline behavior
-// without HasBAL: any StorageRead that now finds a MVReadResultDone entry
-// should be invalidated, regardless of path.
-func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
+// TestValidateRead_InvalidatesAllPaths verifies the baseline behavior: any
+// StorageRead that now finds a MVReadResultDone entry should be invalidated,
+// regardless of path.
+func TestValidateRead_InvalidatesAllPaths(t *testing.T) {
 	t.Parallel()
 
 	addr := getAddress(42)
@@ -546,8 +531,7 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 
 	for _, path := range []AccountPath{BalancePath, NoncePath, AddressPath} {
 		t.Run(path.String(), func(t *testing.T) {
-			vm := NewVersionMap(nil) // HasBAL = false
-			require.False(t, vm.HasBAL)
+			vm := NewVersionMap(nil)
 
 			// A concurrent worker wrote at txIndex 0.
 			vm.Write(addr, path, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
@@ -565,7 +549,7 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 
 			valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
 			require.Equal(t, VersionInvalid, valid,
-				"without HasBAL, StorageRead finding MVReadResultDone should invalidate for %s", path)
+				"StorageRead finding a Done entry should invalidate for %s", path)
 		})
 	}
 }
