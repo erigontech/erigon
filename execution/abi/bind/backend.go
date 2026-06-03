@@ -26,7 +26,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/types"
@@ -45,7 +44,27 @@ var (
 	// This error is returned by WaitDeployed if contract creation leaves an
 	// empty contract behind.
 	ErrNoCodeAfterDeploy = errors.New("no contract code after deployment")
+
+	// ErrNotFound is returned by API methods if the requested item does not exist.
+	ErrNotFound = errors.New("not found")
 )
+
+// CallMsg contains parameters for contract calls.
+type CallMsg struct {
+	From             common.Address  // the sender of the 'transaction'
+	To               *common.Address // the destination contract (nil for contract creation)
+	Gas              uint64          // if 0, the call executes with near-infinite gas
+	MaxFeePerBlobGas *uint256.Int    // EIP-4844 max_fee_per_blob_gas
+	GasPrice         *uint256.Int    // wei <-> gas exchange ratio
+	Value            *uint256.Int    // amount of wei sent along with the call
+	Data             []byte          // input data, usually an ABI-encoded contract method invocation
+
+	FeeCap         *uint256.Int          // EIP-1559 max_fee_per_gas
+	TipCap         *uint256.Int          // EIP-1559 max_priority_fee_per_gas
+	AccessList     types.AccessList      // EIP-2930 access list
+	BlobHashes     []common.Hash         // EIP-4844 versioned blob hashes
+	Authorizations []types.Authorization // EIP-3074 authorizations
+}
 
 // ContractCaller defines the methods needed to allow operating with a contract on a read
 // only basis.
@@ -55,7 +74,7 @@ type ContractCaller interface {
 	CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error)
 	// CallContract executes an Ethereum contract call with the specified data as the
 	// input.
-	CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error)
+	CallContract(ctx context.Context, callMsg CallMsg, blockNumber *uint256.Int) ([]byte, error)
 }
 
 // PendingContractCaller defines methods to perform contract calls on the pending state.
@@ -65,7 +84,7 @@ type PendingContractCaller interface {
 	// PendingCodeAt returns the code of the given account in the pending state.
 	PendingCodeAt(ctx context.Context, contract common.Address) ([]byte, error)
 	// PendingCallContract executes an Ethereum contract call against the pending state.
-	PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error)
+	PendingCallContract(ctx context.Context, call CallMsg) ([]byte, error)
 }
 
 // ContractTransactor defines the methods needed to allow operating with a contract
@@ -85,9 +104,30 @@ type ContractTransactor interface {
 	// There is no guarantee that this is the true gas limit requirement as other
 	// transactions may be added or removed by miners, but it should provide a basis
 	// for setting a reasonable default.
-	EstimateGas(ctx context.Context, callMsg ethereum.CallMsg) (gas uint64, err error)
+	EstimateGas(ctx context.Context, callMsg CallMsg) (gas uint64, err error)
 	// SendTransaction injects the transaction into the pending pool for execution.
 	SendTransaction(ctx context.Context, txn types.Transaction) error
+}
+
+// FilterQuery contains options for contract log filtering.
+type FilterQuery struct {
+	BlockHash *common.Hash     // used by eth_getLogs, return logs only from block with this hash
+	FromBlock *big.Int         // beginning of the queried range, nil means genesis block
+	ToBlock   *big.Int         // end of the range, nil means latest block
+	Addresses []common.Address // restricts matches to events created by specific contracts
+
+	// The Topic list restricts matches to particular event topics. Each event has a list
+	// of topics. Topics matches a prefix of that list. An empty element slice matches any
+	// topic. Non-empty elements represent an alternative that matches any of the
+	// contained topics.
+	//
+	// Examples:
+	// {} or nil          matches any topic list
+	// {{A}}              matches topic A in first position
+	// {{}, {B}}          matches any topic in first position AND B in second position
+	// {{A}, {B}}         matches topic A in first position AND B in second position
+	// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
+	Topics [][]common.Hash
 }
 
 // ContractFilterer defines the methods needed to access log events using one-off
@@ -97,11 +137,11 @@ type ContractFilterer interface {
 	// returning all the results in one batch.
 	//
 	// TODO(karalabe): Deprecate when the subscription one can return past data too.
-	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
+	FilterLogs(ctx context.Context, query FilterQuery) ([]types.Log, error)
 
 	// SubscribeFilterLogs creates a background log filtering operation, returning
 	// a subscription immediately, which can be used to stream the found events.
-	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error)
+	SubscribeFilterLogs(ctx context.Context, query FilterQuery, ch chan<- types.Log) (event.Subscription, error)
 }
 
 // DeployBackend wraps the operations needed by WaitMined and WaitDeployed.

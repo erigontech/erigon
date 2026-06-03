@@ -30,7 +30,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -72,9 +71,6 @@ var (
 
 // SimulatedBackend implements bind.ContractBackend, simulating a blockchain in
 // the background. Its main purpose is to allow for easy testing of contract bindings.
-// Simulated backend implements the following interfaces:
-// ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
-// DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
 	m         *execmoduletester.ExecModuleTester
 	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
@@ -326,28 +322,28 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, ethereum.NotFound
+		return nil, false, bind.ErrNotFound
 	}
 	blockHash, ok, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, ethereum.NotFound
+		return nil, false, bind.ErrNotFound
 	}
 	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
 	if body == nil {
-		return nil, false, ethereum.NotFound
+		return nil, false, bind.ErrNotFound
 	}
 	for _, txn = range body.Transactions {
 		if txn.Hash() == txHash {
 			return txn, false, nil
 		}
 	}
-	return nil, false, ethereum.NotFound
+	return nil, false, bind.ErrNotFound
 }
 
 // BlockByHash retrieves a block based on the block hash.
@@ -567,7 +563,7 @@ func (e *revertError) ErrorData() any {
 }
 
 // CallContract executes a contract call.
-func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
+func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -594,7 +590,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 }
 
 // PendingCallContract executes a contract call on the pending state.
-func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error) {
+func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call bind.CallMsg) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	snapshot := b.pendingState.PushSnapshot()
@@ -629,7 +625,7 @@ func (b *SimulatedBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error
 
 // EstimateGas executes the requested code against the currently pending block/state and
 // returns the used amount of gas.
-func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -731,7 +727,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
-func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
+func (b *SimulatedBackend) callContract(_ context.Context, call bind.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
 	const baseFeeUpperLimit = 880000000
 	const defaultCallGas = 50000000
 	// Ensure message is initialized properly.
@@ -833,13 +829,13 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 // returning all the results in one batch.
 //
 // TODO(karalabe): Deprecate when the subscription one can return past data too.
-func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (b *SimulatedBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 	return nil, nil
 }
 
 // SubscribeFilterLogs creates a background log filtering operation, returning a
 // subscription immediately, which can be used to stream the found events.
-func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
+func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	return nil, nil
 }
 
@@ -875,7 +871,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 
 // callMsg implements protocol.Message to allow passing it as a transaction simulator.
 type callMsg struct {
-	ethereum.CallMsg
+	bind.CallMsg
 }
 
 func (m callMsg) From() accounts.Address { return accounts.InternAddress(m.CallMsg.From) }

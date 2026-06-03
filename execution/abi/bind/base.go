@@ -27,7 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/abi"
@@ -135,7 +134,7 @@ func (c *BoundContract) Call(opts *CallOpts, results *[]any, method string, para
 		return err
 	}
 	var (
-		msg    = ethereum.CallMsg{From: opts.From, To: &c.address, Data: input}
+		msg    = CallMsg{From: opts.From, To: &c.address, Data: input}
 		ctx    = ensureContext(opts.Context)
 		code   []byte
 		output []byte
@@ -251,7 +250,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 			}
 		}
 		// If the contract surely has code (or code is not needed), estimate the transaction
-		msg := ethereum.CallMsg{From: opts.From, To: contract, GasPrice: gasPrice, Value: value, Data: input}
+		msg := CallMsg{From: opts.From, To: contract, GasPrice: gasPrice, Value: value, Data: input}
 		gasLimit, err = c.transactor.EstimateGas(ensureContext(opts.Context), msg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to estimate gas needed: %w", err)
@@ -294,7 +293,7 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]any
 	// Start the background filtering
 	logs := make(chan types.Log, 128)
 
-	config := ethereum.FilterQuery{
+	config := FilterQuery{
 		Addresses: []common.Address{c.address},
 		Topics:    topics,
 		FromBlock: new(big.Int).SetUint64(opts.Start),
@@ -340,7 +339,7 @@ func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]any) 
 	// Start the background filtering
 	logs := make(chan types.Log, 128)
 
-	config := ethereum.FilterQuery{
+	config := FilterQuery{
 		Addresses: []common.Address{c.address},
 		Topics:    topics,
 	}

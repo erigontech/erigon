@@ -96,7 +96,6 @@ import (
 	"fmt"
 	"reflect"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/common"
@@ -108,7 +107,6 @@ import (
 var (
 	_ = big.NewInt
 	_ = strings.NewReader
-	_ = ethereum.NotFound
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
