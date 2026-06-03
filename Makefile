@@ -256,6 +256,11 @@ test-fixtures-cl:
 test-fixtures-eest:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
 
+## test-fixtures-zkevm:                download & extract only the zkevm execution-witness tarball (eest_zkevm)
+.PHONY: test-fixtures-zkevm
+test-fixtures-zkevm:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm
+
 # EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
 # against EEST fixtures. The shard list, workers, and failure budgets live in
 # tools/eest-spec-shards.yml (single source of truth shared with
