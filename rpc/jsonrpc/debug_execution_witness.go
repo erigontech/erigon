@@ -46,10 +46,11 @@ type RecordingState struct {
 	prefix string
 
 	// Read tracking (all accessed keys, including reads that hit the overlay)
-	AccessedAccounts map[common.Address]struct{}
-	AccessedStorage  map[common.Address]map[common.Hash]struct{}
-	AccessedCode     map[common.Address][]byte // all code seen during execution
-	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
+	AccessedAccounts  map[common.Address]struct{}
+	AccessedStorage   map[common.Address]map[common.Hash]struct{}
+	AccessedCode      map[common.Address][]byte // all code seen during execution
+	PreStateCode      map[common.Address][]byte // code read from the inner reader (pre-block state only)
+	emptyCodeAccessed bool                      // an empty-code account had its code loaded (legacy emits one empty bytecode)
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
@@ -141,6 +142,11 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return acc, nil
 	}
 	acc, err := s.inner.ReadAccountData(address)
+	if acc != nil && acc.IsEmptyCodeHash() {
+		// Loading an empty-code account materializes the empty bytecode; legacy
+		// mode emits that single empty entry.
+		s.emptyCodeAccessed = true
+	}
 	if s.tracing(addr) {
 		if acc != nil {
 			fmt.Printf("[TRACE] ReadAccountData %s -> inner nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
@@ -264,6 +270,8 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 				s.PreStateCode[addr] = code
 			}
 		}
+	} else {
+		s.emptyCodeAccessed = true
 	}
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] ReadAccountCode %s -> inner len=%d\n", addr.Hex(), len(code))
@@ -516,6 +524,24 @@ func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error)
 	return common.Hash{}, nil
 }
 
+// witnessMode selects the debug_executionWitness output format. legacy is the
+// default full format; canonical is the minimized ethereum/execution-specs zkevm
+// format (no empty nodes, no in-block-created bytecode, minimum siblings).
+type witnessMode int
+
+const (
+	witnessModeLegacy witnessMode = iota
+	witnessModeCanonical
+)
+
+// resolveWitnessMode reads ERIGON_WITNESS_MODE (default legacy).
+func resolveWitnessMode() witnessMode {
+	if dbg.EnvString("ERIGON_WITNESS_MODE", "legacy") == "canonical" {
+		return witnessModeCanonical
+	}
+	return witnessModeLegacy
+}
+
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
@@ -645,7 +671,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
-	accessed := collectAccessedState(recordingState)
+	accessed := collectAccessedState(recordingState, resolveWitnessMode())
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
@@ -799,7 +825,7 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 // SortedCodes is initialized to an empty (non-nil) slice so callers can assign
 // result.Codes = accessed.SortedCodes without risking a "codes": null JSON
 // regression for empty-touch blocks; the Codes field has no omitempty.
-func collectAccessedState(rs *RecordingState) *accessedState {
+func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
 		Addresses:   make(map[common.Address]struct{}),
 		Storage:     make(map[common.Address]map[common.Hash]struct{}),
@@ -875,16 +901,37 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	})
 	out.SortedKeys = sortedKeys
 
-	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range preStateCode {
-		if len(code) > 0 {
-			h := crypto.Keccak256Hash(code)
-			allCodesByHash[h] = code
+	emptyEntry := false
+	switch mode {
+	case witnessModeCanonical:
+		// canonical: only pre-state bytecode (excludes in-block-created), non-empty.
+		for _, code := range rs.GetPreStateCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
 		}
+	default:
+		// legacy: every bytecode loaded during execution — pre-state reads, in-block
+		// created code that is subsequently called, EIP-7702 designators, plus a single
+		// empty bytecode if any empty-code account was loaded.
+		for _, code := range rs.GetAccessedCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
+		}
+		for _, code := range rs.GetModifiedCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
+		}
+		emptyEntry = rs.emptyCodeAccessed
 	}
 
-	uniqueCodes := make([][]byte, 0, len(allCodesByHash))
+	uniqueCodes := make([][]byte, 0, len(allCodesByHash)+1)
+	if emptyEntry {
+		uniqueCodes = append(uniqueCodes, []byte{})
+	}
 	for _, code := range allCodesByHash {
 		uniqueCodes = append(uniqueCodes, code)
 	}
