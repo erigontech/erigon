@@ -139,13 +139,17 @@ Canonical mode path is untouched. The witness `RootHash()` must be unchanged.
 **Files:**
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 
-- [ ] resolve the storage-root branch **read-only** via
+- [x] resolve the storage-root branch **read-only** via
       `ctx.Branch(nibbles.HexToCompact(hashedKey[:64]))` and decode into a `FullNode` reusing
-      the ~L1573-1613 pattern; attach as `AccountNode.Storage` (one level)
-- [ ] children stay `HashNode`s of the branch's child hashes (root node only); **do not call
-      `hph.unfold`** (mutates traversal state → corrupts other keys / `RootHash`)
-- [ ] canonical path unchanged; `RootHash()` unchanged
-- [ ] unit test multi-slot assertions pass (incl. node-hash == storageRootHash);
+      the ~L1573-1613 pattern; attach as `AccountNode.Storage` (one level). Two sub-cases by
+      storage-root shape: extension-rooted (`c.extLen>0` → `ShortNode{ext, HashNode(branch)}`,
+      no branch stored at the account prefix) and direct-branch-rooted (`c.extLen==0` →
+      decode the branch at the account prefix into a `FullNode`; children computed at depth 65,
+      and skip the 2-byte touch-map prefix before the afterMap bitmap)
+- [x] children stay `HashNode`s of the branch's child hashes (root node only); **do not call
+      `hph.unfold`** — used `branchFromCacheOrDB` (read-only) + a temporary `cell`
+- [x] canonical path unchanged; `RootHash()` unchanged
+- [x] unit test multi-slot assertions pass (incl. node-hash == storageRootHash);
       root-invariant green; `make lint` clean
 
 ### Task 4: Canonical corpus regression (proves canonical unchanged only)

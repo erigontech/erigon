@@ -1438,7 +1438,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	} else {
 		var storageNode trie.Node = trie.NewHashNode(storageRootHash)
 		if hph.witnessLegacy {
-			materialized, err := hph.witnessMaterializeStorageRoot(c, depth, storageRootHash)
+			materialized, err := hph.witnessMaterializeStorageRoot(c, depth, hashedKey, storageRootHash)
 			if err != nil {
 				return nil, err
 			}
@@ -1453,11 +1453,18 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 
 // witnessMaterializeStorageRoot builds the materialized storage-root node for a
 // witnessed account whose storage slots were not touched this block, used only in
-// legacy mode. Returns nil to fall back to a HashNode (multi-slot branch is handled
-// separately). Never mutates traversal state.
-func (hph *HexPatriciaHashed) witnessMaterializeStorageRoot(c *cell, depth int16, storageRootHash []byte) (trie.Node, error) {
+// legacy mode. Returns nil to fall back to a HashNode. Never mutates traversal state.
+func (hph *HexPatriciaHashed) witnessMaterializeStorageRoot(c *cell, depth int16, hashedKey []byte, storageRootHash []byte) (trie.Node, error) {
 	if c.storageAddrLen == 0 {
-		return nil, nil
+		if c.extLen > 0 {
+			extNode := &trie.ShortNode{Key: common.Copy(c.extension[:c.extLen]), Val: trie.NewHashNode(common.Copy(c.hash[:c.hashLen]))}
+			materializedRoot := trie.NewInMemoryTrie(extNode).Root()
+			if !bytes.Equal(materializedRoot, storageRootHash) {
+				return nil, fmt.Errorf("materialized extension storage root(%x) != storageRootHash(%x)", materializedRoot, storageRootHash)
+			}
+			return extNode, nil
+		}
+		return hph.witnessMaterializeStorageBranch(hashedKey, storageRootHash)
 	}
 	if !c.loaded.storage() {
 		update, err := hph.storageFromCacheOrDB(c.storageAddr[:c.storageAddrLen])
@@ -1487,6 +1494,53 @@ func (hph *HexPatriciaHashed) witnessMaterializeStorageRoot(c *cell, depth int16
 		return nil, fmt.Errorf("materialized single-slot storage root(%x) != storageRootHash(%x)", materializedRoot, storageRootHash)
 	}
 	return storageNode, nil
+}
+
+// witnessMaterializeStorageBranch resolves the storage-root branch read-only and
+// decodes it into a one-level FullNode whose children stay HashNodes, used only in
+// legacy mode for accounts with multiple untouched storage slots. Returns nil to fall
+// back to a HashNode. Never mutates traversal state.
+func (hph *HexPatriciaHashed) witnessMaterializeStorageBranch(hashedKey []byte, storageRootHash []byte) (trie.Node, error) {
+	branchData, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(hashedKey[:64]))
+	if err != nil {
+		return nil, err
+	}
+	if len(branchData) >= 2 {
+		branchData = branchData[2:] // skip the touch map; the afterMap bitmap follows
+	}
+	if len(branchData) < 2 {
+		return nil, nil
+	}
+	bitmap := binary.BigEndian.Uint16(branchData[0:])
+	pos := 2
+	fullNode := &trie.FullNode{}
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		var childCell cell
+		fieldBits := branchData[pos]
+		pos++
+		if pos, err = childCell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
+			return nil, err
+		}
+		if err = childCell.deriveHashedKeys(65, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			return nil, err
+		}
+		cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(&childCell, 65, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(cellHash) == length.Hash+1 { // strip the a0 prefix
+			cellHash = cellHash[1:]
+		}
+		fullNode.Children[nibble] = trie.NewHashNode(common.Copy(cellHash))
+		bitset ^= bit
+	}
+	materializedRoot := trie.NewInMemoryTrie(fullNode).Root()
+	if !bytes.Equal(materializedRoot, storageRootHash) {
+		return nil, fmt.Errorf("materialized multi-slot storage root(%x) != storageRootHash(%x)", materializedRoot, storageRootHash)
+	}
+	return fullNode, nil
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
