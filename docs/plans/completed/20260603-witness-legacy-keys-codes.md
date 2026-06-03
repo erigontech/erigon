@@ -186,8 +186,11 @@ effort.
       (L751-753) both describe the populated standalone preimages
 
 ### Task 5: [Final] Documentation and plan close-out
-- [ ] update the witness memory note with keys + 7702 outcomes and residual
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update the witness memory note with keys + 7702 outcomes and residual —
+      `project_witness_canonical_compat.md` updated with the `keys` + EIP-7702-codes
+      implementation details, validation results, pending manual oracle acceptance, and the
+      residual state-node gap
+- [x] move this plan to `docs/plans/completed/` (`git mv`)
 
 ## Post-Completion
 *Informational — external/manual follow-ups, no checkboxes*
