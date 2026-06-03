@@ -70,6 +70,20 @@ type ParallelPatriciaHashed struct {
 	// caching a root that was never committed to the DB if the deferred
 	// branch apply fails.
 	pendingRoot atomic.Pointer[publishedRoot]
+
+	// leaveDeferredForCaller, when true, makes Process() skip the inline
+	// applyDeferredUpdates call and instead stash the worker-combined deferred
+	// updates on the instance for the caller to flush at the right block
+	// boundary. Mirrors HexPatriciaHashed.leaveDeferredForCaller. Required by
+	// the fork-validation / parallel-block-apply path which must attribute
+	// branch writes to the correct block's changeset via FlushPendingUpdates.
+	leaveDeferredForCaller bool
+
+	// pendingDeferred holds the worker-combined deferred branch updates that
+	// Process() decided not to apply inline because leaveDeferredForCaller was
+	// set. The caller drains them via TakeDeferredUpdates(). Cleared on the
+	// next Process call.
+	pendingDeferred []*DeferredBranchUpdate
 }
 
 // publishedRoot bundles the candidate root hash with the worker's final root
@@ -144,6 +158,8 @@ func (p *ParallelPatriciaHashed) Reset() {
 	}
 	p.rootHash.Store(nil)
 	p.pendingRoot.Store(nil)
+	p.recycleDeferred(p.pendingDeferred)
+	p.pendingDeferred = nil
 	p.resetPool()
 }
 
@@ -157,6 +173,8 @@ func (p *ParallelPatriciaHashed) Release() {
 	}
 	p.rootHash.Store(nil)
 	p.pendingRoot.Store(nil)
+	p.recycleDeferred(p.pendingDeferred)
+	p.pendingDeferred = nil
 	p.resetPool()
 }
 
@@ -369,7 +387,19 @@ func (p *ParallelPatriciaHashed) Process(
 		return nil, waitErr
 	}
 
-	if err := p.applyDeferredUpdates(pu); err != nil {
+	if p.leaveDeferredForCaller {
+		// Hand the worker-combined deferred updates to the caller for later
+		// flushing via FlushPendingUpdates. Same contract as HexPatriciaHashed
+		// in leaveDeferredForCaller mode: the root we promote below is a
+		// speculative result that the caller is responsible for committing
+		// (or rejecting). Drop any previous pending batch from a prior
+		// Process call to avoid double-application.
+		p.recycleDeferred(p.pendingDeferred)
+		pu.deferredMu.Lock()
+		p.pendingDeferred = pu.deferredCombined
+		pu.deferredCombined = nil
+		pu.deferredMu.Unlock()
+	} else if err := p.applyDeferredUpdates(pu); err != nil {
 		// Deferred branch apply failed: discard the staged root so neither
 		// p.rootHash nor p.template.root surface a state that was never
 		// persisted to the DB. The pending pointer is dropped on the next
@@ -1170,4 +1200,42 @@ func groupLeafTasksByNibble(leafQueue []leafTask) map[byte][]leafTask {
 		out[t.prefix[0]] = append(out[t.prefix[0]], t)
 	}
 	return out
+}
+
+// SetLeaveDeferredForCaller controls whether Process() leaves the
+// worker-combined deferred branch updates on this instance for the caller
+// to flush. Mirrors HexPatriciaHashed.SetLeaveDeferredForCaller. The caller
+// retrieves them via TakeDeferredUpdates after Process returns. Required by
+// the fork-validation / parallel-block-apply paths: those paths must route
+// branch writes through FlushPendingUpdates so each block's changeset
+// records exactly the branches that block produced, even when several
+// blocks are computed speculatively.
+func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(v bool) {
+	p.leaveDeferredForCaller = v
+}
+
+// HasPendingDeferredUpdates reports whether the previous Process call left
+// deferred branch updates on the instance for the caller to consume.
+func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
+	return len(p.pendingDeferred) > 0
+}
+
+// TakeDeferredUpdates returns the worker-combined deferred branch updates
+// stashed by the previous Process call (when leaveDeferredForCaller was on)
+// and clears the stash. Ownership of the entries (including their pooled
+// allocations) transfers to the caller — the caller is responsible for
+// either applying them via ApplyDeferredBranchUpdates or returning each
+// entry to deferredUpdatePool. Mirrors HexPatriciaHashed.TakeDeferredUpdates.
+func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
+	out := p.pendingDeferred
+	p.pendingDeferred = nil
+	return out
+}
+
+// recycleDeferred returns pooled entries from a previously-stashed batch
+// that the caller never consumed. Safe with a nil slice.
+func (p *ParallelPatriciaHashed) recycleDeferred(batch []*DeferredBranchUpdate) {
+	for _, upd := range batch {
+		putDeferredUpdate(upd)
+	}
 }
