@@ -104,9 +104,7 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
-// fastJSONResult is an RPC method result that marshals itself to JSON bytes without reflection.
-// The handler uses those bytes verbatim (and writeResultTo copies them to the stream raw), which
-// avoids reflection and the appendCompact re-scan that large responses would otherwise pay.
+// fastJSONResult lets an RPC result implement fast JSON marshalling where needed — e.g. large payloads that benefit from skipping the reflection-based path.
 type fastJSONResult interface {
 	MarshalFastJSON() ([]byte, error)
 }
@@ -228,11 +226,7 @@ func NewCodec(conn Conn) ServerCodec {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	// The handler assembles each response into a json.RawMessage; write it verbatim (plus the
-	// trailing newline json.Encoder would add) instead of running json.Encoder over it, which
-	// re-scans the whole payload through appendCompact — a large cost for engine_getBlobs
-	// responses (issue #21226). The buffer is already compact, escaped JSON. Newline and payload
-	// go out in one Write so a single Read on the connection still sees the full framed response.
+	// The handler assembles each response as already-compact json.RawMessage; write it verbatim to skip json.Encoder's redundant appendCompact re-scan.
 	encode := func(v any) error {
 		raw, ok := v.(json.RawMessage)
 		if !ok {
