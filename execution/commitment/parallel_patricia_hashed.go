@@ -270,6 +270,15 @@ func (p *ParallelPatriciaHashed) Process(
 	if updates == nil || updates.mode != ModeParallel || updates.parallel == nil {
 		return nil, errors.New("ParallelPatriciaHashed.Process requires Updates in ModeParallel")
 	}
+	// Recycle per-nibble ETL collectors so the in-RAM dataProviders left over
+	// from any previous Process call do not return EOF on their first Next()
+	// (mergeSortFiles panics on that case). Earlier callers were assumed to
+	// invoke Updates.Reset between rounds but several engine_newPayload paths
+	// (fork validation, parallel block apply) drive consecutive Process calls
+	// on the same Updates instance — when those paths skip Reset the second
+	// dispatchLeafKeys panics. Resetting the dedup map + prefix trie too keeps
+	// the next round's TouchPlainKey behaviour consistent.
+	defer updates.Reset()
 	if p.trieCtxFactory == nil {
 		return nil, errors.New("ParallelPatriciaHashed.Process requires a TrieContextFactory")
 	}
