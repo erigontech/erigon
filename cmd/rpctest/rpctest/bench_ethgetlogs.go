@@ -175,22 +175,23 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	eg.SetLimit(estimate.AlmostAllCPUs())
 
 	for bn := blockFrom; bn < blockTo; bn++ {
+		bn := bn
 		eg.Go(func() error {
 			var resp EthGetLogs
 			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
 			baseOK := true
 			if res.Err != nil {
 				if failFast {
-					return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
+					return fmt.Errorf("could not get eth_getLogs baseline (Erigon): %v", res.Err)
 				}
-				log.Error("[ethGetLogsInvariants] could not get modified accounts (Erigon)", "blockNum", bn, "error", res.Err.Error())
+				log.Error("[ethGetLogsInvariants] could not get eth_getLogs baseline", "blockNum", bn, "error", res.Err.Error())
 				baseOK = false
 			}
 			if resp.Error != nil {
 				if failFast {
-					return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
+					return fmt.Errorf("error getting eth_getLogs baseline (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
 				}
-				log.Error("[ethGetLogsInvariants] error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
+				log.Error("[ethGetLogsInvariants] error getting eth_getLogs baseline", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
 				baseOK = false
 			}
 			if baseOK {
@@ -216,40 +217,41 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				}
 			}
 
-			resp = EthGetLogs{}
-			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, slices.Collect(maps.Keys(sawAddr))), &resp)
-			addrOK := true
-			if res.Err != nil {
-				if failFast {
-					return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
-				}
-				log.Error("[ethGetLogsInvariants] could not get modified accounts (Erigon)", "blockNum", bn, "error", res.Err.Error())
-				addrOK = false
-			}
-			if resp.Error != nil {
-				if failFast {
-					return fmt.Errorf("error getting modified accounts (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
-				}
-				log.Error("[ethGetLogsInvariants] error getting modified accounts (Erigon)", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
-				addrOK = false
-			}
-
-			if addrOK {
-				for k := range sawAddr {
-					logs := filterLogsByAddr(resp.Result, k)
-					//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
-					if len(logs) == 0 {
-						if failFast {
-							return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x not indexed", bn, k)
-						} else {
-							log.Error("[ethGetLogsInvariants] eth_getLogs not indexed", "blockNum", bn, "addr", k.Hex())
-						}
+			if len(sawAddr) > 0 {
+				resp = EthGetLogs{}
+				res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, slices.Collect(maps.Keys(sawAddr))), &resp)
+				addrOK := true
+				if res.Err != nil {
+					if failFast {
+						return fmt.Errorf("could not get eth_getLogs by address (Erigon): %v", res.Err)
 					}
-					if err := noDuplicates(logs); err != nil {
-						if failFast {
-							return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, k, err)
-						} else {
-							log.Error("[ethGetLogsInvariants] eth_getLogs: noDuplicates", "blockNum", bn, "addr", k.Hex(), "error", err.Error())
+					log.Error("[ethGetLogsInvariants] could not get eth_getLogs by address", "blockNum", bn, "error", res.Err.Error())
+					addrOK = false
+				}
+				if resp.Error != nil {
+					if failFast {
+						return fmt.Errorf("error getting eth_getLogs by address (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
+					}
+					log.Error("[ethGetLogsInvariants] error getting eth_getLogs by address", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
+					addrOK = false
+				}
+
+				if addrOK {
+					for k := range sawAddr {
+						logs := filterLogsByAddr(resp.Result, k)
+						if len(logs) == 0 {
+							if failFast {
+								return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x not indexed", bn, k)
+							} else {
+								log.Error("[ethGetLogsInvariants] eth_getLogs not indexed", "blockNum", bn, "addr", k.Hex())
+							}
+						}
+						if err := noDuplicates(logs); err != nil {
+							if failFast {
+								return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, k, err)
+							} else {
+								log.Error("[ethGetLogsInvariants] eth_getLogs: noDuplicates", "blockNum", bn, "addr", k.Hex(), "error", err.Error())
+							}
 						}
 					}
 				}
