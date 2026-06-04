@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -141,6 +142,13 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
+		// drop the peer as the status path above would.
+		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, err
 	}
 	ans := &sentinelproto.ResponseData{

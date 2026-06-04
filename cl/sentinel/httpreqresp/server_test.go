@@ -17,6 +17,7 @@
 package httpreqresp
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -57,9 +58,38 @@ func TestMaxResponseBodySize(t *testing.T) {
 		require.Lessf(t, maxResponseBodySize(p.ID, budget), ceiling,
 			"multi-chunk protocol %s with a small budget must be tighter than the ceiling", p.ID)
 		// A budget above the ceiling is clamped to it, so a miscomputed or overflowed budget
-		// can't make the handler buffer more than a spec-maximal response.
+		// can't make the handler stream more than a spec-maximal response.
 		require.EqualValuesf(t, ceiling, maxResponseBodySize(p.ID, ceiling+1),
 			"multi-chunk protocol %s must clamp a budget above the ceiling", p.ID)
+	}
+}
+
+// maxBytesReader streams up to its limit and then signals ErrResponseTooLarge instead of
+// truncating, so an over-cap peer response surfaces as an explicit read error to the caller.
+func TestMaxBytesReader(t *testing.T) {
+	const limit = 1024
+	for _, tc := range []struct {
+		name    string
+		size    int
+		wantLen int
+		wantErr bool
+	}{
+		{"under limit", limit - 1, limit - 1, false},
+		{"at limit", limit, limit, false},
+		{"one over limit", limit + 1, limit, true},
+		{"far over limit", 64 * limit, limit, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := bytes.Repeat([]byte{0xab}, tc.size)
+			got, err := io.ReadAll(newMaxBytesReader(bytes.NewReader(data), limit))
+			require.Len(t, got, tc.wantLen)
+			require.Equal(t, data[:tc.wantLen], got, "bytes within the limit must pass through unchanged")
+			if tc.wantErr {
+				require.ErrorIs(t, err, ErrResponseTooLarge)
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }
 
@@ -82,11 +112,11 @@ func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
 	require.Equal(t, "hello", string(body), "Do must copy, not alias, the handler's write buffer")
 }
 
-// fetchPeerResponse stands up two libp2p hosts, has the peer answer the given topic
-// with a success code byte followed by payloadSize bytes, and returns the status code, the
-// REQRESP-RESPONSE-CODE header, and the body the req/resp handler surfaces to the caller.
+// fetchPeerResponse stands up two libp2p hosts, has the peer answer the given topic with a success
+// code byte followed by payloadSize bytes, and returns the status code, the REQRESP-RESPONSE-CODE
+// header, the body bytes the caller could read, and the error reading that body produced.
 // maxResponseBytes (when > 0) is sent as the byte-budget hint that sizes the multi-chunk cap.
-func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseBytes uint64) (int, string, []byte) {
+func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseBytes uint64) (int, string, []byte, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -135,26 +165,27 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	return resp.StatusCode, resp.Header.Get("REQRESP-RESPONSE-CODE"), body
+	body, readErr := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header.Get("REQRESP-RESPONSE-CODE"), body, readErr
 }
 
-// A peer that floods its response stream must not be able to make the handler buffer an
-// unbounded amount of memory: a compliant single-object response is returned, but one that
-// exceeds the cap is rejected explicitly rather than silently truncated and accepted as 200.
+// A peer that floods its response stream must not be able to make the node buffer an unbounded
+// amount of memory: a compliant single-object response streams through in full, but a flood is
+// bounded at the cap and surfaces an explicit ErrResponseTooLarge rather than being silently
+// truncated and accepted.
 func TestResponseBodyRejectedOnFlood(t *testing.T) {
-	status, code, body := fetchPeerResponse(t, communication.StatusProtocolV1, 1000, 0)
+	status, code, body, err := fetchPeerResponse(t, communication.StatusProtocolV1, 1000, 0)
+	require.NoError(t, err, "a compliant response must stream through without error")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "0", code, "a compliant response carries the peer's success code")
-	require.Len(t, body, 1000, "a compliant single-object response must pass through")
+	require.Len(t, body, 1000, "a compliant single-object response must pass through in full")
 
 	const floodSize = 40 * 1024 * 1024 // well above the single-object cap
-	status, code, _ = fetchPeerResponse(t, communication.StatusProtocolV1, floodSize, 0)
-	require.Equalf(t, http.StatusRequestEntityTooLarge, status,
-		"a single-object flood must be rejected, not truncated and accepted as 200")
-	require.Emptyf(t, code,
-		"a rejected response must not carry a peer success code that header-gating callers (e.g. handshake.ValidatePeer) would misread")
+	_, _, body, err = fetchPeerResponse(t, communication.StatusProtocolV1, floodSize, 0)
+	require.ErrorIs(t, err, ErrResponseTooLarge,
+		"a single-object flood must surface an explicit too-large error, not be truncated and accepted")
+	require.LessOrEqual(t, len(body), maxSingleObjectResponse,
+		"the caller must never read more than the single-object cap from a flooding peer")
 }
 
 // A multi-chunk request that reaches the handler without a caller budget (a caller that failed to
@@ -163,23 +194,29 @@ func TestResponseBodyRejectedOnFlood(t *testing.T) {
 // response above the single-object cap still passes; see TestMultiChunkResponseRejectedOverByteBudget.
 func TestMultiChunkResponseCappedWithoutBudget(t *testing.T) {
 	const floodSize = 5 * 1024 * 1024 // above the single-object cap
-	status, _, _ := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, 0)
-	require.Equalf(t, http.StatusRequestEntityTooLarge, status,
-		"an unbudgeted multi-chunk response over the single-object cap must be rejected, not buffered toward the ceiling")
+	_, _, body, err := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, 0)
+	require.ErrorIs(t, err, ErrResponseTooLarge,
+		"an unbudgeted multi-chunk response over the single-object cap must be rejected, not streamed toward the ceiling")
+	require.LessOrEqual(t, len(body), maxSingleObjectResponse,
+		"an unbudgeted multi-chunk flood must be bounded by the single-object cap")
 }
 
-// The multi-chunk cap honors the caller's byte budget: a response within it passes through, a
-// flood beyond it is rejected (not truncated, and not clamped to the single-object cap).
+// The multi-chunk cap honors the caller's byte budget: a response within it streams through in
+// full, a flood beyond it surfaces ErrResponseTooLarge (not truncated, and not clamped to the
+// single-object cap).
 func TestMultiChunkResponseRejectedOverByteBudget(t *testing.T) {
 	const budget = 8 * 1024 * 1024
 
 	const okSize = 4 * 1024 * 1024 // within the budget
-	status, _, body := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, okSize, budget)
+	status, _, body, err := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, okSize, budget)
+	require.NoError(t, err, "a response within the budget must stream through without error")
 	require.Equal(t, http.StatusOK, status)
 	require.EqualValues(t, okSize, len(body), "a response within the budget must pass through in full")
 
 	const floodSize = 40 * 1024 * 1024 // > budget, < the ceiling
-	status, _, _ = fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, budget)
-	require.Equalf(t, http.StatusRequestEntityTooLarge, status,
+	_, _, body, err = fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, budget)
+	require.ErrorIs(t, err, ErrResponseTooLarge,
 		"a multi-chunk response over the byte budget must be rejected")
+	require.LessOrEqual(t, len(body), budget,
+		"a multi-chunk flood must be bounded by the caller's byte budget")
 }
