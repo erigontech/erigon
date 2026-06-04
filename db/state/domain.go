@@ -156,9 +156,9 @@ var domainExistenceForceNormal = dbg.EnvBool("DOMAIN_EXISTENCE_NORMAL", false)
 // page cache, not the Go heap). These mirror the DOMAIN_EXISTENCE_* knobs for
 // the recsplit existence filter, but default to mmap since the bloom is the
 // largest and least hot of the existence filters.
-var domainBloomForceInMem = dbg.EnvBool("DOMAIN_BLOOM_MEM", false)
-var domainBloomForceWillNeed = dbg.EnvBool("DOMAIN_BLOOM_WILLNEED", false)
-var domainBloomForceNormal = dbg.EnvBool("DOMAIN_BLOOM_NORMAL", false)
+var bloomForceInMem = dbg.EnvBool("BLOOM_MEM", false)
+var bloomForceWillNeed = dbg.EnvBool("BLOOM_WILLNEED", false)
+var bloomForceNormal = dbg.EnvBool("BLOOM_NORMAL", false)
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
@@ -178,20 +178,20 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 }
 
 // openBloomFilter opens the standalone .kvei bloom existence filter and applies
-// the DOMAIN_BLOOM_* memory policy, mirroring openHashMapAccessor for the
-// recsplit existence filter. Package-level so SnapshotRepo can share it.
+// the BLOOM_* memory policy, mirroring openHashMapAccessor for the recsplit
+// existence filter. Package-level so SnapshotRepo can share it.
 func openBloomFilter(fPath string) (*existence.Filter, error) {
 	f, err := existence.OpenFilter(fPath, false)
 	if err != nil {
 		return nil, err
 	}
-	if domainBloomForceInMem {
+	if bloomForceInMem {
 		f.ForceInMem()
 	}
-	if domainBloomForceWillNeed {
+	if bloomForceWillNeed {
 		f.MadvWillNeed()
 	}
-	if domainBloomForceNormal {
+	if bloomForceNormal {
 		f.MadvNormal()
 	}
 	return f, nil
