@@ -255,14 +255,14 @@ func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*typ
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
+	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
 func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlockAndWait(ctx, block)
+	return cc.chainRW.InsertBlock(ctx, block)
 }
 
 func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {

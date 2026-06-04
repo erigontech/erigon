@@ -792,7 +792,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 			balMap[block.Hash()] = bal
 		}
 	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
+	if err := wr.InsertBlocksWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
 		return err
 	}
 
