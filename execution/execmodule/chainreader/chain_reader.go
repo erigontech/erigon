@@ -230,24 +230,6 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Co
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
-}
-
-// InsertBlocksWithAccessLists inserts blocks, blocking until the execution module finishes the insert.
-// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
-func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
-	rawBlocks := blocksToRaw(blocks, accessLists)
-	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
-	if err != nil {
-		return err
-	}
-	if status != execmodule.ExecutionStatusSuccess {
-		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
-	}
-	return nil
-}
-
 func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *types.Block) error {
 	return c.InsertBlocksAndWait(ctx, []*types.Block{block})
 }

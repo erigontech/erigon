@@ -251,14 +251,11 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
-func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
-	}
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+	return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
 }
 
 func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block) error {

@@ -92,8 +92,8 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 
 	h := &flushTestHarness{}
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen).AnyTimes()
-	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block, _ bool) error {
+	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blocks []*types.Block) error {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		}).AnyTimes()
