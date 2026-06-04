@@ -199,7 +199,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
-		answersWithNils := make([]any, len(msgs))
+		answersWithNils := make([][]byte, len(msgs))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
 		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
 		defer close(boundedConcurrency)
@@ -222,24 +222,32 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				buf := bytes.NewBuffer(nil)
 				stream := jsonstream.New(buf)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
-					answersWithNils[i] = res
+					res.writeTo(stream)
 				}
 				_ = stream.Flush()
-				if buf.Len() > 0 && answersWithNils[i] == nil {
-					answersWithNils[i] = json.RawMessage(buf.Bytes())
+				if buf.Len() > 0 {
+					answersWithNils[i] = buf.Bytes()
 				}
 			}(i)
 		}
 		wg.Wait()
-		answers := make([]any, 0, len(msgs))
-		for _, answer := range answersWithNils {
-			if answer != nil {
-				answers = append(answers, answer)
-			}
-		}
 		h.addSubscriptions(cp.notifiers)
-		if len(answers) > 0 {
-			h.conn.WriteJSON(cp.ctx, answers)
+		out := jsonstream.New(nil)
+		out.WriteArrayStart()
+		wrote := false
+		for _, answer := range answersWithNils {
+			if answer == nil {
+				continue
+			}
+			if wrote {
+				out.WriteMore()
+			}
+			wrote = true
+			_, _ = out.Write(answer)
+		}
+		out.WriteArrayEnd()
+		if wrote {
+			h.conn.WriteJSON(cp.ctx, rawResponse(out.Buffer()))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -704,9 +712,9 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	return nil
 }
 
-// writeTo writes msg to the stream byte-identically to json.Marshal(msg). A success response's
-// Result is already-encoded JSON, so it is written directly instead of re-encoded; anything else
-// falls back to json.Marshal.
+// writeTo writes a success response's already-encoded Result (and id) directly rather than
+// re-encoding it; any other message falls back to json.Marshal. Output equals json.Marshal(msg)
+// except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
 		buf, _ := json.Marshal(msg)

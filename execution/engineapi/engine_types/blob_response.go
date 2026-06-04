@@ -18,12 +18,9 @@ package engine_types
 
 import "encoding/hex"
 
-// BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. They carry a
-// MarshalFastJSON that the RPC handler uses instead of reflection: a worst-case getBlobsV3 reply is
-// a block's worth of blobs (~128 KiB each plus 128 cell proofs), where stdlib's per-field
-// hexutil.Bytes.MarshalText allocates thousands of buffers. MarshalFastJSON serializes the whole
-// response into one pre-sized buffer with direct hex encoding. Output is byte-identical to
-// json.Marshal of the underlying slice (see blob_response_test.go).
+// BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. Their MarshalFastJSON
+// serializes the whole response into one pre-sized buffer (direct hex encoding) instead of reflection,
+// byte-identical to json.Marshal of the underlying slice (see blob_response_test.go).
 type (
 	BlobsBundleV1 []*BlobAndProofV1
 	BlobsBundleV2 []*BlobAndProofV2

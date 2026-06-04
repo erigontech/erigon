@@ -66,3 +66,21 @@ func TestWriteToMatchesJSONMarshal(t *testing.T) {
 		require.Equal(t, string(want), buf.String(), "want=%s", want)
 	}
 }
+
+// TestWriteToSkipsHTMLEscaping documents the one accepted divergence from json.Marshal: writeTo
+// copies the id and result verbatim, so '<', '>', '&' (and U+2028/2029) are left unescaped. The
+// JSON is still valid and decodes to the same value.
+func TestWriteToSkipsHTMLEscaping(t *testing.T) {
+	msg := &jsonrpcMessage{Version: vsn, ID: json.RawMessage(`"a<b>&c"`), Result: json.RawMessage(`"x<y"`)}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	msg.writeTo(stream)
+	require.NoError(t, stream.Flush())
+	require.Equal(t, `{"jsonrpc":"2.0","id":"a<b>&c","result":"x<y"}`, buf.String())
+
+	marshaled, err := json.Marshal(msg)
+	require.NoError(t, err)
+	require.NotContains(t, string(marshaled), "<") // stdlib HTML-escapes '<' where writeTo does not
+	require.NotEqual(t, buf.String(), string(marshaled))
+}
