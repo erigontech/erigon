@@ -16,17 +16,10 @@
 
 package recsplit
 
-import (
-	"sync"
-)
-
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
 	index *Index
 	salt  uint32
-
-	bufLock sync.RWMutex
-	buf     []byte
 }
 
 // NewIndexReader creates new IndexReader
@@ -48,12 +41,9 @@ func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
+// Lookup2 looks up the concatenation key1||key2 without materializing it
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
-	r.bufLock.Lock()
-	// hash of 2 concatenated keys is equal to 2 separated calls of `.Write`
-	r.buf = append(append(r.buf[:0], key1...), key2...)
-	bucketHash, fingerprint := murmur128WithSeed(r.buf, r.salt)
-	r.bufLock.Unlock()
+	bucketHash, fingerprint := murmur128PairWithSeed(key1, key2, r.salt)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
