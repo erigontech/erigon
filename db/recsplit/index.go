@@ -26,7 +26,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -107,7 +106,7 @@ type Index struct {
 	existenceV1        *fusefilter.Reader
 	existenceV2        *fusefilter.ReaderSharded
 
-	readers         *sync.Pool
+	sharedReader    *IndexReader // IndexReader is stateless, so one instance serves all goroutines
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
@@ -163,11 +162,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	//	//}
 	//}
 
-	idx.readers = &sync.Pool{
-		New: func() any {
-			return NewIndexReader(idx)
-		},
-	}
+	idx.sharedReader = NewIndexReader(idx)
 	return idx, nil
 }
 
@@ -605,5 +600,5 @@ func (idx *Index) MadvWillNeed() *Index {
 }
 
 func (idx *Index) GetReaderFromPool() *IndexReader {
-	return idx.readers.Get().(*IndexReader)
+	return idx.sharedReader
 }
