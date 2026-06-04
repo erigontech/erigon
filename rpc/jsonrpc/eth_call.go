@@ -497,7 +497,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, false /* legacy */, "eth_getProof")
+	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof")
 	if err != nil {
 		return nil, err
 	}
@@ -553,7 +553,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched key
 		var storageProofRoot []byte
-		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, false /* legacy */, "eth_getProof")
+		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof")
 		if err != nil {
 			return nil, err
 		}
@@ -752,7 +752,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, false /* legacy */, "computeWitness")
+	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, "computeWitness")
 	if err != nil {
 		return nil, err
 	}

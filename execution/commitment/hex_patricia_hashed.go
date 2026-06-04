@@ -112,10 +112,6 @@ type HexPatriciaHashed struct {
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
 
-	// witnessLegacy gates legacy storage-root node materialization for
-	// untouched-storage accounts in GenerateWitness.
-	witnessLegacy bool
-
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
@@ -1435,111 +1431,9 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 		account.Root = trie.EmptyRoot
 		accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
 	} else {
-		var storageNode trie.Node = trie.NewHashNode(storageRootHash)
-		if hph.witnessLegacy {
-			materialized, err := hph.witnessMaterializeStorageRoot(c, depth, hashedKey, storageRootHash)
-			if err != nil {
-				return nil, err
-			}
-			if materialized != nil {
-				storageNode = materialized
-			}
-		}
-		accountNode = &trie.AccountNode{Account: account, Storage: storageNode, RootCorrect: true, Code: code, CodeSize: -1}
+		accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
 	}
 	return accountNode, nil
-}
-
-// witnessMaterializeStorageRoot builds the materialized storage-root node for a
-// witnessed account whose storage slots were not touched this block, used only in
-// legacy mode. Returns nil to fall back to a HashNode. Never mutates traversal state.
-func (hph *HexPatriciaHashed) witnessMaterializeStorageRoot(c *cell, depth int16, hashedKey []byte, storageRootHash []byte) (trie.Node, error) {
-	if c.storageAddrLen == 0 {
-		if c.extLen > 0 {
-			extNode := &trie.ShortNode{Key: common.Copy(c.extension[:c.extLen]), Val: trie.NewHashNode(common.Copy(c.hash[:c.hashLen]))}
-			materializedRoot := trie.NewInMemoryTrie(extNode).Root()
-			if !bytes.Equal(materializedRoot, storageRootHash) {
-				return nil, nil // best-effort: fall back to a HashNode storage root
-			}
-			return extNode, nil
-		}
-		return hph.witnessMaterializeStorageBranch(hashedKey, storageRootHash)
-	}
-	if !c.loaded.storage() {
-		update, err := hph.storageFromCacheOrDB(c.storageAddr[:c.storageAddrLen])
-		if err != nil {
-			return nil, err
-		}
-		c.setFromUpdate(update)
-	}
-	var hashedKeyOffset int16
-	if depth >= 64 {
-		hashedKeyOffset = depth - 64
-	}
-	koffset := hph.accountKeyLen
-	if depth == 0 && c.accountAddrLen == 0 {
-		koffset = 0
-	}
-	var hashedKeyBuf [128]byte
-	if err := hashKey(hph.keccak, c.storageAddr[koffset:c.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
-		return nil, err
-	}
-	hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte
-	slotKey := common.Copy(hashedKeyBuf[:64-hashedKeyOffset+1])
-	storageNode := &trie.ShortNode{Key: slotKey, Val: trie.ValueNode(common.Copy(c.Storage[:c.StorageLen]))}
-
-	materializedRoot := trie.NewInMemoryTrie(storageNode).Root()
-	if !bytes.Equal(materializedRoot, storageRootHash) {
-		return nil, nil // best-effort: fall back to a HashNode storage root
-	}
-	return storageNode, nil
-}
-
-// witnessMaterializeStorageBranch resolves the storage-root branch read-only and
-// decodes it into a one-level FullNode whose children stay HashNodes, used only in
-// legacy mode for accounts with multiple untouched storage slots. Returns nil to fall
-// back to a HashNode. Never mutates traversal state.
-func (hph *HexPatriciaHashed) witnessMaterializeStorageBranch(hashedKey []byte, storageRootHash []byte) (trie.Node, error) {
-	branchData, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(hashedKey[:64]))
-	if err != nil {
-		return nil, err
-	}
-	if len(branchData) >= 2 {
-		branchData = branchData[2:] // skip the touch map; the afterMap bitmap follows
-	}
-	if len(branchData) < 2 {
-		return nil, nil
-	}
-	bitmap := binary.BigEndian.Uint16(branchData[0:])
-	pos := 2
-	fullNode := &trie.FullNode{}
-	for bitset := bitmap; bitset != 0; {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		var childCell cell
-		fieldBits := branchData[pos]
-		pos++
-		if pos, err = childCell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
-			return nil, err
-		}
-		if err = childCell.deriveHashedKeys(65, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-			return nil, err
-		}
-		cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(&childCell, 65, nil)
-		if err != nil {
-			return nil, err
-		}
-		if len(cellHash) == length.Hash+1 { // strip the a0 prefix
-			cellHash = cellHash[1:]
-		}
-		fullNode.Children[nibble] = trie.NewHashNode(common.Copy(cellHash))
-		bitset ^= bit
-	}
-	materializedRoot := trie.NewInMemoryTrie(fullNode).Root()
-	if !bytes.Equal(materializedRoot, storageRootHash) {
-		return nil, nil // best-effort: fall back to a HashNode storage root
-	}
-	return fullNode, nil
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
@@ -2709,7 +2603,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 // but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `triedeprecated.Trie`.
 // All the individual tries are combined to create the final witness trie.
 // Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
-func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, legacy bool, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2718,7 +2612,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	hph.memoizationOff, hph.trace = true, false
-	hph.witnessLegacy = legacy
 	// defer func() {
 	// 	hph.memoizationOff, hph.trace = false, false
 	// }()
