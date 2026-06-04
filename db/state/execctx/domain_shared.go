@@ -1121,7 +1121,12 @@ func decodeAccountCodeHash(enc []byte) []byte {
 		return nil
 	}
 	var acc accounts.Account
-	if err := acc.DecodeForStorage(enc); err != nil {
+	// AccountsDomain values are SerialiseV3-encoded, so they must be decoded
+	// with DeserialiseV3. DecodeForStorage is the legacy MDBX bitmask format
+	// with an incompatible binary layout; applied to V3 bytes it silently
+	// misparses and leaves CodeHash empty, so codeHashForAddr returned nil for
+	// every contract and the CodeDomain ethHash bypass never fired.
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
 		return nil
 	}
 	if acc.CodeHash.IsEmpty() {
