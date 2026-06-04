@@ -484,7 +484,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
+	rebuildCfg := commitment.DefaultTrieConfig()
+	rebuildCfg.Variant = execctx.PickTrieVariant()
+	rebuildCfg.EnableWarmupCache = useWarmupCache
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(rebuildCfg))
 	if err != nil {
 		return nil, err
 	}
@@ -494,9 +498,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.CodeDomain)
 	domains.SetInMemHistoryReads(false)
 	domains.EnableParaTrieDB(rwDb)
-	domains.EnableTrieWarmup(true)
-	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
-	domains.EnableWarmupCache(useWarmupCache)
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
 	if err != nil {
@@ -591,7 +592,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err != nil {
 			return err
 		}
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger)
+		flushCfg := commitment.DefaultTrieConfig()
+		flushCfg.Variant = execctx.PickTrieVariant()
+		flushCfg.EnableWarmupCache = useWarmupCache
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(flushCfg))
 		if err != nil {
 			return err
 		}
@@ -606,8 +610,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.CodeDomain)
 		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
-		domains.EnableTrieWarmup(true)
-		domains.EnableWarmupCache(useWarmupCache)
 		return nil
 	}
 
@@ -790,7 +792,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 	logger.Info("[rebuild_commitment_history] squeeze starting")
 
-	a.recalcVisibleFiles()
+	a.dirtyFilesLock.Lock()
+	a.recalcVisibleFiles(nil)
+	a.dirtyFilesLock.Unlock()
 
 	// Check if account files exist - squeeze requires them for ReferencesInCommitmentBranches
 	actx := a.BeginFilesRo()
@@ -891,6 +895,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 
+	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
+	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
+	rebuildTrieCfg := commitment.DefaultTrieConfig()
+	rebuildTrieCfg.EnableTrieWarmup = false
+	rebuildTrieCfg.EnableWarmupCache = false
+	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
+
 	var totalKeysCommitted uint64
 
 	for i, r := range ranges {
@@ -919,8 +930,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		// shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -992,7 +1002,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomainsWithTrieVariant(ctx, rwTx, log.New(), trieVariant)
+			iterTrieCfg := rebuildTrieCfg
+			iterTrieCfg.Variant = trieVariant
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
 			if err != nil {
 				return nil, err
 			}
@@ -1022,7 +1034,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			// make new file visible for all aggregator transactions
 			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles()
+			a.recalcVisibleFiles(nil)
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
@@ -1072,7 +1084,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
-	a.recalcVisibleFiles()
+	a.dirtyFilesLock.Lock()
+	a.recalcVisibleFiles(nil)
+	a.dirtyFilesLock.Unlock()
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)

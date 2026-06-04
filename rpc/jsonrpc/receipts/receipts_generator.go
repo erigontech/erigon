@@ -324,11 +324,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates())
 			if err != nil {
 				return nil, err
 			}
-			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
 			if err != nil {
@@ -543,11 +542,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 		var stateWriter state.StateWriter
 		if opts.CommitmentHistoryEnabled {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates())
 			if err != nil {
 				return nil, err
 			}
-			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
 			if err != nil {

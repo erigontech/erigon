@@ -562,10 +562,8 @@ func (d *Domain) beginForTests() *DomainRoTx {
 }
 
 // beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
-// aggregatorVisible generation, avoiding a torn cross-entity read.
+// aggregatorVisible generation, avoiding a torn cross-entity read
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	dv.files.refcntIncrement()
-
 	return &DomainRoTx{
 		name:              d.Name,
 		stepSize:          d.stepSize,
@@ -1439,9 +1437,7 @@ func (dt *DomainRoTx) Close() {
 		return
 	}
 	dt.closeValsCursor()
-	files := dt.files
 	dt.files = nil
-	files.refcntDecrement(dt.d.FilenameBase, dt.d.logger)
 	for _, r := range dt.mapReaders {
 		r.Close()
 	}
@@ -1894,7 +1890,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
-	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
+	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
 		return stat, err

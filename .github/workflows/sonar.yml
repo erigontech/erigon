@@ -31,7 +31,6 @@ jobs:
           # A full clone (filter: '') ensures all blobs are present upfront.
           filter: ''
           submodules: true
-          lfs: tests
           cleanup-space: true
           ramdisk: true
 
@@ -45,8 +44,24 @@ jobs:
         if: inputs.cache-warming-only
         run: go test -run=^$ -cover ./...
 
+      # The scan reaches external services (scanner-binaries CDN, GPG keyserver,
+      # sonarcloud.io) that intermittently 403 or time out; one spaced retry
+      # rides out short blips instead of failing the gate.
       - name: SonarCloud scan
+        id: scan
         if: '!inputs.cache-warming-only'
+        continue-on-error: true
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Wait before SonarCloud scan retry
+        if: "!inputs.cache-warming-only && steps.scan.outcome == 'failure'"
+        run: sleep 90
+
+      - name: SonarCloud scan (retry)
+        if: "!inputs.cache-warming-only && steps.scan.outcome == 'failure'"
         uses: SonarSource/sonarqube-scan-action@v8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,4 +77,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
