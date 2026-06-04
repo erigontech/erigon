@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -253,14 +252,14 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 		latestBlock, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 		require.NoError(t, err)
 		require.Equal(t, uint64(3), latestBlock.Number.Uint64())
-		logs, err := eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		logs, err := eat.RpcApiClient.FilterLogs(ctx, bind.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
 		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
 		// now insert a new payload on the side chain and check the log is still present
 		_, err = eat.MockCl.InsertNewPayload(ctx, b2Side)
 		require.NoError(t, err)
-		logs, err = eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		logs, err = eat.RpcApiClient.FilterLogs(ctx, bind.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
 		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)

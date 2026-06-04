@@ -21,11 +21,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 	var result []types.Log
 
 	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetLogs, query); err != nil {
@@ -35,7 +36,7 @@ func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.F
 	return result, nil
 }
 
-func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	return reqGen.Subscribe(ctx, Methods.ETHLogs, ch, query)
 }
 
