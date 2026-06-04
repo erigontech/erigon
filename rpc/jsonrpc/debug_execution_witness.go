@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -1534,6 +1535,12 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 	if ok {
 		return acc, nil
 	}
+	// gotValue==false ⟺ traversal hit an unresolved HashNode (node missing from witness).
+	// Strict mode errors on that, except the protocol system address (0xff..fe), whose
+	// state is protocol-fixed and intentionally omitted by reth too.
+	if os.Getenv("WITNESS_STRICT_VERIFY") != "" && addr != common.Address(params.SystemAddress.Value()) {
+		return nil, fmt.Errorf("strict witness: unresolved trie node reading account %x (missing from witness)", addr)
+	}
 	return nil, nil
 }
 
@@ -1584,6 +1591,9 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> not found\n", addr.Hex(), keyValue.Hex())
+	}
+	if os.Getenv("WITNESS_STRICT_VERIFY") != "" && addr != common.Address(params.SystemAddress.Value()) {
+		return uint256.Int{}, false, fmt.Errorf("strict witness: unresolved trie node reading storage %x/%x (missing from witness)", addr, keyValue)
 	}
 	return uint256.Int{}, false, nil
 }
