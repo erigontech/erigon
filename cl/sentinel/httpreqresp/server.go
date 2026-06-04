@@ -152,8 +152,8 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	case resp := <-resultCh:
 		return resp, nil
 	case <-r.Context().Done():
-		// The handler may still publish a response whose body owns a live stream; drain and close
-		// it once it arrives so the stream isn't leaked.
+		// The handler may still publish a response whose body owns a live stream; close it once
+		// it arrives so the stream isn't leaked.
 		go func() {
 			if resp := <-resultCh; resp != nil && resp.Body != nil {
 				resp.Body.Close()
