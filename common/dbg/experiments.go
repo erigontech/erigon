@@ -115,6 +115,7 @@ var (
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)
+	ReadAheadStorageSlots = EnvInt("READAHEAD_STORAGE_SLOTS", 0)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

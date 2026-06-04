@@ -312,6 +312,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)
+			warmedStorage := map[accounts.Address]struct{}{}
 
 			for txIdx := workerStart; txIdx < workerEnd; txIdx++ {
 				select {
@@ -331,6 +332,12 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 							cpg.withCodeHashHint(h[:])
 						}
 						stateReader.ReadAccountCode(to)
+						if dbg.ReadAheadStorageSlots > 0 {
+							if _, done := warmedStorage[to]; !done {
+								warmedStorage[to] = struct{}{}
+								warmContractStorage(ttx, getter, to, dbg.ReadAheadStorageSlots)
+							}
+						}
 					}
 				}
 
@@ -488,4 +495,27 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
 
 	return nil
+}
+
+// warmContractStorage preloads up to limit storage slots of addr so the
+// lookups land in the shared caches before execution reads them.
+func warmContractStorage(ttx kv.TemporalTx, getter kv.TemporalGetter, addr accounts.Address, limit int) {
+	a := addr.Value()
+	prefix := a[:]
+	next, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return
+	}
+	it, err := ttx.Debug().RangeLatest(kv.StorageDomain, prefix, next, limit)
+	if err != nil {
+		return
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return
+		}
+		_, _, _ = getter.GetLatest(kv.StorageDomain, k)
+	}
 }
