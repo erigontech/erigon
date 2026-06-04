@@ -20,10 +20,14 @@
 package rpc
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -134,6 +138,52 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	}
 	if len(r) != respLength {
 		t.Fatalf("response has wrong length %d, want %d", len(r), respLength)
+	}
+}
+
+// TestHTTPBatchPreservesOrderWithStreaming checks that a batch mixing streamed (test_streamEcho)
+// and non-streaming (test_echo) calls returns responses in request order — each answer at its index.
+func TestHTTPBatchPreservesOrderWithStreaming(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	body := `[` +
+		`{"jsonrpc":"2.0","id":1,"method":"test_streamEcho","params":["one"]},` +
+		`{"jsonrpc":"2.0","id":2,"method":"test_echo","params":["two",2,{"S":"x"}]},` +
+		`{"jsonrpc":"2.0","id":3,"method":"test_streamEcho","params":["three"]},` +
+		`{"jsonrpc":"2.0","id":4,"method":"test_echo","params":["four",4,{"S":"y"}]}` +
+		`]`
+
+	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var arr []json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &arr))
+	require.Len(t, arr, 4)
+
+	want := []struct {
+		id     int
+		result string
+	}{
+		{1, `"one"`},
+		{2, `{"String":"two","Int":2,"Args":{"S":"x"}}`},
+		{3, `"three"`},
+		{4, `{"String":"four","Int":4,"Args":{"S":"y"}}`},
+	}
+	for i, w := range want {
+		var m struct {
+			ID     int             `json:"id"`
+			Result json.RawMessage `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(arr[i], &m))
+		require.Equal(t, w.id, m.ID, "response at index %d is out of order", i)
+		require.JSONEq(t, w.result, string(m.Result), "wrong result at index %d", i)
 	}
 }
 

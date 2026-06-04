@@ -35,12 +35,10 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-const minStepsForReferencing = 2
-
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
 // Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
 func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
-	return (to-from)/stepSize >= minStepsForReferencing
+	return (to-from)/stepSize >= commitment.DefaultKeyReferencingMinSteps
 }
 
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
