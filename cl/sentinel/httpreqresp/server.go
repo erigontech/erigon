@@ -114,15 +114,12 @@ func (m *maxBytesReader) Read(p []byte) (int, error) {
 	return n, m.err
 }
 
-// streamBody is the response body Do hands back for a successful request: it streams from the
-// libp2p stream through the size cap and closes the stream when the caller closes the body.
+// streamBody is the response body Do hands back for a successful request: it reads through the
+// size cap and closes the libp2p stream when the caller closes the body.
 type streamBody struct {
-	r      io.Reader
-	stream io.Closer
+	io.Reader // the capped reader over the stream
+	io.Closer // the stream
 }
-
-func (b *streamBody) Read(p []byte) (int, error) { return b.r.Read(p) }
-func (b *streamBody) Close() error               { return b.stream.Close() }
 
 // Do performs an http request against the http handler.
 // NOTE: this is actually very similar to the http.RoundTripper interface... maybe we should investigate using that.
@@ -140,18 +137,16 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	resultCh := make(chan *http.Response, 1)
 	go func() {
 		w := &captureWriter{}
+		// Publish the response as the goroutine unwinds, so a handler panic becomes a 500 rather
+		// than crashing the process. The handler's deferred stream.Close runs first, so no stream leaks.
 		defer func() {
 			if rec := recover(); rec != nil {
-				// On a handler panic, publish a 500 rather than crashing the process or leaving Do
-				// blocked forever; the handler's deferred stream.Close runs during the unwind.
-				ew := &captureWriter{}
-				http.Error(ew, fmt.Sprintf("reqresp: handler panic: %v", rec), http.StatusInternalServerError)
-				resultCh <- ew.result() //nolint:bodyclose
+				w = &captureWriter{}
+				http.Error(w, fmt.Sprintf("reqresp: handler panic: %v", rec), http.StatusInternalServerError)
 			}
+			resultCh <- w.result() //nolint:bodyclose
 		}()
 		handler.ServeHTTP(w, r)
-		// the caller closes the body; we hand it off through the channel.
-		resultCh <- w.result() //nolint:bodyclose
 	}()
 	select {
 	case resp := <-resultCh:
@@ -335,7 +330,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// response passes through untouched, a flood is bounded at the cap and the caller sees
 		// ErrResponseTooLarge.
 		limit := int64(maxResponseBodySize(topic, maxBytes))
-		cw.setStreamingBody(&streamBody{r: newMaxBytesReader(stream, limit), stream: stream})
+		cw.setStreamingBody(&streamBody{Reader: newMaxBytesReader(stream, limit), Closer: stream})
 		streamTransferred = true
 	}
 }
