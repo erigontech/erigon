@@ -51,12 +51,8 @@ func (r *IndexReader) Empty() bool {
 	return r.index.Empty()
 }
 
-func (r *IndexReader) Close() {
-	if r == nil || r.index == nil {
-		return
-	}
-	r.index.readers.Put(r)
-}
+// Close is a no-op kept for API compatibility: readers are stateless and shared
+func (r *IndexReader) Close() {}
 
 func (r *IndexReader) OrdinalLookup(id uint64) uint64 { return r.index.OrdinalLookup(id) }
 func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
