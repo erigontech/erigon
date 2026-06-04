@@ -23,6 +23,27 @@ import (
 	"github.com/spaolacci/murmur3"
 )
 
+// murmur128PairWithSeed(k1, k2) must equal hashing the concatenation k1||k2
+func TestMurmur128PairEquivalence(t *testing.T) {
+	rnd := rand.New(rand.NewSource(43))
+	for len1 := 0; len1 <= 40; len1++ {
+		for len2 := 0; len2 <= 40; len2++ {
+			key1 := make([]byte, len1)
+			key2 := make([]byte, len2)
+			rnd.Read(key1)
+			rnd.Read(key2)
+			seed := rnd.Uint32()
+			concat := append(append([]byte{}, key1...), key2...)
+			wantHi, wantLo := murmur3.Sum128WithSeed(concat, seed)
+			gotHi, gotLo := murmur128PairWithSeed(key1, key2, seed)
+			if gotHi != wantHi || gotLo != wantLo {
+				t.Fatalf("mismatch len1=%d len2=%d seed=%d: got (%x,%x) want (%x,%x)",
+					len1, len2, seed, gotHi, gotLo, wantHi, wantLo)
+			}
+		}
+	}
+}
+
 // murmur128WithSeed must be bit-identical to the library used to build existing index files
 func TestMurmur128Equivalence(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
