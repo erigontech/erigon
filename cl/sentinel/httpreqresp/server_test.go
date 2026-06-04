@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -172,6 +173,35 @@ func TestDoRecoversHandlerPanic(t *testing.T) {
 	require.Contains(t, string(body), "handler panic", "the recovered panic should surface in the response body")
 }
 
+// Production reaches the handler through a chi.Router (sentinel.go), not directly, and Do's
+// streaming hand-off needs the handler to receive the exact *captureWriter Do created. This guards
+// that chi (or any routing middleware added later) passes the ResponseWriter through untouched;
+// otherwise the *captureWriter assertion would 500 every req/resp in production.
+func TestDoThroughChiRouterPreservesStreamingHandoff(t *testing.T) {
+	const want = "streamed-through-chi"
+	gotCaptureWriter := false
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cw, ok := w.(*captureWriter)
+		gotCaptureWriter = ok
+		if !ok {
+			return
+		}
+		cw.setStreamingBody(io.NopCloser(bytes.NewReader([]byte(want))))
+	})
+	mux := chi.NewRouter()
+	mux.Get("/", h)
+
+	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	require.NoError(t, err)
+	resp, err := Do(mux, req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.True(t, gotCaptureWriter, "handler routed through chi must receive Do's *captureWriter")
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, want, string(body), "a streaming body set inside a chi-routed handler must reach the caller")
+}
+
 // fetchPeerResponse stands up two libp2p hosts, has the peer answer the given topic with a success
 // code byte followed by payloadSize bytes, and returns the status code, the REQRESP-RESPONSE-CODE
 // header, the body bytes the caller could read, and the error reading that body produced.
@@ -221,7 +251,11 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 		req.Header.Set(MaxResponseBytesHeader, strconv.FormatUint(maxResponseBytes, 10))
 	}
 
-	resp, err := Do(NewRequestHandler(victim), req)
+	// Mirror production wiring (sentinel.go): the handler is reached through a chi router, not
+	// called directly, so these flood/budget assertions exercise the real Do->chi->handler path.
+	mux := chi.NewRouter()
+	mux.Get("/", NewRequestHandler(victim))
+	resp, err := Do(mux, req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
