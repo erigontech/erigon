@@ -219,6 +219,10 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				default:
 				}
 
+				// handleCallMsg yields one of three:
+				// non-streaming response: res != nil, encoded here via writeTo.
+				// streamed response: res == nil, already written to the stream.
+				// notification: no response, leaving buf empty (only non-empty buffers reply).
 				buf := bytes.NewBuffer(nil)
 				stream := jsonstream.New(buf)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
