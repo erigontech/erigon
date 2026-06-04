@@ -625,17 +625,17 @@ func TestErrorTracePath(t *testing.T) {
 // TestTrieTraceReplayFromFile is a convenience test for debugging production
 // trie issues. To use:
 //  1. Set ERIGON_TRIE_TRACE_BLOCK=<N> and run erigon against your datadir
-//  2. Copy the resulting .toml file to testdata/ (or any path)
-//  3. Update the path below and remove t.Skip()
-//  4. Run: go test ./execution/commitment/ -run TestTrieTraceReplayFromFile -v
+//  2. Copy the resulting .toml file somewhere
+//  3. Run: ERIGON_TRIE_TRACE_FILE=<path> go test ./execution/commitment/ -run TestTrieTraceReplayFromFile -v
 //
 // The test loads the trace into MockState, rebuilds plainKeys with hashing
 // and sorting via WrapKeyUpdates, then runs Process to reproduce the exact
 // computation (or error) from production.
 func TestTrieTraceReplayFromFile(t *testing.T) {
-	t.Skip("Manual debugging test — set trace path and remove Skip to use")
-
-	const tracePath = "testdata/trie-trace-block-NNNNNN.toml" // ← your trace file
+	tracePath := os.Getenv("ERIGON_TRIE_TRACE_FILE")
+	if tracePath == "" {
+		t.Skip("set ERIGON_TRIE_TRACE_FILE=<path to .toml trace> to run this manual debugging test")
+	}
 
 	ctx := context.Background()
 	state, plainKeys, replayUpdates, trieState := LoadTrieTraceIntoMockState(t, tracePath)

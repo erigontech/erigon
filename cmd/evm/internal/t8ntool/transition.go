@@ -285,12 +285,15 @@ func Main(ctx *cli.Context) error {
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
+	var missingBlockHash bool
 	getHash := func(num uint64) (common.Hash, error) {
 		if prestate.Env.BlockHashes == nil {
+			missingBlockHash = true
 			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
+			missingBlockHash = true
 			return common.Hash{}, fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
 		}
 		return h, nil
@@ -328,22 +331,41 @@ func Main(ctx *cli.Context) error {
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := protocol.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 
+	// A blockhash requested during execution but not supplied in the env input is a
+	// hard input error (t8n exit code 4), not a per-transaction rejection.
+	if missingBlockHash {
+		return NewError(ErrorMissingBlockhash, errors.New("getHash invoked for a block whose hash was not provided in the env input"))
+	}
 	if err != nil {
 		return fmt.Errorf("error on EBE: %w", err)
 	}
 
 	// state root calculation
-	root, err := CalculateStateRoot(tx, blockNum, txNum)
+	root, err := CalculateStateRoot(sd, tx, blockNum, txNum)
 	if err != nil {
 		return err
 	}
 	result.StateRoot = *root
 
+	// Persist the post-execution state so the alloc dumper (which reads tx) sees it.
+	if err = sd.Flush(context.Background(), tx); err != nil {
+		return err
+	}
+	// Record the block→txNum mapping the dumper needs to read the post-state as-of.
+	if err = rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
+		return err
+	}
+
+	// Match the reference t8n output, which emits null (not []) when empty.
+	if len(result.Receipts) == 0 {
+		result.Receipts = nil
+	}
+
 	// Dump the execution result
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
 
-	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
+	dumper := state.NewDumper(tx, rawdbv3.TxNums, blockNum)
 	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
@@ -416,6 +438,26 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		chainId = *cid
 	}
 
+	sig := func(name string, b *hexutil.Big) (uint256.Int, error) {
+		var out uint256.Int
+		if b != nil && out.SetFromBig(b.ToInt()) {
+			return out, fmt.Errorf("%s field caused an overflow (uint256)", name)
+		}
+		return out, nil
+	}
+	v, err := sig("v", txJson.V)
+	if err != nil {
+		return nil, err
+	}
+	r, err := sig("r", txJson.R)
+	if err != nil {
+		return nil, err
+	}
+	s, err := sig("s", txJson.S)
+	if err != nil {
+		return nil, err
+	}
+
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
@@ -425,6 +467,9 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
 				GasPrice: *gasPrice,
 			}, nil
@@ -438,6 +483,9 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
 				GasPrice: *gasPrice,
 			},
@@ -470,6 +518,9 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
 				ChainID:    chainId,
 				TipCap:     tipCap,
@@ -496,6 +547,9 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
+					V:        v,
+					R:        r,
+					S:        s,
 				},
 				ChainID:    chainId,
 				TipCap:     tipCap,
@@ -643,19 +697,11 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
-	// SharedDomains.ComputeCommitment reads from kv.CommitmentDomain
-	// directly; the legacy PlainState → HashedAccounts/HashedStorage hashing
-	// loop that used to precede this call wrote into tables no current
-	// commitment path reads (and PlainState itself is never populated by
-	// the E3 execution writer).
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	if err != nil {
-		return nil, fmt.Errorf("NewSharedDomains: %w", err)
-	}
-	defer domains.Close()
-
-	root, err := domains.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
+func CalculateStateRoot(sd *execctx.SharedDomains, tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
+	// Compute the commitment on the SharedDomains that executed the block: it holds
+	// the touched-key set (prestate + execution) that ComputeCommitment needs. A
+	// fresh SharedDomains would see no changes and return the empty-trie root.
+	root, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
 		return nil, err
 	}
