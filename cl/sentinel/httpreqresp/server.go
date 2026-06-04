@@ -132,6 +132,8 @@ the following headers have meaning when passed in to the request:
 		REQRESP-PEER-ID - the peer id to target for the request
 		REQRESP-TOPIC - the topic to request with
 		REQRESP-EXPECTED-CHUNKS - this is an integer, which will be multiplied by 10 to calculate the amount of seconds the peer has to respond with all the data
+		REQRESP-FALLBACK-BODY - hex-encoded request body to send if the peer negotiates a non-preferred protocol
+		Reqresp-Max-Response-Bytes - caller's upper bound on the response body size; sizes the per-topic response cap
 */
 func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	resultCh := make(chan *http.Response, 1)
@@ -315,18 +317,15 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// response passes through untouched, a flooding peer is bounded at the cap and the caller
 		// sees ErrResponseTooLarge.
 		limit := int64(maxResponseBodySize(topic, maxBytes))
-		capped := newMaxBytesReader(stream, limit)
-		if cw, ok := w.(*captureWriter); ok {
-			// Hand the stream off to the response body; it now owns the close.
-			cw.setStreamingBody(&streamBody{r: capped, stream: stream})
-			streamTransferred = true
+		// The streaming hand-off needs the *captureWriter that Do supplies; a different writer means
+		// the handler was invoked outside Do and can't carry a streaming body.
+		cw, ok := w.(*captureWriter)
+		if !ok {
+			http.Error(w, "reqresp: handler must be invoked via httpreqresp.Do", http.StatusInternalServerError)
 			return
 		}
-		// Fallback for a real http.ResponseWriter (Do always uses *captureWriter, so this is
-		// defensive): stream straight through; the deferred close runs after the copy.
-		if _, err := io.Copy(w, capped); err != nil {
-			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
-			return
-		}
+		// Hand the live stream off to the response body, which owns the close from here.
+		cw.setStreamingBody(&streamBody{r: newMaxBytesReader(stream, limit), stream: stream})
+		streamTransferred = true
 	}
 }

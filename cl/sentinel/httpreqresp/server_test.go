@@ -112,6 +112,50 @@ func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
 	require.Equal(t, "hello", string(body), "Do must copy, not alias, the handler's write buffer")
 }
 
+// When Do returns early on a cancelled request context, a streaming response body that the handler
+// publishes afterwards owns a live stream; Do must still close it so the stream isn't leaked.
+func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	closed := make(chan struct{})
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		if cw, ok := w.(*captureWriter); ok {
+			cw.setStreamingBody(&signalCloser{closed: closed})
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", nil)
+	require.NoError(t, err)
+
+	errCh := make(chan error, 1)
+	go func() {
+		resp, doErr := Do(h, req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		errCh <- doErr
+	}()
+
+	<-started
+	cancel()
+	require.ErrorIs(t, <-errCh, context.Canceled, "Do must return the context error when the request is cancelled")
+
+	close(release) // let the handler finish and publish its streaming body
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Do leaked the streaming body: it was never closed after context cancel")
+	}
+}
+
+type signalCloser struct{ closed chan struct{} }
+
+func (s *signalCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (s *signalCloser) Close() error             { close(s.closed); return nil }
+
 // fetchPeerResponse stands up two libp2p hosts, has the peer answer the given topic with a success
 // code byte followed by payloadSize bytes, and returns the status code, the REQRESP-RESPONSE-CODE
 // header, the body bytes the caller could read, and the error reading that body produced.
