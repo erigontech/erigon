@@ -47,9 +47,6 @@ func fixturesDir() string {
 }
 
 func TestExecutionSpecWitness(t *testing.T) {
-	// The zkevm corpus fixtures are the minimized canonical witness format, so the
-	// producer must run in canonical mode regardless of the deployment default.
-	t.Setenv("ERIGON_WITNESS_MODE", "canonical")
 
 	// debug_executionWitness requires the historical-commitment schema; enable it
 	// before any test DB is built and restore the prior schema once all subtests
@@ -141,6 +138,8 @@ func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) error {
 
 	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	// zkevm fixtures are the minimized canonical witness format; request canonical explicitly.
+	canonicalMode := "canonical"
 
 	for i := 0; i < test.NumBlocks(); i++ {
 		expected := test.ExpectedWitnessForBlock(i)
@@ -158,7 +157,7 @@ func runWitnessTest(t *testing.T, test *testutil.WitnessBlockTest) error {
 			t.Fatalf("block index %d has a witness but no parseable block number", i)
 		}
 
-		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), nil)
+		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), &canonicalMode)
 		if err != nil {
 			return fmt.Errorf("ExecutionWitness(block %d): %w", blockNum, err)
 		}

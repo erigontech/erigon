@@ -214,8 +214,7 @@ func TestCollectAccessedState_KeysOnlyExistingAccounts(t *testing.T) {
 func TestResolveWitnessMode(t *testing.T) {
 	str := func(s string) *string { return &s }
 
-	t.Run("param overrides env", func(t *testing.T) {
-		t.Setenv("ERIGON_WITNESS_MODE", "canonical")
+	t.Run("param selects mode", func(t *testing.T) {
 		got, err := resolveWitnessMode(str("legacy"))
 		if err != nil {
 			t.Fatal(err)
@@ -239,19 +238,7 @@ func TestResolveWitnessMode(t *testing.T) {
 		}
 	})
 
-	t.Run("env used when param nil", func(t *testing.T) {
-		t.Setenv("ERIGON_WITNESS_MODE", "canonical")
-		got, err := resolveWitnessMode(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != witnessModeCanonical {
-			t.Errorf("nil param should fall back to canonical env, got %v", got)
-		}
-	})
-
-	t.Run("legacy default when param nil and env unset", func(t *testing.T) {
-		t.Setenv("ERIGON_WITNESS_MODE", "")
+	t.Run("legacy default when param nil", func(t *testing.T) {
 		got, err := resolveWitnessMode(nil)
 		if err != nil {
 			t.Fatal(err)

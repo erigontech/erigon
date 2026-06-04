@@ -550,23 +550,20 @@ const (
 	witnessModeCanonical
 )
 
-// resolveWitnessMode resolves the witness mode with precedence: request param > env > legacy.
+// resolveWitnessMode resolves the witness mode from the request param; absent, defaults to legacy.
 // An explicit param value other than "legacy"/"canonical" is rejected.
 func resolveWitnessMode(modeParam *string) (witnessMode, error) {
-	if modeParam != nil {
-		switch *modeParam {
-		case "legacy":
-			return witnessModeLegacy, nil
-		case "canonical":
-			return witnessModeCanonical, nil
-		default:
-			return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
-		}
+	if modeParam == nil {
+		return witnessModeLegacy, nil
 	}
-	if dbg.EnvString("ERIGON_WITNESS_MODE", "legacy") == "canonical" {
+	switch *modeParam {
+	case "legacy":
+		return witnessModeLegacy, nil
+	case "canonical":
 		return witnessModeCanonical, nil
+	default:
+		return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
 	}
-	return witnessModeLegacy, nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
