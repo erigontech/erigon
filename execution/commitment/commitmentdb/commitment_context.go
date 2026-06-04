@@ -805,16 +805,12 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
-	if err != nil {
-		return nil, 0, err
-	}
-	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
-	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
-	// underlying state cache / getter aliases shared storage that another goroutine
-	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
-	// boundary so all downstream consumers are safe.
-	return common.Copy(enc), step, nil
+	// Returns a borrowed slice valid for the lifetime of the current
+	// ComputeCommitment call. Callers must not retain it past that scope —
+	// the only retaining caller (getDeferredUpdate) clones at the queue
+	// boundary, and every other call site consumes the bytes inline
+	// (merger.Merge, unfoldBranchNode, EncodeBranch).
+	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
