@@ -4,10 +4,13 @@
 package existence
 
 import (
+	"bufio"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"testing"
 
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -70,4 +73,56 @@ func TestMmapBloomEmpty(t *testing.T) {
 	defer rd.Close()
 	require.True(t, rd.empty)
 	require.True(t, rd.ContainsHash(0xdeadbeef)) // empty filter answers true
+}
+
+// TestMmapBloomDifferentialParity opens the same on-disk .kvei file with both
+// the bloomfilter library reader and the mmap reader, then requires identical
+// ContainsHash answers across every inserted key and a large random probe set.
+// This is the exact byte-for-byte parity that TestMmapBloomParityWithLibrary
+// only checks implicitly, and guards against drift in either reader.
+func TestMmapBloomDifferentialParity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "parity-diff.kvei")
+
+	const inserted = 50_000
+
+	w, err := NewFilter(uint64(inserted), path, false)
+	require.NoError(t, err)
+	w.DisableFsync()
+
+	r := rand.New(rand.NewSource(7))
+	hashes := make([]uint64, inserted)
+	for i := range hashes {
+		hashes[i] = r.Uint64()
+		require.NoError(t, w.AddHash(hashes[i]))
+	}
+	require.NoError(t, w.Build())
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	lib := new(bloomfilter.Filter)
+	_, err = lib.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1<<20))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	mb, err := openMmapBloom(path)
+	require.NoError(t, err)
+	defer func() { _ = mb.Close() }()
+
+	require.Equal(t, lib.K(), uint64(len(mb.keys)), "key count")
+	require.Equal(t, lib.M(), mb.m, "bit count")
+
+	for i, h := range hashes {
+		if got, want := mb.ContainsHash(h), lib.ContainsHash(h); got != want {
+			t.Fatalf("inserted hash #%d (%d): mmap=%v library=%v", i, h, got, want)
+		}
+	}
+
+	const probes = 1_000_000
+	for i := 0; i < probes; i++ {
+		h := r.Uint64()
+		if got, want := mb.ContainsHash(h), lib.ContainsHash(h); got != want {
+			t.Fatalf("probe %d (hash %d): mmap=%v library=%v", i, h, got, want)
+		}
+	}
 }
