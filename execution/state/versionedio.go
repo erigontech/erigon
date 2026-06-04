@@ -1378,16 +1378,23 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 			if destructed {
 				destructTxIndex := res.DepIdx()
 				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+				revivalLimit := vr.txIndex - 1
+				// AddressPath uses >= to catch same-tx metamorphic SD+CREATE2; subfields use >.
+				if hi, ok := vr.versionMap.LatestTxIndex(address, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
 					revived = true
 				}
 				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 						revived = true
 					}
 				}
 				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 						revived = true
 					}
 				}
@@ -2513,11 +2520,18 @@ func addStorageUpdate(ac *types.AccountChanges, slot accounts.StorageKey, val ui
 
 	for _, slotChange := range ac.StorageChanges {
 		if slotChange.Slot == slot {
+			// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
+			if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
+				return
+			}
 			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
 			return
 		}
 	}
-
+	if origVal, wasRead := account.storageReadValues[slot]; wasRead && val.Eq(&origVal) {
+		return
+	}
+	removeStorageRead(ac, slot) // a real write supersedes any recorded read
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},

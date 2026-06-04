@@ -410,6 +410,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if size != 32 { // AuRa
+		// Reused *Header may carry stale MixDigest/Nonce from a previous
+		// non-AuRa decode; Hash() encoding depends on which branch is set.
+		h.MixDigest = common.Hash{}
+		h.Nonce = BlockNonce{}
 		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
@@ -417,6 +421,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
+		// Symmetric: clear any stale AuRa fields so EncodeRLP's
+		// len(AuRaSeal)>0 branch select stays correct.
+		h.AuRaStep = 0
+		h.AuRaSeal = h.AuRaSeal[:0]
 		if err = s.ReadBytes(h.MixDigest[:]); err != nil {
 			return fmt.Errorf("read MixDigest: %w", err)
 		}
@@ -795,6 +803,10 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
+	// binaryTransactions optionally caches the transactions' encodings (e.g. from
+	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
+	binaryTransactions BinaryTransactions
+
 	// caches
 	size atomic.Uint64
 }
@@ -1131,6 +1143,14 @@ func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, un
 	return b
 }
 
+// NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a binaryTxs cache
+// (its length must match txs) that lets RawBody() skip re-encoding the transactions.
+func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal) *Block {
+	header.hash.Store(&hash)
+	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals}
+	return b
+}
+
 // NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
@@ -1364,10 +1384,30 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 	}
 }
 
+// rlpFromBinaryTxn returns a transaction's rlp.EncodeToBytes form given its
+// binary (canonical EIP-2718) encoding: a typed txn (first byte < 0x80) is
+// wrapped in an RLP string, a legacy txn (already an RLP list) is unchanged.
+func rlpFromBinaryTxn(binaryTxn []byte) []byte {
+	if len(binaryTxn) == 0 || binaryTxn[0] >= 0x80 {
+		return binaryTxn
+	}
+	wrapped := make([]byte, rlp.StringLen(binaryTxn))
+	rlp.EncodeStringToBuf(binaryTxn, wrapped)
+	return wrapped
+}
+
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
+	// Re-wrap the cached binary encodings into their rlp.EncodeToBytes form —
+	// cheaper than a full per-tx struct re-encode.
+	if len(b.binaryTransactions) == len(b.transactions) {
+		for i, binaryTxn := range b.binaryTransactions {
+			br.Transactions[i] = rlpFromBinaryTxn(binaryTxn)
+		}
+		return br
+	}
 	for i, txn := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)

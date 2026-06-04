@@ -744,7 +744,8 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	if accountCopy.Nonce != original.Nonce {
 		c.writes = append(c.writes, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
 	}
-	if accountCopy.Incarnation != original.Incarnation {
+	// Emit on up-revs only — a down-rev would clobber a same-block SD-side cell.
+	if accountCopy.Incarnation > original.Incarnation {
 		c.writes = append(c.writes, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
 	}
 	if accountCopy.CodeHash != original.CodeHash {

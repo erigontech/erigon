@@ -16,7 +16,6 @@
 */**/*dapps*
 build/_vendor/pkg
 /*.a
-docs/readthedocs/build
 /.VSCodeCounter
 #*
 .#*

@@ -999,6 +999,43 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 		if readAccount == nil || err != nil {
 			return nil, StorageRead, UnknownVersion, err
 		}
+
+		// CachedReaderV3 bypasses the versionMap, so a prior in-block SD'd
+		// address still returns its pre-SD record. Without this gate the
+		// stale nonce/codeHash flows through refreshVersionedAccount (which
+		// only overwrites fields a versionMap cell exists for), so Empty()
+		// returns false and the EVM misses CallNewAccountGas.
+		if sdRes := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); sdRes.Status() == MVReadResultDone {
+			if destructed, ok := sdRes.Value().(bool); ok && destructed {
+				destructTxIndex := sdRes.DepIdx()
+				revivalLimit := sdb.txIndex - 1
+				revived := false
+				// Same-tx re-creation (metamorphic SD+CREATE2): both
+				// SelfDestructPath and AddressPath are written at the SAME
+				// TxIdx, so >= (not strict >) is needed on AddressPath.
+				if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
+					revived = true
+				}
+				if !revived {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					return nil, StorageRead, UnknownVersion, nil
+				}
+			}
+		}
 	}
 
 	return sdb.refreshVersionedAccount(addr, readAccount, source, version)
@@ -1706,16 +1743,13 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}()
 	}
 
-	source := StorageRead
-	version := UnknownVersion
-
 	if sdb.versionMap == nil {
 		previous, err = sdb.getStateObject(addr, true)
 		if err != nil {
 			return err
 		}
 	} else {
-		readAccount, accountSource, accountVersion, err := sdb.getVersionedAccount(addr, true)
+		readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
 
 		if err != nil {
 			return err
@@ -1741,8 +1775,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 					// so.deleted early exit.  Reuse the cached stateObject to preserve the
 					// correct selfdestructed flag and accumulated incarnation.
 					previous = so
-					source = accountSource
-					version = accountVersion
 				} else if sdb.versionMap != nil {
 					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
 					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
@@ -1757,8 +1789,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			if previous == nil {
 				previous = newObject(sdb, addr, account, account)
 				previous.selfdestructed = destructed
-				source = accountSource
-				version = accountVersion
 			}
 		} else if so, ok := sdb.stateObjects[addr]; ok && so.deleted {
 			// The account was selfdestructed in an earlier transaction within the
@@ -1782,11 +1812,24 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation
 	}
-	// Read IncarnationPath directly from the versionMap to get the
-	// incarnation written by the prior CreateAccount, giving the correct prevInc.
-	if sdb.versionMap != nil && (previous == nil || previous.selfdestructed) {
-		if inc, res, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && inc > prevInc {
-			prevInc = inc
+	// Capture each path's own (source, version) for the synthetic reads stamped
+	// at the bottom of the function — inheriting the account-record version
+	// would trip the validator on the recursive AddressPath check.
+	incSource, incVersion := StorageRead, UnknownVersion
+	if sdb.versionMap != nil {
+		if inc, res, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone {
+			incSource = MapRead
+			incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			if inc > prevInc {
+				prevInc = inc
+			}
+		}
+	}
+	balSource, balVersion := StorageRead, UnknownVersion
+	if sdb.versionMap != nil {
+		if _, res, ok := sdb.versionMap.ReadBalance(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone {
+			balSource = MapRead
+			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 		}
 	}
 	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
@@ -1826,12 +1869,15 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// creation clashes between trnascations get detected
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
-		hdr := ReadHeader{Source: source, Version: version}
-		sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{hdr, newObj.Balance()})
-		sdb.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{hdr, prevInc})
+		sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
+		sdb.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
 	}
 	sdb.recordWriteBalance(addr, newObj.Balance())
-	sdb.recordWriteIncarnation(addr, newObj.data.Incarnation)
+	// Only on real contract creation; CreateAccount(false) leaves Incarnation=0
+	// and would clobber a prior tx's SD-side cell, breaking same-block CREATE2's prevInc.
+	if contractCreation {
+		sdb.recordWriteIncarnation(addr, newObj.data.Incarnation)
+	}
 	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
 		sdb.recordWriteSelfDestruct(addr, false)
 	}
@@ -2373,6 +2419,14 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 	if sdb.versionMap != nil {
 		sdb.MarkAddressAccess(addr, true)
 		data := *account
+		// Demote a sub-field MapRead promotion when AddressPath itself has no cell,
+		// or the validator non-converges on its recursive AddressPath check.
+		if source == MapRead {
+			if _, res, ok := sdb.versionMap.ReadAddress(addr, sdb.txIndex); !ok || res.Status() != MVReadResultDone {
+				source = StorageRead
+				version = UnknownVersion
+			}
+		}
 		sdb.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
 			ReadHeader: ReadHeader{Source: source, Version: version},
 			Val:        NewAccountView(&data),

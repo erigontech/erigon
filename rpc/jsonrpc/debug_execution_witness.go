@@ -71,6 +71,11 @@ type RecordingState struct {
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
+
+	// The system address is touched as msg.sender on every block's system calls;
+	// that alone is not a witness access. A real opcode access during a user tx
+	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
+	systemAddrTouchedInTx bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -93,6 +98,10 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
+
+// MarkSystemAddrTouchedInTx records that a user transaction accessed the system
+// address via an opcode, so it is kept in the witness even without a state change.
+func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -601,6 +610,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		ibs.SetTxContext(blockNum, txIndex)
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		// A user tx that accesses the system address via an opcode keeps it in the
+		// witness; the per-tx access set captures this even on state-cache hits.
+		if acc := ibs.AccessedAddresses(); acc != nil {
+			if _, ok := acc[params.SystemAddress]; ok {
+				recordingState.MarkSystemAddrTouchedInTx()
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
@@ -639,13 +655,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
-	sdCtx.SetDeferBranchUpdates(false)
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash
@@ -693,6 +708,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
 		return nil, err
 	}
+
+	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
+	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
 
 	return result, nil
 }
@@ -834,7 +854,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
-		if !reallyChanged && !hasStorage && !existenceChanged {
+		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrTouchedInTx {
 			delete(out.Addresses, sysAddr)
 		}
 	}
@@ -854,11 +874,6 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	})
 	out.SortedKeys = sortedKeys
 
-	type codeWithHash struct {
-		code []byte
-		hash common.Hash
-	}
-
 	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
 	for _, code := range preStateCode {
@@ -868,15 +883,13 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
-	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
-	for h, code := range allCodesByHash {
-		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
+	uniqueCodes := make([][]byte, 0, len(allCodesByHash))
+	for _, code := range allCodesByHash {
+		uniqueCodes = append(uniqueCodes, code)
 	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
+	slices.SortFunc(uniqueCodes, bytes.Compare)
 	for _, c := range uniqueCodes {
-		out.SortedCodes = append(out.SortedCodes, c.code)
+		out.SortedCodes = append(out.SortedCodes, c)
 	}
 
 	preCode := rs.GetPreStateCode()
@@ -941,9 +954,18 @@ func detectCollapseSiblings(
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
 
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+	type collapseCandidate struct {
+		siblingPath  []byte
+		branchPrefix []byte
+	}
+	var candidates []collapseCandidate
+	sdCtx.SetCollapseTracer(func(hashedKeyPath, branchPrefix []byte) {
+		candidates = append(candidates, collapseCandidate{
+			siblingPath:  common.Copy(hashedKeyPath),
+			branchPrefix: common.Copy(branchPrefix),
+		})
 	})
+	defer sdCtx.SetCollapseTracer(nil)
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
@@ -954,7 +976,22 @@ func detectCollapseSiblings(
 		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
 	}
 
-	sdCtx.SetCollapseTracer(nil)
+	// The canonical witness (insert-before-delete order) does not touch the sibling of
+	// a branch whose net block change leaves it with >=2 children; erigon's replay can
+	// transiently collapse such a branch, so drop those siblings to match membership.
+	siblingPaths = make([][]byte, 0, len(candidates))
+	for _, c := range candidates {
+		childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
+		}
+		if childCount >= 2 {
+			log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
+				"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
+			continue
+		}
+		siblingPaths = append(siblingPaths, c.siblingPath)
+	}
 	return siblingPaths, nil
 }
 
@@ -1157,13 +1194,12 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
 	// Create commitment context for accurate storage roots (since they are not stored explicitly)
-	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
 	}
 	defer postDomains.Close()
 	postSdCtx := postDomains.GetCommitmentContext()
-	postSdCtx.SetDeferBranchUpdates(false)
 
 	// Set up to read state at current block (after execution)
 	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)

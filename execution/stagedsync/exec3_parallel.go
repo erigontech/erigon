@@ -3406,14 +3406,21 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 					continue
 				}
 			} else if stateReader != nil {
-				// No prior TX wrote this key — compare against pre-block value.
-				preVal, found, err := stateReader.ReadAccountStorage(w.Header().Address, w.Header().Key)
-				if err == nil {
-					if !found && writeVal.IsZero() {
-						continue // both zero — no-op
+				// SD-then-revival: any prior SD=true wipes the baseline to zero for post-SD writes,
+				// even when the latest SelfDestructPath is false (revival flipped it).
+				if vm.AnyDoneBoolWriteEquals(w.Header().Address, state.SelfDestructPath, accounts.NilKey, txIndex-1, true) {
+					if writeVal.IsZero() {
+						continue
 					}
-					if found && writeVal.Eq(&preVal) {
-						continue // same as pre-block — no-op
+				} else {
+					preVal, found, err := stateReader.ReadAccountStorage(w.Header().Address, w.Header().Key)
+					if err == nil {
+						if !found && writeVal.IsZero() {
+							continue
+						}
+						if found && writeVal.Eq(&preVal) {
+							continue
+						}
 					}
 				}
 			}
