@@ -69,9 +69,10 @@ func collectCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]int64 {
 }
 
 // wipeCommitment removes all commitment state from both database tables and snapshot files,
-// then rescans the aggregator's file state.
-func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs) {
+// then returns a freshly reopened db and aggregator over the wiped folder.
+func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
+	stepSize := agg.StepSize()
 
 	// Clear commitment tables in the database.
 	rwTx, err := db.BeginRw(t.Context())
@@ -90,6 +91,10 @@ func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dir
 	}
 	require.NoError(t, rwTx.Commit())
 
+	// Release the aggregator's file handles before deleting the .kv files: Windows refuses to
+	// remove a still-mapped file, while Unix allows unlink-while-open.
+	agg.Close()
+
 	// Delete commitment .kv files and their siblings (.kvi, .kvei, .bt).
 	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
 	require.NoError(t, err, "listing snapshot domain files")
@@ -106,13 +111,16 @@ func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dir
 		}
 	}
 
-	// Rescan file state.
-	err = agg.OpenFolder()
+	// Reopen a fresh aggregator over the wiped folder; the old one was closed above.
+	newAgg := testAgg(t, db, dirs, stepSize, log.New())
+	newDB, err := temporal.New(db, newAgg)
 	require.NoError(t, err)
+	require.NoError(t, newAgg.OpenFolder())
 
 	// Verify the wipe was complete — no commitment files should remain.
 	remaining := collectCommitmentFiles(t, dirs)
 	require.Empty(t, remaining, "commitment files must be fully removed after wipe")
+	return newDB, newAgg
 }
 
 // logComparison prints a summary comparing baseline, sequential, and concurrent rebuild results.
@@ -403,7 +411,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	db, agg = reopenAggregator(t, db, agg, stepSize)
 
 	// Wipe all commitment state
-	wipeCommitment(t, db, agg, dirs)
+	db, agg = wipeCommitment(t, db, agg, dirs)
 
 	// Run sequential rebuild
 	seqStart := time.Now()
@@ -436,7 +444,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 	db, agg = reopenAggregator(t, db, agg, stepSize)
 
 	// Wipe all commitment state
-	wipeCommitment(t, db, agg, dirs)
+	db, agg = wipeCommitment(t, db, agg, dirs)
 
 	// Enable concurrent mode via the global flag.
 	// This creates a ConcurrentPatriciaHashed trie and enables EnableParaTrieDB.
@@ -587,7 +595,7 @@ func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
 	t.Logf("=== Sequential Rebuild (no squeeze) ===")
 	statecfg.ExperimentalConcurrentCommitment = false
 	db, agg = reopenAggregator(t, db, agg, stepSize)
-	wipeCommitment(t, db, agg, dirs)
+	db, agg = wipeCommitment(t, db, agg, dirs)
 
 	seqRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)
@@ -601,7 +609,7 @@ func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
 	t.Logf("=== Concurrent Rebuild (no squeeze) ===")
 	statecfg.ExperimentalConcurrentCommitment = true
 	db, agg = reopenAggregator(t, db, agg, stepSize)
-	wipeCommitment(t, db, agg, dirs)
+	db, agg = wipeCommitment(t, db, agg, dirs)
 
 	concRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)

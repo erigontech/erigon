@@ -85,7 +85,7 @@ func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
 	refRoot := recomputeRootFromState(t, db)
 	require.NotEmpty(t, refRoot)
 
-	wipeCommitment(t, db, agg, dirs)
+	db, agg = wipeCommitment(t, db, agg, dirs)
 
 	_, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), true)
 	require.NoError(t, err)
