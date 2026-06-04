@@ -96,6 +96,9 @@ func (b *Filter) Contains(v hash.Hash64) bool {
 	if b.empty {
 		return true
 	}
+	if b.useFuse {
+		return b.fuseReader.ContainsHash(v.Sum64())
+	}
 	if b.mmapBloom != nil {
 		return b.mmapBloom.ContainsHash(v.Sum64())
 	}
@@ -227,6 +230,10 @@ func (b *Filter) Close() {
 		return
 	}
 	b.fuseReader.Close()
+	if b.fuseWriter != nil {
+		b.fuseWriter.Close()
+		b.fuseWriter = nil
+	}
 	if b.mmapBloom != nil {
 		_ = b.mmapBloom.Close()
 		b.mmapBloom = nil

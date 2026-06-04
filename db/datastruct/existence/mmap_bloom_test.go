@@ -195,3 +195,64 @@ func TestMmapBloomPolicyOnEmpty(t *testing.T) {
 	rd.MadvNormal()
 	require.Zero(t, uint64(rd.ForceInMem()))
 }
+
+// u64Hasher is a hash.Hash64 whose Sum64 returns a fixed value, to exercise the
+// Filter.Contains(hash.Hash64) entry point.
+type u64Hasher uint64
+
+func (u u64Hasher) Sum64() uint64               { return uint64(u) }
+func (u u64Hasher) Write(p []byte) (int, error) { return len(p), nil }
+func (u u64Hasher) Sum(b []byte) []byte         { return b }
+func (u u64Hasher) Reset()                      {}
+func (u u64Hasher) Size() int                   { return 8 }
+func (u u64Hasher) BlockSize() int              { return 8 }
+
+// TestFuseFilterContains: Contains(hash.Hash64) on a fuse-backed reader must
+// delegate to the fuse reader, not fall through to the nil writer-path filter.
+func TestFuseFilterContains(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fuse-contains.kvei")
+
+	const inserted = 10_000
+	w, err := NewFilter(uint64(inserted), path, true)
+	require.NoError(t, err)
+	w.DisableFsync()
+	r := rand.New(rand.NewSource(9))
+	hashes := make([]uint64, inserted)
+	for i := range hashes {
+		hashes[i] = r.Uint64()
+		require.NoError(t, w.AddHash(hashes[i]))
+	}
+	require.NoError(t, w.Build())
+	w.Close()
+
+	rd, err := OpenFilter(path, true)
+	require.NoError(t, err)
+	defer rd.Close()
+	require.True(t, rd.useFuse)
+
+	for _, h := range hashes {
+		require.True(t, rd.ContainsHash(h), "inserted hash should hit")
+		require.Equal(t, rd.ContainsHash(h), rd.Contains(u64Hasher(h)),
+			"Contains must mirror ContainsHash on the fuse path")
+	}
+}
+
+// TestFuseFilterCloseReleasesWriter: Close must release the fuse writer's
+// off-heap resources, not just the reader.
+func TestFuseFilterCloseReleasesWriter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fuse-close.kvei")
+
+	w, err := NewFilter(10_000, path, true)
+	require.NoError(t, err)
+	w.DisableFsync()
+	require.NotNil(t, w.fuseWriter)
+	for i := uint64(1); i <= 1000; i++ {
+		require.NoError(t, w.AddHash(i))
+	}
+	require.NoError(t, w.Build())
+
+	w.Close()
+	require.Nil(t, w.fuseWriter, "Close must release the fuse writer")
+}
