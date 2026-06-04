@@ -963,15 +963,21 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 			}
 		}
 	default:
-		// legacy: every bytecode loaded during execution — pre-state reads, in-block
-		// created code that is subsequently called, EIP-7702 designators, plus a single
-		// empty bytecode if any empty-code account was loaded.
+		// legacy: every bytecode loaded during execution plus a single empty bytecode if any
+		// empty-code account was loaded. PreStateCode is folded in because AccessedCode is
+		// keyed by address, so a delegated account's EIP-7702 designator is overwritten there
+		// by its resolved target code and survives only in PreStateCode.
 		for _, code := range rs.GetAccessedCode() {
 			if len(code) > 0 {
 				allCodesByHash[crypto.Keccak256Hash(code)] = code
 			}
 		}
 		for _, code := range rs.GetModifiedCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
+		}
+		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
 				allCodesByHash[crypto.Keccak256Hash(code)] = code
 			}

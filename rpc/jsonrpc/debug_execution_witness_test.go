@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -136,6 +137,38 @@ func TestEmptyCodeTrigger_OnAccountLoad(t *testing.T) {
 			t.Error("empty 0x code entry missing after a code load")
 		}
 	})
+}
+
+// TestCollectAccessedState_Legacy7702Designator asserts the legacy code set carries the
+// EIP-7702 delegation designator. For a delegated account the designator is read first
+// (AccessedCode[A]=designator) then overwritten by the resolved target code on the second
+// read (AccessedCode[A]=target, last-write-wins); the designator survives only in
+// PreStateCode. Without it, stateless verification of a block touching the delegated
+// account recomputes the wrong state root.
+func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
+	eoa := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	target := common.HexToAddress("0x3fc8c2b6e4ea901721aef251c67bc7c2591a1e1f")
+	designator := append([]byte{0xef, 0x01, 0x00}, target[:]...)
+	targetCode := []byte{0x60, 0x00, 0x60, 0x00, 0xfd}
+
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{
+		eoa: {Nonce: 1},
+	}}
+	rs := NewRecordingState(inner)
+	rs.PreStateCode[eoa] = designator
+	rs.AccessedCode[eoa] = targetCode
+
+	accessed := collectAccessedState(rs, witnessModeLegacy)
+
+	var sawDesignator bool
+	for _, c := range accessed.SortedCodes {
+		if bytes.Equal(c, designator) {
+			sawDesignator = true
+		}
+	}
+	if !sawDesignator {
+		t.Fatal("legacy witness codes missing the EIP-7702 designator (present only in PreStateCode)")
+	}
 }
 
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
