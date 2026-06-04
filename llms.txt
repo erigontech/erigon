@@ -26,6 +26,7 @@
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, prune modes, database internals, and node configuration.
 - [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
 - [Prune Modes](https://docs.erigon.tech/fundamentals/prune-modes): Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case.
+- [Architecture](https://docs.erigon.tech/fundamentals/architecture): How Erigon is built — staged sync, modular processes, flat-DB on MDBX, immutable snapshots, and an embedded consensus layer.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
@@ -37,6 +38,7 @@
 - [JWT Secret](https://docs.erigon.tech/fundamentals/jwt): Generating and configuring the JWT secret for Engine API communication.
 - [TLS Authentication](https://docs.erigon.tech/fundamentals/tls-authentication): Mutual TLS setup for securing gRPC and RPC daemon endpoints.
 - [Multiple instances / One machine](https://docs.erigon.tech/fundamentals/multiple-instances): Running several Erigon instances on a single machine without conflict.
+- [Database](https://docs.erigon.tech/fundamentals/database): How Erigon stores chain data — MDBX engine, datadir layout, snapshot files, and real mainnet sizing numbers.
 - [MCP Server](https://docs.erigon.tech/fundamentals/mcp): Model Context Protocol server for AI-assisted node interaction and queries.
 - [Creating a dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard): Prometheus metrics export and Grafana dashboard setup for node monitoring.
 - [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose): Running Erigon and all its modules with Docker Compose.
