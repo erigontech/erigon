@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"unsafe"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -20,8 +19,8 @@ import (
 type mmapBloom struct {
 	file *os.File
 	mmap mmap.MMap // backing region — header + keys + bits + trailing sha
-	keys []uint64  // copied into Go memory (small: K=3..10 entries)
-	bits []uint64  // aliases the mmap region; do not write to
+	keys []uint64  // copied into Go memory (small: K=3 entries)
+	bits []byte    // bit array aliased from the mmap; little-endian uint64 words
 	m    uint64    // number of bits
 	n    uint64    // number of inserted elements (informational)
 }
@@ -36,11 +35,6 @@ type mmapBloom struct {
 //	offset 36  | k*8B | keys[k] uint64 little-endian
 //	offset 36+ | …    | bits[ceil(m/64)] uint64 little-endian
 //	tail       | 48B  | sha512/384 hash of all previous bytes (ignored on read; matches NoVerify behaviour)
-//
-// The bits offset (36 + k*8) is generally not 8-byte aligned, but x86_64
-// tolerates misaligned uint64 reads with negligible cost; building this for
-// non-x86 would require either padding the file or copying the bits to a
-// new-aligned buffer (defeats the purpose).
 const (
 	bloomHeaderSize = 36      // 8 magic + 4 version + 3*8 (k/n/m)
 	bloomTrailerLen = 48      // sha512/384
@@ -117,10 +111,7 @@ func openMmapBloom(filePath string) (*mmapBloom, error) {
 		keys[i] = binary.LittleEndian.Uint64(region[keysOffset+i*8 : keysOffset+(i+1)*8])
 	}
 
-	// Alias the bits region as []uint64. The mmap.MMap is itself a []byte that
-	// stays alive for the lifetime of the bloom; bits is a view over it, so no
-	// GC concerns. Misaligned access is intentional (see comment above).
-	bits := unsafe.Slice((*uint64)(unsafe.Pointer(&region[bitsOffset])), int(bitsLen))
+	bits := region[bitsOffset : bitsOffset+bitsSize]
 
 	return &mmapBloom{
 		file: f,
@@ -141,7 +132,8 @@ func (b *mmapBloom) ContainsHash(hash uint64) bool {
 	for n := 0; n < len(b.keys) && r != 0; n++ {
 		hash = ((hash << rotation) | (hash >> (64 - rotation))) ^ b.keys[n]
 		i := hash % b.m
-		r &= (b.bits[i>>6] >> uint(i&0x3f)) & 1
+		word := binary.LittleEndian.Uint64(b.bits[(i>>6)*8:])
+		r &= (word >> uint(i&0x3f)) & 1
 	}
 	return r != 0
 }
