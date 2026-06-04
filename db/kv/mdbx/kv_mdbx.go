@@ -177,11 +177,13 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
 	if tb != nil {
-		// Tests open many envs in parallel; a 16GB VA reservation each piles
-		// file mappings into the Go race heap's address window ("too many
-		// address space collisions for -race mode").
-		opts.mapSize = 1 * datasize.GB
 		opts.dirtySpace = uint64(2 * datasize.MB)
+		// Parallel unit tests pile 16GB VA reservations into the Go race heap
+		// window ("too many address space collisions for -race mode"); cap them.
+		// Benchmarks run sequentially and can need the full map.
+		if _, isBench := tb.(*testing.B); !isBench {
+			opts.mapSize = 1 * datasize.GB
+		}
 	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
