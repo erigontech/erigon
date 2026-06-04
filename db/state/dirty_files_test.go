@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -149,6 +150,38 @@ func TestOpenDirtyFilesPopulatesVersion(t *testing.T) {
 	for _, c := range cases {
 		require.Equal(t, c.ver, gotDirty[c.rng], "dirty file version for %s", c.name)
 		require.Equal(t, c.ver, gotVisible[c.rng], "visibleFile.Version() for %s", c.name)
+	}
+}
+
+// Two same-range commitment files of different versions collapse to one dirty item
+// resolved to the highest version (v2.1); the lower v2.0 twin is left on disk, never opened.
+func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
+	t.Parallel()
+	for _, order := range [][]string{
+		{"v2.0-commitment.0-2.kv", "v2.1-commitment.0-2.kv"},
+		{"v2.1-commitment.0-2.kv", "v2.0-commitment.0-2.kv"},
+	} {
+		t.Run(strings.Join(order, ","), func(t *testing.T) {
+			logger := log.New()
+			_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+			tmp := t.TempDir()
+			for _, name := range order {
+				writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, name), tmp, logger)
+			}
+
+			d.scanDirtyFiles(order)
+			require.NoError(t, d.openDirtyFiles(order))
+
+			require.Equal(t, 1, d.dirtyFiles.Len(), "same-range duplicate must collapse to one dirty file")
+			var opened *FilesItem
+			d.dirtyFiles.Scan(func(it *FilesItem) bool { opened = it; return true })
+			require.NotNil(t, opened)
+			require.Equal(t, version.V2_1, opened.version, "newest version wins")
+			require.Equal(t, "v2.1-commitment.0-2.kv", filepath.Base(opened.decompressor.FilePath()))
+
+			_, err := os.Stat(filepath.Join(d.dirs.SnapDomain, "v2.0-commitment.0-2.kv"))
+			require.NoError(t, err, "lower-version twin stays on disk, just unopened")
+		})
 	}
 }
 
