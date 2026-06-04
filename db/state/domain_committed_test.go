@@ -27,7 +27,7 @@ import (
 func TestCommitmentBranchReferenced(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(10)
-	// minStepsForReferencing == 2, so a range >= 2 steps reaches the threshold.
+	// commitment.DefaultKeyReferencingMinSteps == 2, so a range >= 2 steps reaches the threshold.
 	const fromAbove = uint64(0)
 	const toAbove = uint64(20) // 2 steps -> threshold reached
 	const fromBelow = uint64(0)
