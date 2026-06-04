@@ -109,7 +109,7 @@ func TestTrieTraceRoundTrip(t *testing.T) {
 	err := state1.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
 	recorder := NewRecordingContext(state1)
 	trie1.ResetContext(recorder)
 
@@ -129,7 +129,7 @@ func TestTrieTraceRoundTrip(t *testing.T) {
 	// Phase 2: Load trace into fresh MockState and replay
 	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
 
-	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
 
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
 	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
@@ -178,7 +178,7 @@ func TestTrieTraceAccountOnlyRoundTrip(t *testing.T) {
 	err := state1.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
 	recorder := NewRecordingContext(state1)
 	trie1.ResetContext(recorder)
 
@@ -198,7 +198,7 @@ func TestTrieTraceAccountOnlyRoundTrip(t *testing.T) {
 
 	// Replay
 	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
-	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
 	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 	err := state1.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
 	recorder := NewRecordingContext(state1)
 	trie1.ResetContext(recorder)
 
@@ -244,7 +244,7 @@ func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 
 	// Replay
 	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
-	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
 	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -341,7 +341,7 @@ func TestTrieTraceErrorRoundTrip(t *testing.T) {
 		errToReturn:     accountErr,
 	}
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state)
+	trie1 := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
 	recorder := NewRecordingContext(errState)
 	trie1.ResetContext(recorder)
 
@@ -395,7 +395,7 @@ func TestTrieTraceErrorRoundTrip(t *testing.T) {
 		errToReturn:     accountErr,
 	}
 
-	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
 	trie2.ResetContext(errState2)
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	_, replayErr := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
@@ -438,7 +438,7 @@ func TestTrieTracePartialRoundTrip(t *testing.T) {
 
 	recorder := NewRecordingContext(errState)
 
-	trie := NewHexPatriciaHashed(length.Addr, state)
+	trie := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
 	trie.ResetContext(recorder)
 
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
@@ -488,7 +488,7 @@ func TestTrieTracePutBranchRecording(t *testing.T) {
 	err := state.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state)
+	trie1 := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
 	recorder := NewRecordingContext(state)
 	trie1.ResetContext(recorder)
 
@@ -640,7 +640,7 @@ func TestTrieTraceReplayFromFile(t *testing.T) {
 	ctx := context.Background()
 	state, plainKeys, replayUpdates, trieState := LoadTrieTraceIntoMockState(t, tracePath)
 
-	trie := NewHexPatriciaHashed(length.Addr, state)
+	trie := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
 	trie.ResetContext(state)
 	if len(trieState) > 0 {
 		err := trie.SetState(trieState)
@@ -679,7 +679,7 @@ func TestTrieTraceNonEmptyStateRoundTrip(t *testing.T) {
 	err := state1.applyPlainUpdates(plainKeys1, updates1)
 	require.NoError(t, err)
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
 	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
 	_, err = trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -720,7 +720,7 @@ func TestTrieTraceNonEmptyStateRoundTrip(t *testing.T) {
 	state2, replayKeys, replayUpdates, loadedState := LoadTrieTraceIntoMockState(t, tracePath)
 	require.NotEmpty(t, loadedState, "loaded trie state should be non-empty")
 
-	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
 	trie2.ResetContext(state2)
 	err = trie2.SetState(loadedState)
 	require.NoError(t, err)
@@ -748,7 +748,7 @@ func TestTrieTraceDeleteRoundTrip(t *testing.T) {
 	err := state1.applyPlainUpdates(plainKeys1, updates1)
 	require.NoError(t, err)
 
-	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	trie1 := NewHexPatriciaHashed(length.Addr, state1, DefaultTrieConfig())
 	trie1.ResetContext(state1)
 
 	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
@@ -805,7 +805,7 @@ func TestTrieTraceDeleteRoundTrip(t *testing.T) {
 
 	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
 
-	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2 := NewHexPatriciaHashed(length.Addr, state2, DefaultTrieConfig())
 
 	upds3 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
 	rootHash2, err := trie2.Process(ctx, upds3, "", nil, WarmupConfig{})
