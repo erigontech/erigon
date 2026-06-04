@@ -18,8 +18,6 @@ package recsplit
 
 import (
 	"sync"
-
-	"github.com/spaolacci/murmur3"
 )
 
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
@@ -40,9 +38,8 @@ func NewIndexReader(index *Index) *IndexReader {
 }
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
-	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
-	// because `hasher` object is interface and need call many methods on it
-	return murmur3.Sum128WithSeed(key, r.salt)
+	// in-package murmur3 port is bit-identical to the library but faster for short keys
+	return murmur128WithSeed(key, r.salt)
 }
 
 // Lookup wraps index Lookup
@@ -55,7 +52,7 @@ func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
 	r.bufLock.Lock()
 	// hash of 2 concatenated keys is equal to 2 separated calls of `.Write`
 	r.buf = append(append(r.buf[:0], key1...), key2...)
-	bucketHash, fingerprint := murmur3.Sum128WithSeed(r.buf, r.salt)
+	bucketHash, fingerprint := murmur128WithSeed(r.buf, r.salt)
 	r.bufLock.Unlock()
 	return r.index.Lookup(bucketHash, fingerprint)
 }
