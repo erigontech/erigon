@@ -302,8 +302,7 @@ func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
 	t.Run("mark verified", func(t *testing.T) {
 		f := newPayloadVoteTestStore(t, root, true, false)
 		execHash := common.HexToHash("0xabcd")
-		block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-		f.MarkPayloadVerified(root, execHash, block)
+		f.MarkPayloadVerified(root, execHash)
 		require.True(t, f.IsPayloadVerified(root))
 
 		status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
@@ -327,9 +326,7 @@ func TestMarkPayloadInvalidRecordsELRejection(t *testing.T) {
 		hasEnvelope:       true,
 		invalidatedHeader: &invalidatedHeader,
 	}
-	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-
-	f.MarkPayloadInvalid(root, execHash, block)
+	f.MarkPayloadInvalid(root, execHash)
 
 	require.False(t, f.IsPayloadVerified(root))
 	status, ok := f.GetRecentExecutionPayloadStatus(execHash)

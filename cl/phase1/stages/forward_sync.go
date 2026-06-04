@@ -19,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -490,22 +489,30 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if err := cfg.forkChoice.StoreAnchorEnvelope(anchorRoot, env); err != nil {
 		return fmt.Errorf("failed to store anchor envelope: %w", err)
 	}
-	if cfg.executionClient != nil {
-		status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-		if err != nil {
-			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot), "status", status, "err", err)
-		}
-		switch status {
-		case execution_client.PayloadStatusValidated:
-			cfg.forkChoice.MarkPayloadVerified(anchorRoot, env.Message.Payload.BlockHash, nil)
-		case execution_client.PayloadStatusInvalidated:
-			cfg.forkChoice.MarkPayloadInvalid(anchorRoot, env.Message.Payload.BlockHash, nil)
-			return fmt.Errorf("anchor execution payload invalidated by EL")
-		}
+	if err := validateAnchorPayloadIfLocalEL(ctx, cfg, anchorRoot, bid, env); err != nil {
+		return err
 	}
 
 	log.Info("[Caplin] Anchor envelope stored successfully (checkpoint sync)",
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot))
+	return nil
+}
+
+func validateAnchorPayloadIfLocalEL(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if !canRetryGloasPayloads(cfg) {
+		return nil
+	}
+	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+	if err != nil {
+		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	}
+	switch status {
+	case execution_client.PayloadStatusValidated:
+		cfg.forkChoice.MarkPayloadVerified(anchorRoot, env.Message.Payload.BlockHash)
+	case execution_client.PayloadStatusInvalidated:
+		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, env.Message.Payload.BlockHash)
+		return fmt.Errorf("anchor execution payload invalidated by EL")
+	}
 	return nil
 }
 
@@ -620,16 +627,9 @@ func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.Exe
 }
 
 func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
-	versionedHashes := make([]common.Hash, 0, bid.BlobKzgCommitments.Len())
-	if err := solid.RangeErr[*cltypes.KZGCommitment](&bid.BlobKzgCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-		if err != nil {
-			return err
-		}
-		versionedHashes = append(versionedHashes, versionedHash)
-		return nil
-	}); err != nil {
-		return nil, nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
+	versionedHashes, err := gloasVersionedHashes(&bid.BlobKzgCommitments)
+	if err != nil {
+		return nil, nil, err
 	}
-	return versionedHashes, cltypes.GetExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests), nil
+	return versionedHashes, gloasExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests), nil
 }

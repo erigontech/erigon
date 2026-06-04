@@ -20,6 +20,48 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+const maxGloasVerificationSweepPerCycle = 32
+
+func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
+	if blobCommitments == nil || blobCommitments.Len() == 0 {
+		return nil, nil
+	}
+	versionedHashes := make([]common.Hash, 0, blobCommitments.Len())
+	if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
+		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
+		if err != nil {
+			return err
+		}
+		versionedHashes = append(versionedHashes, versionedHash)
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
+	}
+	return versionedHashes, nil
+}
+
+func gloasExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, requests *cltypes.ExecutionRequests) []hexutil.Bytes {
+	if requests == nil {
+		return nil
+	}
+	return cltypes.GetExecutionRequestsList(beaconCfg, requests)
+}
+
+func validPendingGloasPayload(p forkchoice.PendingELPayload) bool {
+	return p.Block != nil && p.Block.Block != nil && p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.Payload != nil
+}
+
+func gloasEnvelopePayloadHash(envelope *cltypes.SignedExecutionPayloadEnvelope) (common.Hash, bool) {
+	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
+		return common.Hash{}, false
+	}
+	return envelope.Message.Payload.BlockHash, true
+}
+
+func canRetryGloasPayloads(cfg *Cfg) bool {
+	return cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
+}
+
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
 // It periodically checks the readiness of the execution client and returns true if the client is ready before
 // the timeout occurs. If the context is canceled or a timeout occurs, it returns false with the corresponding error.
@@ -215,7 +257,7 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, true); envErr != nil {
+						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canRetryGloasPayloads(cfg)); envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
 					}
@@ -252,9 +294,7 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 		return
 	}
 	for _, env := range envelopes {
-		// validatePayload=true so recovered envelopes are sent to EL via NewPayload.
-		// If EL is behind, errELBehind will queue them as pending EL payloads.
-		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, true); err != nil {
+		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canRetryGloasPayloads(cfg)); err != nil {
 			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
 		}
 	}
@@ -458,27 +498,11 @@ func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelo
 		return nil, nil, errors.New("missing execution payload bid")
 	}
 
-	versionedHashes := make([]common.Hash, 0)
-	blobCommitments := &committedBid.Message.BlobKzgCommitments
-	if blobCommitments.Len() > 0 {
-		versionedHashes = make([]common.Hash, 0, blobCommitments.Len())
-		if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-			if err != nil {
-				return err
-			}
-			versionedHashes = append(versionedHashes, versionedHash)
-			return nil
-		}); err != nil {
-			return nil, nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
-		}
+	versionedHashes, err := gloasVersionedHashes(&committedBid.Message.BlobKzgCommitments)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	var executionRequestsList []hexutil.Bytes
-	if envelope.Message.ExecutionRequests != nil {
-		executionRequestsList = cltypes.GetExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests)
-	}
-	return versionedHashes, executionRequestsList, nil
+	return versionedHashes, gloasExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests), nil
 }
 
 func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
@@ -491,36 +515,32 @@ func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.Signe
 }
 
 func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
-	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
+	executionBlockHash, ok := gloasEnvelopePayloadHash(envelope)
+	if !ok {
 		return false
 	}
-	status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatus(envelope.Message.Payload.BlockHash)
+	status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatus(executionBlockHash)
 	return ok && status == execution_client.PayloadStatusInvalidated
 }
 
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 	for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
-		if p.Block == nil || p.Envelope == nil || p.Envelope.Message == nil || p.Envelope.Message.Payload == nil {
-			continue
-		}
-		blockRoot, err := p.Block.Block.HashSSZ()
-		if err != nil {
-			log.Warn("[chainTipSync] failed to hash pending GLOAS block", "slot", p.Block.Block.Slot, "err", err)
+		if !validPendingGloasPayload(p) {
 			continue
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		beaconRoot := common.Hash(blockRoot)
+		beaconRoot := p.Envelope.Message.BeaconBlockRoot
 		execHash := p.Envelope.Message.Payload.BlockHash
 		switch status {
 		case execution_client.PayloadStatusValidated:
-			cfg.forkChoice.MarkPayloadVerified(beaconRoot, execHash, p.Block.Block)
+			cfg.forkChoice.MarkPayloadVerified(beaconRoot, execHash)
 		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
 			cfg.forkChoice.RequeuePendingELPayload(p)
 		case execution_client.PayloadStatusInvalidated:
-			cfg.forkChoice.MarkPayloadInvalid(beaconRoot, execHash, p.Block.Block)
+			cfg.forkChoice.MarkPayloadInvalid(beaconRoot, execHash)
 			log.Warn("[chainTipSync] pending GLOAS payload invalidated by EL", "slot", p.Block.Block.Slot, "blockRoot", beaconRoot)
 		}
 	}
@@ -555,10 +575,14 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 				root  common.Hash
 				block *cltypes.SignedBeaconBlock
 			}{root: root, block: block})
+			if len(blocks) >= maxGloasVerificationSweepPerCycle {
+				break
+			}
 		}
 		root = common.Hash(block.Block.ParentRoot)
 	}
 
+	swept := 0
 	for i := len(blocks) - 1; i >= 0; i-- {
 		item := blocks[i]
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
@@ -569,24 +593,32 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
 			continue
 		}
+		execHash, ok := gloasEnvelopePayloadHash(envelope)
+		if !ok {
+			log.Warn("[chainTipSync] missing GLOAS envelope payload during verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root)
+			continue
+		}
 		if isGloasPayloadKnownInvalid(cfg, envelope) {
-			cfg.forkChoice.MarkPayloadInvalid(item.root, envelope.Message.Payload.BlockHash, item.block.Block)
+			cfg.forkChoice.MarkPayloadInvalid(item.root, execHash)
 			continue
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
-		execHash := envelope.Message.Payload.BlockHash
 		switch status {
 		case execution_client.PayloadStatusValidated:
-			cfg.forkChoice.MarkPayloadVerified(item.root, execHash, item.block.Block)
+			cfg.forkChoice.MarkPayloadVerified(item.root, execHash)
 		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
 			cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: item.block, Envelope: envelope})
 		case execution_client.PayloadStatusInvalidated:
-			cfg.forkChoice.MarkPayloadInvalid(item.root, execHash, item.block.Block)
+			cfg.forkChoice.MarkPayloadInvalid(item.root, execHash)
 			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
 		}
+		swept++
+	}
+	if swept > 0 || len(blocks) >= maxGloasVerificationSweepPerCycle {
+		log.Info("[chainTipSync] GLOAS verification sweep", "swept", swept, "queued", len(blocks), "limit", maxGloasVerificationSweepPerCycle)
 	}
 }
 
@@ -628,9 +660,9 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	execHash := envelope.Message.Payload.BlockHash
 	switch status {
 	case execution_client.PayloadStatusValidated:
-		cfg.forkChoice.MarkPayloadVerified(anchorRoot, execHash, nil)
+		cfg.forkChoice.MarkPayloadVerified(anchorRoot, execHash)
 	case execution_client.PayloadStatusInvalidated:
-		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, execHash, nil)
+		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, execHash)
 		log.Warn("[chainTipSync] anchor payload invalidated by EL", "anchorRoot", anchorRoot)
 	}
 }
@@ -645,15 +677,13 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// insertion — so it must run regardless of SupportInsertion().
 	recoverMissingEnvelopes(ctx, cfg)
 
-	if cfg.executionClient != nil {
+	if canRetryGloasPayloads(cfg) {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
 		drainPendingGloasPayloads(ctx, cfg)
 		retryUnverifiedAnchorPayload(ctx, cfg)
-		if cfg.executionClient.SupportInsertion() {
-			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
-			}
+		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 		}
 	}
 
@@ -667,7 +697,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
-			if cfg.executionClient != nil {
+			if canRetryGloasPayloads(cfg) {
 				verifyUnverifiedGloasPayloads(ctx, cfg)
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before

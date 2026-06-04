@@ -784,11 +784,13 @@ func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
 	return f.verifiedExecutionPayload.Contains(blockRoot)
 }
 
-// MarkPayloadVerified records that the execution payload has been accepted by the EL
-// and updates all associated state: verified-payload cache, execution-payload-status
-// LRU, optimistic store, and head cache invalidation.
-// [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash, block *cltypes.BeaconBlock) {
+func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markPayloadVerifiedLocked(blockRoot, executionBlockHash)
+}
+
+func (f *ForkChoiceStore) markPayloadVerifiedLocked(blockRoot common.Hash, executionBlockHash common.Hash) {
 	if f.verifiedExecutionPayload == nil {
 		return
 	}
@@ -799,20 +801,17 @@ func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBl
 	if f.payloadStatusByRoot != nil {
 		f.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusValidated)
 	}
-	if block != nil && f.optimisticStore != nil {
-		if err := f.optimisticStore.ValidateBlock(blockRoot, block); err != nil {
-			log.Warn("[MarkPayloadVerified] optimistic store update failed", "blockRoot", blockRoot, "err", err)
-		}
-	}
-	f.mu.Lock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.mu.Unlock()
 }
 
-// MarkPayloadInvalid records that the execution payload has been rejected by the EL.
-// [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash, block *cltypes.BeaconBlock) {
+func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
+}
+
+func (f *ForkChoiceStore) markPayloadInvalidLocked(blockRoot common.Hash, executionBlockHash common.Hash) {
 	if f.verifiedExecutionPayload != nil {
 		f.verifiedExecutionPayload.Remove(blockRoot)
 	}
@@ -823,15 +822,8 @@ func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlo
 		f.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
 	}
 	f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-	if block != nil && f.optimisticStore != nil {
-		if err := f.optimisticStore.InvalidateBlock(blockRoot, block); err != nil {
-			log.Warn("[MarkPayloadInvalid] optimistic store update failed", "blockRoot", blockRoot, "err", err)
-		}
-	}
-	f.mu.Lock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.mu.Unlock()
 }
 
 // ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.

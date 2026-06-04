@@ -523,9 +523,13 @@ func TestAggregateAndProofGloasIgnoreIndex1EnvelopeNotVerified(t *testing.T) {
 		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
 	}
 	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
-		Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: blockRoot},
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: blockRoot,
+			Payload:         &cltypes.Eth1Block{BlockHash: common.HexToHash("0x1234")},
+		},
 	}
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
+	fcu.ExecutionPayloadStatusMap[common.HexToHash("0x1234")] = execution_client.PayloadStatusInvalidated
 
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)

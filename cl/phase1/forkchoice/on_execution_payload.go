@@ -296,19 +296,11 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
-		f.forkGraph.MarkHeaderAsInvalid(beaconBlockRoot)
-		// remove from optimistic candidate
-		if err := f.optimisticStore.InvalidateBlock(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to remove block from optimistic store: %v", err)
-		}
+		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
 		return errors.New("execution payload is invalid")
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
-		// remove from optimistic candidate
-		if err := f.optimisticStore.ValidateBlock(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to validate block in optimistic store: %v", err)
-		}
-		f.verifiedExecutionPayload.Add(beaconBlockRoot, struct{}{})
+		f.markPayloadVerifiedLocked(beaconBlockRoot, executionBlockHash)
 	}
 
 	if err != nil {
@@ -464,6 +456,9 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 		f.mu.Unlock()
 		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
 	}
+	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.mu.Unlock()
 
 	if f.db != nil {
@@ -475,11 +470,6 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 		}
 	}
 
-	f.mu.Lock()
-	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.mu.Unlock()
 	return nil
 }
 
