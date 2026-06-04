@@ -1784,12 +1784,17 @@ type aggregatorVisible struct {
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles() {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
+	prev := a.visible.Load()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
 		if d == nil {
 			continue
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		var prevDV *domainVisible
+		if prev != nil {
+			prevDV = prev.d[id]
+		}
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum, prevDV)
 	}
 	for id, ii := range a.standaloneIIs() {
 		if ii == nil {
