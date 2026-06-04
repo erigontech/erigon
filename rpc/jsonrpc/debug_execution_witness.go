@@ -655,13 +655,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
-	sdCtx.SetDeferBranchUpdates(false)
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash
@@ -1195,13 +1194,12 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
 	// Create commitment context for accurate storage roots (since they are not stored explicitly)
-	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
 	}
 	defer postDomains.Close()
 	postSdCtx := postDomains.GetCommitmentContext()
-	postSdCtx.SetDeferBranchUpdates(false)
 
 	// Set up to read state at current block (after execution)
 	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)

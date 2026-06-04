@@ -471,7 +471,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
+	// binaryTransactions cache so the downstream Block.RawBody() invocation
+	// inside InsertBlocksAndWaitWithAccessLists doesn't re-encode every tx
+	// via rlp.EncodeToBytes. Both slices reference the same underlying
+	// byte buffers from req.Transactions.
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
