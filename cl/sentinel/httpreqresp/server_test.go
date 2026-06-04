@@ -156,6 +156,22 @@ type signalCloser struct{ closed chan struct{} }
 func (s *signalCloser) Read([]byte) (int, error) { return 0, io.EOF }
 func (s *signalCloser) Close() error             { close(s.closed); return nil }
 
+// A handler panic must not crash the process or block Do forever (background-context callers never
+// cancel); Do recovers in the handler goroutine and publishes a 500.
+func TestDoRecoversHandlerPanic(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("boom")
+	})
+	req, err := http.NewRequest("GET", "http://service.internal/", nil)
+	require.NoError(t, err)
+	resp, err := Do(h, req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	require.Contains(t, string(body), "handler panic", "the recovered panic should surface in the response body")
+}
+
 // fetchPeerResponse stands up two libp2p hosts, has the peer answer the given topic with a success
 // code byte followed by payloadSize bytes, and returns the status code, the REQRESP-RESPONSE-CODE
 // header, the body bytes the caller could read, and the error reading that body produced.

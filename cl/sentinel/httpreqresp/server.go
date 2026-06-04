@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -139,6 +140,15 @@ func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
 	resultCh := make(chan *http.Response, 1)
 	go func() {
 		w := &captureWriter{}
+		defer func() {
+			if rec := recover(); rec != nil {
+				// On a handler panic, publish a 500 rather than crashing the process or leaving Do
+				// blocked forever; the handler's deferred stream.Close runs during the unwind.
+				ew := &captureWriter{}
+				http.Error(ew, fmt.Sprintf("reqresp: handler panic: %v", rec), http.StatusInternalServerError)
+				resultCh <- ew.result() //nolint:bodyclose
+			}
+		}()
 		handler.ServeHTTP(w, r)
 		// the caller closes the body; we hand it off through the channel.
 		resultCh <- w.result() //nolint:bodyclose
@@ -304,7 +314,15 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
 			return
 		}
-		// this is not necessary, but seems like the right thing to do
+		// The streaming hand-off needs the *captureWriter that Do supplies; a different writer means
+		// the handler was invoked outside Do and can't carry a streaming body.
+		cw, ok := w.(*captureWriter)
+		if !ok {
+			http.Error(w, "reqresp: handler must be invoked via httpreqresp.Do", http.StatusInternalServerError)
+			return
+		}
+		// Success path: these headers (incl. the snappy encoding) describe the body we stream back,
+		// so they are set only here, not on the error responses above.
 		w.Header().Set("CONTENT-TYPE", "application/octet-stream")
 		w.Header().Set("CONTENT-ENCODING", "snappy/stream")
 		w.Header().Set("REQRESP-PEER-ID", peerIdBase58)
@@ -314,17 +332,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// this is technically incorrect, and more aggressive than the network might like.
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
 		// Stream the response through a per-topic size cap instead of buffering it: a compliant
-		// response passes through untouched, a flooding peer is bounded at the cap and the caller
-		// sees ErrResponseTooLarge.
+		// response passes through untouched, a flood is bounded at the cap and the caller sees
+		// ErrResponseTooLarge.
 		limit := int64(maxResponseBodySize(topic, maxBytes))
-		// The streaming hand-off needs the *captureWriter that Do supplies; a different writer means
-		// the handler was invoked outside Do and can't carry a streaming body.
-		cw, ok := w.(*captureWriter)
-		if !ok {
-			http.Error(w, "reqresp: handler must be invoked via httpreqresp.Do", http.StatusInternalServerError)
-			return
-		}
-		// Hand the live stream off to the response body, which owns the close from here.
 		cw.setStreamingBody(&streamBody{r: newMaxBytesReader(stream, limit), stream: stream})
 		streamTransferred = true
 	}
