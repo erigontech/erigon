@@ -152,6 +152,14 @@ var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", true)
 var domainExistenceForceWillNeed = dbg.EnvBool("DOMAIN_EXISTENCE_WILLNEED", false)
 var domainExistenceForceNormal = dbg.EnvBool("DOMAIN_EXISTENCE_NORMAL", false)
 
+// Standalone .kvei bloom existence filter is mmap'd by default (bits in the OS
+// page cache, not the Go heap). These mirror the DOMAIN_EXISTENCE_* knobs for
+// the recsplit existence filter, but default to mmap since the bloom is the
+// largest and least hot of the existence filters.
+var domainBloomForceInMem = dbg.EnvBool("DOMAIN_BLOOM_MEM", false)
+var domainBloomForceWillNeed = dbg.EnvBool("DOMAIN_BLOOM_WILLNEED", false)
+var domainBloomForceNormal = dbg.EnvBool("DOMAIN_BLOOM_NORMAL", false)
+
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
 	if err != nil {
@@ -167,6 +175,26 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 		accessor.ForceExistenceFilterNormal()
 	}
 	return accessor, nil
+}
+
+// openBloomFilter opens the standalone .kvei bloom existence filter and applies
+// the DOMAIN_BLOOM_* memory policy, mirroring openHashMapAccessor for the
+// recsplit existence filter. Package-level so SnapshotRepo can share it.
+func openBloomFilter(fPath string) (*existence.Filter, error) {
+	f, err := existence.OpenFilter(fPath, false)
+	if err != nil {
+		return nil, err
+	}
+	if domainBloomForceInMem {
+		f.ForceInMem()
+	}
+	if domainBloomForceWillNeed {
+		f.MadvWillNeed()
+	}
+	if domainBloomForceNormal {
+		f.MadvNormal()
+	}
+	return f, nil
 }
 
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
@@ -889,7 +917,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			existenceFilter, err = existence.OpenFilter(fPath, false)
+			existenceFilter, err = openBloomFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
@@ -991,7 +1019,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath, false)
+			bloom, err = openBloomFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}

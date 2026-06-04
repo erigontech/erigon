@@ -126,3 +126,72 @@ func TestMmapBloomDifferentialParity(t *testing.T) {
 		}
 	}
 }
+
+// TestMmapBloomForceInMem verifies that pinning the bits to the heap preserves
+// ContainsHash answers, releases the mapping, and that the madvise hints and a
+// repeated ForceInMem are safe no-ops.
+func TestMmapBloomForceInMem(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "forceinmem.kvei")
+
+	const inserted = 20_000
+	w, err := NewFilter(uint64(inserted), path, false)
+	require.NoError(t, err)
+	w.DisableFsync()
+	r := rand.New(rand.NewSource(3))
+	hashes := make([]uint64, inserted)
+	for i := range hashes {
+		hashes[i] = r.Uint64()
+		require.NoError(t, w.AddHash(hashes[i]))
+	}
+	require.NoError(t, w.Build())
+
+	rd, err := OpenFilter(path, false)
+	require.NoError(t, err)
+	defer rd.Close()
+	require.NotNil(t, rd.mmapBloom)
+	require.False(t, rd.mmapBloom.keepInMem)
+	require.NotNil(t, rd.mmapBloom.mmap)
+
+	rd.MadvWillNeed() // safe on the live mapping
+	rd.MadvNormal()
+
+	probes := append([]uint64{}, hashes...)
+	for i := 0; i < inserted; i++ {
+		probes = append(probes, r.Uint64())
+	}
+	before := make([]bool, len(probes))
+	for i, h := range probes {
+		before[i] = rd.ContainsHash(h)
+	}
+
+	moved := rd.ForceInMem()
+	require.Positive(t, uint64(moved))
+	require.True(t, rd.mmapBloom.keepInMem)
+	require.Nil(t, rd.mmapBloom.mmap, "mapping released after ForceInMem")
+
+	for i, h := range probes {
+		require.Equalf(t, before[i], rd.ContainsHash(h), "ContainsHash diverged after ForceInMem at probe %d", i)
+	}
+
+	rd.MadvWillNeed() // safe no-ops once pinned
+	rd.MadvNormal()
+	require.Zero(t, uint64(rd.ForceInMem()), "ForceInMem should be idempotent")
+}
+
+func TestMmapBloomPolicyOnEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty-policy.kvei")
+	w, err := NewFilter(1, path, false) // keysCount<2 → empty sentinel
+	require.NoError(t, err)
+	w.DisableFsync()
+	require.NoError(t, w.Build())
+
+	rd, err := OpenFilter(path, false)
+	require.NoError(t, err)
+	defer rd.Close()
+	require.True(t, rd.empty)
+	rd.MadvWillNeed() // no-ops on an empty filter
+	rd.MadvNormal()
+	require.Zero(t, uint64(rd.ForceInMem()))
+}

@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+
+	mm "github.com/erigontech/erigon/common/mmap"
 )
 
 // mmapBloom is a memory-mapped read-only bloom filter, binary-compatible with
@@ -17,12 +20,13 @@ import (
 // lives in the OS page cache instead of the Go heap, so opening many large
 // existence-filter files no longer pins multiple GB of heap.
 type mmapBloom struct {
-	file *os.File
-	mmap mmap.MMap // backing region — header + keys + bits + trailing sha
-	keys []uint64  // copied into Go memory (small: K=3 entries)
-	bits []byte    // bit array aliased from the mmap; little-endian uint64 words
-	m    uint64    // number of bits
-	n    uint64    // number of inserted elements (informational)
+	file      *os.File
+	mmap      mmap.MMap // backing region — header + keys + bits + trailing sha
+	keys      []uint64  // copied into Go memory (small: K=3 entries)
+	bits      []byte    // little-endian uint64 words; aliases the mmap, or heap-owned after ForceInMem
+	m         uint64    // number of bits
+	n         uint64    // number of inserted elements (informational)
+	keepInMem bool      // ForceInMem copied bits to the heap and dropped the mmap
 }
 
 // bloom v02 on-disk layout:
@@ -136,6 +140,46 @@ func (b *mmapBloom) ContainsHash(hash uint64) bool {
 		r &= (word >> uint(i&0x3f)) & 1
 	}
 	return r != 0
+}
+
+// MadvWillNeed hints to the OS to prefetch the mapped bits into the page cache.
+func (b *mmapBloom) MadvWillNeed() {
+	if b == nil || b.keepInMem || len(b.mmap) == 0 {
+		return
+	}
+	if err := mm.MadviseWillNeed(b.mmap); err != nil {
+		panic(err)
+	}
+}
+
+// MadvNormal resets the kernel readahead policy for the mapping to its default.
+func (b *mmapBloom) MadvNormal() {
+	if b == nil || b.keepInMem || len(b.mmap) == 0 {
+		return
+	}
+	if err := mm.MadviseNormal(b.mmap); err != nil {
+		panic(err)
+	}
+}
+
+// ForceInMem copies the bit array off the mmap into the Go heap and releases the
+// mapping, pinning the bits in RAM so they can't be evicted under memory
+// pressure. Returns the number of bytes moved to the heap.
+func (b *mmapBloom) ForceInMem() datasize.ByteSize {
+	if b == nil || b.keepInMem || b.mmap == nil {
+		return 0
+	}
+	cpy := make([]byte, len(b.bits)) // not bytes.Clone — keep heap-profiler attribution
+	copy(cpy, b.bits)
+	b.bits = cpy
+	b.keepInMem = true
+	_ = b.mmap.Unmap() //nolint:errcheck
+	b.mmap = nil
+	if b.file != nil {
+		_ = b.file.Close() //nolint:errcheck
+		b.file = nil
+	}
+	return datasize.ByteSize(len(cpy))
 }
 
 func (b *mmapBloom) Close() error {

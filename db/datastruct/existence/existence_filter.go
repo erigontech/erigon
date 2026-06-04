@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -230,4 +231,41 @@ func (b *Filter) Close() {
 		_ = b.mmapBloom.Close()
 		b.mmapBloom = nil
 	}
+}
+
+// MadvWillNeed hints to the OS to prefetch the filter's mapped pages into the
+// page cache. No-op for the in-heap writer path and empty filters.
+func (b *Filter) MadvWillNeed() {
+	if b == nil || b.empty {
+		return
+	}
+	if b.useFuse {
+		b.fuseReader.MadvWillNeed()
+		return
+	}
+	b.mmapBloom.MadvWillNeed()
+}
+
+// MadvNormal resets the kernel readahead policy for the filter to its default.
+func (b *Filter) MadvNormal() {
+	if b == nil || b.empty {
+		return
+	}
+	if b.useFuse {
+		b.fuseReader.MadvNormal()
+		return
+	}
+	b.mmapBloom.MadvNormal()
+}
+
+// ForceInMem pins the filter's bits in the Go heap, dropping the mmap, so they
+// can't be evicted under memory pressure. Returns the bytes moved to the heap.
+func (b *Filter) ForceInMem() datasize.ByteSize {
+	if b == nil || b.empty {
+		return 0
+	}
+	if b.useFuse {
+		return b.fuseReader.ForceInMem()
+	}
+	return b.mmapBloom.ForceInMem()
 }
