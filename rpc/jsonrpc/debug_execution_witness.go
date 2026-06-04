@@ -541,8 +541,8 @@ func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error)
 }
 
 // witnessMode selects the debug_executionWitness output format. legacy is the
-// default full format; canonical is the minimized ethereum/execution-specs zkevm
-// format (no empty nodes, no in-block-created bytecode, minimum siblings).
+// default full format; canonical is the minimized form the ethereum/execution-spec-tests
+// zkevm corpus encodes (no empty nodes, no in-block-created bytecode, minimum siblings).
 type witnessMode int
 
 const (
