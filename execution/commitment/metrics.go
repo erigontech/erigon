@@ -85,15 +85,20 @@ func (m MetricValues) RUnlock() {
 	}
 }
 
-func NewMetrics() *Metrics {
+// NewMetrics creates a new Metrics instance. If csvPrefix is non-empty, CSV metrics
+// are enabled with that prefix. Otherwise, falls back to the
+// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX environment variable.
+func NewMetrics(csvPrefix string) *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
 		Branches:                 NewBranches(),
 		collectCommitmentMetrics: dbg.KVReadLevelledMetrics,
 	}
-	csvFilePathPrefix := dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
-	if csvFilePathPrefix != "" {
-		metrics.EnableCsvMetrics(csvFilePathPrefix)
+	if csvPrefix == "" {
+		csvPrefix = dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
+	}
+	if csvPrefix != "" {
+		metrics.EnableCsvMetrics(csvPrefix)
 	}
 	return metrics
 }

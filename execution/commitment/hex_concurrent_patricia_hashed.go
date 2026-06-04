@@ -192,7 +192,6 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	p.root.EnableCsvMetrics(filePathPrefix)
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
-		p.mounts[i].metrics = p.root.metrics
 	}
 }
 
