@@ -51,8 +51,12 @@ type SharedDomainsCommitmentContext struct {
 	trace         bool
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
-	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
-	tmpDir        string          // temp directory for ETL collectors
+	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
+	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
+	// worker count from WarmupNumWorkersOrDefault.
+	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
+	warmupBase commitment.WarmupConfig
+	tmpDir     string // temp directory for ETL collectors
 
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
@@ -66,21 +70,14 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 	sdc.stateReader = stateReader
 }
 
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
-// It requires a DB to be set by calling EnableParaTrieDB
-func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
-	sdc.trieWarmup = trieWarmup
-}
-
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
-	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
-		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
-	}
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
+// It requires a DB to be set by calling EnableParaTrieDB
+func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
+	sdc.warmupBase.Enabled = trieWarmup
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
@@ -186,16 +183,16 @@ func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
-	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
-}
-
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
+		warmupBase: commitment.WarmupConfig{
+			Enabled:    cfg.EnableTrieWarmup,
+			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
+		},
 	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
 }
 
@@ -423,15 +420,14 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	var warmupConfig commitment.WarmupConfig
 	var drainCollectors func() []*etl.Collector
 	if sdc.paraTrieDB != nil {
+		warmupConfig = sdc.warmupBase
+		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
+		warmupConfig.LogPrefix = logPrefix
 		if _, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok && sdc.updates.IsConcurrentCommitment() {
 			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		} else {
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
-		warmupConfig.Enabled = sdc.trieWarmup
-		warmupConfig.NumWorkers = dbg.TipTrieWarmupers
-		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
-		warmupConfig.LogPrefix = logPrefix
 	}
 
 	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment
