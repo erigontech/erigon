@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -61,6 +62,23 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 		},
 		"worst-case bundle": {
 			BlobsBundle: worstCaseBlobsBundle(),
+		},
+		"nil response": nil,
+		"populated payload": {
+			ExecutionPayload: &ExecutionPayload{
+				ParentHash:    common.HexToHash("0xabc1"),
+				FeeRecipient:  common.HexToAddress("0xfee"),
+				StateRoot:     common.HexToHash("0x5747"),
+				BlockNumber:   2,
+				GasLimit:      30_000_000,
+				GasUsed:       21_000,
+				Timestamp:     1_700_000_000,
+				BaseFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+				BlockHash:     common.HexToHash("0xb10c"),
+				Transactions:  []hexutil.Bytes{{0x01, 0x02}, {0x03}},
+			},
+			BlockValue:  (*hexutil.Big)(big.NewInt(99)),
+			BlobsBundle: &BlobsBundle{Commitments: []hexutil.Bytes{{0x01}}, Proofs: []hexutil.Bytes{{0x02}}, Blobs: []hexutil.Bytes{{0x03}}},
 		},
 	}
 	for name, r := range cases {

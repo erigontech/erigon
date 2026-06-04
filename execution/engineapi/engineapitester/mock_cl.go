@@ -162,6 +162,9 @@ func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
 		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
+	if fcuRes.PayloadId == nil {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("forkchoiceUpdated for block building returned no payload id")
+	}
 	return *fcuRes.PayloadId, payloadAttributes, nil
 }
 

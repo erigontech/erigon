@@ -73,6 +73,9 @@ func hexArrayLen(arr []hexutil.Bytes) int {
 // (reflection-heavy) BlobsBundle and deferring to json.Marshal for the smaller fields.
 // Byte-identical to json.Marshal(r).
 func (r *GetPayloadResponse) MarshalFastJSON() ([]byte, error) {
+	if r == nil {
+		return jsonNull(), nil
+	}
 	executionPayload, err := json.Marshal(r.ExecutionPayload)
 	if err != nil {
 		return nil, err
