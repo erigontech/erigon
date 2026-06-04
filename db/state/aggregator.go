@@ -2497,15 +2497,25 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxSte
 		return nil, kv.Step(0), false, err
 	}
 	if ok && step <= maxStep {
-		if metrics != nil && dbg.KVReadLevelledMetrics {
-			metrics.UpdateDbReads(domain, start)
+		if metrics != nil {
+			if dbg.KVReadLevelledMetrics {
+				metrics.UpdateDbReads(domain, start)
+			}
+			changeset.IncReadTier(domain, changeset.TierDb)
 		}
 		return v, step, true, nil
 	}
 
-	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
+	v, found, fromFileCache, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
 	if !found {
 		return nil, kv.Step(0), false, err
+	}
+	if metrics != nil {
+		if fromFileCache {
+			changeset.IncReadTier(domain, changeset.TierFileCache)
+		} else {
+			changeset.IncReadTier(domain, changeset.TierFile)
+		}
 	}
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		// UpdateFileReadsUnique tracks both total reads and distinct
@@ -2524,7 +2534,7 @@ func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx 
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxTxNum)
+	v, found, _, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxTxNum)
 	if domain == kv.CommitmentDomain && found {
 		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	}

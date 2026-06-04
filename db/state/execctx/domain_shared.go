@@ -900,6 +900,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
+		changeset.IncReadTier(domain, changeset.TierMem)
 		return v, step, nil
 	} else {
 		if step > 0 {
@@ -913,6 +914,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 			if dbg.KVReadLevelledMetrics {
 				sd.metrics.UpdateCacheReads(domain, start)
 			}
+			changeset.IncReadTier(domain, changeset.TierMem)
 			return v, step, nil
 		} else {
 			if step > 0 && step < maxStep {
@@ -952,6 +954,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 						domain, k, v, vDB, sd.txNum))
 				}
 			}
+			changeset.IncReadTier(domain, changeset.TierStateCache)
 			return v, 0, nil
 		}
 	}
@@ -963,6 +966,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// state never coexists with stale cache entries.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cstep, ok := sd.branchCache.Get(k); ok {
+			changeset.IncReadTier(domain, changeset.TierStateCache)
 			return cv, kv.Step(cstep), nil
 		}
 	}
@@ -979,6 +983,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if h := sd.codeHashForAddr(tx, k); len(h) > 0 {
 			codeEthHash = h
 			if cv, ok := sd.stateCache.GetCodeByHash(codeEthHash); ok {
+				changeset.IncReadTier(domain, changeset.TierStateCache)
 				return cv, 0, nil
 			}
 		}

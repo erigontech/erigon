@@ -1304,7 +1304,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 // of file where the value is stored (not exact step when kv has been set)
 //
 // maxTxNum, if > 0, filters out files with bigger txnums from search
-func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, found bool, fromCache bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
 	}
@@ -1322,7 +1322,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	}
 	if getFromFileCache != nil {
 		if cv, ok := getFromFileCache.Get(hi); ok {
-			return cv.v, true, cv.startTxNum, cv.endTxNum, nil
+			return cv.v, true, true, cv.startTxNum, cv.endTxNum, nil
 		}
 	}
 
@@ -1354,7 +1354,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 		v, found, _, err = dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
-			return nil, false, 0, 0, err
+			return nil, false, false, 0, 0, err
 		}
 		if !found {
 			if traceGetLatest == dt.name {
@@ -1369,7 +1369,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		if getFromFileCache != nil {
 			getFromFileCache.Add(hi, domainGetFromFileCacheItem{startTxNum: dt.files[i].startTxNum, endTxNum: dt.files[i].endTxNum, v: common.Copy(v)})
 		}
-		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
+		return v, true, false, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
 	if traceGetLatest == dt.name {
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))
@@ -1378,7 +1378,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	if getFromFileCache != nil {
 		getFromFileCache.Add(hi, domainGetFromFileCacheItem{})
 	}
-	return nil, false, 0, 0, nil
+	return nil, false, false, 0, 0, nil
 }
 
 // Returns the first txNum from available history
@@ -1629,15 +1629,25 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
-		if metrics != nil && dbg.KVReadLevelledMetrics {
-			metrics.UpdateDbReads(dt.name, start)
+		if metrics != nil {
+			if dbg.KVReadLevelledMetrics {
+				metrics.UpdateDbReads(dt.name, start)
+			}
+			changeset.IncReadTier(dt.name, changeset.TierDb)
 		}
 		return v, foundStep, true, nil
 	}
 
-	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReadsUnique(dt.name, key, start)
+	v, foundInFile, fromFileCache, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
+	if metrics != nil {
+		if dbg.KVReadLevelledMetrics {
+			metrics.UpdateFileReadsUnique(dt.name, key, start)
+		}
+		if fromFileCache {
+			changeset.IncReadTier(dt.name, changeset.TierFileCache)
+		} else {
+			changeset.IncReadTier(dt.name, changeset.TierFile)
+		}
 	}
 
 	if err != nil {
