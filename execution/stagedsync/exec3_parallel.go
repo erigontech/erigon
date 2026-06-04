@@ -1862,18 +1862,44 @@ func (result *execResult) finalizeTx(
 		}
 	}
 
+	// Track post-worker-write coinbase nonce / codehash so EIP-161 emptiness
+	// respects the worker's writes (e.g. a sender==coinbase tx bumping nonce).
+	coinbaseNonce := uint64(0)
+	coinbaseHasCodeHashWrite := false
+	if coinbaseAcc != nil {
+		coinbaseNonce = coinbaseAcc.Nonce
+	}
+	for _, w := range result.TxOut {
+		hdr := w.Header()
+		if hdr.Address != result.Coinbase {
+			continue
+		}
+		switch hdr.Path {
+		case state.NoncePath:
+			if n, ok := w.ValAny().(uint64); ok {
+				coinbaseNonce = n
+			}
+		case state.CodeHashPath:
+			coinbaseHasCodeHashWrite = true
+		}
+	}
+	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
+
 	// Update the pre-computed collector writes with adjusted balances.
-	// Only write when the balance actually changed — otherwise we'd emit
-	// spurious writes (and potentially spurious EIP-161 deletions) for
-	// accounts that weren't touched during execution.
 	emptyRemoval := chainRules.IsSpuriousDragon
 	oldCoinbaseBalance := uint256.Int{}
 	if coinbaseAcc != nil {
 		oldCoinbaseBalance = coinbaseAcc.Balance
 	}
-	coinbaseChanged := newCoinbaseBalance != oldCoinbaseBalance
+	// EIP-161: even with no balance delta, an empty coinbase must be "touched"
+	// so the commitment calculator emits the empty-account delete — mirrors the
+	// serial executor's AddBalance(coinbase, 0) → TouchAccount → SD path.
+	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
+	coinbaseEmptyRemoval := emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero()
+	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || coinbaseEmptyRemoval
 
-	if coinbaseChanged {
+	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
 	}
@@ -1890,10 +1916,27 @@ func (result *execResult) finalizeTx(
 
 	// Build versionMap writes: the stripped TxOut (IBS-format, no stale
 	// coinbase/burnt balances) plus the adjusted balance writes.
-	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
+	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+3)
 	copy(allWrites, result.TxOut)
-	if coinbaseChanged {
-		allWrites = append(allWrites, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.BalancePath, Version: task.Version(), Reason: tracing.BalanceIncreaseRewardTransactionFee}, Val: newCoinbaseBalance})
+	if emitCoinbase {
+		if coinbaseEmptyRemoval {
+			allWrites = append(allWrites, &state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: task.Version()}, Val: true})
+		} else {
+			allWrites = append(allWrites, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.BalancePath, Version: task.Version(), Reason: tracing.BalanceIncreaseRewardTransactionFee}, Val: newCoinbaseBalance})
+			// AddressPath sibling write so downstream parallel txs see an account
+			// record for a freshly-credited coinbase (mirrors serial's implicit
+			// AddBalance-on-first-credit → account create).
+			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
+			if coinbaseAcc != nil {
+				addrAcc.Nonce = coinbaseAcc.Nonce
+				addrAcc.Incarnation = coinbaseAcc.Incarnation
+				addrAcc.CodeHash = coinbaseAcc.CodeHash
+			} else {
+				addrAcc.Nonce = coinbaseNonce
+				addrAcc.CodeHash = accounts.EmptyCodeHash
+			}
+			allWrites = append(allWrites, &state.VersionedWrite[*accounts.Account]{WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.AddressPath, Version: task.Version()}, Val: addrAcc})
+		}
 	}
 	if hasBurnt {
 		oldBurntBalance := uint256.Int{}
