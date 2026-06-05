@@ -16,10 +16,11 @@ type StateReader interface {
 type LatestStateReader struct {
 	sharedDomains sd
 	getter        kv.TemporalGetter
+	srcTx         kv.TemporalTx
 }
 
 func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx)}
+	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx), srcTx: tx}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
@@ -43,7 +44,14 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 }
 
 func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
-	return NewLatestStateReader(tx, r.sharedDomains)
+	// Keep reading the source this reader was bound to. The tx passed by
+	// clone/warmup callers targets the *compute* database, which may differ
+	// from this reader's source — e.g. recomputing commitment in an empty db
+	// while reading committed state from the source db (TouchChangedKeysFromHistory).
+	// Before flush drained sd.mem this was masked because the in-memory batch
+	// still held the source values; rebinding sd.AsGetter to the foreign compute
+	// tx reads the wrong database and yields empty state (wrong root).
+	return NewLatestStateReader(r.srcTx, r.sharedDomains)
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
