@@ -83,6 +83,35 @@ Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug
 
 ---
 
+## [3.4.3] "Splashing Saga" – 2026-06-02
+
+v3.4.3 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- db/state: prune `TemporalMemBatch` overlay entries past the unwind point (#21538) by @JkLondon — second
+  fix for the post-reorg `gas used mismatch` / state-leak some users still hit on v3.4.2. After a tip reorg
+  a stale read in the in-memory overlay could return a write made *inside* the unwound `txNum` range,
+  flipping an `SSTORE` from cold to warm gas pricing. Complements the #21157 diffset fix shipped in v3.4.2.
+- rpc: match Geth semantics in `debug_getModifiedAccountsByHash` / `debug_getModifiedAccountsByNumber`
+  (#21507) by @lupin012 — corrects the block-range convention (exclusive start), now also reports contracts
+  whose storage changed without an account change, and excludes touched-but-unchanged precompiles and
+  self-destructed accounts.
+- node/cli: register `--rpc.logs.maxresults` in `DefaultFlags` so it takes effect via the CLI (#21389) by
+  @lupin012 — the limit was documented in 3.4.0 but never wired into the flag set, so setting it on the
+  command line had no effect; it now applies.
+
+**Improvements**
+
+- execution/p2p, execution/engineapi: fail-fast `engine_newPayload` backward download when the gap exceeds
+  the reorg limit (#21502) by @yperbasis — when a payload's parent is more than `MaxReorgDepth` blocks from
+  the local head, the download short-circuits instead of fetching a header batch every slot, and logs the
+  expected gap at INFO instead of WARN. The gap is still closed by the following fork-choice update.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.2...v3.4.3
+
+---
+
 ## [3.4.2] "Splashing Saga" – 2026-05-22
 
 v3.4.2 is a bugfix release recommended for all users.

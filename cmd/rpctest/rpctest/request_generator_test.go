@@ -490,3 +490,45 @@ func TestRequestGenerator_getProof(t *testing.T) {
 		require.Equal(t, testCase.expected, got)
 	}
 }
+
+func TestRequestGenerator_getLogsForTopics(t *testing.T) {
+	hash1 := common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca")
+	hash2 := common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de")
+
+	testCases := []struct {
+		topics   [][]common.Hash
+		expected string
+	}{
+		{
+			// pos 0 non-nil: single topic at position 0
+			[][]common.Hash{{hash1}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"]]}],"id":1}`,
+		},
+		{
+			// pos 0 nil, pos 1 non-nil: wildcard then topic (typical positional filter)
+			[][]common.Hash{nil, {hash1}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [null,["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"]]}],"id":2}`,
+		},
+		{
+			// all nil: three wildcard positions
+			[][]common.Hash{nil, nil, nil},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [null,null,null]}],"id":3}`,
+		},
+		{
+			// multiple topics at the same position (OR semantics)
+			[][]common.Hash{{hash1, hash2}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca","0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"]]}],"id":4}`,
+		},
+		{
+			// mixed: nil, non-nil, nil, non-nil across all four positions
+			[][]common.Hash{nil, {hash1}, nil, {hash2}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [null,["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"],null,["0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"]]}],"id":5}`,
+		},
+	}
+
+	reqGen := MockRequestGenerator(0)
+	for _, tc := range testCases {
+		got := reqGen.getLogsForTopics(100, 100, tc.topics)
+		require.Equal(t, tc.expected, got)
+	}
+}
