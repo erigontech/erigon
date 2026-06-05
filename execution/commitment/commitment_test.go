@@ -54,18 +54,22 @@ func noopCtxFactory() (PatriciaContext, func()) {
 // sleep+descend keep a worker re-reading its arena-backed key across batch boundaries,
 // while entered/release gate a worker inside Branch for deterministic ordering.
 type gatedPatriciaContext struct {
-	sleep   time.Duration
-	descend bool
-	entered chan struct{}
-	release chan struct{}
+	sleep    time.Duration
+	descend  bool
+	entered  chan struct{}
+	release  chan struct{}
+	gateDone atomic.Bool
 }
 
 func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	if g.entered != nil {
-		g.entered <- struct{}{}
-	}
-	if g.release != nil {
-		<-g.release
+	// Gate only the first Branch call so a released worker can't wedge re-sending to entered.
+	if (g.entered != nil || g.release != nil) && !g.gateDone.Swap(true) {
+		if g.entered != nil {
+			g.entered <- struct{}{}
+		}
+		if g.release != nil {
+			<-g.release
+		}
 	}
 	if g.sleep > 0 {
 		time.Sleep(g.sleep)
