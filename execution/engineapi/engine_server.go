@@ -88,9 +88,7 @@ type EngineServer struct {
 	logger  log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
-	// TODO Remove this on next release
-	printPectraBanner bool
-	maxReorgDepth     uint64
+	maxReorgDepth   uint64
 }
 
 func NewEngineServer(
@@ -109,19 +107,18 @@ func NewEngineServer(
 ) *EngineServer {
 	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
-		logger:            logger,
-		config:            config,
-		executionService:  executionService,
-		blockDownloader:   blockDownloader,
-		chainRW:           chainRW,
-		proposing:         proposing,
-		caplin:            caplin,
-		internalCL:        internalCL,
-		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
-		printPectraBanner: true,
-		txpool:            txPool,
-		blobGetter:        blobGetter,
-		maxReorgDepth:     maxReorgDepth,
+		logger:           logger,
+		config:           config,
+		executionService: executionService,
+		blockDownloader:  blockDownloader,
+		chainRW:          chainRW,
+		proposing:        proposing,
+		caplin:           caplin,
+		internalCL:       internalCL,
+		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		txpool:           txPool,
+		blobGetter:       blobGetter,
+		maxReorgDepth:    maxReorgDepth,
 	}
 
 	srv.consuming.Store(consuming)
@@ -493,11 +490,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
-	}
-
-	if version == clparams.ElectraVersion && s.printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
-		s.printPectraBanner = false
-		log.Info(engine_helpers.PectraBanner)
 	}
 
 	return payloadStatus, nil
