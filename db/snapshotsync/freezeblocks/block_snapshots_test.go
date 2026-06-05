@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -49,6 +50,6 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	}
 
 	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.RoSnapshots)
-	require.Error(t, err)
+	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
 }

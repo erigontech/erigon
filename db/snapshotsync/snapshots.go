@@ -582,6 +582,10 @@ type rangeKey struct {
 	from, to uint64
 }
 
+// ErrRangeBuildInProgress means another builder holds the (type, range) claim;
+// the caller should retry later rather than treat it as a failure.
+var ErrRangeBuildInProgress = errors.New("range build is already in progress")
+
 // TryAcquireRange atomically claims (enum, from, to) for building. Returns false
 // if another builder already holds it, in which case the caller must skip it.
 func (s *RoSnapshots) TryAcquireRange(enum snaptype.Enum, from, to uint64) bool {

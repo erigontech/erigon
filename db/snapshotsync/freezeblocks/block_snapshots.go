@@ -457,6 +457,10 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
 			return
 		}
+		if errors.Is(err, snapshotsync.ErrRangeBuildInProgress) {
+			br.logger.Debug("[snapshots] retire blocks: deferred to in-flight build", "err", err)
+			return
+		}
 		if err != nil {
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
@@ -634,7 +638,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	// .seg before its index is built and race our BuildIndexes below.
 	if inProgress != nil {
 		if !inProgress.TryAcquireRange(f.Type.Enum(), f.From, f.To) {
-			return 0, fmt.Errorf("dump %s: range is already being built", f.Name())
+			return 0, fmt.Errorf("dump %s: %w", f.Name(), snapshotsync.ErrRangeBuildInProgress)
 		}
 		defer inProgress.ReleaseRange(f.Type.Enum(), f.From, f.To)
 	}
