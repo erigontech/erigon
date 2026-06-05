@@ -283,8 +283,16 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 				// explicitly to keep both consistent.
 				revivalLimit := vr.txIndex - 1
 				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+				// Same-tx re-creation (metamorphic SD+CREATE2): AddressPath
+				// at TxIdx >= destructTxIndex signals re-creation within or
+				// after the destruct.
+				if hi, ok := vr.versionMap.LatestTxIndex(address, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
 					revived = true
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
 				}
 				if !revived {
 					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {

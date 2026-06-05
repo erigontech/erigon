@@ -1568,6 +1568,14 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 		return reply, fmt.Errorf("msgcode not found for message Id: %s (peer protocol %d)", inreq.Data.Id, peerInfo.EthProtocol())
 	}
 
+	// With a shared PeerStore every sentry resolves the same PeerInfo, so only
+	// the sentry matching the peer's negotiated eth version may write — same
+	// rule as SendMessageToAll — or the peer receives one copy per sentry.
+	if protocolName, _ := ss.protocolForMessageID(inreq.Data.Id); protocolName == eth.ProtocolName &&
+		!protocolVersions.Contains(peerInfo.EthProtocol()) {
+		return reply, nil
+	}
+
 	ss.writePeer("[sentry] sendMessageById", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 0)
 	reply.Peers = []*typesproto.H512{inreq.PeerId}
 	return reply, nil
