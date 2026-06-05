@@ -692,16 +692,17 @@ type BeaconChainConfig struct {
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
 
 	// Gloas
-	ChurnLimitQuotientGloas         uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
-	ConsolidationChurnLimitQuotient uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"` // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
-	BuilderWithdrawalPrefix         ConfigByte `yaml:"-" json:"-"`
-	PayloadDueBps                   uint64     `yaml:"PAYLOAD_DUE_BPS" spec:"true" json:"PAYLOAD_DUE_BPS,string"`
-	PtcSize                         uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
-	MaxPayloadAttestations          uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
-	BuilderRegistryLimit            uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
-	BuilderPendingWithdrawalsLimit  uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
-	MaxBuildersPerWithdrawalsSweep  uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
-	MinBuilderWithdrawabilityDelay  uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
+	ChurnLimitQuotientGloas              uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
+	ConsolidationChurnLimitQuotient      uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"`                 // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
+	MaxPerEpochActivationChurnLimitGloas uint64     `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS,string"` // MaxPerEpochActivationChurnLimitGloas caps activation churn per epoch in GLOAS+ (EIP8061).
+	BuilderWithdrawalPrefix              ConfigByte `yaml:"-" json:"-"`
+	PayloadDueBps                        uint64     `yaml:"PAYLOAD_DUE_BPS" spec:"true" json:"PAYLOAD_DUE_BPS,string"`
+	PtcSize                              uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
+	MaxPayloadAttestations               uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
+	BuilderRegistryLimit                 uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
+	BuilderPendingWithdrawalsLimit       uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
+	MaxBuildersPerWithdrawalsSweep       uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
+	MinBuilderWithdrawabilityDelay       uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -1042,16 +1043,17 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	},
 
 	// Gloas
-	ChurnLimitQuotientGloas:         1 << 15,
-	ConsolidationChurnLimitQuotient: 1 << 16,
-	BuilderWithdrawalPrefix:         0x03,
-	PayloadDueBps:                   7500,
-	PtcSize:                         512,
-	MaxPayloadAttestations:          4,
-	BuilderRegistryLimit:            1 << 40,
-	BuilderPendingWithdrawalsLimit:  1 << 20,
-	MaxBuildersPerWithdrawalsSweep:  1 << 14,
-	MinBuilderWithdrawabilityDelay:  8192,
+	ChurnLimitQuotientGloas:              1 << 15,
+	ConsolidationChurnLimitQuotient:      1 << 16,
+	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
+	BuilderWithdrawalPrefix:              0x03,
+	PayloadDueBps:                        7500,
+	PtcSize:                              512,
+	MaxPayloadAttestations:               4,
+	BuilderRegistryLimit:                 1 << 40,
+	BuilderPendingWithdrawalsLimit:       1 << 20,
+	MaxBuildersPerWithdrawalsSweep:       1 << 14,
+	MinBuilderWithdrawabilityDelay:       8192,
 }
 
 func mainnetConfig() BeaconChainConfig {

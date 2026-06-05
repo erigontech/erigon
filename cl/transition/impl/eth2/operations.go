@@ -172,6 +172,9 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	if deposit == nil {
 		return nil
 	}
+	if s.Version() >= clparams.FuluVersion {
+		return errors.New("old-style deposits are not supported after Fulu")
+	}
 	depositLeaf, err := deposit.Data.HashSSZ()
 	if err != nil {
 		return err
@@ -559,6 +562,13 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	// Verify that the bid is for the current slot
 	if bid.Slot != block.GetSlot() {
 		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match block slot %d", bid.Slot, block.GetSlot())
+	}
+	parentBid := s.GetLatestExecutionPayloadBid()
+	if parentBid == nil {
+		return errors.New("processExecutionPayloadBid: state has no latest execution payload bid")
+	}
+	if bid.Slot <= parentBid.Slot {
+		return fmt.Errorf("processExecutionPayloadBid: bid slot %d must be greater than parent slot %d", bid.Slot, parentBid.Slot)
 	}
 	// Verify that the bid is for the right parent block
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
@@ -1648,9 +1658,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 
 func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
 	// Set deposit request start index on first deposit request.
-	// [Modified in Gloas:EIP7732] This is only done pre-GLOAS; the GLOAS spec
-	// removed this from process_deposit_request (it's set during the fork upgrade).
-	if s.Version() < clparams.GloasVersion {
+	if s.Version() < clparams.FuluVersion {
 		if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
 			s.SetDepositRequestsStartIndex(depositRequest.Index)
 		}

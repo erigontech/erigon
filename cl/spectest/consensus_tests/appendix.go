@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
@@ -254,6 +255,7 @@ func addSszTests() {
 		With("PayloadAttestationMessage", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationMessage{
 			Data: &cltypes.PayloadAttestationData{},
 		}, runAfterVersion(clparams.GloasVersion))).
+		With("ForkChoiceNode", sszStaticTestByEmptyObject(&forkchoice.ForkChoiceNode{}, runAfterVersion(clparams.GloasVersion))).
 		With("ProposerPreferences", sszStaticTestByEmptyObject(&cltypes.ProposerPreferences{}, runAfterVersion(clparams.GloasVersion))).
 		With("SignedExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.SignedExecutionPayloadBid{
 			Message: &cltypes.ExecutionPayloadBid{
@@ -274,6 +276,5 @@ func addSszTests() {
 		With("ForkData", spectest.UnimplementedHandler).
 		With("HistoricalBatch", spectest.UnimplementedHandler).
 		With("PowBlock", spectest.UnimplementedHandler).
-		With("SigningData", spectest.UnimplementedHandler).
-		With("ForkChoiceNode", spectest.UnimplementedHandler)
+		With("SigningData", spectest.UnimplementedHandler)
 }

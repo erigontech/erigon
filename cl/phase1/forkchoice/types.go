@@ -18,8 +18,15 @@ package forkchoice
 
 import (
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
+
+var _ ssz.HashableSSZ = (*ForkChoiceNode)(nil)
 
 // LatestMessage represents the latest message from a validator.
 // [Modified in Gloas:EIP7732] Added Slot and PayloadPresent.
@@ -35,4 +42,36 @@ type LatestMessage struct {
 type ForkChoiceNode struct {
 	Root          common.Hash
 	PayloadStatus cltypes.PayloadStatus
+}
+
+func (n *ForkChoiceNode) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, n.Root[:], uint64(n.PayloadStatus))
+}
+
+func (n *ForkChoiceNode) DecodeSSZ(buf []byte, version int) error {
+	var payloadStatus uint64
+	if err := ssz2.UnmarshalSSZ(buf, version, n.Root[:], &payloadStatus); err != nil {
+		return err
+	}
+	n.PayloadStatus = cltypes.PayloadStatus(payloadStatus)
+	return nil
+}
+
+func (*ForkChoiceNode) EncodingSizeSSZ() int {
+	return length.Hash + 8
+}
+
+func (*ForkChoiceNode) Static() bool {
+	return true
+}
+
+func (n *ForkChoiceNode) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(n.Root[:], uint64(n.PayloadStatus))
+}
+
+func (n *ForkChoiceNode) Clone() clonable.Clonable {
+	return &ForkChoiceNode{
+		Root:          n.Root,
+		PayloadStatus: n.PayloadStatus,
+	}
 }

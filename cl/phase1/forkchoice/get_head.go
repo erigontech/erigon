@@ -149,6 +149,30 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	head, slot, err := f.computeHeadGloasWithAnchorFallback()
+	if err != nil {
+		return common.Hash{}, 0, err
+	}
+	f.headHash = head.Root
+	f.headSlot = slot
+	f.headPayloadStatus = head.PayloadStatus
+	return f.headHash, f.headSlot, nil
+}
+
+func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback() (ForkChoiceNode, uint64, error) {
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
+			"justifiedRoot", justifiedCheckpoint.Root)
+		return ForkChoiceNode{
+			Root:          f.forkGraph.AnchorRoot(),
+			PayloadStatus: cltypes.PayloadStatusPending,
+		}, f.forkGraph.AnchorSlot(), nil
+	}
+	return f.computeHeadGloas()
+}
+
+func (f *ForkChoiceStore) computeHeadGloas() (ForkChoiceNode, uint64, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 
 	// Get filtered block tree
@@ -169,12 +193,9 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 			// No children, head is the result
 			header, hasHeader := f.forkGraph.GetHeader(head.Root)
 			if !hasHeader {
-				return common.Hash{}, 0, errors.New("no slot for head is stored")
+				return ForkChoiceNode{}, 0, errors.New("no slot for head is stored")
 			}
-			f.headHash = head.Root
-			f.headSlot = header.Slot
-			f.headPayloadStatus = head.PayloadStatus
-			return f.headHash, f.headSlot, nil
+			return head, header.Slot, nil
 		}
 
 		// Find best child: max(children, key=(weight, root, tiebreaker))

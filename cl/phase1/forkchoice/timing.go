@@ -129,19 +129,17 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 	f.blockTimeliness.Store(blockRoot, timeliness)
 }
 
+func (f *ForkChoiceStore) getDependentRoot(root common.Hash) common.Hash {
+	epoch := f.computeEpochAtSlot(f.Slot())
+	if epoch <= f.beaconCfg.MinSeedLookahead {
+		return common.Hash{}
+	}
+	dependentSlot := f.computeStartSlotAtEpoch(epoch-f.beaconCfg.MinSeedLookahead) - 1
+	return f.getAncestor(f.getNodeForRoot(root), dependentSlot).Root
+}
+
 // updateProposerBoostRoot implements update_proposer_boost_root from the spec.
-// It sets the proposer boost root if the block is timely, the boost has not
-// already been assigned this slot, AND the block's proposer matches the
-// expected proposer for the current slot.
-//
-// Spec (GLOAS fork-choice.md):
-//
-//	if is_timely and is_first_block:
-//	    head_state = copy(store.block_states[get_head(store).root])
-//	    process_slots(head_state, slot)
-//	    if block.proposer_index == get_beacon_proposer_index(head_state):
-//	        store.proposer_boost_root = root
-func (f *ForkChoiceStore) updateProposerBoostRoot(block *cltypes.BeaconBlock, blockRoot common.Hash) {
+func (f *ForkChoiceStore) updateProposerBoostRoot(headRoot common.Hash, blockRoot common.Hash) {
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	if !ok {
 		return
@@ -153,26 +151,14 @@ func (f *ForkChoiceStore) updateProposerBoostRoot(block *cltypes.BeaconBlock, bl
 		return
 	}
 
-	// [New in Gloas:EIP7732] Verify the block's proposer matches the expected proposer
-	// for this slot. This check is only performed post-GLOAS; pre-GLOAS does not verify
-	// proposer identity for the boost (matching legacy behavior).
-	// We use the proposer lookahead (computed during state transition) to avoid
-	// the expensive get_head + process_slots path from the spec.
-	epoch := f.computeEpochAtSlot(block.Slot)
-	if epoch >= f.beaconCfg.GloasForkEpoch {
-		currentSlot := f.Slot()
-		lookahead, hasLookahead := f.GetProposerLookahead(currentSlot)
-		if hasLookahead {
-			slotInEpoch := currentSlot % f.beaconCfg.SlotsPerEpoch
-			if slotInEpoch < uint64(lookahead.Length()) {
-				expectedProposer := lookahead.Get(int(slotInEpoch))
-				if block.ProposerIndex != expectedProposer {
-					return // Wrong proposer — no boost
-				}
-			}
+	epoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
+		if headRoot == (common.Hash{}) {
+			return
 		}
-		// If we don't have a lookahead yet (e.g. first GLOAS block), fall through
-		// and grant the boost optimistically.
+		if f.getDependentRoot(blockRoot) != f.getDependentRoot(headRoot) {
+			return
+		}
 	}
 
 	f.proposerBoostRoot.Store(blockRoot)
@@ -407,6 +393,48 @@ func (f *ForkChoiceStore) isParentStrong(root common.Hash) bool {
 	parentWeight := ws.GetAttestationScore(parentNode)
 
 	return parentWeight > parentThreshold
+}
+
+func (f *ForkChoiceStore) isShufflingStable(slot uint64) bool {
+	return slot%f.beaconCfg.SlotsPerEpoch != 0
+}
+
+func (f *ForkChoiceStore) reorgLatePayload(head ForkChoiceNode) bool {
+	if !f.isPreviousSlotPayloadDecision(head) {
+		return false
+	}
+	return head.PayloadStatus == cltypes.PayloadStatusFull && !f.ShouldBuildOnFull(head)
+}
+
+// GetProposerHead applies the optional proposer reorg rule before block
+// production. It returns parent(head) only for a single-slot reorg where the
+// head is late and weak while its parent is strong. In GLOAS, a previous-slot
+// FULL payload that should not be built on also triggers the same reorg path.
+func (f *ForkChoiceStore) GetProposerHead(headRoot common.Hash, slot uint64) common.Hash {
+	headBlock, ok := f.forkGraph.GetBlock(headRoot)
+	if !ok || headBlock == nil {
+		return headRoot
+	}
+	parentRoot := headBlock.Block.ParentRoot
+	parentBlock, ok := f.forkGraph.GetBlock(parentRoot)
+	if !ok || parentBlock == nil {
+		return headRoot
+	}
+
+	parentSlotOK := parentBlock.Block.Slot+1 == headBlock.Block.Slot
+	currentTimeOK := headBlock.Block.Slot+1 == slot
+	if !parentSlotOK || !currentTimeOK {
+		return headRoot
+	}
+
+	head := ForkChoiceNode{Root: headRoot, PayloadStatus: f.GetHeadPayloadStatus()}
+	if f.reorgLatePayload(head) && f.isShufflingStable(slot) {
+		return parentRoot
+	}
+	if f.isHeadLate(headRoot) && f.isHeadWeak(headRoot) && f.isParentStrong(headRoot) && f.isShufflingStable(slot) {
+		return parentRoot
+	}
+	return headRoot
 }
 
 // getBlockTimeliness returns the timeliness vector for a block root.

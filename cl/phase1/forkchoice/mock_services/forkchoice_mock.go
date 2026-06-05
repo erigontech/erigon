@@ -263,6 +263,10 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
+func (f *ForkChoiceStorageMock) GetProposerHead(headRoot common.Hash, slot uint64) common.Hash {
+	return headRoot
+}
+
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
 }

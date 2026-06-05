@@ -150,7 +150,8 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 	// [IGNORE] The message's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue attestation for processing once the block is retrieved.
-	if _, ok := s.forkchoiceStore.GetHeader(blockRoot); !ok {
+	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
+	if !ok {
 		// Block hasn't arrived yet, queue attestation for later processing
 		s.queuePendingAttestation(blockRoot, msg)
 		log.Trace("Queued payload attestation for later processing",
@@ -158,9 +159,13 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 			"validatorIndex", validatorIndex)
 		return nil
 	}
+	// [IGNORE] The block referenced by data.beacon_block_root is at data.slot.
+	if blockHeader.Slot != slot {
+		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
+	}
 
 	// Process through forkchoice which handles:
-	// [IGNORE] block state not found, slot mismatch
+	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
 	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {

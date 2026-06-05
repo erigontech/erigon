@@ -173,6 +173,9 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
+	if b.Version() >= clparams.GloasVersion {
+		return shuffling.ComputeUnslashedBalanceWeightedProposerIndex(b.BeaconState, indices, seedArray)
+	}
 	return shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 }
 

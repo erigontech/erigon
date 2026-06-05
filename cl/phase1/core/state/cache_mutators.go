@@ -143,6 +143,9 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
 	)
 	perEpochChurn := GetActivationExitChurnLimit(b)
+	if b.Version() >= clparams.GloasVersion {
+		perEpochChurn = GetExitChurnLimit(b)
+	}
 
 	var exitBalanceToConsume uint64
 	if b.EarliestExitEpoch() < earliestExitEpoch {

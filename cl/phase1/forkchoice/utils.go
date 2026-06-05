@@ -157,46 +157,43 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 	return slot - f.computeStartSlotAtEpoch(f.computeEpochAtSlot(slot))
 }
 
-// Ancestor returns the ancestor to the given root.
-// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
-// Spec: if block.slot <= slot (block is at or before the target), return PENDING.
-// Otherwise traverse up and return get_parent_payload_status for the found ancestor.
-func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	header, has := f.forkGraph.GetHeader(root)
+func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoiceNode {
+	header, has := f.forkGraph.GetHeader(node.Root)
 	if !has {
 		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
 
-	// Spec: if block.slot <= slot, return (root, PENDING)
 	if header.Slot <= slot {
-		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+		return node
 	}
 
-	// Traverse up: find the ancestor block whose parent is at or before the target slot.
-	// This mirrors the spec's "while parent.slot > slot" loop, tracking the child (block)
-	// so we can call get_parent_payload_status(block) at the end.
-	childRoot := root
-	for header.Slot > slot {
-		childRoot = root
-		root = header.ParentRoot
-		header, has = f.forkGraph.GetHeader(header.ParentRoot)
-		if !has {
+	for {
+		block, hasBlock := f.forkGraph.GetBlock(node.Root)
+		if !hasBlock || block == nil {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
+		parent := ForkChoiceNode{
+			Root:          block.Block.ParentRoot,
+			PayloadStatus: f.getParentPayloadStatus(block.Block),
+		}
+		parentHeader, hasParent := f.forkGraph.GetHeader(parent.Root)
+		if !hasParent {
+			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+		}
+		if parentHeader.Slot <= slot {
+			return parent
+		}
+		node = parent
 	}
+}
 
-	// root is now the ancestor at or before the target slot.
-	// childRoot is the block whose parent_root == root (i.e. "block" in the spec).
-	// Spec: return ForkChoiceNode(root=block.parent_root, payload_status=get_parent_payload_status(store, block))
-	payloadStatus := cltypes.PayloadStatusPending
-	if block, hasBlock := f.forkGraph.GetBlock(childRoot); hasBlock && block != nil {
-		payloadStatus = f.getParentPayloadStatus(block.Block)
-	}
-
-	return ForkChoiceNode{
+// Ancestor returns the ancestor to the given root.
+// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
+	return f.getAncestor(ForkChoiceNode{
 		Root:          root,
-		PayloadStatus: payloadStatus,
-	}
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}, slot)
 }
 
 // getCheckpointState computes and caches checkpoint states.
@@ -220,6 +217,10 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	// By default use the no change encoding to signal that there is no future epoch here.
 	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch) {
 		log.Debug("Long checkpoint detected")
+		baseState, err = baseState.Copy()
+		if err != nil {
+			return nil, err
+		}
 		// If we require to change it then process the future epoch
 		if err := transition.DefaultMachine.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch)); err != nil {
 			return nil, err

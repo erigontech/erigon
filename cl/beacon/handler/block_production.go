@@ -294,6 +294,31 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
 	baseBlockSlot := baseState.LatestBlockHeader().Slot
 
+	// Apply optional proposer-head reorgs before advancing the state for the
+	// proposal slot. This is needed for GLOAS late/unavailable payload reorgs
+	// and for the classic one-slot proposer reorg rule.
+	if _, _, err := a.forkchoiceStore.GetHead(nil); err == nil {
+		proposerHeadRoot := a.forkchoiceStore.GetProposerHead(baseBlockRoot, targetSlot)
+		if proposerHeadRoot != baseBlockRoot {
+			proposerHeadState, err := a.forkchoiceStore.GetStateAtBlockRoot(proposerHeadRoot, true)
+			if err != nil {
+				return nil, beaconhttp.NewEndpointError(
+					http.StatusInternalServerError,
+					fmt.Errorf("proposer head state not found %x: %w", proposerHeadRoot, err),
+				)
+			}
+			if proposerHeadState == nil {
+				return nil, beaconhttp.NewEndpointError(
+					http.StatusNotFound,
+					fmt.Errorf("proposer head state not found %x", proposerHeadRoot),
+				)
+			}
+			baseBlockRoot = proposerHeadRoot
+			baseState = proposerHeadState
+			baseBlockSlot = baseState.LatestBlockHeader().Slot
+		}
+	}
+
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
@@ -740,14 +765,18 @@ func (a *ApiHandler) produceBeaconBody(
 		return nil, 0, err
 	}
 	var targetGasLimit *hexutil.Uint64
-	if stateVersion.AfterOrEqual(clparams.GloasVersion) && a.epbsPool != nil {
-		proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
-		dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
-		if err != nil {
-			log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-		} else if pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot); ok && pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
-			tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
-			targetGasLimit = &tgl
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		tgl := hexutil.Uint64(baseState.GetLatestExecutionPayloadBid().GasLimit)
+		targetGasLimit = &tgl
+		if a.epbsPool != nil {
+			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
+			dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
+			if err != nil {
+				log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
+			} else if pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot); ok && pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
+				tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
+				targetGasLimit = &tgl
+			}
 		}
 	}
 	currEpoch := a.ethClock.GetCurrentEpoch()

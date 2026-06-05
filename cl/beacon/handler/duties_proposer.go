@@ -96,7 +96,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 
 		targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 		if targetVersion.After(s.Version()) {
-			advancedState, copyErr := s.Copy()
+			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
 				return copyErr
 			}
@@ -108,7 +108,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			return fillProposerDutiesFromState(duties, advancedState, epoch, expectedSlot)
 		}
 		if targetVersion.Before(s.Version()) {
-			versionedState, copyErr := s.Copy()
+			versionedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
 				return copyErr
 			}
@@ -141,7 +141,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		// behind), we must advance a copy of the state to the target epoch so
 		// that RANDAO mixes and proposer lookahead are correct.
 		if s.Version() >= clparams.FuluVersion && epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
-			advancedState, copyErr := s.Copy()
+			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
 				return copyErr
 			}
@@ -177,6 +177,14 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		With("dependent_root", dependentRoot), nil
+}
+
+func (a *ApiHandler) copyHeadStateForDuties(s *state.CachingBeaconState) (*state.CachingBeaconState, error) {
+	copied := state.New(a.beaconChainCfg)
+	if err := s.CopyInto(copied); err != nil {
+		return nil, err
+	}
+	return copied, nil
 }
 
 func fillProposerDutiesFromState(duties []proposerDuties, s *state.CachingBeaconState, epoch, expectedSlot uint64) error {

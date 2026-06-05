@@ -124,7 +124,7 @@ func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, ind
 		slotSeed := utils.Sha256(input)
 
 		if clVersion >= clparams.GloasVersion {
-			indicies, err := ComputeBalanceWeightedSelection(b, indices, slotSeed, 1, true)
+			indicies, err := ComputeUnslashedBalanceWeightedSelection(b, indices, slotSeed, 1, true)
 			if err != nil {
 				return nil, err
 			}
@@ -140,6 +140,31 @@ func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, ind
 	}
 
 	return proposerIndices, nil
+}
+
+func ComputeUnslashedBalanceWeightedSelection(
+	s *raw.BeaconState,
+	indices []uint64,
+	seed [32]byte,
+	size uint64,
+	shuffleIndices bool,
+) ([]uint64, error) {
+	indices, err := filterSlashedValidators(s, indices)
+	if err != nil {
+		return nil, err
+	}
+	if len(indices) == 0 {
+		return nil, errors.New("ComputeUnslashedBalanceWeightedSelection: no unslashed validators")
+	}
+	return ComputeBalanceWeightedSelection(s, indices, seed, size, shuffleIndices)
+}
+
+func ComputeUnslashedBalanceWeightedProposerIndex(s *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
+	selected, err := ComputeUnslashedBalanceWeightedSelection(s, indices, seed, 1, true)
+	if err != nil {
+		return 0, err
+	}
+	return selected[0], nil
 }
 
 // ComputeBalanceWeightedSelection returns `size` validator indices sampled by effective balance,
@@ -211,6 +236,20 @@ func ComputeBalanceWeightedSelection(
 		i++
 	}
 	return selected, nil
+}
+
+func filterSlashedValidators(s *raw.BeaconState, indices []uint64) ([]uint64, error) {
+	filtered := make([]uint64, 0, len(indices))
+	for _, index := range indices {
+		validator, err := s.ValidatorForValidatorIndex(int(index))
+		if err != nil {
+			return nil, fmt.Errorf("filterSlashedValidators: unable to get validator %d: %w", index, err)
+		}
+		if !validator.Slashed() {
+			filtered = append(filtered, index)
+		}
+	}
+	return filtered, nil
 }
 
 // ComputeBalanceWeightedAcceptance returns whether to accept the selection of the validator at `index`,

@@ -62,3 +62,33 @@ func TestShuffling(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), idx)
 }
+
+func TestComputeProposerIndexFuluAllowsSlashedValidators(t *testing.T) {
+	s := raw.GetTestState()
+	s.SetVersion(clparams.FuluVersion)
+	require.NoError(t, s.SetValidatorSlashed(1, true))
+
+	idx, err := shuffling.ComputeProposerIndex(s, []uint64{1}, [32]byte{1})
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), idx)
+}
+
+func TestComputeUnslashedBalanceWeightedProposerIndexFiltersSlashedValidators(t *testing.T) {
+	s := raw.GetTestState()
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetValidatorSlashed(1, true))
+
+	idx, err := shuffling.ComputeUnslashedBalanceWeightedProposerIndex(s, []uint64{1, 2}, [32]byte{1})
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), idx)
+}
+
+func TestComputeUnslashedBalanceWeightedSelectionFiltersSlashedValidators(t *testing.T) {
+	s := raw.GetTestState()
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetValidatorSlashed(1, true))
+
+	indices, err := shuffling.ComputeUnslashedBalanceWeightedSelection(s, []uint64{1, 2}, [32]byte{1}, 4, true)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{2, 2, 2, 2}, indices)
+}

@@ -161,6 +161,28 @@ func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
 	require.True(t, exists)
 }
 
+func TestPayloadAttestationServiceReferencedBlockSlotMismatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+
+	blockRoot := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
+		Slot: 99,
+	}
+
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrIgnore))
+	require.Contains(t, err.Error(), "does not match referenced block slot")
+	require.False(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
+}
+
 func TestPayloadAttestationServiceSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
