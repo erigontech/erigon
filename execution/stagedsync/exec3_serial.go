@@ -504,9 +504,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
-			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
-				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
-			}
 			if se.cfg.badBlockHalt {
 				return false, err
 			}

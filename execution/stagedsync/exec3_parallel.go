@@ -234,10 +234,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Disable trie warmup — the Warmuper uses sdCtx.updates which the
-	// calculator replaces via SetUpdates before ComputeCommitment.
-	pe.rs.Domains().EnableTrieWarmup(false)
-	defer pe.rs.Domains().EnableTrieWarmup(true)
+	// Trie warmup left enabled for the parallel path. Original disable was
+	// based on a calculator/warmer interaction concern that turned out to be
+	// overly conservative — the Warmuper's reads are independent of the
+	// calculator's SetUpdates call. Removing the disable produced an 8×
+	// throughput improvement on the perf-devnet-3 SSTORE-bloated benchmark
+	// (block 24358306) by letting the Warmuper pre-fetch branch data while
+	// EVM execution runs. See #20920 for the canonical perf measurement.
 
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
@@ -365,7 +368,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			if cr.err != nil {
 				// Lazy-load / ComputeCommitment errors from the calculator
 				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
-				// would mark a valid block as bad (ReportBadHeaderPoS) and
+				// would mark a valid block as bad and
 				// trigger an unwind that throws away valid state. Fail fast
 				// instead and preserve the original error in the message.
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
@@ -376,7 +379,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				if initialCycle {
 					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 				}
-				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, lastBlockResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
+				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, rwTx, pe.cfg, execStage, pe.logger, u)
 			}
 			pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
 			pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
@@ -699,9 +702,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
 			}
 			if errors.Is(execErr, rules.ErrInvalidBlock) {
-				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
-					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
-				}
 				if pe.cfg.badBlockHalt {
 					return nil, rwTx, execErr
 				}
@@ -1691,8 +1691,12 @@ func (result *execResult) calcFees(
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
 	emptyRemoval := chainRules.IsSpuriousDragon
-	coinbaseEmptyPre := coinbaseAcc == nil ||
-		(coinbaseAcc.Balance.IsZero() && coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite)
+	// nil pre-state must not short-circuit to empty=true: a worker may
+	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
+	// must respect those writes — otherwise SelfDestructPath is emitted
+	// and normalizeWriteSet's sdSet filter drops them.
+	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
@@ -3154,14 +3158,26 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 					continue
 				}
 			} else if stateReader != nil {
-				// No prior TX wrote this key — compare against pre-block value.
-				preVal, found, err := stateReader.ReadAccountStorage(w.Address, w.Key)
-				if err == nil {
-					if !found && writeVal.IsZero() {
-						continue // both zero — no-op
+				// SD-then-revival: latest SelfDestructPath may be false (a
+				// later TxIdx revived), but the SD's per-slot DELETE cascade
+				// already fixed the baseline at zero for any post-SD write.
+				// History scan catches that; the sdOk latest-value read above
+				// misses it. Narrower than an IncarnationPath probe: pure
+				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
+				// so its same-value SSTOREs still no-op against pre-block.
+				if vm.AnyDoneBoolWriteEquals(w.Address, state.SelfDestructPath, accounts.NilKey, txIndex-1, true) {
+					if writeVal.IsZero() {
+						continue
 					}
-					if found && writeVal.Eq(&preVal) {
-						continue // same as pre-block — no-op
+				} else {
+					preVal, found, err := stateReader.ReadAccountStorage(w.Address, w.Key)
+					if err == nil {
+						if !found && writeVal.IsZero() {
+							continue
+						}
+						if found && writeVal.Eq(&preVal) {
+							continue
+						}
 					}
 				}
 			}

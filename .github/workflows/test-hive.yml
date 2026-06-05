@@ -74,17 +74,14 @@ jobs:
             sim-limit: ".*"
             max-allowed-failures: 0
             exec_mode: parallel
-          # devp2p/eth: regression guard for eth wire protocol handlers
-          # (GetBlockHeaders skip traversal, BlockRangeUpdate invalid-packet kick,
-          # blob-sidecar commitment check, eth/68 announcement size/type check).
-          # The sibling devp2p suites (snap, discv4, discv5) are intentionally
-          # excluded — they have unrelated pre-existing failures.
           - sim: devp2p
             sim-limit: eth
             max-allowed-failures: 0
             exec_mode: serial
+          # discv5 exercises peer discovery, not the EL exec path, so it runs in
+          # just one exec mode — duplicating it in the serial leg adds no signal.
           - sim: devp2p
-            sim-limit: eth
+            sim-limit: eth|discv5
             max-allowed-failures: 0
             exec_mode: parallel
     steps:
@@ -251,12 +248,21 @@ jobs:
           run_suite "${{ matrix.sim }}" "${{ matrix.sim-limit }}" "${{ matrix.max-allowed-failures }}"
         continue-on-error: true
 
+      # matrix.sim and matrix.sim-limit contain characters that are invalid in
+      # artifact names ("/" in ethereum/*, "|" and "*" in sim limits), which made
+      # upload-artifact reject the name and the workspace logs silently vanish.
+      - name: Compute artifact name
+        id: artifact-name
+        env:
+          RAW_NAME: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}-${{ matrix.exec_mode }}
+        run: echo "name=${RAW_NAME//[^A-Za-z0-9._-]/_}" >> "$GITHUB_OUTPUT"
+
       - name: Upload output log
         uses: actions/upload-artifact@v7
         with:
           # exec_mode in the artifact name keeps the two matrix entries from
           # clobbering each other's logs on the same artifact key.
-          name: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}-${{ matrix.exec_mode }}
+          name: ${{ steps.artifact-name.outputs.name }}
           path: hive/workspace/logs
         continue-on-error: true
 

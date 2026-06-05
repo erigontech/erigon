@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -50,8 +51,12 @@ type SharedDomainsCommitmentContext struct {
 	trace         bool
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
-	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
-	tmpDir        string          // temp directory for ETL collectors
+	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
+	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
+	// worker count from WarmupNumWorkersOrDefault.
+	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
+	warmupBase commitment.WarmupConfig
+	tmpDir     string // temp directory for ETL collectors
 
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
@@ -65,21 +70,14 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 	sdc.stateReader = stateReader
 }
 
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
-// It requires a DB to be set by calling EnableParaTrieDB
-func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
-	sdc.trieWarmup = trieWarmup
-}
-
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
-	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
-		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
-	}
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
+// It requires a DB to be set by calling EnableParaTrieDB
+func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
+	sdc.warmupBase.Enabled = trieWarmup
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
@@ -185,16 +183,16 @@ func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
-	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
-}
-
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
+		warmupBase: commitment.WarmupConfig{
+			Enabled:    cfg.EnableTrieWarmup,
+			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
+		},
 	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
 }
 
@@ -292,6 +290,17 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	if ok {
 		hexPatriciaHashed.SetCollapseTracer(tracer)
 	}
+}
+
+// BranchChildCount returns the child count of the branch at nibblePrefix, read
+// from the in-memory commitment domain (post-compute state).
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+	key := nibbles.HexToCompact(nibblePrefix)
+	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	if err != nil {
+		return 0, err
+	}
+	return commitment.BranchData(enc).ChildCount(), nil
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
@@ -411,15 +420,14 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	var warmupConfig commitment.WarmupConfig
 	var drainCollectors func() []*etl.Collector
 	if sdc.paraTrieDB != nil {
+		warmupConfig = sdc.warmupBase
+		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
+		warmupConfig.LogPrefix = logPrefix
 		if _, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok && sdc.updates.IsConcurrentCommitment() {
 			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		} else {
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
-		warmupConfig.Enabled = sdc.trieWarmup
-		warmupConfig.NumWorkers = dbg.TipTrieWarmupers
-		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
-		warmupConfig.LogPrefix = logPrefix
 	}
 
 	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment
@@ -797,16 +805,12 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
-	if err != nil {
-		return nil, 0, err
-	}
-	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
-	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
-	// underlying state cache / getter aliases shared storage that another goroutine
-	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
-	// boundary so all downstream consumers are safe.
-	return common.Copy(enc), step, nil
+	// Returns a borrowed slice valid for the lifetime of the current
+	// ComputeCommitment call. Callers must not retain it past that scope —
+	// the only retaining caller (getDeferredUpdate) clones at the queue
+	// boundary, and every other call site consumes the bytes inline
+	// (merger.Merge, unfoldBranchNode, EncodeBranch).
+	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

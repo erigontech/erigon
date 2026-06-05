@@ -254,6 +254,14 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 					if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 						return err
 					}
+					// Drive FCU after each batch so execution + prune can drain
+					// BlockTransaction as InsertBlocks proceeds. Without this,
+					// the entire backfill (potentially 100k+ blocks → 20+ GB
+					// of tx data) accumulates in chaindata before any drain
+					// can occur.
+					if lastInsertedBlock != nil {
+						p.doForkChoiceUpdate(ctx, lastInsertedBlock)
+					}
 					blocksBatch = []*types.Block{}
 				}
 			}
@@ -290,10 +298,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		}
 	}
 
-	// Trigger a single ForkChoiceUpdate after all batches are flushed.
-	// Calling FCU inside insertBatch between batches destroys the EL's
-	// in-memory overlay that accumulates TDs across batches, causing
-	// "parent's total difficulty not found" on the next InsertBlocks call.
 	if lastInsertedBlock != nil {
 		p.doForkChoiceUpdate(ctx, lastInsertedBlock)
 	}
@@ -402,7 +406,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, err
 	}
 
-	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals), nil
+	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64, lastInserted **types.Block) error {

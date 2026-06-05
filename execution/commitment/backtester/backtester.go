@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -197,17 +196,19 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	}
 	toTxNum := maxTxNum + 1
 	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
+	cfg := commitment.DefaultTrieConfig()
 	if bt.paraTrie {
-		statecfg.ExperimentalConcurrentCommitment = true
+		cfg.Variant = commitment.VariantConcurrentHexPatricia
 	}
-	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
+	cfg.EnableTrieWarmup = bt.trieWarmup
+	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
+	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger, execctx.WithTrieConfig(cfg))
 	if err != nil {
 		return err
 	}
 	defer sd.Close()
 	if bt.trieWarmup {
 		sd.EnableParaTrieDB(bt.db)
-		sd.EnableTrieWarmup(true)
 	}
 	if bt.paraTrie {
 		sd.EnableParaTrieDB(bt.db)
@@ -217,7 +218,6 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	//   - account/storage/code data as-of the end of the block
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err

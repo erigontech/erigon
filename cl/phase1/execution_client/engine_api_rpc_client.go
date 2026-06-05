@@ -216,24 +216,24 @@ func (c *EngineAPIRPCClient) GetClientVersionV1(ctx context.Context, callerVersi
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
-	var result []*engine_types.BlobAndProofV1
+func (c *EngineAPIRPCClient) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
+	var result engine_types.BlobsBundleV1
 	if err := c.client.CallContext(ctx, &result, rpc_helper.EngineGetBlobsV1, blobHashes); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
-	var result []*engine_types.BlobAndProofV2
+func (c *EngineAPIRPCClient) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
+	var result engine_types.BlobsBundleV2
 	if err := c.client.CallContext(ctx, &result, rpc_helper.EngineGetBlobsV2, blobHashes); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
-	var result []*engine_types.BlobAndProofV2
+func (c *EngineAPIRPCClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
+	var result engine_types.BlobsBundleV2
 	if err := c.client.CallContext(ctx, &result, rpc_helper.EngineGetBlobsV3, blobHashes); err != nil {
 		return nil, err
 	}

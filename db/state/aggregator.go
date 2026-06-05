@@ -998,6 +998,37 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	return
 }
 
+// reorgSafeBlockAndStep reports the highest block that is safe to freeze
+// (lastBlockInDB - reorgBlockDepth) and the fractional step that block maps to.
+func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock uint64, reorgSafeStep float64, ok bool) {
+	if a.reorgBlockDepth == 0 {
+		return 0, 0, false
+	}
+	a.commitGate.RLock()
+	defer a.commitGate.RUnlock()
+	if err := a.db.View(ctx, func(tx kv.Tx) error {
+		lastBlockInDB, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return err
+		}
+		if lastBlockInDB <= a.reorgBlockDepth {
+			return nil
+		}
+		reorgSafeBlock = lastBlockInDB - a.reorgBlockDepth
+		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, reorgSafeBlock)
+		if err != nil {
+			return err
+		}
+		reorgSafeStep = float64(maxTxNum) / float64(a.stepSize.Load())
+		ok = true
+		return nil
+	}); err != nil {
+		a.logger.Warn("[snapshots] reorgSafeBlockAndStep", "err", err)
+		return 0, 0, false
+	}
+	return reorgSafeBlock, reorgSafeStep, ok
+}
+
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
 	finished := a.buildFilesInBackground(toTxNum, true)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
@@ -1053,8 +1084,10 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		}
 
 		if doMerge {
+			a.wg.Add(1)
 			go func() {
-				if err := a.MergeLoop(ctx); err != nil {
+				defer a.wg.Done()
+				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
 			}()
@@ -1097,7 +1130,13 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 	return nil
 }
 
-func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
+func (a *Aggregator) MergeLoop(ctx context.Context) error {
+	a.wg.Add(1)
+	defer a.wg.Done()
+	return a.mergeLoop(ctx)
+}
+
+func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
@@ -1110,8 +1149,6 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	a.wg.Add(1)
-	defer a.wg.Done()
 	defer a.mergingFiles.Store(false)
 
 	mergeThrottleMs := dbg.MergeThrottleMs
@@ -2032,7 +2069,9 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				lastIdInDB(a.db, a.d[kv.StorageDomain]),
 				lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		}()
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()))
+		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx)
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
+			"reorgSafeBlock", reorgSafeBlock, "reorgSafeStep", fmt.Sprintf("%.2f", reorgSafeStep), "reorgSafeOK", reorgSafeOK)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
@@ -2149,9 +2188,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !doMerge {
 			return
 		}
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			defer close(fin)
-			if err := a.MergeLoop(a.ctx); err != nil {
+			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
 				}
