@@ -563,17 +563,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		gasUsed := st.gasUsed()
-		st.blockGasUsed = gasUsed
+		gasUsedBeforeRefund := st.gasUsed()
+		gasUsed := gasUsedBeforeRefund
 		stateRefund := st.state.GetRefund()
 		refund := min(gasUsed/refundQuotient, stateRefund)
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
 			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)
 		}
-		if rules.IsAmsterdam {
-			// EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.blockGasUsed)
+		if rules.IsOsaka {
+			// EIP-7778: Block Gas Accounting without Refunds (Osaka onwards).
+			// Block-level gas accounting uses the actual pre-refund execution gas:
+			// SSTORE refunds do not free up block capacity, and the EIP-7623
+			// calldata floor is a minimum ETH payment only — it must not inflate
+			// block gas. The receipt (what the user pays) still uses the
+			// post-refund, floored value via ReceiptGasUsed.
+			st.blockGasUsed = gasUsedBeforeRefund
 		} else {
 			st.blockGasUsed = gasUsed
 		}

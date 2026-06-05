@@ -113,30 +113,28 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
 	// TODO remove skips
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_invalid_`)                                                                  // BAL validation not yet implemented
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_contract_creation_tx.json`)                                                            // gas used by execution: 53064, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_collision_no_log.json`)                                                         // gas used by execution: 197704, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_initcode_stop_emits_log.json`)                                                  // gas used by execution: 53023, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_insufficient_balance_no_log.json`)                                              // gas used by execution: 55226, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_opcode_emits_log.json`)                                                         // gas used by execution: 75132, in header: 169056
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_out_of_gas_no_log.json`)                                                        // gas used by execution: 253215, in header: 166350
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_failed_create_with_value_no_log.json`)                                                 // gas used by execution: 495219, in header: 365427
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_finalization_burn_logs.json`)                                                          // gas used by execution: 224135, in header: 652744
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_initcode_calls_with_value.json`)                                                       // gas used by execution: 62369, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_nested_calls_log_order.json`)                                                          // gas used by execution: 139210, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)                                    // gas used by execution: 100112, in header: 265324
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_mainnet.json`)                                                            // gas used by execution: 53603, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                                                   // gas used by execution: 72103, in header: 157316
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_then_transfer_same_block.json`)                                           // gas used by execution: 82206, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_different_address_same_tx.json`)                                       // gas used by execution: 60625, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                                            // gas used by execution: 79612, in header: 133836
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_self_same_tx.json`)                                                    // gas used by execution: 58024, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                                                  // gas used by execution: 53603, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_with_value_emits_log.json`)                                               // gas used by execution: 53603, in header: 131488
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_transfer_with_all_tx_types.json`)                                                      // gas used by execution: 86100, in header: 54004
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7778_block_gas_accounting_without_refunds/test_multiple_refund_types_in_one_tx.json`)                              // gas used by execution: 321052, in header: 270020
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7778_block_gas_accounting_without_refunds/test_simple_gas_accounting.json`)                                        // gas used by execution: 271002, in header: 270020
-	bt.skipLoad(`^for_amsterdam/amsterdam/eip7778_block_gas_accounting_without_refunds/test_varying_calldata_costs.json`)                                       // gas used by execution: 51122, in header: 33800
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_invalid_`)                               // BAL validation not yet implemented
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_contract_creation_tx.json`)                         // gas used by execution: 53064, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_collision_no_log.json`)                      // gas used by execution: 197704, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_initcode_stop_emits_log.json`)               // gas used by execution: 53023, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_insufficient_balance_no_log.json`)           // gas used by execution: 55226, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_opcode_emits_log.json`)                      // gas used by execution: 75132, in header: 169056
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_out_of_gas_no_log.json`)                     // gas used by execution: 253215, in header: 166350
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_failed_create_with_value_no_log.json`)              // gas used by execution: 495219, in header: 365427
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_finalization_burn_logs.json`)                       // gas used by execution: 224135, in header: 652744
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_initcode_calls_with_value.json`)                    // gas used by execution: 62369, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_nested_calls_log_order.json`)                       // gas used by execution: 139210, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`) // gas used by execution: 100112, in header: 265324
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_mainnet.json`)                         // gas used by execution: 53603, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                // gas used by execution: 72103, in header: 157316
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_then_transfer_same_block.json`)        // gas used by execution: 82206, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_different_address_same_tx.json`)    // gas used by execution: 60625, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)         // gas used by execution: 79612, in header: 133836
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_self_same_tx.json`)                 // gas used by execution: 58024, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)               // gas used by execution: 53603, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_with_value_emits_log.json`)            // gas used by execution: 53603, in header: 131488
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_transfer_with_all_tx_types.json`)                   // gas used by execution: 86100, in header: 54004
+	// EIP-7778 block gas accounting (Osaka onwards) now uses pre-refund gas — see state_transition.go.
 	bt.skipLoad(`^for_amsterdam/amsterdam/eip7843_slotnum/test_slotnum_gas_cost.json`)                                                                          // gas used by execution: 45726, in header: 37568
 	bt.skipLoad(`^for_amsterdam/amsterdam/eip7843_slotnum/test_slotnum_value.json`)                                                                             // gas used by execution: 43105, in header: 37568
 	bt.skipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_2930_slot_listed_and_unlisted_writes.json`)                                 // gas used by execution: 67412, in header: 75136
