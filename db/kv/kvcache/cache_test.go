@@ -170,7 +170,6 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	t.Skip()
 	require := require.New(t)
 
 	// Create a context with timeout for the entire test
@@ -516,27 +515,37 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 }
 
 func TestCode(t *testing.T) {
-	t.Skip("TODO: use state reader/writer instead of Put()")
 	require, ctx := require.New(t), t.Context()
 	c := New(DefaultCoherentConfig)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	k1, k2 := [20]byte{1}, [20]byte{2}
+	k1 := [20]byte{1}
+	code := []byte{0x60, 0x00, 0x60, 0x00}
 
-	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		//todo: use kv.CodeDomain
-		//_ = tx.Put(kv.Code, k1[:], k2[:])
-		cacheView, _ := c.View(ctx, tx)
+	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.CodeDomain, tx, k1[:], code, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	}))
+
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
 		view := cacheView.(*CoherentView)
 
 		v, err := c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
-		require.Equal(k2[:], v)
+		require.Equal(code, v)
 
+		// second read is served from the cache
 		v, err = c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
-		require.Equal(k2[:], v)
-
-		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+		require.Equal(code, v)
 		return nil
-	})
+	}))
 }

@@ -1156,3 +1156,183 @@ func findRead(reads ReadSet, addr accounts.Address, path AccountPath) *Versioned
 	}
 	return nil
 }
+
+// When a prior tx wrote a sub-field (e.g. BalancePath via AddBalance) without
+// writing AddressPath, refreshVersionedAccount promotes the sub-field version
+// onto accountRead's AddressPath stamp. The validator's vm.Read(AddressPath)
+// must not invalidate that stamp — otherwise OCC re-execution races
+// identically until the retry budget exhausts.
+func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB19A240E"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(50_000_000_000_000_000)
+
+	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
+	vm := NewVersionMap(nil)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0},
+		postWithdrawalBalance, true)
+
+	ibs := New(NewVersionedStateReader(1, nil, vm, reader))
+	ibs.SetTxContext(0, 1)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	// Simulate refreshVersionedAccount's promoted return value:
+	// BalancePath at (0,0) bumped (source, version) above the
+	// account-record's own.
+	acc := accounts.NewAccount()
+	acc.Balance = postWithdrawalBalance
+	acc.CodeHash = accounts.EmptyCodeHash
+	ibs.accountRead(addr, &acc, MapRead, Version{TxIndex: 0, Incarnation: 0})
+
+	// Same call the parallel-exec scheduler makes between worker
+	// completion and apply.
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := vm.ValidateVersion(1, io, checkVersionEqual, true, "TestAccountRead_BalancePathPromotion")
+
+	require.Equal(t, VersionValid, valid,
+		"tx 1's account read should validate against a versionMap with only "+
+			"a BalancePath write at TxIdx=0 — promoting the sub-field's "+
+			"version onto an AddressPath cell that does not exist is what "+
+			"makes validation fail and produces the cross-chain OCC livelock")
+}
+
+// When CreateAccount runs on an address whose only versionMap entry is a
+// sub-field (e.g. BalancePath from a prior credit), the synthetic
+// IncarnationPath read must default to (StorageRead, UnknownVersion), not
+// the outer (MapRead, V_bal) promotion — same livelock class as the
+// accountRead path.
+func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB19A240E"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(50_000_000_000_000_000)
+
+	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
+	vm := NewVersionMap(nil)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0},
+		postWithdrawalBalance, true)
+
+	ibs := New(NewVersionedStateReader(1, nil, vm, reader))
+	ibs.SetTxContext(0, 1)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	require.NoError(t, ibs.CreateAccount(addr, false))
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := vm.ValidateVersion(1, io, checkVersionEqual, true, "TestCreateAccount_SyntheticIncarnationStamp")
+
+	require.Equal(t, VersionValid, valid,
+		"CreateAccount on an address with only a BalancePath cell must not "+
+			"stamp the synthetic IncarnationPath read with the promoted "+
+			"BalancePath version")
+}
+
+// getVersionedAccount must honour a prior tx's SelfDestructPath cell even
+// when stateReader (which doesn't consult the versionMap) returns the pre-SD
+// record. Without this gate Empty() returns false and a CALL-with-value to
+// the SD'd address misses CallNewAccountGas.
+func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xF1F5555B"))
+	reader := newAccountStateReader(addr)
+	// Pre-SD record: a deployed contract with nonce=1 and a real codeHash.
+	reader.accounts[addr].Nonce = 1
+	codeHash := accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
+	reader.accounts[addr].CodeHash = codeHash
+
+	vm := NewVersionMap(nil)
+	// Tx 3 self-destructs: SelfDestructPath=true only — SD doesn't write
+	// Nonce/CodeHash into the versionMap.
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, true, true)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint256.Int{}, true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
+
+	// Tx 4's worker IBS. The reader (analogous to CachedReaderV3) returns
+	// the pre-SD account directly — no versionMap-aware wrapper short-circuits
+	// the SD case. Only getVersionedAccount's versionMap check should convert
+	// that to nil.
+	ibs := New(reader)
+	ibs.SetTxContext(0, 4)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, account,
+		"getVersionedAccount must return nil for an address self-destructed "+
+			"by a prior tx with no revival, even when the underlying "+
+			"stateReader still surfaces the pre-SD record")
+}
+
+// Metamorphic SD+CREATE2 in one tx: SelfDestructPath=true and a fresh
+// AddressPath land at the SAME TxIdx. A strict hi > destructTxIndex
+// revival check would miss this; getVersionedAccount must recognise
+// AddressPath at TxIdx >= destructTxIndex as revival.
+func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x140DA4236"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Nonce = 1
+	reader.accounts[addr].CodeHash = accounts.InternCodeHash(common.HexToHash("0xc8c04ce6368db80967fe4c88faa37d1a3d3becb3b9e442a62a5dc8c1df6e14ee"))
+
+	// Tx 3: SD + CREATE2 re-deploy. All writes land at (TxIdx=3, Inc=0).
+	vm := NewVersionMap(nil)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, true, true)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint256.Int{}, true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint64(2), true)
+	// Fresh AddressPath at the same TxIdx as the SD.
+	recreatedAcc := &accounts.Account{
+		Nonce:       1,
+		Incarnation: 2,
+		CodeHash:    accounts.InternCodeHash(common.HexToHash("0xdeadbeefcafebabe1111111111111111111111111111111111111111111111ff")),
+	}
+	vm.Write(addr, AddressPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, recreatedAcc, true)
+
+	// Tx 4 reads addr. Strict-greater on subfields wouldn't see the
+	// same-TxIdx Balance/Nonce/CodeHash; the AddressPath >= destructTxIndex
+	// branch is what surfaces the re-created account.
+	ibs := New(NewVersionedStateReader(4, nil, vm, reader))
+	ibs.SetTxContext(0, 4)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, account,
+		"same-tx SD+CREATE2 (metamorphic) re-creates the contract; "+
+			"getVersionedAccount must surface the re-created account, not nil")
+	require.Equal(t, uint64(2), account.Incarnation,
+		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
+}
