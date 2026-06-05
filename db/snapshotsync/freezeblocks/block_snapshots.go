@@ -93,7 +93,6 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-
 func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
