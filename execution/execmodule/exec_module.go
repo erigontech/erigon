@@ -217,11 +217,10 @@ type ExecModule struct {
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
+	nextForkActivated       bool
 	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
 	accumGasMgas float64
 	accumTimeSec float64
-
-	nextForkActivated bool
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
@@ -385,7 +384,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	return nil
 }
 
-const glamsterdamBanner = `
+const nextForkBanner = `
 :'######:::'##::::::::::'###::::'##::::'##::'######::'########:'########:'########::'########:::::'###::::'##::::'##:
 '##... ##:: ##:::::::::'## ##::: ###::'###:'##... ##:... ##..:: ##.....:: ##.... ##: ##.... ##:::'## ##::: ###::'###:
  ##:::..::: ##::::::::'##:. ##:: ####'####: ##:::..::::: ##:::: ##::::::: ##:::: ##: ##:::: ##::'##:. ##:: ####'####:
@@ -581,7 +580,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	if !e.nextForkActivated && validationStatus == ExecutionStatusSuccess && e.config.IsAmsterdam(header.Time) {
 		e.nextForkActivated = true
-		e.logger.Info(glamsterdamBanner)
+		e.logger.Info(nextForkBanner)
 	}
 
 	result := ValidationResult{
