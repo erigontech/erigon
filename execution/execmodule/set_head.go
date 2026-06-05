@@ -103,6 +103,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer sd.Close()
 
+	// Wire the shared state cache so unwindExec3 invalidates it (epoch bump +
+	// floor lower). Without this, GetStateCache() returns nil during the unwind,
+	// the cache keeps pre-unwind values, and the next FCU re-execution reads them
+	// and computes a stale state root (BadBlock). Mirrors ValidateChain/forkchoice.
+	sd.SetStateCache(e.stateCache)
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
