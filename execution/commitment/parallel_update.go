@@ -233,26 +233,19 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 	}
 	qualifiesAsSplit := fanout >= 2 && node.subtreeCount >= threshold
 
-	// A node where a key terminates ("inline leaf") cannot be a split-point
-	// in the current cell layout. splitPoint.cells is a [16]cellEncodeData
-	// array indexed by child nibble — the terminator slot (used in the trie
-	// for keys whose hashed path ends exactly at this node, e.g. an account
-	// at depth 64) has no representation. Emitting a split-point here would
-	// silently drop the terminating key from the eventual branch hash and
-	// produce a root that diverges from the sequential trie.
-	//
-	// Detect terminators via subtreeCount > sum(child.subtreeCount): Insert
-	// bumps subtreeCount on every traversed node and on the node where the
-	// key ends, so the difference equals the count of keys terminating here.
+	// A node hosting a terminator key (one that ends exactly here, e.g. an
+	// account at depth 64 above its storage) cannot be a split-point:
+	// splitPoint.cells is indexed by child nibble and has no terminator slot,
+	// so splitting would drop that key from the branch hash and diverge from
+	// the sequential root.
 	if qualifiesAsSplit && nodeHasTerminator(node) {
 		qualifiesAsSplit = false
 	}
 
-	// Root with fanout >= 1 but does not qualify as a split-point: we still
-	// must descend so each emerging leafTask gets a non-empty prefix that
-	// routes to a single nibbles[i] ETL bucket. Otherwise multiple top-level
-	// nibble buckets would collapse into one task and break the per-bucket
-	// scan dispatch contract documented in the plan.
+	// Root that does not qualify as a split-point: still descend one level so
+	// each emerging leafTask gets a non-empty prefix routing to a single
+	// nibbles[i] bucket; otherwise several top-level nibbles would collapse
+	// into one task and break the single-scan dispatch contract.
 	if isRoot && !qualifiesAsSplit {
 		return pu.recurseChildren(ctx, node, nil)
 	}
@@ -266,12 +259,10 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		if err := pu.loadDBBranch(ctx, sp); err != nil {
 			return err
 		}
-		// arrived is initialised to the number of workers expected to deposit
-		// at this split-point. Each worker decrements it; the worker whose
-		// Add(-1) returns 0 is the unique last-finisher. Initialising to
-		// fanout (not fanout-1) is essential: with N-1 as the initial value,
-		// for N=2 both workers would satisfy `remaining <= 0` and continue
-		// folding past the barrier, producing two root publishers.
+		// arrived = fanout (the count of depositing workers). Initialising to
+		// fanout-1 would let both workers of a 2-way fork pass the barrier and
+		// publish two roots; with fanout, the worker whose Add(-1) returns 0 is
+		// the unique last finisher.
 		sp.arrived.Store(int32(fanout))
 		pu.splitMap.Set(nodePrefix, sp)
 		pu.splitPoints = append(pu.splitPoints, sp)
@@ -356,13 +347,9 @@ func buildPrefix(accPrefix, ext []byte) []byte {
 }
 
 // nodeHasTerminator reports whether at least one inserted key ends exactly at
-// this node — i.e. the node has subtreeCount strictly greater than the sum
-// of its children's subtreeCounts. In the prefix trie's accounting, every
-// Insert bumps subtreeCount on every node along the traversal path (including
-// the terminating node), so the difference equals the count of keys that
-// stopped here. Used by prepareDFS to refuse split-point emission at nodes
-// hosting inline leaves (e.g. depth-64 nodes carrying an account leaf
-// alongside its storage children).
+// this node (subtreeCount > Σ children.subtreeCount, since Insert bumps the
+// terminating node's count too). prepareDFS uses it to refuse split-point
+// emission at nodes hosting inline leaves.
 func nodeHasTerminator(node *prefixNode) bool {
 	if node == nil {
 		return false

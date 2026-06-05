@@ -319,12 +319,8 @@ func (p *ParallelPatriciaHashed) Process(
 		}
 	}
 
-	// foldSem is a global semaphore shared by every active bucket's fold-phase
-	// goroutines. Without it, each bucket's inner errgroup would independently
-	// cap at p.numWorkers, so the total fold concurrency could grow to
-	// p.numWorkers * active_buckets (up to p.numWorkers * 16). With it, the
-	// total fold-phase goroutine count across all buckets is bounded by
-	// p.numWorkers regardless of how many buckets are active simultaneously.
+	// foldSem bounds the total fold-phase goroutines across all buckets to
+	// p.numWorkers; without it concurrency would grow to numWorkers per bucket.
 	foldSem := make(chan struct{}, p.numWorkers)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -420,34 +416,13 @@ func (p *ParallelPatriciaHashed) acquirePrepareContext() (PatriciaContext, func(
 	return p.trieCtxFactory()
 }
 
-// runNibbleBucket processes every leafTask under a single root nibble bucket.
-// The ETL collector backing the bucket can only be scanned once, so this
-// orchestrator owns the scan and dispatches each key to the matching worker.
-// After the scan completes, every worker drains its fold-back path through
-// the barrier protocol concurrently (via a sub-errgroup that shares the
-// outer worker-count budget through gctx cancellation).
-//
-// trieCtx lifecycle: one shared trieCtx is acquired for the entire dispatch
-// phase (safe because dispatch is single-pass and sequential through fn).
-// Each fold goroutine acquires its own trieCtx after passing through foldSem,
-// so simultaneous trieCtx (and MDBX reader-slot) usage per bucket is bounded
-// by 1 + min(p.numWorkers, len(tasks)) instead of len(tasks).
-//
-// Lifecycle per worker:
-//   - acquire hph from the pool, bind it to the shared dispatch ctx, enable
-//     deferred branch updates;
-//   - receive its share of the bucket's keys via followAndUpdate during the
-//     scan dispatch;
-//   - inside the fold goroutine, swap in a fresh per-worker trieCtx and fold
-//     its grid through every ancestor split-point via foldDrainWithBarrier,
-//     either exiting at a barrier or — as the topmost finisher — publishing
-//     the root hash;
-//   - on return, the worker's deferred updates have been folded into
-//     pu.deferredCombined and the worker has been put back into the pool;
-//     the per-worker trieCtx is released via its cleanup defer.
-//
-// Errors from either the dispatch or any worker's drain cancel the whole
-// bucket via gctx.
+// runNibbleBucket processes every leafTask under one root nibble. The backing
+// ETL collector can be scanned only once, so this orchestrator owns the scan
+// and routes each key to the matching worker; the workers then fold back
+// concurrently through the barrier protocol. A shared context serves the
+// single-pass dispatch; each fold goroutine takes its own context after foldSem.
+// Any dispatch or worker error cancels the whole bucket. See
+// docs/design/parallel-patricia-hashed.md (Phase 3) for the phase model.
 func (p *ParallelPatriciaHashed) runNibbleBucket(
 	ctx context.Context,
 	updates *Updates,
@@ -539,20 +514,10 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 	// goroutine acquires its own trieCtx below.
 	releaseDispatchCtx()
 
-	// All workers fold back concurrently. They synchronise via splitMap
-	// deposits; deadlock is impossible because sp.arrived's last decrement
-	// triggers the last-finisher path even if the other workers exited
-	// already.
-	//
-	// foldSem is a process-wide semaphore (sized p.numWorkers) shared by every
-	// active bucket so the total fold-phase goroutine count across all buckets
-	// is bounded by p.numWorkers — not p.numWorkers per bucket, which would
-	// fan out to p.numWorkers * 16 with all buckets active. Workers that exit
-	// at a sub-barrier release their slot immediately; the last-finisher holds
-	// its slot while folding upward, bounded by the split-point chain depth.
-	// Per-worker trieCtxes are acquired inside foldSem so concurrent trieCtx
-	// (and MDBX reader-slot) usage tracks the fold concurrency cap, not
-	// len(tasks).
+	// Workers fold back concurrently, synchronising via splitMap deposits; the
+	// last sp.arrived decrement always triggers the finisher path, so arrival
+	// order cannot deadlock. Each per-worker trieCtx is acquired inside foldSem,
+	// so concurrent trieCtxes (and MDBX reader slots) track the fold cap.
 	sg, sgctx := errgroup.WithContext(ctx)
 	for i := range workers {
 		taskIdx := i
@@ -604,27 +569,13 @@ func (p *ParallelPatriciaHashed) releaseHandedOffWorker(hph *HexPatriciaHashed) 
 	p.workerPool.Put(hph)
 }
 
-// foldDrainWithBarrier folds the worker's grid all the way to the root cell,
-// then deposits the resulting cell at the worker's enclosing split-point. The
-// worker either exits (a sibling is still pending) or — as the last sibling
-// to arrive — rebuilds the split-point's grid row from every deposit and
-// folds upward, repeating the process for each further-enclosing split-point
-// in the chain. The topmost finisher publishes the root hash.
-//
-// Design note: an earlier attempt tried to detect split-point crossings
-// during the fold loop itself (one fold step at a time, querying splitMap
-// against the current `currentKey[:depths[deepest]-1]`). That doesn't work
-// in this codebase: the HPH trie has no row at the split-point's child depth
-// for workers that touched only one sibling — the trie structure is dense by
-// trie-shape, not by split-point shape. We instead match the
-// ConcurrentPatriciaHashed PoC: fold fully, deposit the worker's compressed
-// root cell, and let the last-finisher synthesise the merged grid row from
-// the deposits. The PoC handles a single depth-1 split-point; here we extend
-// it to arbitrary-depth split-points and chains.
-//
-// The function always returns the worker to p.workerPool. Deferred branch
-// updates collected by the worker are appended to the shared accumulator
-// regardless of whether the worker exited at a barrier or at the root.
+// foldDrainWithBarrier folds the worker's grid to its enclosing split-point,
+// deposits the resulting cell there, and exits — unless it is the last sibling
+// to arrive, in which case it rebuilds the merged row from every deposit, folds
+// upward, and repeats for each further-enclosing split-point; the topmost
+// finisher publishes the root. The worker is always returned to the pool and
+// its deferred updates appended to the shared accumulator, on every path. See
+// docs/design/parallel-patricia-hashed.md (Phase 4) for the protocol.
 func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 	ctx context.Context,
 	hph *HexPatriciaHashed,
@@ -641,28 +592,13 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 		p.workerPool.Put(hph)
 	}()
 
-	// Stage 1: fold the worker's grid down toward the first enclosing
-	// split-point's depth. Two outcomes:
-	//
-	//   - No enclosing split-point: fold all the way to activeRows == 0;
-	//     hph.root carries the worker's entire subtree cell.
-	//
-	//   - Enclosing split-point at depth D = len(sp.prefix): fold while
-	//     depths[deepest] > D+1 so the worker's deepest active row settles
-	//     exactly at the split-point's child depth. The cell at
-	//     grid[deepest][childNibble] is the deposit target — folding past it
-	//     would incorrectly absorb the shared root branch into the worker's
-	//     hph.root and overwrite sibling workers' contributions during
-	//     deferred-update apply (the multi-phase failure mode this fix
-	//     addresses). Workers in phase 1 (empty DB) typically have rows only
-	//     at depths far below D+1 and naturally collapse to activeRows == 0,
-	//     so the existing hph.root deposit path still fires.
-	//
-	// snapshot* captures currentKey + depths[0] only when Stage 1 still has
-	// row 0 to fold and that fold would write extLen > 64 (deep storage
-	// subtree case). depositRootIntoSplitPoint uses the snapshot to
-	// reconstruct the trimmed extension when cell.extension was truncated by
-	// the fold's silent [64]byte clamp.
+	// Stage 1: fold down to the enclosing split-point's child depth
+	// (len(sp.prefix)+1), or all the way to activeRows==0 when none encloses
+	// this worker. Folding past the child depth would absorb the shared parent
+	// branch into hph.root and overwrite siblings' deposits at apply time.
+	// snapshot* preserves currentKey/depth before a final row-0 fold so a
+	// deep-storage extension (>64 nibbles, silently clamped by the fold) can be
+	// reconstructed at deposit time.
 	firstSP := findEnclosingSplitPoint(pu, leafTaskPrefix)
 	stopDepth := int16(0)
 	if firstSP != nil {
@@ -723,17 +659,9 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 			// Sibling still pending: the last-finisher will pick up sp.cells.
 			return nil
 		}
-		// Last-finisher: rebuild grid[0] from sp.cells, fold once to produce
-		// the merged cell into hph.root, then continue the loop with the
-		// split-point's prefix as the new "current" position.
-		//
-		// rebuildWorkerFromSplitPoint's fold writes upCell.extLen =
-		// len(sp.prefix). For sp.prefix lengths <= 64 (covering all our
-		// currently-exercised split-point depths: root and account-boundary
-		// at depth 64) this fits cleanly in cell.extension[64]byte. We
-		// refresh the snapshot so the next iteration's depositRoot can
-		// recover if a deeper outer split-point ever requires a longer
-		// extension.
+		// Last finisher: rebuild grid[0] from sp.cells, fold to merge into
+		// hph.root, and continue from sp.prefix. Refresh the snapshot so the
+		// next iteration's deposit can rebuild a long extension if needed.
 		rowZeroSnapDepth = int16(len(sp.prefix)) + 1
 		rowZeroSnapKey = make([]byte, len(sp.prefix))
 		copy(rowZeroSnapKey, sp.prefix)
@@ -744,36 +672,14 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 	}
 }
 
-// publishRootFromWorker computes the worker's hph.RootHash and stages it on
-// p.pendingRoot together with the worker's final root cell and root flags.
-// CAS detects orchestration bugs that let multiple workers reach this
-// terminal state.
-//
-// Staging (rather than writing rootHash / template.root directly) lets the
-// main Process goroutine promote the result only after applyDeferredUpdates
-// has succeeded. If the deferred apply fails, the staged pending pointer is
-// dropped and the trie does not surface a root that was never persisted.
-//
-// The captured hph.root cell and rootChecked/rootTouched/rootPresent flags
-// are mirrored into the template on promotion. Workers never write to the
-// template during Process, so without this copy the template stays at its
-// initial (empty) state and downstream paths that depend on template's root
-// state return the wrong value:
-//
-//   - RootHash() on this instance falls back to template.RootHash() when
-//     p.rootHash is nil (e.g. on a fresh instance after restart);
-//   - Process()'s zero-update fast-path returns template.RootHash() directly;
-//   - commitmentdb.encodeCommitmentState serializes template via
-//     RootTrie().EncodeCurrentState, which writes the three root flags
-//     alongside the root cell; restorePatriciaState replays both via
-//     SetState. Without the flag mirror the persisted state restores with
-//     rootChecked/rootTouched/rootPresent == false, and the next unfold
-//     treats the persisted root cell as "not present" in the fold/unfold
-//     cycle.
-//
-// Safe to read hph.root and the flags without locks: CAS guarantees this
-// branch runs in only one worker per Process call, and the worker is the
-// sole owner of its pooled hph at this point.
+// publishRootFromWorker stages the worker's root hash, root cell, and root
+// flags on p.pendingRoot (CAS-guarded, so only one worker can publish).
+// Staging rather than writing rootHash/template directly lets Process promote
+// the result only after applyDeferredUpdates succeeds, so a failed apply never
+// surfaces an unpersisted root. The flags must travel with the cell: they are
+// what EncodeCurrentState/SetState round-trip, and a fresh instance's
+// RootHash() falls back to the template. Lock-free: CAS plus sole ownership of
+// the pooled hph.
 func (p *ParallelPatriciaHashed) publishRootFromWorker(hph *HexPatriciaHashed) error {
 	rh, err := hph.RootHash()
 	if err != nil {
@@ -807,37 +713,15 @@ func findEnclosingSplitPoint(pu *parallelUpdate, leafTaskPrefix []byte) *splitPo
 	return nil
 }
 
-// depositRootIntoSplitPoint copies hph.root (the worker's compressed leafTask
-// subtree cell) into sp.cells[childNibble], trimming the leading nibbles that
-// are implicit in the slot index. The extension nibbles at the start of
-// hph.root represent the path from depth 0 down to where the touched keys
-// begin; the split-point's child slot already encodes the first L+1 of those
-// nibbles (the prefix path through the split-point plus the child nibble), so
-// they must be stripped before deposit.
-//
-// Two paths cover the common cases and the deep-storage-overflow case:
-//
-//   - extLen ≤ 64 ("normal"): computeCellHash is called first to memoise the
-//     cell's hash, since cellEncodeData does not carry the Balance / Storage
-//     / loaded-flag state that the last-finisher's hashRow would otherwise
-//     need to recompute. Then the leading depositDepth nibbles are trimmed
-//     from extension and hashedExtension.
-//
-//   - extLen > 64 ("deep storage"): the fold that produced hph.root silently
-//     truncated cell.extension because the destination [64]byte cannot hold
-//     the full path. We avoid computeCellHash entirely (it would panic on
-//     cell.extension[:extLen]) and instead reconstruct the trimmed extension
-//     from snapKey/snapDepth, which captured the worker's currentKey before
-//     the final fold. After trimming, the residual extension fits within the
-//     [64]byte capacity for every split-point ≤ depth 65 (the worker's row 0
-//     depth minus depositDepth is bounded by 64 - 1 - depositDepth swing).
-//     The cell.hash is already the branch hash written by foldBranch via
-//     keccak2.Read, so the last-finisher's computeCellHash will correctly
-//     compute extensionHash(trimmed_extension, hash).
-//
-// snapKey / snapDepth may be empty / zero when the worker's leafTask had no
-// active rows to fold (single-touched-key paths) — that's safe because such
-// a worker cannot have produced extLen > 0 either.
+// depositRootIntoSplitPoint copies the worker's folded root cell into
+// sp.cells[childNibble], stripping the leading nibbles already implied by the
+// slot's position (the split-point prefix plus child nibble). The normal path
+// memoises the cell hash first, since cellEncodeData drops the state the
+// last-finisher would otherwise need to recompute it. The deep-storage path
+// (extLen>64, where the fold silently clamped cell.extension) instead rebuilds
+// the trimmed extension from the pre-fold snapshot. snapKey/snapDepth may be
+// empty for single-key workers, which cannot have produced extLen>0. See
+// docs/design/parallel-patricia-hashed.md.
 func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibble int, snapKey []byte, snapDepth int16) error {
 	depositDepth := int16(len(sp.prefix)) + 1
 
@@ -897,17 +781,11 @@ func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibb
 	return nil
 }
 
-// depositGridCellIntoSplitPoint deposits the grid cell at the deepest
-// active row directly into sp.cells[childNibble]. This is the multi-phase
-// path: Stage 1 stopped folding once the deepest row settled at the
-// split-point's child depth, and the row's grid cell at childNibble already
-// represents the worker's contribution to that slot. Depositing here avoids
-// folding up through (and corrupting) the shared parent branch.
-//
-// The cell may have been loaded from DB without setting cellLoadAccount /
-// cellLoadStorage flags, so its memoized stateHash may be empty. We call
-// computeCellHash to populate stateHash before extraction; the last-finisher
-// reads stateHash directly via the short-circuit path in computeCellHash.
+// depositGridCellIntoSplitPoint deposits the grid cell at the deepest active
+// row directly into sp.cells[childNibble] — the path taken when Stage 1 stopped
+// folding at the split-point's child depth, so folding further would corrupt the
+// shared parent branch. computeCellHash populates stateHash first (a DB-loaded
+// cell may have it empty) for the last-finisher's hashRow.
 func depositGridCellIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibble int) error {
 	row := hph.activeRows - 1
 	if row < 0 {
@@ -942,14 +820,9 @@ func rebuildWorkerFromSplitPoint(hph *HexPatriciaHashed, sp *splitPoint) error {
 	hph.depths[0] = depth
 	hph.activeRows = 1
 
-	// currentKey carries the path from root down to the row's parent. The
-	// path through the split-point is sp.prefix; the row's column selector
-	// (currentKey[depth-1]) is the implicit nibble at position depth-1, which
-	// is len(sp.prefix). foldBranch reads currentKey[upDepth:currentKeyLen]
-	// to compute extension nibbles, so we set currentKeyLen = depth-1 and
-	// fill currentKey[:depth-1] = sp.prefix. The byte at currentKey[depth-1]
-	// is filled by foldBranch's own logic when row==0 it doesn't matter, but
-	// to keep depthsToTxNum / extension construction sane we leave it zero.
+	// foldBranch reads currentKey[upDepth:currentKeyLen] for the extension
+	// nibbles, so set currentKeyLen = depth-1 and currentKey[:depth-1] =
+	// sp.prefix (the path from root down to the row's parent).
 	if len(sp.prefix) > 0 {
 		copy(hph.currentKey[:len(sp.prefix)], sp.prefix)
 	}
@@ -965,14 +838,11 @@ func rebuildWorkerFromSplitPoint(hph *HexPatriciaHashed, sp *splitPoint) error {
 	return nil
 }
 
-// loadSiblingsIntoGrid is called by the last-finisher after all siblings have
-// deposited at the split-point. It overwrites the deepest grid row with the
-// 16 child cells (workers' deposits + DB pre-population from Prepare) and
-// reconstructs the touchMap / afterMap / branchBefore state that hph.fold()
-// expects to find. The row's depth was already set by the worker's unfold
-// history; rows above the split-point retain the worker's state and are
-// guaranteed consistent because every leafTask under the split-point shares
-// the same ancestor path.
+// loadSiblingsIntoGrid overwrites the deepest grid row with the 16 child cells
+// (worker deposits + DB pre-population) and reconstructs the touchMap/afterMap/
+// branchBefore state hph.fold() expects. Rows above the split-point retain the
+// worker's state, consistent because every leafTask under the split-point
+// shares the ancestor path.
 func loadSiblingsIntoGrid(hph *HexPatriciaHashed, sp *splitPoint, row int) {
 	// Zero the row before reloading so stale slots from the worker's own
 	// processing (which only touched grid[row][childNibble]) cannot leak

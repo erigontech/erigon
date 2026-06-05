@@ -495,19 +495,6 @@ func generateUpdate(shape randomBatchShape, isStorage bool, rnd *rand.Rand) Upda
 // during the equivalence harness — the path most likely to regress.
 const parallelEquivMinSplitKeys uint32 = 2
 
-// shapeRequiresStorageDeepBarrierFix reports whether a shape needs an
-// unfinished underlying fix before it can run end-to-end through the
-// ModeParallel arm. The original gap (shapeStorageHeavySingle's deep
-// extension overflow in depositRootIntoSplitPoint) is fixed by Task 9
-// via the snapshot-recovery path in foldDrainWithBarrier + the
-// terminator-slot rejection in Prepare. The predicate is retained so
-// future shape additions can opt out without re-introducing skip
-// scaffolding; today it returns false for every defined shape.
-func shapeRequiresStorageDeepBarrierFix(shape randomBatchShape) bool {
-	_ = shape
-	return false
-}
-
 // TestVerifyParallel_AllShapes exercises one batch per named shape. Each
 // shape is run as a subtest so failures point at the offending shape rather
 // than the bulk loop below.
@@ -528,9 +515,6 @@ func TestVerifyParallel_AllShapes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if shapeRequiresStorageDeepBarrierFix(tc.shape) {
-				t.Skip("Task 9: single-account-many-storage exposes a deep-prefix overflow in depositRootIntoSplitPoint (cell.extension is [64]byte but leafTask fold produces extLen up to 127). Tracked in plan ⚠️.")
-			}
 			plainKeys, updates := generateBatch(tc.shape, tc.n, tc.seed)
 			root := assertEquivalentRootWorkers(t, plainKeys, updates, parallelEquivMinSplitKeys, 4)
 			require.NotEmpty(t, root, "root hash must be non-empty for shape %s", tc.name)
@@ -552,9 +536,7 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 	}
 	rnd := rand.New(rand.NewSource(0xC0FFEE))
 	const totalBatches = 1100
-	// All five named shapes participate now that Task 9 unblocked
-	// shapeStorageHeavySingle (deep-extension fix + terminator-slot guard).
-	// Each shape gets ≥220 iterations.
+	// All five named shapes participate; each gets ≥220 iterations.
 	shapes := []randomBatchShape{
 		shapeAccountsOnly, shapeStorageHeavySingle, shapeStorageSpread,
 		shapeInsertsAndDeletes, shapeEmpty,
@@ -601,9 +583,6 @@ func FuzzParallelEquivalence(f *testing.F) {
 			t.Skip("oversized batch")
 		}
 		shape := randomBatchShape(int(shapeByte) % 5)
-		if shapeRequiresStorageDeepBarrierFix(shape) {
-			t.Skip("Task 9: shapeStorageHeavySingle exposes a known depth/extension overflow in depositRootIntoSplitPoint")
-		}
 		plainKeys, updates := generateBatch(shape, int(keysCount), seed)
 		_ = assertEquivalentRootWorkers(t, plainKeys, updates, parallelEquivMinSplitKeys, 2)
 	})
