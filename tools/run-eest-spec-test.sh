@@ -165,13 +165,22 @@ echo "running: $evm_bin $cmd ${extra[*]:-} --workers $workers --jsonout $path"
 echo "tmpdir:  $TMPDIR"
 echo "max-allowed-failures: $max"
 
-# Don't fail on non-zero — the runners report all results via JSON regardless,
-# and we want to inspect the JSON to drive the pass/fail decision. The grep
-# filter strips any init-time log lines (e.g. dbg.envLookup's "[WARN] [env]"
-# message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm sets the log
-# handler, and the default log handler writes to stdout) so jq sees only JSON.
+# Don't fail on most non-zero exits — the runners report all results via JSON
+# regardless, and we want to inspect the JSON to drive the pass/fail decision
+# (crashes surface as missing/truncated JSON below). The one exception is exit
+# code 66: the Go race runtime's "data race detected" signal, emitted even when
+# the run completes and the JSON parses clean, so it must be checked explicitly.
+# The grep filter strips any init-time log lines (e.g. dbg.envLookup's
+# "[WARN] [env]" message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm
+# sets the log handler, and the default log handler writes to stdout) so jq
+# sees only JSON.
 raw_file=$(mktemp)
-"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || true
+rc=0
+"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || rc=$?
+if (( rc == 66 )); then
+	echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
+	exit 1
+fi
 grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$result_file"
 rm -f "$raw_file"
 
