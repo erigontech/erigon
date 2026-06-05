@@ -59,9 +59,9 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	t.Parallel()
 
 	prefix := []byte{0xaa}
-	initial := []byte{1, 2, 3}
+	expectedBranchData := []byte{1, 2, 3}
 	reader := &testStateReader{
-		branchData: append([]byte(nil), initial...),
+		branchData: append([]byte(nil), expectedBranchData...),
 		step:       42,
 	}
 	ctx := NewTrieContextRo(reader, 1)
@@ -69,13 +69,14 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	branch, step, err := ctx.Branch(prefix)
 	require.NoError(t, err)
 	require.Equal(t, reader.step, step)
-	require.Equal(t, initial, branch)
+	require.Equal(t, expectedBranchData, branch)
 	require.Equal(t, kv.CommitmentDomain, reader.readDomain)
 	require.Equal(t, prefix, reader.readKey)
 	require.Equal(t, uint64(1), reader.readStepSize)
 
-	// Branch must return an independent copy — mutating the underlying
-	// domain storage must NOT affect the previously returned slice.
 	reader.branchData[0] = 9
-	require.Equal(t, initial, branch, "Branch should return a copy independent of the underlying storage")
+	require.Equal(t, expectedBranchData, branch)
+
+	branch[1] = 8
+	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
 }

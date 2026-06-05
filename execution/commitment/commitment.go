@@ -128,9 +128,9 @@ type CommitProgress struct {
 }
 
 type PatriciaContext interface {
-	// Branch loads branch-node bytes for a hex-compact prefix.
-	// The returned slice is an independent copy owned by the caller;
-	// it is safe to retain across multiple Branch calls.
+	// GetBranch load branch node and fill up the cells
+	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
+	// and for the extension, account, and leaf type, the `l` and `k`
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte) error

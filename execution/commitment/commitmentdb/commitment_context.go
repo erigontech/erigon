@@ -809,9 +809,11 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	// Branch reads feed into downstream consumers that may overlap
-	// their lifetime with the next Branch call. Copy at the trie-context
-	// boundary to ensure each returned slice is independent.
+	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
+	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
+	// underlying state cache / getter aliases shared storage that another goroutine
+	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
+	// boundary so all downstream consumers are safe.
 	return common.Copy(enc), step, nil
 }
 
