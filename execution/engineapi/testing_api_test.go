@@ -245,6 +245,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 		false, // proposing
 		true,  // consuming
 		nil,   // txPool
+		nil,   // blobGetter
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
@@ -913,6 +914,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			false,
 			true,
 			nil,
+			nil,
 			0,
 			0,
 		)
@@ -951,6 +953,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			false,
 			false,
 			true,
+			nil,
 			nil,
 			0,
 			0,
@@ -996,6 +999,7 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 		false,
 		false,
 		true,
+		nil,
 		nil,
 		0,
 		0,
@@ -1043,6 +1047,7 @@ func TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing(t *testing.T) 
 		false,
 		true,
 		nil,
+		nil,
 		0,
 		0,
 	)
@@ -1089,6 +1094,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 		false,
 		false,
 		true,
+		nil,
 		nil,
 		0,
 		0,
