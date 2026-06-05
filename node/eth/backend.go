@@ -694,6 +694,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 
 	var txnProvider txnprovider.TxnProvider
+	var blobGetter txpool.BlobGetter
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
@@ -720,6 +721,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		txnProvider = backend.txPool
+		blobGetter = backend.txPool
 	}
 
 	execmoduleCache := &execmodule.Cache{}
@@ -1004,6 +1006,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Builder.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
+		blobGetter,
 		config.FcuTimeout,
 		config.MaxReorgDepth,
 	)

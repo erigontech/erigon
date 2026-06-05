@@ -16,6 +16,12 @@
 
 package communication
 
+import (
+	"math"
+
+	"github.com/golang/snappy"
+)
+
 const MaximumRequestClientUpdates = 128
 
 const ProtocolPrefix = "/eth2/beacon_chain/req"
@@ -81,3 +87,70 @@ var (
 	LightClientBootstrapProtocolV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
 	LightClientUpdatesByRangeProtocolV1   = ProtocolPrefix + LightClientUpdatesByRangeTopic + Schema1 + EncodingProtocol
 )
+
+// reqRespChunkFraming bounds the per-chunk envelope (result byte + length prefix + context
+// bytes) around each snappy-framed response chunk on the wire.
+const reqRespChunkFraming = 64
+
+// MaxWireResponseBytes upper-bounds the on-wire (snappy-framed) size of numItems response chunks,
+// each at most rawItemBytes before compression; snappy.MaxEncodedLen covers worst-case expansion
+// so it never truncates a compliant response, and it saturates to MaxUint64 instead of wrapping.
+func MaxWireResponseBytes(rawItemBytes int, numItems uint64) uint64 {
+	enc := snappy.MaxEncodedLen(rawItemBytes)
+	if enc < 0 {
+		return math.MaxUint64
+	}
+	perItem := uint64(enc) + reqRespChunkFraming
+	if numItems > math.MaxUint64/perItem {
+		return math.MaxUint64
+	}
+	return numItems * perItem
+}
+
+// AllProtocols enumerates every req/resp protocol defined above with whether it streams multiple
+// response chunks (by_range / by_root / by_head). It is the single source of truth for the
+// response-size cap: add new protocols here, or they fail closed to the single-object cap.
+var AllProtocols = []struct {
+	ID         string
+	MultiChunk bool
+}{
+	{PingProtocolV1, false},
+	{GoodbyeProtocolV1, false},
+	{MetadataProtocolV1, false},
+	{MetadataProtocolV2, false},
+	{MetadataProtocolV3, false},
+	{StatusProtocolV1, false},
+	{StatusProtocolV2, false},
+	{LightClientOptimisticUpdateProtocolV1, false},
+	{LightClientFinalityUpdateProtocolV1, false},
+	{LightClientBootstrapProtocolV1, false},
+	{BeaconBlocksByRangeProtocolV1, true},
+	{BeaconBlocksByRangeProtocolV2, true},
+	{BeaconBlocksByRootProtocolV1, true},
+	{BeaconBlocksByRootProtocolV2, true},
+	{BeaconBlocksByHeadProtocolV1, true},
+	{BlobSidecarByRootProtocolV1, true},
+	{BlobSidecarByRangeProtocolV1, true},
+	{DataColumnSidecarsByRootProtocolV1, true},
+	{DataColumnSidecarsByRangeProtocolV1, true},
+	{ExecutionPayloadEnvelopesByRangeProtocolV1, true},
+	{ExecutionPayloadEnvelopesByRootProtocolV1, true},
+	{LightClientUpdatesByRangeProtocolV1, true},
+}
+
+var multiChunkProtocols = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(AllProtocols))
+	for _, p := range AllProtocols {
+		if p.MultiChunk {
+			m[p.ID] = struct{}{}
+		}
+	}
+	return m
+}()
+
+// IsMultiChunkProtocol reports whether a negotiated protocol streams multiple response chunks.
+// Unknown protocols return false — fail-closed to the tight single-object response cap.
+func IsMultiChunkProtocol(protocolID string) bool {
+	_, ok := multiChunkProtocols[protocolID]
+	return ok
+}

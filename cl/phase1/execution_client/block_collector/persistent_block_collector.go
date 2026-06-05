@@ -417,7 +417,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, 
 		bal = executionPayload.BlockAccessList.Bytes()
 	}
 
-	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals), bal, nil
+	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), bal, nil
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, balByHash map[common.Hash][]byte, inserted *uint64, lastInserted **types.Block) error {

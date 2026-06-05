@@ -283,8 +283,16 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 				// explicitly to keep both consistent.
 				revivalLimit := vr.txIndex - 1
 				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+				// Same-tx re-creation (metamorphic SD+CREATE2): AddressPath
+				// at TxIdx >= destructTxIndex signals re-creation within or
+				// after the destruct.
+				if hi, ok := vr.versionMap.LatestTxIndex(address, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
 					revived = true
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
 				}
 				if !revived {
 					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
@@ -1589,17 +1597,9 @@ func ensureAccountState(accounts map[accounts.Address]*accountState, addr accoun
 func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32) {
 	switch vw.Path {
 	case StoragePath:
-		// Skip intra-tx net-zero storage writes: if this is the first write
-		// to the slot (no prior tx wrote to it) and the written value equals
-		// the original read value, it's a no-op that should remain as a read.
-		if !hasStorageWrite(account.changes, vw.Key) {
-			if val, ok := vw.Val.(uint256.Int); ok {
-				if origVal, wasRead := account.storageReadValues[vw.Key]; wasRead && val.Eq(&origVal) {
-					return
-				}
-			}
+		if val, ok := vw.Val.(uint256.Int); ok {
+			account.addStorageUpdate(vw.Key, accessIndex, val)
 		}
-		addStorageUpdate(account.changes, vw, accessIndex)
 	case BalancePath:
 		val, ok := vw.Val.(uint256.Int)
 		if !ok {
@@ -1714,28 +1714,29 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 	}
 }
 
-func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint32) {
-	// If we already recorded a read for this slot, drop it because a write takes precedence.
-	removeStorageRead(ac, vw.Key)
-
-	if ac.StorageChanges == nil {
-		ac.StorageChanges = []*types.SlotChanges{{
-			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
-		}}
-		return
-	}
-
+// addStorageUpdate records a value-changing storage write in a single pass over
+// the slot's changes, applying the EIP-7928 no-op filter: a write whose value
+// equals the slot's current value — the most recent earlier write this block,
+// or the pre-block read value for the first write — is not a change and is
+// omitted (the slot stays a read).
+func (account *accountState) addStorageUpdate(slot accounts.StorageKey, accessIndex uint32, val uint256.Int) {
+	ac := account.changes
 	for _, slotChange := range ac.StorageChanges {
-		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: vw.Val.(uint256.Int)})
+		if slotChange.Slot == slot {
+			if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
+				return
+			}
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: accessIndex, Value: val})
 			return
 		}
 	}
-
+	if origVal, wasRead := account.storageReadValues[slot]; wasRead && val.Eq(&origVal) {
+		return
+	}
+	removeStorageRead(ac, slot) // a real write supersedes any recorded read
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
-		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: accessIndex, Value: val}},
 	})
 }
 

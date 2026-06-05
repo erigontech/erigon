@@ -142,7 +142,7 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 }
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, 0, 0)
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	body, err := encodeCapabilities([]string{"engine_newPayloadV1"})
 	require.NoError(t, err)
 
@@ -160,7 +160,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 }
 
 func TestSSZRESTAdvertisedRoutes(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, 0, 0)
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	for _, route := range []struct {
 		method string
 		path   string
@@ -273,7 +273,7 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 }
 
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, 0, 0)
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")
