@@ -292,6 +292,16 @@ func (p *ParallelPatriciaHashed) Process(
 		defer prepareCleanup()
 	}
 	pu.minSplitKeys = p.minSplitKeys
+	// Coarsen the split threshold so a wide, uniform trie is not shattered into
+	// tens of thousands of leaf tasks (each acquires a worker grid from the
+	// pool — at that volume the pool stops amortizing and allocations blow up).
+	// Aim for ~numWorkers*4 tasks; only ever raises the threshold, so small and
+	// clustered batches keep p.minSplitKeys.
+	if total := pu.trie.root.subtreeCount; total > 0 && p.numWorkers > 0 {
+		if adaptive := total / uint32(p.numWorkers*4); adaptive > pu.minSplitKeys {
+			pu.minSplitKeys = adaptive
+		}
+	}
 	if err := pu.Prepare(prepareCtx); err != nil {
 		return nil, fmt.Errorf("[%s] parallel commitment prepare: %w", logPrefix, err)
 	}
