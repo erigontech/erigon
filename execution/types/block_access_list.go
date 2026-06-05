@@ -919,8 +919,9 @@ func (sc *SlotChanges) validate() error {
 }
 
 func validateStorageChangeEntries(changes []*StorageChange) error {
+	// Each SlotChanges entry MUST contain at least one StorageChange.
 	if len(changes) == 0 {
-		return nil
+		return errors.New("empty slot changes")
 	}
 	if len(changes) > maxStorageChangesPerSlot {
 		return fmt.Errorf("too many storage change entries (%d > %d)", len(changes), maxStorageChangesPerSlot)
@@ -1005,7 +1006,13 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 		if slot == nil {
 			return fmt.Errorf("entry %d is nil", i)
 		}
+		// Each SlotChanges entry MUST contain at least one StorageChange.
+		if len(slot.Changes) == 0 {
+			return errors.New("empty slot changes")
+		}
 	}
+
+	// Each storage key MUST appear at most once in storage_changes per account.
 	for i := 1; i < len(slots); i++ {
 		if slots[i-1].Slot.Cmp(slots[i].Slot) >= 0 {
 			return fmt.Errorf("slots must be strictly increasing (index %d)", i)

@@ -216,3 +216,32 @@ func TestBlockAccessListEmptyRoundTrip(t *testing.T) {
 		t.Fatalf("decoded empty BAL length: got %d, want 0", len(decoded))
 	}
 }
+
+// TestBlockAccessListRejectsEmptySlotChanges verifies that a BlockAccessList
+// containing a storage slot with zero actual changes is strictly rejected.
+// As per EIP-7928: "Each SlotChanges entry MUST contain at least one StorageChange."
+func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
+	var addr common.Address
+	addr[19] = 0x01
+	slot := common.HexToHash("0x01")
+
+	ac := &AccountChanges{
+		Address: accounts.InternAddress(addr),
+		StorageChanges: []*SlotChanges{
+			{
+				Slot:    accounts.InternKey(slot),
+				Changes: []*StorageChange{}, // Intentionally empty list
+			},
+		},
+	}
+
+	bal := BlockAccessList{ac}
+	err := bal.Validate()
+	
+	if err == nil {
+		t.Fatal("expected error for empty slot changes, but got nil")
+	}
+	if !strings.Contains(err.Error(), "empty slot changes") {
+		t.Fatalf("expected 'empty slot changes' error, but got: %v", err)
+	}
+}
