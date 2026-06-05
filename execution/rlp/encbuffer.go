@@ -22,11 +22,9 @@ package rlp
 import (
 	"encoding/binary"
 	"io"
-	"math/big"
 	"reflect"
 	"sync"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/holiman/uint256"
 )
 
@@ -147,23 +145,6 @@ func (buf *encBuffer) writeBytes(b []byte) {
 
 func (buf *encBuffer) writeString(s string) {
 	buf.writeBytes([]byte(s))
-}
-
-// writeBigInt writes i as an integer.
-func (buf *encBuffer) writeBigInt(i *big.Int) {
-	bitlen := i.BitLen()
-	if bitlen <= 64 {
-		buf.writeUint64(i.Uint64())
-		return
-	}
-	// Integer is larger than 64 bits, encode from i.Bits().
-	// The minimal byte length is bitlen rounded up to the next
-	// multiple of 8, divided by 8.
-	length := ((bitlen + 7) & -8) >> 3
-	buf.encodeStringHeader(length)
-	buf.str = append(buf.str, make([]byte, length)...)
-	bytesBuf := buf.str[len(buf.str)-length:]
-	math.ReadBits(i, bytesBuf)
 }
 
 // writeUint256 writes z as an integer.
@@ -382,12 +363,6 @@ func (w EncoderBuffer) WriteBool(b bool) {
 // WriteUint64 encodes an unsigned integer.
 func (w EncoderBuffer) WriteUint64(i uint64) {
 	w.buf.writeUint64(i)
-}
-
-// WriteBigInt encodes a big.Int as an RLP string.
-// Note: Unlike with Encode, the sign of i is ignored.
-func (w EncoderBuffer) WriteBigInt(i *big.Int) {
-	w.buf.writeBigInt(i)
 }
 
 // WriteUint256 encodes uint256.Int as an RLP string.

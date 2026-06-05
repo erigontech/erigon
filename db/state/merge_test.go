@@ -25,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -145,7 +144,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			universalEntity := FromII(d.InvertedIndex.InvIdxCfg.Name)
 			checker.AddDependency(universalEntity, &DependentInfo{
 				entity: universalEntity,
-				filesGetter: func() *btree2.BTreeG[*FilesItem] {
+				filesGetter: func() *DirtyFiles {
 					return d.History.dirtyFiles
 				},
 				accessors: d.History.Accessors,
@@ -972,8 +971,6 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 }
 
 func Test_mergeEliasFano(t *testing.T) {
-	t.Skip()
-
 	firstList := []int{1, 298164, 298163, 13, 298160, 298159}
 	slices.Sort(firstList)
 	uniq := make(map[int]struct{})
@@ -993,7 +990,7 @@ func Test_mergeEliasFano(t *testing.T) {
 	}
 
 	secondList := []int{
-		1, 644951, 644995, 682653, 13,
+		644951, 644995, 682653,
 		644988, 644987, 644946, 644994,
 		644942, 644945, 644941, 644940,
 		644939, 644938, 644792, 644787}
@@ -1021,17 +1018,17 @@ func Test_mergeEliasFano(t *testing.T) {
 	require.NoError(t, err)
 	menc := mergedSeq.AppendBytes(nil)
 
-	merged, _ := eliasfano32.ReadEliasFano(menc)
+	var merged multiencseq.SequenceReader
+	merged.Reset(0, menc)
 	require.EqualValues(t, len(uniq), merged.Count())
-	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
 	slices.Sort(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
-	require.Equal(t, merged.Max(), eliasfano32.Max(menc))
 
-	mit := merged.Iterator()
+	mit := merged.Iterator(0)
 	for mit.HasNext() {
-		v, _ := mit.Next()
+		v, err := mit.Next()
+		require.NoError(t, err)
 		require.Contains(t, mergedLists, int(v))
 	}
 }
@@ -1134,7 +1131,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checker := NewDependencyIntegrityChecker(log.New())
 		info := &DependentInfo{
 			entity: FromDomain(commitment.Name),
-			filesGetter: func() *btree2.BTreeG[*FilesItem] {
+			filesGetter: func() *DirtyFiles {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,

@@ -95,6 +95,10 @@ var (
 		Name:  "bench",
 		Usage: "benchmark the execution",
 	}
+	TimeFlag = cli.BoolFlag{
+		Name:  "time",
+		Usage: "record per-test wall time and memstats on a single execution (cheaper than --bench)",
+	}
 	CreateFlag = cli.BoolFlag{
 		Name:  "create",
 		Usage: "indicates the action should be create rather than call",
@@ -136,10 +140,10 @@ var (
 		Value: ".*",
 		Usage: "Run only those tests matching the regular expression.",
 	}
-	WorkersFlag = cli.IntFlag{
+	WorkersFlag = cli.Uint64Flag{
 		Name:  "workers",
-		Value: 0,
-		Usage: "Number of workers to execute tests in parallel (0 means use the command's defaul)",
+		Value: 1,
+		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
 	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
@@ -202,6 +206,7 @@ func init() {
 		&runCommand,
 		&blockTestCommand,
 		&engineXTestCommand,
+		&zkevmTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}

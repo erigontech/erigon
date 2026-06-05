@@ -396,15 +396,18 @@ func TestWaitingQueueSizeRace(t *testing.T) {
 	wp := New(workers)
 	defer wp.Stop()
 
+	// Block every worker so that, once all are busy, the dispatcher must put
+	// further tasks on the waiting queue — making a non-zero WaitingQueueSize
+	// deterministic rather than dependent on goroutine scheduling.
+	release := make(chan struct{})
+
 	maxChan := make(chan int)
 	for g := 0; g < goroutines; g++ {
 		go func() {
 			max := 0
-			// Submit 100 tasks, checking waiting queue size each time.  Report
-			// the maximum queue size seen.
 			for i := 0; i < tasks; i++ {
 				wp.Submit(func() {
-					time.Sleep(time.Microsecond)
+					<-release
 				})
 				waiting := wp.WaitingQueueSize()
 				if waiting > max {
@@ -429,6 +432,9 @@ func TestWaitingQueueSizeRace(t *testing.T) {
 	if maxMax >= goroutines*tasks {
 		t.Error("should not have seen all tasks on waiting queue")
 	}
+
+	// Unblock workers so the deferred Stop can drain and join them.
+	close(release)
 }
 
 func TestPause(t *testing.T) {

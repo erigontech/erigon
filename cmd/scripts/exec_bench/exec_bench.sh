@@ -278,8 +278,6 @@ execute_benchmark() {
     local cmd="$1"
     local datadir="$2"
     local run_number="$3"
-    local timeout_seconds=30
-    
     log_info "Starting benchmark run $run_number for $datadir"
 
     local logfile="$LOG_LOCATION/output.txt"
@@ -303,7 +301,8 @@ execute_benchmark() {
     clear_caches
     log_info "Executing Command: $cmd"
 
-    local log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
+    local log_file
+    log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
     
     if [[ "$CONTINUE_ON_ERIGON_PANIC" == "true" ]]; then
        set +e

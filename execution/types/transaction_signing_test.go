@@ -21,7 +21,6 @@ package types
 
 import (
 	"errors"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -36,7 +35,7 @@ func TestEIP1559Signing(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
 	chainId := uint256.NewInt(18)
-	signer := LatestSignerForChainID(chainId.ToBig())
+	signer := LatestSignerForChainID(chainId)
 	txn, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +55,7 @@ func TestEIP155Signing(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	signer := LatestSignerForChainID(big.NewInt(18))
+	signer := LatestSignerForChainID(uint256.NewInt(18))
 	txn, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +75,7 @@ func TestEIP155ChainId(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	signer := LatestSignerForChainID(big.NewInt(18))
+	signer := LatestSignerForChainID(uint256.NewInt(18))
 	txn, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +120,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 		{"f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10", "0x9bddad43f934d313c2b79ca28a432dd2b7281029"},
 		{"f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", "0x3c24d7329e92f84f08556ceb6df1cdb0104ca49f"},
 	} {
-		signer := LatestSignerForChainID(big.NewInt(1))
+		signer := LatestSignerForChainID(uint256.NewInt(1))
 
 		txn, err := DecodeTransaction(common.Hex2Bytes(test.txRlp))
 		if err != nil {
@@ -150,17 +149,17 @@ func TestChainId(t *testing.T) {
 	var txn Transaction = NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
 
 	var err error
-	txn, err = SignTx(txn, *LatestSignerForChainID(big.NewInt(1)), key)
+	txn, err = SignTx(txn, *LatestSignerForChainID(uint256.NewInt(1)), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = txn.Sender(*LatestSignerForChainID(big.NewInt(2)))
+	_, err = txn.Sender(*LatestSignerForChainID(uint256.NewInt(2)))
 	if !errors.Is(err, ErrInvalidChainId) {
 		t.Error("expected error:", ErrInvalidChainId)
 	}
 
-	_, err = txn.Sender(*LatestSignerForChainID(big.NewInt(1)))
+	_, err = txn.Sender(*LatestSignerForChainID(uint256.NewInt(1)))
 	if err != nil {
 		t.Error("expected no error")
 	}
@@ -169,7 +168,7 @@ func TestChainId(t *testing.T) {
 func TestSignatureValuesError(t *testing.T) {
 	// 1. Setup a valid transaction
 	tx := NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
-	signer := LatestSignerForChainID(big.NewInt(18))
+	signer := LatestSignerForChainID(uint256.NewInt(18))
 
 	// 2. Call WithSignature with invalid length sig (not 65 bytes)
 	invalidSig := make([]byte, 64)

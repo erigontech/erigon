@@ -1,0 +1,128 @@
+# EEST spec-test shard manifest.
+#
+# Single source of truth for:
+#   - .github/workflows/test-eest-spec.yml (load-matrix step → matrix.include)
+#   - tools/run-eest-spec-test.sh         (runtime workers / failure budget lookup)
+#   - Makefile                            (EEST_SPEC_SHARDS / EEST_SPEC_RACE_SHARDS)
+#
+# All three readers convert YAML→JSON via `yq -o=json` and then query with `jq`,
+# so existing jq expressions are unchanged. mikefarah/yq is pre-installed on
+# GitHub-hosted ubuntu-* runners; locally install via `brew install yq` (macOS)
+# or `snap install yq` (Linux).
+#
+# Per-entry keys:
+#   shard                 (required) — shard name; see run-eest-spec-test.sh
+#                                      for the routing case statement.
+#   workers               (required) — parallel worker count.
+#   max-allowed-failures  (required) — failure budget; bump only with a comment
+#                                      explaining why and a tracking issue.
+#   exec3-parallel        (optional, default false) — pins ERIGON_EXEC3_PARALLEL.
+
+- shard: statetests-stable
+  workers: 12
+  max-allowed-failures: 0
+- shard: statetests-devnet
+  workers: 12
+  max-allowed-failures: 0
+- shard: blocktests-stable-sequential
+  workers: 12
+  max-allowed-failures: 0
+- shard: blocktests-stable-parallel
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: blocktests-devnet
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-stable-sequential
+  workers: 8
+  max-allowed-failures: 0
+- shard: enginextests-stable-parallel
+  workers: 8
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-1m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-1m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-5m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-5m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-10m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-10m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-30m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-30m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-60m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-60m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-100m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-100m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: enginextests-benchmark-150m-sequential
+  workers: 1
+  max-allowed-failures: 0
+- shard: enginextests-benchmark-150m-parallel
+  workers: 1
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: blocktests-stable-race-pre-cancun-sequential
+  workers: 12
+  max-allowed-failures: 0
+- shard: blocktests-stable-race-cancun-sequential
+  workers: 12
+  max-allowed-failures: 0
+- shard: blocktests-stable-race-prague-sequential
+  workers: 12
+  max-allowed-failures: 0
+- shard: blocktests-stable-race-osaka-sequential
+  workers: 12
+  max-allowed-failures: 0
+- shard: blocktests-stable-race-pre-cancun-parallel
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: blocktests-stable-race-cancun-parallel
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: blocktests-stable-race-prague-parallel
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: blocktests-stable-race-osaka-parallel
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: blocktests-devnet-race-amsterdam
+  workers: 12
+  max-allowed-failures: 0
+  exec3-parallel: true
+- shard: zkevm-witness-race
+  workers: 8
+  max-allowed-failures: 0

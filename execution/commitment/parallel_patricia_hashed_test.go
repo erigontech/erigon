@@ -28,7 +28,7 @@ import (
 )
 
 func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	require.NotNil(t, p)
 	require.NotNil(t, p.template, "template HexPatriciaHashed allocated")
 	assert.Equal(t, int16(length.Addr), p.accountKeyLen)
@@ -38,12 +38,12 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonRootTrie(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	require.Same(t, p.template, p.RootTrie())
 }
 
 func TestParallelPatriciaHashedSkeletonVariant(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	assert.Equal(t, VariantParallelHexPatricia, p.Variant())
 	assert.Equal(t, TrieVariant("hex-parallel-patricia-hashed"), p.Variant())
 }
@@ -59,7 +59,7 @@ func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonSetNumWorkers(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
 	p.SetNumWorkers(4)
 	assert.Equal(t, 4, p.numWorkers)
@@ -72,7 +72,7 @@ func TestParallelPatriciaHashedSkeletonSetNumWorkers(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonSetMinSplitKeys(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
 	p.SetMinSplitKeys(7)
 	assert.Equal(t, uint32(7), p.minSplitKeys)
@@ -83,7 +83,7 @@ func TestParallelPatriciaHashedSkeletonSetMinSplitKeys(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	stashed := []byte{0xde, 0xad}
 	p.rootHash.Store(&stashed)
 	require.NotNil(t, p.rootHash.Load())
@@ -94,7 +94,7 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonResetContextPropagates(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	ms := NewMockState(t)
 
 	p.ResetContext(ms)
@@ -102,7 +102,7 @@ func TestParallelPatriciaHashedSkeletonResetContextPropagates(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonSetTrieContextFactory(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	assert.Nil(t, p.trieCtxFactory)
 
 	ms := NewMockState(t)
@@ -121,7 +121,7 @@ func TestParallelPatriciaHashedSkeletonSetTrieContextFactory(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonSetTraceFlags(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
 	p.SetTrace(true)
 	assert.True(t, p.template.trace)
@@ -135,7 +135,7 @@ func TestParallelPatriciaHashedSkeletonSetTraceFlags(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonEnableWarmupCache(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
 	p.EnableWarmupCache(true)
 	assert.True(t, p.template.enableWarmupCache)
@@ -144,7 +144,7 @@ func TestParallelPatriciaHashedSkeletonEnableWarmupCache(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonCaptureRoundTrip(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
 	capture := []string{"alpha", "beta"}
 	p.SetCapture(capture)
@@ -154,14 +154,14 @@ func TestParallelPatriciaHashedSkeletonCaptureRoundTrip(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonEnableCsvMetricsNoPanic(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	// Empty prefix is a valid no-op in HexPatriciaHashed.EnableCsvMetrics —
 	// we only verify the delegation does not panic.
 	require.NotPanics(t, func() { p.EnableCsvMetrics("") })
 }
 
 func TestParallelPatriciaHashedSkeletonReleaseNilSafe(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	require.NotNil(t, p.template)
 
 	p.Release()
@@ -183,7 +183,7 @@ func TestParallelPatriciaHashedSkeletonReleaseNilSafe(t *testing.T) {
 }
 
 func TestParallelPatriciaHashedSkeletonRootHashStashed(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	defer p.Release()
 
 	stored := []byte{0xde, 0xad, 0xbe, 0xef}
@@ -204,7 +204,7 @@ func TestParallelPatriciaHashedSkeletonRootHashStashed(t *testing.T) {
 func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T) {
 	ms := NewMockState(t)
 
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	defer p.Release()
 	p.ResetContext(ms)
 
@@ -213,7 +213,7 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 
 	// Reference: a freshly constructed sequential trie returns the same hash
 	// for the no-updates path.
-	seq := NewHexPatriciaHashed(length.Addr, ms)
+	seq := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	defer seq.Release()
 	expected, err := seq.RootHash()
 	require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 }
 
 func TestParallelPatriciaHashedSkeletonRootHashAfterRelease(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	p.Release()
 
 	got, err := p.RootHash()
@@ -269,7 +269,7 @@ func assertEquivalentRootWorkers(
 	// Sequential side.
 	seqMs := NewMockState(t)
 	require.NoError(t, seqMs.applyPlainUpdates(plainKeys, updates))
-	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs)
+	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
 	defer seqTrie.Release()
 	seqUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer seqUpds.Close()
@@ -280,7 +280,7 @@ func assertEquivalentRootWorkers(
 	parMs := NewMockState(t)
 	parMs.SetConcurrentCommitment(true)
 	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
-	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer parTrie.Release()
 	parTrie.SetNumWorkers(numWorkers)
 	if raiseMinSplitKeys > 0 {
@@ -395,7 +395,7 @@ func TestParallelProcessSkeleton_RejectsMissingFactory(t *testing.T) {
 	t.Parallel()
 
 	ms := NewMockState(t)
-	p := NewParallelPatriciaHashed(nil, length.Addr)
+	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	defer p.Release()
 	p.ResetContext(ms)
 
@@ -427,7 +427,7 @@ func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 	t.Parallel()
 
 	ms := NewMockState(t)
-	p := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)
+	p := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 	defer p.Release()
 	p.ResetContext(ms)
 
@@ -528,7 +528,7 @@ func TestParallelProcessSkeleton_GroupLeafTasksByNibble(t *testing.T) {
 // — Task 6 leafTask-only configurations exercise the no-op branch.
 func TestParallelProcessSkeleton_WarmupAncestorsNoOp(t *testing.T) {
 	t.Parallel()
-	p := NewParallelPatriciaHashed(mockTrieCtxFactory(NewMockState(t)), length.Addr)
+	p := NewParallelPatriciaHashed(mockTrieCtxFactory(NewMockState(t)), length.Addr, DefaultTrieConfig())
 	defer p.Release()
 
 	require.NotPanics(t, func() {
@@ -701,7 +701,7 @@ func TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit(t *testing.T) {
 	ms := NewMockState(t)
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 
-	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)
+	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 	defer parTrie.Release()
 	parTrie.SetNumWorkers(2)
 	parTrie.ResetContext(ms)
@@ -729,7 +729,7 @@ func TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit(t *testing.T) {
 // rebuilt branch.
 func TestParallelBarrier_LoadSiblingsZeroes(t *testing.T) {
 	t.Parallel()
-	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	defer hph.Release()
 
 	// Pre-populate the row with junk cells.
@@ -776,7 +776,7 @@ func TestParallelBarrier_LoadSiblingsZeroes(t *testing.T) {
 // untouched-nibble fix in action.
 func TestParallelBarrier_LoadSiblingsRespectsDBSiblings(t *testing.T) {
 	t.Parallel()
-	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	defer hph.Release()
 
 	sp := &splitPoint{
@@ -814,7 +814,7 @@ func TestParallelBarrier_LoadSiblingsRespectsDBSiblings(t *testing.T) {
 // reflect the absence so the branch encoder emits a deletion at that slot.
 func TestParallelBarrier_LoadSiblingsTouchedAndDeleted(t *testing.T) {
 	t.Parallel()
-	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	defer hph.Release()
 
 	sp := &splitPoint{
@@ -854,7 +854,7 @@ func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 	parMs.SetConcurrentCommitment(true)
 	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
 
-	p := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	p := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer p.Release()
 	p.SetNumWorkers(1)
 	p.ResetContext(parMs)
@@ -902,7 +902,7 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 	parMs.SetConcurrentCommitment(true)
 	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
 
-	p := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	p := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer p.Release()
 	p.SetNumWorkers(1)
 	p.ResetContext(parMs)
@@ -936,7 +936,7 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 	require.NotEmpty(t, encoded, "EncodeCurrentState must capture template state mirrored from the worker")
 
 	// Restore on a brand-new instance, simulating a process restart.
-	p2 := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	p2 := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer p2.Release()
 	p2.ResetContext(parMs)
 	require.NoError(t, p2.RootTrie().SetState(encoded))

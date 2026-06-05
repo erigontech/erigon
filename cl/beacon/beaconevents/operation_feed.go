@@ -1,6 +1,6 @@
 package beaconevents
 
-import ethevent "github.com/erigontech/erigon/p2p/event"
+import ethevent "github.com/erigontech/erigon/common/event"
 
 type operationFeed struct {
 	feed *ethevent.Feed
@@ -76,6 +76,30 @@ func (f *operationFeed) SendBlobSidecar(value *BlobSidecarData) int {
 func (f *operationFeed) SendDataColumnSidecar(value *DataColumnSidecarData) int {
 	return f.feed.Send(&EventStream{
 		Event: OpDataColumnSidecar,
+		Data:  value,
+	})
+}
+
+// SendPayloadAttestationMessage emits a payload_attestation_message event. [New in Gloas:EIP7732]
+func (f *operationFeed) SendPayloadAttestationMessage(value *PayloadAttestationMessageData) int {
+	return f.feed.Send(&EventStream{
+		Event: OpPayloadAttestationMessage,
+		Data:  value,
+	})
+}
+
+// SendExecutionPayloadBid emits an execution_payload_bid event. [New in Gloas:EIP7732]
+func (f *operationFeed) SendExecutionPayloadBid(value *SignedExecutionPayloadBidData) int {
+	return f.feed.Send(&EventStream{
+		Event: OpExecutionPayloadBid,
+		Data:  value,
+	})
+}
+
+// SendExecutionPayloadAvailable emits an execution_payload_available event. [New in Gloas:EIP7732]
+func (f *operationFeed) SendExecutionPayloadAvailable(value *ExecutionPayloadAvailableData) int {
+	return f.feed.Send(&EventStream{
+		Event: OpExecutionPayloadAvailable,
 		Data:  value,
 	})
 }

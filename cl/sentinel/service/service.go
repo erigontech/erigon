@@ -17,14 +17,17 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -94,6 +97,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
+	if req.MaxResponseBytes > 0 {
+		httpReq.Header.Set(httpreqresp.MaxResponseBytesHeader, strconv.FormatUint(req.MaxResponseBytes, 10))
+	}
 	// for now this can't actually error. in the future, it can due to a network error
 	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
 	if err != nil {
@@ -136,6 +142,13 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
+		// drop the peer as the status path above would.
+		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, err
 	}
 	ans := &sentinelproto.ResponseData{
@@ -180,8 +193,9 @@ func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *senti
 		return nil, err
 	}
 	req := &sentinelproto.RequestData{
-		Data:  reqWithPeer.Data,
-		Topic: reqWithPeer.Topic,
+		Data:             reqWithPeer.Data,
+		Topic:            reqWithPeer.Topic,
+		MaxResponseBytes: reqWithPeer.MaxResponseBytes,
 	}
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
@@ -284,6 +298,27 @@ func (r ResponseCode) ErrorMessage(resp *http.Response) string {
 	if r == 0 || r == 1 {
 		return ""
 	}
-	errBody, _ := io.ReadAll(resp.Body)
-	return string(errBody)
+	// Error response bodies are Snappy-compressed per the ETH2 req/resp spec.
+	// First read the varint-encoded length prefix, then decompress the payload.
+	rawReader := bufio.NewReader(resp.Body)
+	// Read and discard the varint length prefix (uncompressed length).
+	for {
+		b, err := rawReader.ReadByte()
+		if err != nil {
+			// Fallback: read raw body if varint parsing fails.
+			remaining, _ := io.ReadAll(rawReader)
+			return string(remaining)
+		}
+		if b&0x80 == 0 {
+			break // last byte of varint
+		}
+	}
+	sr := snappy.NewReader(rawReader)
+	decoded, err := io.ReadAll(sr)
+	if err != nil {
+		// Fallback: if snappy decode fails, read raw remaining bytes.
+		remaining, _ := io.ReadAll(rawReader)
+		return string(remaining)
+	}
+	return string(decoded)
 }

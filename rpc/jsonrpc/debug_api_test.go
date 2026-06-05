@@ -324,7 +324,7 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 
 		// start from something, limited
-		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey[:], 2)
 		require.NoError(t, err)
 		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
 		if !reflect.DeepEqual(result, expect) {
@@ -384,12 +384,19 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		}
 
 		// start from nextKey (hashed), limited — pagination
-		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey[:], 2)
 		require.NoError(t, err)
 		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
 		if !reflect.DeepEqual(result, expect) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
+
+		// negative maxResult should be handled safely and must not panic.
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, -1)
+		require.NoError(t, err)
+		require.Empty(t, result.Storage)
+		require.NotNil(t, result.NextKey)
+		require.Equal(t, keys[0], *result.NextKey)
 	})
 }
 
@@ -745,7 +752,7 @@ func TestGetRawTransaction(t *testing.T) {
 }
 
 func TestExecutionWitness(t *testing.T) {
-	// Enable historical commitment to allow witness generation for historical blocks
+	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -756,9 +763,15 @@ func TestExecutionWitness(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	ctx := context.Background()
 
+	// Write the DB flag so that debug_executionWitness accepts the request.
+	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	})
+	require.NoError(t, err)
+
 	// Get the latest block number
 	var latestBlockNum uint64
-	err := m.DB.View(ctx, func(tx kv.Tx) error {
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
 		latestBlockNum, _ = stages.GetStageProgress(tx, stages.Execution)
 		return nil
 	})
@@ -767,27 +780,35 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("genesis block", func(t *testing.T) {
 		// Note: commitment history starts from 1 in this test suite
 		blockNum := rpc.BlockNumber(0)
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.NotNil(t, result.Keys, "Keys should not be nil")
 		require.NotNil(t, result.Codes, "Codes should not be nil")
 
-		t.Logf("Genesis: %d state nodes, %d codes, %d keys",
-			len(result.State), len(result.Codes), len(result.Keys))
+		t.Logf("Genesis: %d state nodes, %d codes",
+			len(result.State), len(result.Codes))
 	})
 
 	t.Run("by block number", func(t *testing.T) {
 		// Test with block number 1
 		blockNum := rpc.BlockNumber(1)
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.NotNil(t, result.Keys, "Keys should not be nil")
+		require.NotNil(t, result.Keys, "Keys must be populated with accessed address/slot preimages")
+		for i, k := range result.Keys {
+			require.Contains(t, []int{20, 32}, len(k), "key %d must be a 20B address or 32B slot preimage", i)
+			if i > 0 {
+				require.Negative(t, bytes.Compare(result.Keys[i-1], k), "keys must be sorted and deduplicated")
+			}
+		}
+		if len(result.Headers) > 0 {
+			require.Contains(t, result.headerByNumber, uint64(0), "parent header (block 0) must be present in lookup map when Headers is non-empty")
+		}
 	})
 
 	t.Run("by block hash", func(t *testing.T) {
@@ -798,7 +819,7 @@ func TestExecutionWitness(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -807,7 +828,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("multiple blocks", func(t *testing.T) {
 		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
-			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 
 			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
 			require.NotNil(t, result, "Result should not be nil for block %d", blockNum)
@@ -817,17 +838,16 @@ func TestExecutionWitness(t *testing.T) {
 
 	t.Run("latest block", func(t *testing.T) {
 		blockNum := rpc.LatestBlockNumber
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.NotNil(t, result.Keys, "Keys should not be nil")
 	})
 
 	t.Run("non-existent block", func(t *testing.T) {
 		// Very high block number that doesn't exist
 		blockNum := rpc.BlockNumber(999999999)
-		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 		require.Error(t, err, "should error for non-existent block")
 	})
 }

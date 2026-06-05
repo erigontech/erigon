@@ -656,7 +656,7 @@ func TestHistoryCanPrune(t *testing.T) {
 }
 
 func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
-	const nonPruned = 490
+	const nonPruned = 600
 
 	// setup builds snapshot files then returns the open History, a write tx, and a log ticker.
 	// DB/History cleanup is registered by filledHistoryValues.
@@ -706,7 +706,6 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	}
 
 	t.Run("scan_prune", func(t *testing.T) {
-		t.Skip("TODO: figure out pretty way to do this check")
 		h, rwTx, logEvery := setup(t)
 		hc := h.beginForTests()
 		defer hc.Close()
@@ -714,23 +713,29 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
 		t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
 
+		require.True(t, canHist)
+
+		// unforced prune only reaches the file boundary (txTo)
 		stat, err := hc.Prune(t.Context(), rwTx, 0, txTo, 50, false, logEvery)
 		require.NoError(t, err)
 		require.NotNil(t, stat)
 		t.Logf("stat=%v", stat)
 
+		// nothing left to prune without force: DB minTxNum now equals the file boundary
 		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 500, false, logEvery)
+		require.NoError(t, err)
+		require.Nil(t, stat)
+
+		// forced prune removes the whole requested range, past the file boundary
+		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 10, true, logEvery)
 		require.NoError(t, err)
 		require.NotNil(t, stat)
 		t.Logf("stat=%v", stat)
 
-		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 10, true, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
+		// and again there is nothing left to prune without force
 		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 10, false, logEvery)
 		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
+		require.Nil(t, stat)
 
 		assertResults(t, h, rwTx, hc)
 		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)

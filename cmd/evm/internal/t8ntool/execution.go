@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type Prestate struct {
@@ -80,18 +79,18 @@ type stEnvMarshaling struct {
 }
 
 func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	stateReader, stateWriter := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)
-		statedb.SetCode(addr, account.Code)
-		statedb.SetNonce(addr, account.Nonce)
+		statedb.SetCode(addr, account.Code, tracing.CodeChangeGenesis)
+		statedb.SetNonce(addr, account.Nonce, tracing.NonceChangeGenesis)
 		var balance uint256.Int
 		_ = balance.SetFromBig(account.Balance)
 		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range account.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v[:])
 			statedb.SetState(addr, key, *val)
 		}
 

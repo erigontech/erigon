@@ -77,7 +77,7 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 		b.StopTimer()
 		ms := NewMockState(b)
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
-		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 		upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, pk, updates)
 		b.StartTimer()
 
@@ -109,7 +109,7 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		ms.SetConcurrentCommitment(true)
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
 		if pph == nil {
-			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)
+			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
 			// Re-wire MockState dependencies without dropping the worker pool.

@@ -202,12 +202,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txHash := txn.Hash().String()
+		txHash := txn.Hash()
 		jsonResult := map[string]any{
-			"txHash":  txHash,
+			"txHash":  txHash.String(),
 			"gasUsed": result.ReceiptGasUsed,
 		}
-		bundleHash.Write(txn.Hash().Bytes())
+		bundleHash.Write(txHash[:])
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
@@ -230,17 +230,31 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
 
-	b, err := api.blockByNumber(ctx, number, tx)
-	if err != nil {
-		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+	var b *types.Block
+	if number == rpc.PendingBlockNumber {
+		b, err = api.blockByNumber(ctx, number, tx)
+		if err != nil {
+			return nil, err
 		}
-		return nil, err
+	} else {
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+			}
+			return nil, err
+		}
+		if err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+			return nil, err
+		}
+		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+			}
+			return nil, err
+		}
 	}
 	if b == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -293,7 +307,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +371,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +426,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	libchain "github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -88,7 +87,7 @@ func newCanonical(t *testing.T, n int) *execmoduletester.ExecModuleTester {
 }
 
 // Test fork of length N starting from block i
-func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comparator func(td1, td2 *big.Int)) {
+func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comparator func(td1, td2 *uint256.Int)) {
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
 	var err error
@@ -123,7 +122,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	}
 	// Extend the newly created chain
 	var blockChainB *blockgen.ChainPack
-	var tdPre, tdPost *big.Int
+	var tdPre, tdPost *uint256.Int
 	var currentBlockB *types.Block
 
 	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -209,7 +208,7 @@ func TestExtendCanonicalBlocks(t *testing.T) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	better := func(td1, td2 *big.Int) {
+	better := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) <= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected more than %v", td2, td1)
 		}
@@ -237,7 +236,7 @@ func testShorterFork(t *testing.T) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	worse := func(td1, td2 *big.Int) {
+	worse := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) >= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected less than %v", td2, td1)
 		}
@@ -267,7 +266,7 @@ func testLongerFork(t *testing.T, full bool) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	better := func(td1, td2 *big.Int) {
+	better := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) <= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected more than %v", td2, td1)
 		}
@@ -435,7 +434,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	want := new(uint256.Int).AddUint64(&genDiff, uint64(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
 	require.NoError(err)
-	if want.CmpBig(have) != 0 {
+	if want.Cmp(have) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 	// Make sure the canonical chain is the correct one
@@ -605,8 +604,12 @@ func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecM
 		return nil, common.Hash{}, 0, 0, err
 	}
 
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(db)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
+	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
@@ -677,7 +680,7 @@ func TestEIP155Transition(t *testing.T) {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
-			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
+			Config: &libchain.Config{ChainID: uint256.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -750,7 +753,7 @@ func TestEIP155Transition(t *testing.T) {
 	}
 
 	// generate an invalid chain id transaction
-	config := &libchain.Config{ChainID: big.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
+	config := &libchain.Config{ChainID: uint256.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
 	chain, chainErr = blockgen.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
@@ -796,11 +799,11 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
-			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
+			Config: &libchain.Config{ChainID: uint256.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithBlockBufferSize(128), execmoduletester.WithPruneMode(pm))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithPruneMode(pm))
 
 	head := uint64(4)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
@@ -974,7 +977,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		theAddr = accounts.InternAddress(common.Address{1})
 		gspec   = &types.Genesis{
 			Config: &libchain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        common.NewUint64(0),
 				TangerineWhistleBlock: common.NewUint64(0),
 				SpuriousDragonBlock:   common.NewUint64(2),
@@ -1192,8 +1195,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 				return err
 			}
 			h := rawdb.ReadCurrentHeader(tx)
-			if b.Hash() != h.Hash() {
-				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			bHash := b.Hash()
+			hHash := h.Hash()
+			if bHash != hHash {
+				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), bHash[:4], h.Number, hHash[:4])
 			}
 			if err := m2.InsertChain(forks[i]); err != nil {
 				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
@@ -1203,8 +1208,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 				return err
 			}
 			h = rawdb.ReadCurrentHeader(tx)
-			if b.Hash() != h.Hash() {
-				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
+			bHash2 := b.Hash()
+			hHash2 := h.Hash()
+			if bHash2 != hHash2 {
+				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), bHash2[:4], h.Number, hHash2[:4])
 			}
 			return nil
 		}); err != nil {
@@ -2133,7 +2140,7 @@ func TestEIP2718Transition(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		gasPrice, _ := uint256.FromBig(big.NewInt(1))
-		chainID, _ := uint256.FromBig(gspec.Config.ChainID)
+		chainID := gspec.Config.ChainID
 
 		// One transaction to 0xAAAA
 		signer := types.LatestSigner(gspec.Config)
@@ -2181,6 +2188,27 @@ func TestEIP2718Transition(t *testing.T) {
 	}
 }
 
+// eip1559Config is a PoW (Ethash) config with London active from genesis, so
+// blockgen and verification agree on difficulty and the miner earns the PoW
+// block reward this test asserts on.
+func eip1559Config() *libchain.Config {
+	return &libchain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 libchain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
+		Ethash:                new(libchain.EthashConfig),
+	}
+}
+
 // TestEIP1559Transition tests the following:
 //
 //  1. A transaction whose feeCap is greater than the baseFee is valid.
@@ -2192,7 +2220,6 @@ func TestEIP2718Transition(t *testing.T) {
 //  6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
 	t.Parallel()
-	t.Skip("needs fixing")
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
@@ -2205,7 +2232,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = accounts.InternAddress(crypto.PubkeyToAddress(key2.PublicKey))
 		funds   = new(uint256.Int).Mul(&u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: chainspec.Sepolia.Config,
+			Config: eip1559Config(),
 			Alloc: types.GenesisAlloc{
 				addr1.Value(): {Balance: funds.ToBig()},
 				addr2.Value(): {Balance: funds.ToBig()},
@@ -2240,7 +2267,7 @@ func TestEIP1559Transition(t *testing.T) {
 			}}
 
 			var chainID uint256.Int
-			chainID.SetFromBig(gspec.Config.ChainID)
+			chainID.Set(gspec.Config.ChainID)
 			var txn types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce:    0,
@@ -2276,7 +2303,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		statedb := state.New(m.NewHistoryStateReader(1, tx))
+		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
@@ -2324,7 +2351,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		statedb := state.New(m.NewHistoryStateReader(1, tx))
+		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
 		baseFee := block.BaseFee()
 		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
 		effectiveTip := tip.Uint64()

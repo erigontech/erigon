@@ -9,16 +9,19 @@ Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that n
 
 ## Prerequisite: Test fixtures
 
-`make test-all-race` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
+`make test-all-race` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
 
-Two side prerequisites still apply:
+If you want race coverage on the EEST blocktests, use the dedicated race shards — `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-{sequential,parallel}` and `make eest-spec-blocktests-devnet-race-amsterdam`. These build a race-instrumented `evm.race` binary automatically (see `EEST_SPEC_RACE_SHARDS` in the root `Makefile`); the `-sequential` / `-parallel` split pins `ERIGON_EXEC3_PARALLEL` so race coverage hits both modes. For the consensus spec suite or other Go packages, pass `GOFLAGS='-race'` or invoke `go test -race` against the relevant package directly.
+
+**Pitfall: stale `evm.race` binary.** `make eest-spec-<race-shard>` lists `evm.race` as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt. Calling `bash tools/run-eest-spec-test.sh <shard>` directly with `EVM_BIN=build/bin/evm.race` **bypasses** the rebuild and silently runs an old race-instrumented binary against current fixtures — race reports against code that no longer exists, missed races against code that does. After pulling or switching branches: `rm -f build/bin/evm.race && make evm.race` before re-running.
+
+One side prerequisite still applies for tests `make test-all-race` does run:
 
 ```bash
 git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
-git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
 ```
 
-The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
+The CI workflow handles this in `setup-erigon`; locally you must do it yourself.
 
 ## Prerequisite: Create RAM Disk
 
@@ -82,7 +85,7 @@ Areas historically susceptible to races in Erigon:
 
 - After changes to the parallel executor or concurrent code paths
 - For concurrency-sensitive fixes before merging
-- Race check gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
+- Race check gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
 
 ## CI Equivalent
 

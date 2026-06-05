@@ -25,8 +25,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -66,16 +64,16 @@ type RejectedTx struct {
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash         `json:"stateRoot"`
-	TxRoot           common.Hash         `json:"txRoot"`
-	ReceiptRoot      common.Hash         `json:"receiptsRoot"`
-	LogsHash         common.Hash         `json:"logsHash"`
-	Bloom            types.Bloom         `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts      `json:"receipts"`
-	Rejected         RejectedTxs         `json:"rejected,omitempty"`
-	Difficulty       *uint256.Int        `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64 `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt      `json:"-"`
+	StateRoot        common.Hash           `json:"stateRoot"`
+	TxRoot           common.Hash           `json:"txRoot"`
+	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
+	LogsHash         common.Hash           `json:"logsHash"`
+	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts         types.Receipts        `json:"receipts"`
+	Rejected         RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
+	StateSyncReceipt *types.Receipt        `json:"-"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -99,10 +97,9 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
-		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
 		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
 			Block:     block,
-			TD:        td,
+			TD:        chainReader.GetTd(block.ParentHash(), block.NumberU64()-1),
 			Finalized: chainReader.CurrentFinalizedHeader(),
 			Safe:      chainReader.CurrentSafeHeader(),
 		})
@@ -198,7 +195,7 @@ func ExecuteBlockEphemerally(
 		Bloom:       bloom,
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
-		Difficulty:  &header.Difficulty,
+		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
 		GasUsed:     math.HexOrDecimal64(blockGasUsed),
 		Rejected:    rejectedTxs,
 	}
@@ -272,9 +269,14 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
 	}
-	ret, _, err := evm.Call(
+	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// so system calls keep their pre-EIP-8037 execution margin.
+		mdGas.State = params.StateGasSystemMaxSstores
+	}
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
@@ -401,9 +403,14 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
 
+	var lbloom types.Bloom
+	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if bloomFromReceipts {
+				lbloom.Or(&r.Bloom)
+			}
 		}
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
@@ -422,7 +429,9 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 	// a pre-Byzantium block (e.g. hive bcInvalidHeaderTest/log1_wrongBloom)
 	// is silently accepted.
 	if checkBloom && !alwaysSkipReceiptCheck {
-		lbloom := types.CreateBloom(receipts)
+		if !bloomFromReceipts {
+			lbloom = types.CreateBloom(receipts)
+		}
 		if lbloom != h.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
 		}

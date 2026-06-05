@@ -72,7 +72,7 @@ func TestDump(t *testing.T) {
 
 	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
 		var copy chain.Config
-		copier.Copy(&copy, config)
+		require.NoError(t, copier.CopyWithOption(&copy, config, copier.Option{DeepCopy: true}))
 		bor := *config.Bor.(*borcfg.BorConfig)
 		bor.Sprint = sprints
 		copy.Bor = &bor
@@ -280,7 +280,6 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		t,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
-		execmoduletester.WithBlockBufferSize(chainSize),
 		execmoduletester.WithPruneMode(prune.DefaultMode),
 	)
 

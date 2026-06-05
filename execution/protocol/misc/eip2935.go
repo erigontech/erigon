@@ -45,6 +45,6 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState)
 func storeHash(num uint64, hash common.Hash, state *state.IntraBlockState) error {
 	slotNum := num % params.BlockHashHistoryServeWindow
 	storageSlot := common.BytesToHash(uint256.NewInt(slotNum).Bytes())
-	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())
+	parentHashInt := uint256.NewInt(0).SetBytes32(hash[:])
 	return state.SetState(params.HistoryStorageAddress, accounts.InternKey(storageSlot), *parentHashInt)
 }

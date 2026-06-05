@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -256,6 +257,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("load/generate node key: %w", err)
 	}
+	mdbxDBSizeLimit := args.MdbxDBSizeLimit
+	if mdbxDBSizeLimit == 0 {
+		mdbxDBSizeLimit = 1 * datasize.GB
+	}
 	nodeConfig := nodecfg.Config{
 		Dirs: dirs,
 		Http: httpConfig,
@@ -266,10 +271,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
-		MdbxDBSizeLimit: 1 * datasize.GB,
+		MdbxDBSizeLimit: mdbxDBSizeLimit,
 		DisableSentry:   args.DisableSentry,
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
@@ -287,6 +291,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
+		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
 	}
 	if args.EthConfigTweaker != nil {
@@ -363,9 +368,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	}
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config)
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config)
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
@@ -384,6 +389,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		CoinbaseKey:          args.CoinbaseKey,
 		ChainConfig:          genesis.Config,
 		EngineApiClient:      engineApiClient,
+		JsonRpcUrl:           "http://" + rpcDaemonHttpUrl,
+		EngineApiUrl:         engineApiUrl,
+		JwtSecret:            jwtSecret,
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
@@ -406,6 +414,7 @@ type EngineApiTesterInitArgs struct {
 	EngineApiClientTimeout *time.Duration
 	DisableTxPool          bool
 	DisableSentry          bool
+	MdbxDBSizeLimit        datasize.ByteSize
 }
 
 type EngineApiTester struct {
@@ -413,6 +422,9 @@ type EngineApiTester struct {
 	CoinbaseKey          *ecdsa.PrivateKey
 	ChainConfig          *chain.Config
 	EngineApiClient      *engineapi.JsonRpcClient
+	JsonRpcUrl           string
+	EngineApiUrl         string
+	JwtSecret            []byte
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
@@ -431,7 +443,7 @@ func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *t
 	test(t.Context(), t, eat)
 }
 
-func (eat EngineApiTester) ChainId() *big.Int {
+func (eat EngineApiTester) ChainId() *uint256.Int {
 	return eat.ChainConfig.ChainID
 }
 

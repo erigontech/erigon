@@ -88,6 +88,14 @@ func (c *EngineAPIRPCClient) NewPayloadV4(ctx context.Context, payload *engine_t
 	return result, nil
 }
 
+func (c *EngineAPIRPCClient) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	result := &engine_types.PayloadStatus{}
+	if err := c.client.CallContext(ctx, result, rpc_helper.EngineNewPayloadV5, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (c *EngineAPIRPCClient) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	result := &engine_types.ForkChoiceUpdatedResponse{}
 	if err := c.client.CallContext(ctx, result, rpc_helper.ForkChoiceUpdatedV1, forkChoiceState, payloadAttributes); err != nil {
@@ -160,6 +168,14 @@ func (c *EngineAPIRPCClient) GetPayloadV5(ctx context.Context, payloadID hexutil
 	return result, nil
 }
 
+func (c *EngineAPIRPCClient) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	result := &engine_types.GetPayloadResponse{}
+	if err := c.client.CallContext(ctx, result, rpc_helper.EngineGetPayloadV6, payloadID); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (c *EngineAPIRPCClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
 	var result []*engine_types.ExecutionPayloadBody
 	if err := c.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
@@ -200,24 +216,24 @@ func (c *EngineAPIRPCClient) GetClientVersionV1(ctx context.Context, callerVersi
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
-	var result []*engine_types.BlobAndProofV1
+func (c *EngineAPIRPCClient) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
+	var result engine_types.BlobsBundleV1
 	if err := c.client.CallContext(ctx, &result, rpc_helper.EngineGetBlobsV1, blobHashes); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
-	var result []*engine_types.BlobAndProofV2
+func (c *EngineAPIRPCClient) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
+	var result engine_types.BlobsBundleV2
 	if err := c.client.CallContext(ctx, &result, rpc_helper.EngineGetBlobsV2, blobHashes); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
-	var result []*engine_types.BlobAndProofV2
+func (c *EngineAPIRPCClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
+	var result engine_types.BlobsBundleV2
 	if err := c.client.CallContext(ctx, &result, rpc_helper.EngineGetBlobsV3, blobHashes); err != nil {
 		return nil, err
 	}

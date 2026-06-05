@@ -24,6 +24,16 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v5
+        with:
+          # Only cache the .tar.gz; the extracted dir is recreated by
+          # tools/test-fixtures.sh on each run from the cached tarball.
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
+
       - name: test-integration-caplin
         run: |
           cd cl/spectest
@@ -43,7 +53,9 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
 
   tests-windows:
     strategy:
@@ -60,6 +72,14 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v5
+        with:
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
+
       - name: test-integration-caplin
         run: |
           cd cl/spectest && make tests
@@ -75,4 +95,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

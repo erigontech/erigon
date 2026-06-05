@@ -133,6 +133,30 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	}
 }
 
+func TestBranchData_ChildCount(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 0, BranchData(nil).ChildCount())
+	require.Equal(t, 0, BranchData{}.ChildCount())
+	require.Equal(t, 0, BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
+
+	for _, size := range []int{1, 2, 5, 16} {
+		row, bm := generateCellRow(t, size)
+		cellData := generateCellEncodeDataRow(t, row, bm)
+		be := NewBranchEncoder(1024)
+		enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+		require.NoError(t, err)
+		require.Equal(t, size, bits.OnesCount16(bm))
+		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
+	}
+
+	// ChildCount counts afterMap (bytes 2:4), not touchMap (bytes 0:2).
+	var buf BranchData = make([]byte, 4)
+	binary.BigEndian.PutUint16(buf[0:], 0xffff)
+	binary.BigEndian.PutUint16(buf[2:], 0b0000_0000_0000_0111)
+	require.Equal(t, 3, buf.ChildCount())
+}
+
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 	t.Parallel()
 
@@ -672,7 +696,9 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 	t.Parallel()
 
-	trie, upd := InitializeTrieAndUpdates(VariantParallelHexPatricia, ModeDirect, t.TempDir())
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantParallelHexPatricia
+	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
 	defer upd.Close()
 	defer trie.Release()
 
@@ -689,7 +715,9 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	t.Parallel()
 
-	trie, upd := InitializeTrieAndUpdates(VariantHexPatriciaTrie, ModeDirect, t.TempDir())
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantHexPatriciaTrie
+	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
 	defer upd.Close()
 	defer trie.Release()
 
@@ -702,7 +730,9 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 func TestInitializeTrieAndUpdates_ConcurrentVariantUnchanged(t *testing.T) {
 	t.Parallel()
 
-	trie, upd := InitializeTrieAndUpdates(VariantConcurrentHexPatricia, ModeDirect, t.TempDir())
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantConcurrentHexPatricia
+	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
 	defer upd.Close()
 	defer trie.Release()
 

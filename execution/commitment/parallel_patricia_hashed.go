@@ -55,6 +55,7 @@ type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
 	workerPool     sync.Pool
+	cfg            TrieConfig
 
 	accountKeyLen int16
 	numWorkers    int
@@ -88,11 +89,12 @@ type publishedRoot struct {
 // NewParallelPatriciaHashed constructs a fresh ParallelPatriciaHashed. The
 // returned instance is usable for configuration immediately; Process requires
 // a non-nil ctxFactory.
-func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16) *ParallelPatriciaHashed {
+func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{
-		template:       NewHexPatriciaHashed(accountKeyLen, nil),
+		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
+		cfg:            cfg,
 		numWorkers:     runtime.NumCPU(),
 		minSplitKeys:   MinSplitKeys,
 	}
@@ -104,9 +106,10 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 // Release to drop any pooled workers that were configured for a prior run.
 func (p *ParallelPatriciaHashed) resetPool() {
 	akl := p.accountKeyLen
+	cfg := p.cfg
 	p.workerPool = sync.Pool{
 		New: func() any {
-			return NewHexPatriciaHashed(akl, nil)
+			return NewHexPatriciaHashed(akl, nil, cfg)
 		},
 	}
 }
@@ -515,7 +518,7 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 		hph := p.workerPool.Get().(*HexPatriciaHashed)
 		hph.resetForReuse()
 		hph.ResetContext(dispatchCtx)
-		hph.branchEncoder.SetDeferUpdates(true)
+		hph.branchEncoder.setDeferUpdates(true)
 		hph.SetLeaveDeferredForCaller(true)
 
 		if p.template != nil {

@@ -151,10 +151,10 @@ const (
 	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
 )
 
-func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
-	switch tv {
+func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
+	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil)
+		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		trie := NewConcurrentPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
@@ -164,7 +164,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		// must allocate the prefix-trie / parallelUpdate state that Prepare
 		// reads. Force ModeParallel here so callers cannot accidentally pair
 		// the parallel trie with ModeDirect/ModeUpdate.
-		trie := NewParallelPatriciaHashed(nil, length.Addr)
+		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	case VariantBinPatriciaTrie:
@@ -177,7 +177,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil)
+		trie := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -328,8 +328,16 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 // Used by the commitment context to defer branch update application until a later flush.
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
-	TxNum    uint64
-	Deferred []*DeferredBranchUpdate
+	// BlockHash is the hash of the block these deferred updates were
+	// generated for. It disambiguates pastChangesAccumulator lookups when
+	// multiple changesets exist for the same block number (e.g. during a
+	// fork-bounce reorg test where canonical and fork chains both saved a
+	// block 1 changeset). Without the hash, GetChangesetByBlockNum returns
+	// the first match it iterates — non-deterministic and wrong in that
+	// scenario.
+	BlockHash common.Hash
+	TxNum     uint64
+	Deferred  []*DeferredBranchUpdate
 }
 
 // Clear returns all deferred updates to the pool and nils the slice.
@@ -347,10 +355,11 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates    bool
-	deferred        []*DeferredBranchUpdate
-	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache           *WarmupCache
+	deferUpdates       bool
+	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
+	deferred           []*DeferredBranchUpdate
+	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	cache              *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -360,9 +369,9 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-// SetDeferUpdates enables or disables deferred update collection.
+// setDeferUpdates enables or disables deferred update collection.
 // When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
-func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
+func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
 	if defer_ {
 		if be.deferred == nil {
@@ -614,8 +623,6 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-const maxDeferredUpdates = 50_000
-
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
 // and defers encoding for parallel execution later.
@@ -628,7 +635,11 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	cells *[16]cellEncodeData,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
-	needsFlush := len(be.deferred) >= maxDeferredUpdates
+	limit := be.maxDeferredUpdates
+	if limit == 0 {
+		limit = DefaultMaxDeferredUpdates
+	}
+	needsFlush := len(be.deferred) >= limit
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}
@@ -749,6 +760,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 }
 
 type BranchData []byte
+
+// ChildCount returns the number of children present in the branch.
+func (branchData BranchData) ChildCount() int {
+	if len(branchData) < 4 {
+		return 0
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+}
 
 func (branchData BranchData) String() string {
 	if len(branchData) == 0 {
