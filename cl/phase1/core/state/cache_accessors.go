@@ -152,6 +152,15 @@ func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, e
 func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
 	epoch := slot / b.BeaconConfig().SlotsPerEpoch
 
+	if b.Version() >= clparams.FuluVersion {
+		stateEpoch := b.Slot() / b.BeaconConfig().SlotsPerEpoch
+		if epoch >= stateEpoch && epoch <= stateEpoch+b.BeaconConfig().MinSeedLookahead {
+			p := b.GetProposerLookahead()
+			index := int((epoch-stateEpoch)*b.BeaconConfig().SlotsPerEpoch + slot%b.BeaconConfig().SlotsPerEpoch)
+			return p.Get(index), nil
+		}
+	}
+
 	hash := sha256.New()
 	beaconConfig := b.BeaconConfig()
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %

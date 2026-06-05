@@ -63,15 +63,7 @@ func skipIfNodeUnreachable(t *testing.T, addrs ...string) {
 	}
 }
 
-func skipIfShort(t *testing.T) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping external-node benchmark in short mode")
-	}
-}
-
 func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
-	skipIfShort(t)
 	skipIfNodeUnreachable(t, rpcAddressNode1)
 
 	txToSendCount := 15000
@@ -149,7 +141,6 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 // This test sends transaction to node1 RPC which means they are local for node1
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
-	skipIfShort(t)
 	skipIfNodeUnreachable(t, rpcAddressNode1)
 
 	txToSendCount := 1000
@@ -214,7 +205,6 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 // This test sends transaction to node2 RPC which means they are remote for node1 and local for node2
 // P2P helper is binded to node1 port, that's why we measure performance of remote txs processing
 func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
-	skipIfShort(t)
 	skipIfNodeUnreachable(t, rpcAddressNode1, rpcAddressNode2)
 
 	nonce := 0
@@ -303,7 +293,6 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 // This test sends transaction to node2 RPC which means they are remote for node1 and local for node2
 // P2P helper is binded to node1 port, that's why we measure performance of remote txs processing
 func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
-	skipIfShort(t)
 	skipIfNodeUnreachable(t, rpcAddressNode1, rpcAddressNode2)
 
 	txToSendCount := 100
