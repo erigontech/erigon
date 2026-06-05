@@ -114,6 +114,13 @@ level so each leaf task carries a non-empty prefix routing to exactly one
 `nibbles[i]` collector. `leafQueue` is finally sorted by descending `keyCount`
 (heaviest tasks dispatch first).
 
+**Adaptive coarsening.** Before the DFS, `Process` raises the effective threshold
+for large batches to `max(MinSplitKeys, touchedKeys / (numWorkers×4))`. A fixed
+`MinSplitKeys` shatters a wide, uniform trie into tens of thousands of leaf tasks,
+each acquiring a ~1MB worker grid; at that volume the pool stops amortizing (a
+1M-flat batch otherwise allocates 16–32 GB and runs slower than sequential). The
+threshold only ever rises, so small and clustered batches keep `MinSplitKeys`.
+
 ### Phase 3 — Dispatch (`runNibbleBucket`)
 
 An ETL collector can be scanned only once, so each touched nibble bucket is owned
@@ -193,7 +200,8 @@ byte-for-byte. Supporting invariants:
   (`execctx.PickTrieVariant`).
 - `MinSplitKeys` (default 64) — minimum subtree size for a fork to become a
   split-point; smaller forks collapse to a leaf task because barrier coordination
-  would dominate the saved work.
+  would dominate the saved work. `Process` coarsens it adaptively for large
+  batches (see Phase 2) to bound the leaf-task count.
 - `numWorkers` (default `runtime.NumCPU()`, override via `SetNumWorkers`).
 
 ## Performance
@@ -211,6 +219,12 @@ workers) — bounded by memory bandwidth and limited top-level fan-out, not lock
 contention. On high-core hosts a tuned worker count beats raw `NumCPU()`;
 worker-count autotuning is future work. These numbers are for hand inspection,
 not a CI gate (too noisy for a "must be faster" assertion).
+
+On heavier loads the adaptive threshold is load-bearing: without it a 1M flat
+batch over-splits and allocates 16–32 GB (parallel slower than sequential, and
+worse with more workers); with it the same batch runs ~1.6× at sub-GB memory.
+Storage-heavy is insensitive to the threshold — its keys already cluster under a
+bounded set of account prefixes.
 
 ## Limitations & future work
 
