@@ -421,7 +421,10 @@ func (s *RecordingState) accountExists(addr common.Address) bool {
 		return acc != nil
 	}
 	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
-	return err == nil && acc != nil
+	// A read error is unexpected for an account accessed this block; include the key
+	// rather than silently drop it — over-inclusion is harmless, a missing key would
+	// make the witness incomplete.
+	return err != nil || acc != nil
 }
 
 // --- Query methods ---
