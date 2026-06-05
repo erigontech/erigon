@@ -204,33 +204,3 @@ func (t *prefixTrie) Insert(hashedKey []byte) {
 		node = node.children[idx]
 	}
 }
-
-// Walk visits every node in DFS pre-order, passing the accumulated nibble prefix
-// (including the node's own ext) and the node itself. The prefix slice is freshly
-// allocated per call — callers may retain it without copying.
-func (t *prefixTrie) Walk(fn func(prefix []byte, node *prefixNode)) {
-	t.walkDFS(t.root, nil, fn)
-}
-
-func (t *prefixTrie) walkDFS(n *prefixNode, accPrefix []byte, fn func([]byte, *prefixNode)) {
-	if n == nil {
-		return
-	}
-	prefix := make([]byte, len(accPrefix)+len(n.ext))
-	copy(prefix, accPrefix)
-	copy(prefix[len(accPrefix):], n.ext)
-	fn(prefix, n)
-
-	bm := n.bitmap
-	childIdx := 0
-	for bm != 0 {
-		nib := byte(bits.TrailingZeros16(bm))
-		child := n.children[childIdx]
-		childPrefix := make([]byte, len(prefix)+1)
-		copy(childPrefix, prefix)
-		childPrefix[len(prefix)] = nib
-		t.walkDFS(child, childPrefix, fn)
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-}

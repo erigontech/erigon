@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"math/bits"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,13 +39,32 @@ type walkEntry struct {
 	bitmap       uint16
 }
 
+// collectWalk visits every node in DFS pre-order and records its accumulated
+// prefix, subtreeCount, and bitmap. Production has no trie walker (Prepare uses
+// its own DFS), so this helper recurses directly for the structure assertions.
 func collectWalk(t *prefixTrie) []walkEntry {
 	var out []walkEntry
-	t.Walk(func(prefix []byte, node *prefixNode) {
-		p := make([]byte, len(prefix))
-		copy(p, prefix)
-		out = append(out, walkEntry{prefix: p, subtreeCount: node.subtreeCount, bitmap: node.bitmap})
-	})
+	var dfs func(n *prefixNode, accPrefix []byte)
+	dfs = func(n *prefixNode, accPrefix []byte) {
+		if n == nil {
+			return
+		}
+		prefix := make([]byte, len(accPrefix)+len(n.ext))
+		copy(prefix, accPrefix)
+		copy(prefix[len(accPrefix):], n.ext)
+		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.subtreeCount, bitmap: n.bitmap})
+		childIdx := 0
+		for bm := n.bitmap; bm != 0; {
+			nib := byte(bits.TrailingZeros16(bm))
+			childPrefix := make([]byte, len(prefix)+1)
+			copy(childPrefix, prefix)
+			childPrefix[len(prefix)] = nib
+			dfs(n.children[childIdx], childPrefix)
+			childIdx++
+			bm &^= uint16(1) << nib
+		}
+	}
+	dfs(t.root, nil)
 	return out
 }
 
