@@ -94,7 +94,7 @@ default_test_race_timeout := 60m
 # only via its own `execution-eest-zkevm` test-group (which provisions the
 # tarball), not the default ./... sweep, so `make test-all`/`test-short` stay
 # fast and don't hard-fail when the zkevm fixtures aren't downloaded.
-GOTEST_PACKAGES = $(shell go list ./... | grep -v '/eest_zkevm_witness$$')
+GOTEST_PACKAGES = $(filter-out %/eest_zkevm_witness,$(shell go list ./... 2>/dev/null))
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
