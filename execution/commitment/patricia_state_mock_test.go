@@ -39,7 +39,7 @@ type MockState struct {
 	t          testing.TB
 	concurrent atomic.Bool
 
-	mu     sync.Mutex            // to protect sm and cm for concurrent trie
+	mu     sync.RWMutex          // to protect sm and cm for concurrent trie
 	sm     map[string][]byte     // backbone of the state
 	cm     map[string]BranchData // backbone of the commitments
 	numBuf [binary.MaxVarintLen64]byte
@@ -74,8 +74,8 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 
 func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	if ms.concurrent.Load() {
-		ms.mu.Lock()
-		defer ms.mu.Unlock()
+		ms.mu.RLock()
+		defer ms.mu.RUnlock()
 	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
@@ -86,11 +86,11 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 
 func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 	if ms.concurrent.Load() {
-		ms.mu.Lock()
+		ms.mu.RLock()
 	}
 	exBytes, ok := ms.sm[string(plainKey)]
 	if ms.concurrent.Load() {
-		ms.mu.Unlock()
+		ms.mu.RUnlock()
 	}
 	if !ok {
 		//ms.t.Logf("%p GetAccount not found key [%x]", ms, plainKey)
@@ -122,11 +122,11 @@ func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 
 func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	if ms.concurrent.Load() {
-		ms.mu.Lock()
+		ms.mu.RLock()
 	}
 	exBytes, ok := ms.sm[string(plainKey)]
 	if ms.concurrent.Load() {
-		ms.mu.Unlock()
+		ms.mu.RUnlock()
 	}
 	if !ok {
 		ms.t.Logf("GetStorage not found key [%x]", plainKey)
