@@ -43,6 +43,7 @@ type BbdHeaderReader interface {
 type BackwardBlockDownloader struct {
 	logger        log.Logger
 	fetcher       Fetcher
+	balFetcher    BALFetcher
 	peerPenalizer *PeerPenalizer
 	peerTracker   *PeerTracker
 	tmpDir        string
@@ -51,6 +52,7 @@ type BackwardBlockDownloader struct {
 func NewBackwardBlockDownloader(
 	logger log.Logger,
 	fetcher Fetcher,
+	balFetcher BALFetcher,
 	peerPenalizer *PeerPenalizer,
 	peerTracker *PeerTracker,
 	tmpDir string,
@@ -58,6 +60,7 @@ func NewBackwardBlockDownloader(
 	return &BackwardBlockDownloader{
 		logger:        logger,
 		fetcher:       fetcher,
+		balFetcher:    balFetcher,
 		peerPenalizer: peerPenalizer,
 		peerTracker:   peerTracker,
 		tmpDir:        tmpDir,
@@ -457,6 +460,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 	batchAssignments := make([]batchAssignment, 0, len(headerBatches))
 	blockBatches := make([][]*types.Block, len(availablePeers))
+	balBatches := make([]map[common.Hash][]byte, len(availablePeers))
 	pendingBatches := true
 	attempts := 1
 	for pendingBatches {
@@ -538,6 +542,28 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				}
 				if len(blockBatch) == len(headerBatch) {
 					blockBatches[batchIndex] = blockBatch
+					if bbd.balFetcher != nil {
+						if reqs := balRequestsForHeaders(headerBatch); len(reqs) > 0 {
+							// Best-effort: fetch BALs from the same peer that served the
+							// bodies. A miss just means execution recomputes the BAL.
+							bals, balErr := bbd.balFetcher.FetchFromPeer(ctx, reqs, &peerId, config.balBatchFetchTimeout)
+							if balErr != nil {
+								bbd.logger.Debug(
+									"[backward-block-downloader] best-effort BAL fetch failed",
+									"peerId", peerId.String(),
+									"err", balErr,
+								)
+							} else {
+								balBatches[batchIndex] = bals
+								bbd.logger.Debug(
+									"[backward-block-downloader] fetched BALs over eth/71",
+									"peerId", peerId.String(),
+									"got", len(bals),
+									"requested", len(reqs),
+								)
+							}
+						}
+					}
 				}
 				return nil
 			})
@@ -566,16 +592,50 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	blocks := make([]*types.Block, 0, len(headers))
-	for _, blocksBatch := range blockBatches {
-		blocks = append(blocks, blocksBatch...)
+	bals := make([][]byte, 0, len(headers))
+	haveBAL := false
+	for batchIndex, blocksBatch := range blockBatches {
+		balMap := balBatches[batchIndex]
+		for _, block := range blocksBatch {
+			blocks = append(blocks, block)
+			var bal []byte
+			if balMap != nil {
+				if v, ok := balMap[block.Hash()]; ok {
+					bal = v
+					haveBAL = true
+				}
+			}
+			bals = append(bals, bal)
+		}
+	}
+	if !haveBAL {
+		bals = nil
 	}
 
-	err = feed.consumeData(ctx, blocks)
+	err = feed.consumeData(ctx, blocks, bals)
 	if err != nil {
 		return fmt.Errorf("result feed could not consume blocks batch: %w", err)
 	}
 
 	return nil
+}
+
+// balRequestsForHeaders builds BAL requests for the Amsterdam+ headers in the
+// batch (those committing to a BlockAccessListHash); pre-Amsterdam headers are
+// skipped.
+func balRequestsForHeaders(headers []*types.Header) []BALRequest {
+	var reqs []BALRequest
+	for _, header := range headers {
+		if header.BlockAccessListHash == nil {
+			continue
+		}
+		reqs = append(reqs, BALRequest{
+			Hash:         header.Hash(),
+			Number:       header.Number.Uint64(),
+			ExpectedHash: *header.BlockAccessListHash,
+		})
+	}
+	return reqs
 }
 
 func newPeersContext(peers []*PeerId) peersContext {
