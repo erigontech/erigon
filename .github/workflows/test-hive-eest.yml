@@ -46,15 +46,23 @@ jobs:
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
         with:
-          sparse-checkout: go.mod
+          sparse-checkout: |
+            go.mod
+            .github/workflows/hive-versions.json
           sparse-checkout-cone-mode: false
           path: erigon-src
+
+      - name: Read pinned versions
+        id: hive-version
+        run: |
+          echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          ref: master
+          # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
     
       - name: Conditional Docker Login
