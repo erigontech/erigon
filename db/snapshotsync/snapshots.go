@@ -1084,7 +1084,9 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 	return res, missingSnapshots, nil
 }
 
-func allTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInfo, err error) {
+// AllTypedSegments returns the raw, unfiltered list of segment files on disk
+// that match the given types. No overlap or gap removal is applied.
+func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInfo, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, err
@@ -1210,7 +1212,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		files, err := allTypedSegments(s.dir, s.Types())
+		files, err := AllTypedSegments(s.dir, s.Types())
 		if err != nil {
 			return err
 		}
@@ -1242,7 +1244,7 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	files, err := allTypedSegments(s.dir, types)
+	files, err := AllTypedSegments(s.dir, types)
 
 	if err != nil {
 		return err

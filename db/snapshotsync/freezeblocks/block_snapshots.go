@@ -93,9 +93,6 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	return snapshotsync.TypedSegments(dir, snaptype2.BlockSnapshotTypes, true)
-}
 
 func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
 	list, err := snaptype.Segments(dir)
@@ -275,7 +272,8 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		nextBlockInSnapshots := br.snapshots().SegmentsMax() + 1
 		haveGap = nextBlockInSnapshots < firstInDB
 		if haveGap {
-			// Log once per unique gap start.
+			// Log once per unique gap: Swap stores firstInDB and returns the previous
+			// value. If it matches, we already logged for this exact gap — skip.
 			if br.lastRetireGapStart.Swap(firstInDB) != firstInDB {
 				br.logger.Debug("skipping block snapshot retirement: db does not contain the next block after snapshots",
 					"nextBlockInSnapshots", nextBlockInSnapshots,
