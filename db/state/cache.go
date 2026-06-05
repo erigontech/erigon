@@ -62,7 +62,10 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 
 // newDomainCache sizes the per-domain file cache to roughly half the executor
 // StateCache byte budget: counts derived from average value sizes per domain.
-func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
+// The capacity is capped by the number of keys in the visible files — freelru
+// preallocates its full capacity upfront, so an uncapped cache costs ~1GB per
+// aggregator instance even when the files hold almost no data.
+func newDomainCache(name kv.Domain, files visibleFiles) *DomainGetFromFileCache {
 	if !domainGetFromFileCacheEnabled {
 		return nil
 	}
@@ -77,6 +80,13 @@ func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 		limit = limit + limit/2
 	case kv.CodeDomain:
 		limit = limit / 100
+	}
+	var fileKeys uint64
+	for _, f := range files {
+		fileKeys += uint64(f.src.decompressor.Count() / 2)
+	}
+	if fileKeys < uint64(limit) {
+		limit = uint32(fileKeys)
 	}
 	if limit == 0 {
 		return nil
@@ -96,7 +106,7 @@ func newDomainVisible(name kv.Domain, files visibleFiles, prev *domainVisible) *
 	if prev != nil && prev.cache != nil && prev.files.EndTxNum() == files.EndTxNum() {
 		d.cache = prev.cache
 	} else {
-		d.cache = newDomainCache(name)
+		d.cache = newDomainCache(name, files)
 	}
 	return d
 }
