@@ -38,65 +38,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Context) {
-	tb.Helper()
-	ch := make(chan Announcements, 5)
-	coreDB := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
-	db := memdb.NewTestPoolDB(tb)
-	cfg := txpoolcfg.DefaultConfig
-	cfg.TotalBlobPoolLimit = 1000
-	ctx, cancel := context.WithCancel(context.Background())
-	tb.Cleanup(cancel)
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(tb, err)
-	require.NotNil(tb, pool)
-	pool.blockGasLimit.Store(30000000)
-
-	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remoteproto.StateChangeBatch{
-		StateVersionId:       0,
-		PendingBlockBaseFee:  200_000,
-		BlockGasLimit:        math.MaxUint64,
-		PendingBlobFeePerGas: 100_000,
-		ChangeBatch:          []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h1}},
-	}
-	acc := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts3.EmptyCodeHash, Incarnation: 1}
-	v := accounts3.SerialiseV3(&acc)
-	var addr [20]byte
-	for i := 0; i < numAccounts; i++ {
-		addr[0] = uint8(i + 1)
-		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-			Action:  remoteproto.Action_UPSERT,
-			Address: gointerfaces.ConvertAddressToH160(addr),
-			Data:    v,
-		})
-	}
-	require.NoError(tb, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	return pool, ctx
-}
-
-func addTestBlobTxn(tb testing.TB, pool *TxPool, ctx context.Context, senderByte byte, nonce uint64) []common.Hash {
-	tb.Helper()
-	blobTxn := makeBlobTxn()
-	blobTxn.IDHash[0] = senderByte
-	blobTxn.IDHash[1] = byte(nonce)
-	blobTxn.Nonce = nonce
-	bt := blobTxn.Txn.(*types.BlobTx)
-	bt.Nonce = nonce
-	bt.GasLimit = 50000
-	var addr [20]byte
-	addr[0] = senderByte
-	var slots TxnSlots
-	slots.Append(&blobTxn, addr[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, slots)
-	require.NoError(tb, err)
-	for _, r := range reasons {
-		require.Equal(tb, txpoolcfg.Success, r, r.String())
-	}
-	return blobTxn.GetBlobHashes()
-}
-
 func TestGetBlobsRemovedAfterMined(t *testing.T) {
 	require := require.New(t)
 	pool, ctx := newGetBlobsTestPool(t, 1)
@@ -155,4 +96,63 @@ func TestGetBlobsUnknownHash(t *testing.T) {
 	require.Nil(got[2].Blob)
 	require.NotNil(got[3].Blob)
 	require.Nil(got[4].Blob)
+}
+
+func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Context) {
+	tb.Helper()
+	ch := make(chan Announcements, 5)
+	coreDB := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
+	db := memdb.NewTestPoolDB(tb)
+	cfg := txpoolcfg.DefaultConfig
+	cfg.TotalBlobPoolLimit = 1000
+	ctx, cancel := context.WithCancel(context.Background())
+	tb.Cleanup(cancel)
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(tb, err)
+	require.NotNil(tb, pool)
+	pool.blockGasLimit.Store(30000000)
+
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:       0,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        math.MaxUint64,
+		PendingBlobFeePerGas: 100_000,
+		ChangeBatch:          []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h1}},
+	}
+	acc := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts3.EmptyCodeHash, Incarnation: 1}
+	v := accounts3.SerialiseV3(&acc)
+	var addr [20]byte
+	for i := 0; i < numAccounts; i++ {
+		addr[0] = uint8(i + 1)
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(addr),
+			Data:    v,
+		})
+	}
+	require.NoError(tb, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	return pool, ctx
+}
+
+func addTestBlobTxn(tb testing.TB, pool *TxPool, ctx context.Context, senderByte byte, nonce uint64) []common.Hash {
+	tb.Helper()
+	blobTxn := makeBlobTxn()
+	blobTxn.IDHash[0] = senderByte
+	blobTxn.IDHash[1] = byte(nonce)
+	blobTxn.Nonce = nonce
+	bt := blobTxn.Txn.(*types.BlobTx)
+	bt.Nonce = nonce
+	bt.GasLimit = 50000
+	var addr [20]byte
+	addr[0] = senderByte
+	var slots TxnSlots
+	slots.Append(&blobTxn, addr[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(tb, err)
+	for _, r := range reasons {
+		require.Equal(tb, txpoolcfg.Success, r, r.String())
+	}
+	return blobTxn.GetBlobHashes()
 }
