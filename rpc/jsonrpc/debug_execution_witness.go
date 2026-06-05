@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -144,8 +143,8 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 	}
 	acc, err := s.inner.ReadAccountData(address)
 	if acc != nil && acc.IsEmptyCodeHash() {
-		// Loading an empty-code account materializes the empty bytecode; legacy
-		// mode emits that single empty entry.
+		// Pre-state load of an empty-code account materializes the empty
+		// bytecode (legacy's single empty entry); overlay reads are post-state.
 		s.emptyCodeAccessed = true
 	}
 	if s.tracing(addr) {
@@ -1416,6 +1415,7 @@ type witnessStateless struct {
 	deleted        map[common.Address]struct{}                    // deleted accounts
 	created        map[common.Address]struct{}                    // created contracts
 	trace          bool
+	strictVerify   bool // error on trie nodes missing from the witness
 
 	// Debug: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -1474,6 +1474,7 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 		deleted:        make(map[common.Address]struct{}),
 		created:        make(map[common.Address]struct{}),
 		trace:          false,
+		strictVerify:   dbg.EnvBool("WITNESS_STRICT_VERIFY", false),
 	}, nil
 }
 
@@ -1537,7 +1538,7 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 	// gotValue==false ⟺ traversal hit an unresolved HashNode (node missing from witness).
 	// Strict mode errors on that, except the protocol system address (0xff..fe), whose
 	// state is protocol-fixed and intentionally omitted by reth too.
-	if os.Getenv("WITNESS_STRICT_VERIFY") != "" && addr != common.Address(params.SystemAddress.Value()) {
+	if s.strictVerify && addr != common.Address(params.SystemAddress.Value()) {
 		return nil, fmt.Errorf("strict witness: unresolved trie node reading account %x (missing from witness)", addr)
 	}
 	return nil, nil
@@ -1591,7 +1592,7 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> not found\n", addr.Hex(), keyValue.Hex())
 	}
-	if os.Getenv("WITNESS_STRICT_VERIFY") != "" && addr != common.Address(params.SystemAddress.Value()) {
+	if s.strictVerify && addr != common.Address(params.SystemAddress.Value()) {
 		return uint256.Int{}, false, fmt.Errorf("strict witness: unresolved trie node reading storage %x/%x (missing from witness)", addr, keyValue)
 	}
 	return uint256.Int{}, false, nil
