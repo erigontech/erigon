@@ -8,7 +8,7 @@ description: Run Erigon Hive simulator tests locally or via GitHub Actions. Test
 Runs Hive simulator tests for EL/CL protocol interoperability. Two modes:
 1. **`make test-hive`** — uses `act` (nektos) to simulate the GitHub Actions workflow locally
 2. **`make hive-local`** — builds hive and runs suites directly (no `act` needed)
-3. **`make eest-devnet`** — runs the BAL/Amsterdam-specific EEST fixtures
+3. **`make eest-devnet`** — runs the Amsterdam-specific EEST fixtures
 
 ## Prerequisites
 
@@ -48,7 +48,7 @@ SUITE=eest make test-hive
 make hive-local
 ```
 
-### BAL/Amsterdam-specific (EIP-7928 fixtures)
+### Amsterdam devnet fixtures
 
 ```bash
 # Runs eels/consume-engine with amsterdam fixtures
@@ -133,13 +133,13 @@ cd temp/<hive-dir>/hive
 | `engine/auth` | JWT authentication |
 | `rpc-compat` | RPC compatibility with reference |
 | `eels/consume-engine` | EEST execution spec tests |
-| `eels/consume-engine` (amsterdam) | EIP-7928 BAL Amsterdam fixtures |
+| `eels/consume-engine` (amsterdam) | EEST Amsterdam devnet fixtures |
 
 ## Related Skill
 
 For an **interactive, ephemeral hive workflow** (handles versioned EEST fixtures, Dockerfile setup, BAL workarounds, per-suite parallelism), use the `/hive-test` skill instead:
 ```
-/hive-test eest-devnet       # run devnet (BAL/glamsterdam) tests
+/hive-test eest-devnet       # run Amsterdam devnet tests
 /hive-test engine rpc-compat # run engine + rpc suites
 /hive-test all               # run everything
 ```

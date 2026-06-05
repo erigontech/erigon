@@ -27,7 +27,7 @@ The user may specify one or more test suites in any combination:
 | `auth` | ethereum/engine | Engine auth |
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
 | `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
-| `eest-devnet` | ethereum/eels/consume-engine | EEST devnet (BAL/glamsterdam) fixtures (version auto-discovered) |
+| `eest-devnet` | ethereum/eels/consume-engine | EEST Amsterdam devnet fixtures (version auto-discovered) |
 | `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
@@ -41,7 +41,7 @@ The user may specify one or more test suites in any combination:
 - `/hive-test withdrawals api` - Run withdrawals and API suites
 - `/hive-test engine` - Run all engine suites
 - `/hive-test engine rpc-compat` - Run all engine suites plus rpc-compat
-- `/hive-test eest-devnet` - Run devnet EEST tests (BAL/glamsterdam)
+- `/hive-test eest-devnet` - Run Amsterdam devnet EEST tests
 - `/hive-test eest-rlp` - Run EEST RLP block-import tests
 - `/hive-test all` - Run everything
 
@@ -51,7 +51,7 @@ The user may specify one or more test suites in any combination:
   working directory. The branch is cloned from `https://github.com/erigontech/erigon.git`
   into the hive client directory. Example: `/hive-test api branch=fix/my-feature`
 - **eest-version=VERSION** - Pin EEST fixtures version (e.g. `v5.3.0`). Default: auto-discover latest.
-- **bal-version=VERSION** - Pin BAL fixtures version (e.g. `bal@v5.1.0`). Default: auto-discover latest.
+- **bal-version=VERSION** - Pin Amsterdam devnet fixtures version (e.g. `bal@v5.1.0`; the `bal@` prefix is the upstream release-tag convention). Default: auto-discover latest.
 
 ## Expected Failures (CI thresholds)
 
@@ -69,15 +69,42 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-engine) | 0 |
 | eest-rlp | 0 |
-| eest-devnet (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
+| eest-devnet — `paris-devnet` | 0 |
+| eest-devnet — `shanghai-devnet` | 0 |
+| eest-devnet — `cancun-devnet` | 0 |
+| eest-devnet — `prague-devnet` | 0 |
+| eest-devnet — `osaka-devnet` | 0 |
+| eest-devnet — `amsterdam-a-l-devnet` | 1 (EIP-7928 `test_bal_invalid_extraneous_entries` flake, #21364 — lives in `tests/amsterdam/...` so it falls in this [a-l] shard) |
+| eest-devnet — `amsterdam-m-z-devnet` | 0 |
+| eest-devnet — `bpo-transitions-devnet` | 2 (EIP-7928 `test_invalid_{pre,post}_fork_block_*_bal_hash_field` at `fork_BPO2ToAmsterdamAtTime15k` — well-formed V4/V5 newPayload with a wrong-fork-schema header; erigon returns InvalidStatus + INVALID_BLOCK_HASH while the tests expect -32602 InvalidParams. Testing team has been notified.) |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
-against the URL and hive `branch` pinned under the `eest_devnet`
-entry in `test-fixtures.json` (currently `bal@v5.7.0` / `devnets/bal/4`),
-with `--experimental.bal` enabled on the erigon side. Reproduce locally by
-aligning the invocation with those values — `make eest-devnet` reads them
-from the manifest via `jq` and applies them automatically.
+The CI `eest_devnet` shards mirror the `eest_stable` per-fork split with three
+adjustments:
+- `paris` and `shanghai` are separate shards (not combined as in `eest_stable`)
+  because the consume-engine plugin on `devnets/bal/7` doesn't honour regex
+  alternation in `--sim.limit`: `".*/.*fork_(Paris|Shanghai)"` leaks ~5.8k
+  fork_Cancun tests in. Single-fork patterns filter correctly.
+- `fork_Amsterdam` is split into two shards by first-directory letter under
+  `tests/` — `.*tests/[a-l].*fork_Amsterdam` and `.*tests/[m-z].*fork_Amsterdam`
+  — so each finishes in ~25 min instead of ~52 min for the combined ~21k tests.
+- A dedicated `bpo-transitions` shard (sim-limit `.*fork_BPO`) is added to both
+  `eest_stable` and `eest_devnet` matrices. The per-fork shards catch `X->Y`
+  transitions where the source fork `X` has its own shard (via substring match
+  on `fork_X`), but no shard's pattern is a substring of `fork_BPO[N]To*`, so
+  BPO-source transitions need their own. Stable covers `BPO1->BPO2`,
+  `BPO2->BPO3`, `BPO3->BPO4` (17 tests, ~80s). Devnet covers `BPO1->BPO2` and
+  `BPO2->Amsterdam` (94 tests, ~40s) — the latter contains the two known
+  EIP-7928 deterministic failures.
+
+The `amsterdam-{a-l,m-z}-devnet` and `bpo-transitions-devnet` shards pass
+`--experimental.bal` on the erigon side and `--client.checktimelimit=300s` to
+hive (the BPO2->Amsterdam transition crosses BAL activation); the pre-Amsterdam
+per-fork devnet shards run with default flags. All devnet shards consume the URL and hive `branch` pinned
+under the `eest_devnet` entry in `test-fixtures.json` (currently `bal@v7.2.0` /
+`devnets/bal/7`). Reproduce locally by aligning the invocation with those
+values — `make eest-devnet` reads them from the manifest via `jq` and applies
+them automatically.
 
 ## Procedure
 
@@ -91,7 +118,7 @@ if the user provided explicit version overrides (`eest-version=`, `bal-version=`
 EEST_VERSION=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
   | jq -r '[.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tag_name')
 
-# Latest BAL fixtures (tag matching bal@v*.*.*)
+# Latest Amsterdam devnet fixtures (upstream tag prefix is `bal@v*.*.*`)
 BAL_TAG=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
   | jq -r '[.[] | select(.tag_name | startswith("bal@"))][0].tag_name')
 BAL_BRANCH="tests-${BAL_TAG}"
@@ -167,7 +194,7 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
 
    FROM debian:13-slim
    COPY --from=builder /usr/local/bin/erigon /usr/local/bin/
-   RUN apt-get update && apt-get install -y bash curl jq libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/*
+   RUN apt-get update && apt-get install -y bash curl gcc iproute2 jq libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/*
    RUN erigon --version | sed -e 's/erigon version \(.*\)/\1/' > /version.txt
    COPY genesis.json /genesis.json
    COPY mapper.jq /mapper.jq
