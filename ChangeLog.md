@@ -113,7 +113,6 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 - **EIP-7732 — Enshrined Proposer-Builder Separation (ePBS / "GLOAS"):** implemented in Caplin — execution-payload envelope, PTC, and builder payments (#18956) — with follow-up audit and fork-choice fixes (#21248, #21228) — by @domiwei
 - **Gas repricings:** EIP-8037 State Creation Gas Cost Increase (#19596), EIP-7976 calldata floor cost (#20613), EIP-7981 access-list cost (#20671) — by @taratorio
 - **EIP-7954 — Increase Maximum Contract Size** (#19624) — by @yperbasis
-- **EIP-7708 — ETH transfers and SELFDESTRUCT emit logs** (#19685, #20416) — by @Sahil-4555, @yperbasis
 - **EIP-7843 — slot-number system contract**, wired into Caplin block production and `engine_forkchoiceUpdatedV4` (#20175) — by @yperbasis
 - **Networking:** `eth/71` Block Access List exchange (EIP-8159, #20793, #20794, #20795) — by @mh0lt
 
@@ -122,7 +121,6 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 #### RPC
 
 - `debug_executionWitness`: generate stateless execution witnesses (EIP-7928/8025), with `legacy` and `canonical` output modes — the `legacy` format is reth-compatible — for zkEVM and stateless clients (#20205, #21371, #21518, #21629) — by @antonis19, @lupin012, @awskii
-- `eth_getBlockAccessList`: return a block's EIP-7928 access list (#19929) — by @yperbasis
 - `eth_capabilities`: report the set of supported RPC methods (#20951) — by @lupin012
 - `debug_setHead`: rewind the chain head (#19577) — by @canepat
 - **GraphQL** substantially revived — transaction, logs, `call`, `sendRawTransaction`, `estimateGas`, `gasPrice`, and storage resolvers, plus EIP-4844 fields (#20389, #20916, #21219, #21379, #21060) — by @lupin012
