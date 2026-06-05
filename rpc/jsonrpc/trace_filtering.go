@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
@@ -42,8 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -66,6 +65,7 @@ type withdrawalBalanceDiff struct {
 	address common.Address
 	prev    uint256.Int
 	amount  uint256.Int
+	existed bool
 }
 
 // Transaction implements trace_transaction
@@ -954,9 +954,14 @@ func (api *TraceAPIImpl) callBlock(
 	var wdiffs []withdrawalBalanceDiff
 	for _, w := range block.Withdrawals() {
 		var prev uint256.Int
+		var existed bool
 		if hasStateDiff {
 			var err error
 			prev, err = ibs.GetBalance(accounts.InternAddress(w.Address))
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			existed, err = ibs.Exist(accounts.InternAddress(w.Address))
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -967,6 +972,7 @@ func (api *TraceAPIImpl) callBlock(
 			address: w.Address,
 			prev:    prev,
 			amount:  amountWei,
+			existed: existed,
 		})
 	}
 

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
@@ -169,7 +170,7 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 // TestBlockWithdrawalTraceEntries verifies that trace_block includes a
 // "reward"/"withdrawal" entry for each beacon-chain withdrawal in the block.
 func TestBlockWithdrawalTraceEntries(t *testing.T) {
-	const withdrawalGwei = uint64(32_000_000) // 32 ETH in Gwei
+	const withdrawalGwei = uint64(32_000_000) // 0.032 ETH in Gwei
 	withdrawalAddr := common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 
 	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
@@ -226,8 +227,9 @@ func TestBlockWithdrawalNoEntriesPreShanghai(t *testing.T) {
 // trace_replayBlockTransactions returns a synthetic final entry whose
 // stateDiff captures the balance increase from beacon-chain withdrawals.
 func TestReplayBlockTransactionsWithdrawalStateDiff(t *testing.T) {
-	const withdrawalGwei = uint64(1_000_000) // 1 ETH in Gwei
+	const withdrawalGwei = uint64(1_000_000) // 0.001 ETH in Gwei
 	withdrawalAddr := common.HexToAddress("0xcafecafecafecafecafecafecafecafecafecafe")
+	genesisBalance, _ := new(big.Int).SetString("100000000000000000000", 10)
 
 	m, blk := chainWithWithdrawal(t, withdrawalAddr, withdrawalGwei)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
@@ -246,12 +248,15 @@ func TestReplayBlockTransactionsWithdrawalStateDiff(t *testing.T) {
 	wdDiff, ok := last.StateDiff[internedAddr]
 	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
 
-	balDiff, ok := wdDiff.Balance.(*StateDiffBalance)
+	balMap, ok := wdDiff.Balance.(map[string]*StateDiffBalance)
 	require.True(t, ok, "balance diff has unexpected type: %T", wdDiff.Balance)
+	balDiff := balMap["*"]
+	require.NotNil(t, balDiff, "balance diff missing \"*\" key")
 
 	expectedAmountWei := new(big.Int).Mul(new(big.Int).SetUint64(withdrawalGwei), big.NewInt(1e9))
 	actualFrom := balDiff.From.ToInt()
 	actualTo := balDiff.To.ToInt()
+	require.Equal(t, genesisBalance, actualFrom, "From must equal pre-withdrawal (genesis) balance")
 	delta := new(big.Int).Sub(actualTo, actualFrom)
 	require.Equal(t, expectedAmountWei, delta,
 		"withdrawal balance delta mismatch: from=%s to=%s expected delta=%s", actualFrom, actualTo, expectedAmountWei)
@@ -299,8 +304,10 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
 	require.Len(t, last.StateDiff, 1, "expected one collapsed entry for the repeated address")
 
-	balDiff, ok := wdDiff.Balance.(*StateDiffBalance)
+	balMap, ok := wdDiff.Balance.(map[string]*StateDiffBalance)
 	require.True(t, ok, "balance diff has unexpected type: %T", wdDiff.Balance)
+	balDiff := balMap["*"]
+	require.NotNil(t, balDiff, "balance diff missing \"*\" key")
 
 	expectedDelta := new(big.Int).Mul(new(big.Int).SetUint64(wd1Gwei+wd2Gwei), big.NewInt(1e9))
 	delta := new(big.Int).Sub(balDiff.To.ToInt(), balDiff.From.ToInt())
@@ -309,4 +316,87 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 		balDiff.From.ToInt(), balDiff.To.ToInt(), expectedDelta)
 	require.Equal(t, "=", wdDiff.Code)
 	require.Equal(t, "=", wdDiff.Nonce)
+}
+
+// TestReplayBlockTransactionsWithdrawalNewAddress verifies that a withdrawal to
+// an address that did not previously exist produces a "+" stateDiff entry
+// (account creation) rather than a "*" modification entry.
+func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
+	const withdrawalGwei = uint64(1_000_000)
+	// Address intentionally absent from genesis alloc.
+	newAddr := common.HexToAddress("0xaaaabbbbccccddddeeeeffffaaaabbbbccccdddd")
+	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	n := rpc.BlockNumber(generated.Blocks[0].NumberU64())
+	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+
+	last := results[len(results)-1]
+	require.NotNil(t, last.StateDiff)
+
+	wdDiff, ok := last.StateDiff[internedAddress(newAddr.Hex())]
+	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
+
+	balMap, ok := wdDiff.Balance.(map[string]*hexutil.Big)
+	require.True(t, ok, "expected creation balance map[string]*hexutil.Big, got %T", wdDiff.Balance)
+	finalBal := balMap["+"]
+	require.NotNil(t, finalBal, "balance missing \"+\" key")
+
+	expectedWei := new(big.Int).Mul(new(big.Int).SetUint64(withdrawalGwei), big.NewInt(1e9))
+	require.Equal(t, expectedWei, finalBal.ToInt(), "new-address withdrawal balance mismatch")
+
+	_, codeIsPlus := wdDiff.Code.(map[string]hexutil.Bytes)
+	require.True(t, codeIsPlus, "expected code \"+\" creation map, got %T", wdDiff.Code)
+	_, nonceIsPlus := wdDiff.Nonce.(map[string]hexutil.Uint64)
+	require.True(t, nonceIsPlus, "expected nonce \"+\" creation map, got %T", wdDiff.Nonce)
+}
+
+// TestReplayBlockTransactionsMultiWithdrawalNewAddress verifies that multiple
+// withdrawals to the same brand-new address are collapsed into a single "+"
+// stateDiff entry with the accumulated total balance.
+func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
+	const (
+		wd1Gwei = uint64(400_000)
+		wd2Gwei = uint64(600_000)
+	)
+	newAddr := common.HexToAddress("0x1111222233334444555566667777888899990000")
+	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
+		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	n := rpc.BlockNumber(generated.Blocks[0].NumberU64())
+	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+
+	last := results[len(results)-1]
+	require.NotNil(t, last.StateDiff)
+	require.Len(t, last.StateDiff, 1, "expected one collapsed entry for the repeated address")
+
+	wdDiff, ok := last.StateDiff[internedAddress(newAddr.Hex())]
+	require.True(t, ok, "withdrawal address not found in synthetic stateDiff entry")
+
+	balMap, ok := wdDiff.Balance.(map[string]*hexutil.Big)
+	require.True(t, ok, "expected creation balance map[string]*hexutil.Big, got %T", wdDiff.Balance)
+	finalBal := balMap["+"]
+	require.NotNil(t, finalBal, "balance missing \"+\" key")
+
+	expectedWei := new(big.Int).Mul(new(big.Int).SetUint64(wd1Gwei+wd2Gwei), big.NewInt(1e9))
+	require.Equal(t, expectedWei, finalBal.ToInt(), "collapsed new-address withdrawal balance mismatch")
 }

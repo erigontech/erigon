@@ -1059,20 +1059,38 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		for _, wd := range wdiffs {
 			addr := accounts.InternAddress(wd.address)
 			if entry, ok := sdMap[addr]; ok {
-				bal := entry.Balance.(*StateDiffBalance)
-				cur, _ := uint256.FromBig(bal.To.ToInt())
-				cur.Add(cur, &wd.amount)
-				bal.To = (*hexutil.Big)(cur.ToBig())
+				if wd.existed {
+					bal := entry.Balance.(map[string]*StateDiffBalance)["*"]
+					cur, _ := uint256.FromBig(bal.To.ToInt())
+					cur.Add(cur, &wd.amount)
+					bal.To = (*hexutil.Big)(cur.ToBig())
+				} else {
+					balMap := entry.Balance.(map[string]*hexutil.Big)
+					cur, _ := uint256.FromBig(balMap["+"].ToInt())
+					cur.Add(cur, &wd.amount)
+					balMap["+"] = (*hexutil.Big)(cur.ToBig())
+				}
 			} else {
 				to := new(uint256.Int).Add(&wd.prev, &wd.amount)
-				sdMap[addr] = &StateDiffAccount{
-					Balance: &StateDiffBalance{
-						From: (*hexutil.Big)(wd.prev.ToBig()),
-						To:   (*hexutil.Big)(to.ToBig()),
-					},
-					Code:    "=",
-					Nonce:   "=",
-					Storage: map[common.Hash]map[string]any{},
+				if wd.existed {
+					sdMap[addr] = &StateDiffAccount{
+						Balance: map[string]*StateDiffBalance{
+							"*": {
+								From: (*hexutil.Big)(wd.prev.ToBig()),
+								To:   (*hexutil.Big)(to.ToBig()),
+							},
+						},
+						Code:    "=",
+						Nonce:   "=",
+						Storage: map[common.Hash]map[string]any{},
+					}
+				} else {
+					sdMap[addr] = &StateDiffAccount{
+						Balance: map[string]*hexutil.Big{"+": (*hexutil.Big)(to.ToBig())},
+						Code:    map[string]hexutil.Bytes{"+": {}},
+						Nonce:   map[string]hexutil.Uint64{"+": 0},
+						Storage: map[common.Hash]map[string]any{},
+					}
 				}
 			}
 		}
