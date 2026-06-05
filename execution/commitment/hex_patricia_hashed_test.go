@@ -822,7 +822,9 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
 		Build()
 
-	trieNormal := NewHexPatriciaHashed(length.Addr, stateNormal, DefaultTrieConfig())
+	normalCfg := DefaultTrieConfig()
+	normalCfg.DeferBranchUpdates = false
+	trieNormal := NewHexPatriciaHashed(length.Addr, stateNormal, normalCfg)
 	deferredCfg := DefaultTrieConfig()
 	deferredCfg.DeferBranchUpdates = true
 	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
