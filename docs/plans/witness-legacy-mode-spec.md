@@ -80,9 +80,10 @@ The unhashed preimages of every accessed key:
 - **account addresses** — 20 bytes, included only when the account exists in post-state;
 - **storage slots** — 32 bytes, for every accessed slot.
 
-The EIP-7928 system address `0xff…fe` is excluded unless it has a real state change: it is touched as the
-`msg.sender` of the per-block system call, which on its own is not a state access. Entries are deduplicated and
-sorted ascending. Populated in both modes.
+The EIP-7928 system address `0xff…fe` is excluded unless it has a real state change or is accessed by a user
+transaction: it is touched as the `msg.sender` of the per-block system call, which on its own is not a state
+access, so that system-call touch alone does not include it. Entries are deduplicated and sorted ascending.
+Populated in both modes.
 
 ### `headers` — ancestor headers
 

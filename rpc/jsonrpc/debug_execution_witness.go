@@ -931,21 +931,23 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		}
 	}
 
-	witnessKeySet := make(map[string]struct{}, len(out.Addresses))
+	// Address (20B) and slot (32B) keys never collide, so a per-type set
+	// reproduces the original single dedup set; slots dedup across accounts.
+	slotSet := make(map[common.Hash]struct{})
+	for _, keys := range out.Storage {
+		for key := range keys {
+			slotSet[key] = struct{}{}
+		}
+	}
+	witnessKeys := make([]hexutil.Bytes, 0, len(out.Addresses)+len(slotSet))
 	for addr := range out.Addresses {
 		if !rs.accountExists(addr) {
 			continue
 		}
-		witnessKeySet[string(addr[:])] = struct{}{}
+		witnessKeys = append(witnessKeys, bytes.Clone(addr[:]))
 	}
-	for _, keys := range out.Storage {
-		for key := range keys {
-			witnessKeySet[string(key[:])] = struct{}{}
-		}
-	}
-	witnessKeys := make([]hexutil.Bytes, 0, len(witnessKeySet))
-	for k := range witnessKeySet {
-		witnessKeys = append(witnessKeys, []byte(k))
+	for slot := range slotSet {
+		witnessKeys = append(witnessKeys, bytes.Clone(slot[:]))
 	}
 	slices.SortFunc(witnessKeys, func(a, b hexutil.Bytes) int {
 		return bytes.Compare(a, b)

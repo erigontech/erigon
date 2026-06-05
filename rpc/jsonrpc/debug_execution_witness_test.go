@@ -220,7 +220,7 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got != witnessModeLegacy {
-			t.Errorf("param legacy should win over canonical env, got %v", got)
+			t.Errorf("param legacy should resolve to legacy mode, got %v", got)
 		}
 
 		got, err = resolveWitnessMode(str("canonical"))
