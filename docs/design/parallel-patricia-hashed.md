@@ -37,7 +37,7 @@ in how the computation is scheduled.
 | flag | (default) | `--experimental.concurrent-commitment` | `--experimental.parallel-commitment` |
 | `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeDirect` + `sortPerNibble` | `ModeParallel` |
 | parallel unit | none | one goroutine per top nibble (≤16 mounts) | worker pool (`NumCPU`) over leaf tasks |
-| split granularity | none | fixed: 16-way at **depth 1** only | adaptive: any node with `fanout≥2` and `subtreeCount≥MinSplitKeys`, at **any depth**, chained |
+| split granularity | none | fixed: 16-way at **depth 1** only | adaptive: any node with `subtrees≥2` and `subtreeCount≥MinSplitKeys`, at **any depth**, chained |
 | merge mechanism | single bottom-up fold | each mount folds, takes `rootMu`, writes `root.grid[0][nib]`; root folded last | fold-time barrier at each split-point; last finisher rebuilds the row and folds up the chain |
 | root-update sync | — | `rootMu` mutex | atomic `arrived` counter + staged `pendingRoot` |
 | branch writes | inline `PutBranch` | inline (per mount) | deferred per worker, merged + applied once |
@@ -103,10 +103,10 @@ ones — the property the parallel design must preserve.
 
 DFS classifies each node:
 
-- **Split-point** iff `fanout ≥ 2` **and** `subtreeCount ≥ MinSplitKeys` **and**
+- **Split-point** iff `subtrees ≥ 2` **and** `subtreeCount ≥ MinSplitKeys` **and**
   the node hosts no terminator key. For each, Prepare loads the on-disk branch via
   `ctx.Branch`, seeds `sp.cells` for every nibble present on disk, sets
-  `dbBitmap`/`branchBefore`, and stores `arrived = fanout`.
+  `dbBitmap`/`branchBefore`, and stores `arrived = subtrees`.
 - **Leaf task** otherwise: the node's whole subtree collapses into one task.
 
 The root is special-cased: even when it is not a split-point, Prepare descends one
@@ -161,7 +161,7 @@ byte-for-byte. Supporting invariants:
 
 - **Untouched-nibble pre-population.** A branch hash mixes all present nibbles;
   workers write only touched slots, so Prepare seeds the rest from disk.
-- **`arrived = fanout`, not `fanout − 1`.** With `fanout − 1`, both workers of a
+- **`arrived = subtrees`, not `subtrees − 1`.** With `subtrees − 1`, both workers of a
   2-way fork pass the barrier and two roots get published.
 - **No split-point at a terminator node.** `splitPoint.cells` is indexed by child
   nibble with no terminator slot; splitting at a node where a key ends (e.g. an

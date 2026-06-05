@@ -220,9 +220,9 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		return fmt.Errorf("parallelUpdate.Prepare: prefix depth %d exceeds max %d", nodeDepth, PrefixTrieMaxDepth)
 	}
 
-	fanout := bits.OnesCount16(node.bitmap)
+	subtrees := bits.OnesCount16(node.bitmap)
 
-	if isRoot && fanout == 0 {
+	if isRoot && subtrees == 0 {
 		// Empty trie — nothing to do.
 		return nil
 	}
@@ -231,7 +231,7 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 	if threshold == 0 {
 		threshold = MinSplitKeys
 	}
-	qualifiesAsSplit := fanout >= 2 && node.subtreeCount >= threshold
+	qualifiesAsSplit := subtrees >= 2 && node.subtreeCount >= threshold
 
 	// A node hosting a terminator key (one that ends exactly here, e.g. an
 	// account at depth 64 above its storage) cannot be a split-point:
@@ -259,11 +259,10 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		if err := pu.loadDBBranch(ctx, sp); err != nil {
 			return err
 		}
-		// arrived = fanout (the count of depositing workers). Initialising to
-		// fanout-1 would let both workers of a 2-way fork pass the barrier and
-		// publish two roots; with fanout, the worker whose Add(-1) returns 0 is
-		// the unique last finisher.
-		sp.arrived.Store(int32(fanout))
+		// One depositor per subtree; the worker whose Add(-1) returns 0 is the
+		// unique last finisher. (subtrees, not subtrees-1: at a 2-way fork the
+		// latter would let both workers pass the barrier and publish two roots.)
+		sp.arrived.Store(int32(subtrees))
 		pu.splitMap.Set(nodePrefix, sp)
 		pu.splitPoints = append(pu.splitPoints, sp)
 		return pu.recurseChildren(ctx, node, nodePrefix)
