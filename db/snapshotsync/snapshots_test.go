@@ -285,6 +285,45 @@ func TestMergeSnapshots(t *testing.T) {
 	// require.Equal(10, a)
 }
 
+func TestMergeSkipsPreClaimedRange(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for i := uint64(0); i < 4; i++ {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	// pre-claim one type of the first range: Merge must skip that whole range,
+	// roll back its own partial claims, and leave the pre-claim intact
+	claimed, free := NewRange(0, 20_000), NewRange(20_000, 40_000)
+	require.True(s.TryAcquireRange(snaptype2.Transactions.Enum(), claimed.From(), claimed.To()))
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	require.NoError(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{claimed, free}, s.Dir(), false, nil, nil))
+
+	skippedFile := filepath.Join(dir, snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, claimed.From(), claimed.To(), snaptype2.Transactions.Enum()))
+	exists, err := dir2.FileExist(skippedFile)
+	require.NoError(err)
+	require.False(exists)
+	require.False(s.TryAcquireRange(snaptype2.Transactions.Enum(), claimed.From(), claimed.To()))
+	require.True(s.TryAcquireRange(snaptype2.Headers.Enum(), claimed.From(), claimed.To()))
+	s.ReleaseRange(snaptype2.Headers.Enum(), claimed.From(), claimed.To())
+
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		mergedFile := filepath.Join(dir, snaptype.SegmentFileName(snT.Versions().Current, free.From(), free.To(), snT.Enum()))
+		exists, err := dir2.FileExist(mergedFile)
+		require.NoError(err)
+		require.True(exists)
+		require.True(s.TryAcquireRange(snT.Enum(), free.From(), free.To()))
+		s.ReleaseRange(snT.Enum(), free.From(), free.To())
+	}
+}
+
 func TestDeleteSnapshots(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
