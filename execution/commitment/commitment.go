@@ -129,9 +129,8 @@ type CommitProgress struct {
 
 type PatriciaContext interface {
 	// Branch loads branch-node bytes for a hex-compact prefix.
-	// The returned slice is BORROWED and valid only for the current
-	// ComputeCommitment scope — callers must not retain or mutate it.
-	// To keep the bytes past that scope, clone before storing.
+	// The returned slice is an independent copy owned by the caller;
+	// it is safe to retain across multiple Branch calls.
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte) error

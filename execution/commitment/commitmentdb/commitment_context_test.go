@@ -55,7 +55,7 @@ func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte
 
 func (r *testStateReader) Clone(kv.TemporalTx) StateReader { return r }
 
-func Test_TrieContext_BranchBorrowsData(t *testing.T) {
+func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	t.Parallel()
 
 	prefix := []byte{0xaa}
@@ -74,9 +74,8 @@ func Test_TrieContext_BranchBorrowsData(t *testing.T) {
 	require.Equal(t, prefix, reader.readKey)
 	require.Equal(t, uint64(1), reader.readStepSize)
 
-	// Branch returns a borrowed slice that aliases the underlying domain
-	// storage — callers must consume inline or clone before retaining.
-	// Mutating the source shows through in the returned slice (no copy).
+	// Branch must return an independent copy — mutating the underlying
+	// domain storage must NOT affect the previously returned slice.
 	reader.branchData[0] = 9
-	require.Equal(t, []byte{9, 2, 3}, branch)
+	require.Equal(t, initial, branch, "Branch should return a copy independent of the underlying storage")
 }
