@@ -49,8 +49,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -155,8 +157,29 @@ func init() {
 	cmdCommitmentBenchHistoryLookup.Flags().Int64Var(&benchHistorySeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
 
+	// commitment recompute-at — debug harness for the mode-B
+	// RecomputeAtTxNumWithoutSD primitive. Runs the primitive against
+	// the datadir at the supplied (toTxNum, maxStep) and prints the
+	// computed root + baseline txnum. Fast (no 10-min erigon launch)
+	// — drop into recompute_sdless.go with probes + re-run.
+	withChain(cmdCommitmentRecomputeAt)
+	withDataDir(cmdCommitmentRecomputeAt)
+	withConfig(cmdCommitmentRecomputeAt)
+	cmdCommitmentRecomputeAt.Flags().Uint64Var(&recomputeToTxNum, "to-tx-num", 0, "target txnum (last txnum of unwind toBlock); mutually exclusive with --block")
+	cmdCommitmentRecomputeAt.Flags().Uint64Var(&recomputeBlock, "block", 0, "target block number; --to-tx-num is derived as rawdbv3.TxNums.Max(block); --expected-root is filled from header.StateRoot")
+	cmdCommitmentRecomputeAt.Flags().Uint64Var(&recomputeMaxStep, "max-step", 0, "step bound for file-side reads (typically (toTxNum+1)/stepSize)")
+	cmdCommitmentRecomputeAt.Flags().StringVar(&recomputeExpectedRoot, "expected-root", "", "optional hex-encoded expected root; mismatch is reported but not fatal")
+	commitmentCmd.AddCommand(cmdCommitmentRecomputeAt)
+
 	rootCmd.AddCommand(commitmentCmd)
 }
+
+var (
+	recomputeToTxNum      uint64
+	recomputeBlock        uint64
+	recomputeMaxStep      uint64
+	recomputeExpectedRoot string
+)
 
 var commitmentCmd = &cobra.Command{
 	Use:   "commitment",
@@ -423,6 +446,126 @@ var cmdCommitmentPrint = &cobra.Command{
 				logger.Error(err.Error())
 			}
 			return
+		}
+	},
+}
+
+// integration commitment recompute-at — runs the mode-B RecomputeAtTxNumWithoutSD
+// primitive directly against the datadir. Used to iterate on probes/fixes
+// without the 10-min erigon-launch + setHead-RPC cycle.
+var cmdCommitmentRecomputeAt = &cobra.Command{
+	Use:   "recompute-at",
+	Short: "Run mode-B RecomputeAtTxNumWithoutSD against the datadir and report the root",
+	Long: `Opens the datadir read-only, calls commitmentdb.RecomputeAtTxNumWithoutSD with
+the supplied --to-tx-num and --max-step, and prints the computed root + baseline
+txnum + branch count. If --expected-root is supplied, also reports match/mismatch.
+
+This is a debug harness — it bypasses the storage.Provider.Unwind orchestration
+(no wiping, no shadow setup, no apply). Use it to iterate on probe additions in
+recompute_sdless.go without the full setHead RPC cycle.
+
+Example:
+  integration commitment recompute-at \\
+    --datadir /erigon/tmp/erigon-hoodi-phase4.I503p --chain hoodi \\
+    --to-tx-num 103125037 --max-step 264 \\
+    --expected-root 746d9bfd23f521286b89f4c61906fb501fe75092a7e43dc7a78bc5d0740cacb5
+`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if recomputeMaxStep == 0 {
+			logger.Error("--max-step is required")
+			return
+		}
+		if recomputeToTxNum == 0 && recomputeBlock == 0 {
+			logger.Error("--to-tx-num or --block is required")
+			return
+		}
+
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		stepSize := agg.StepSize()
+		ctx := cmd.Context()
+
+		roTx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			logger.Error("BeginTemporalRo", "err", err)
+			return
+		}
+		defer roTx.Rollback()
+
+		// --block path: derive toTxNum and fill expected from header.StateRoot.
+		if recomputeBlock != 0 {
+			lastTxNum, terr := rawdbv3.TxNums.Max(ctx, roTx, recomputeBlock)
+			if terr != nil {
+				logger.Error("TxNums.Max", "block", recomputeBlock, "err", terr)
+				return
+			}
+			recomputeToTxNum = lastTxNum
+			blockReader, _ := blocksIO(db, logger)
+			header, herr := blockReader.HeaderByNumber(ctx, roTx, recomputeBlock)
+			if herr != nil {
+				logger.Error("HeaderByNumber", "block", recomputeBlock, "err", herr)
+				return
+			}
+			if header == nil {
+				logger.Error("HeaderByNumber returned nil", "block", recomputeBlock)
+				return
+			}
+			fmt.Printf("CANONICAL: block=%d toTxNum=%d hash=%x stateRoot=%x\n", recomputeBlock, recomputeToTxNum, header.Hash(), header.Root)
+			if recomputeExpectedRoot == "" {
+				recomputeExpectedRoot = hex.EncodeToString(header.Root[:])
+			}
+		}
+
+		var expected []byte
+		if recomputeExpectedRoot != "" {
+			expected, err = hex.DecodeString(strings.TrimPrefix(recomputeExpectedRoot, "0x"))
+			if err != nil {
+				logger.Error("decoding expected-root", "err", err)
+				return
+			}
+		}
+
+		tmpDir, err := os.MkdirTemp("", "recompute-at-")
+		if err != nil {
+			logger.Error("mktemp", "err", err)
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+
+		fmt.Printf("RecomputeAtTxNumWithoutSD: toTxNum=%d maxStep=%d stepSize=%d\n", recomputeToTxNum, recomputeMaxStep, stepSize)
+		root, encodedTrieState, baselineTxNum, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, tmpDir, recomputeToTxNum, kv.Step(recomputeMaxStep), stepSize)
+		if err != nil {
+			fmt.Printf("ERROR: %v\n", err)
+			return
+		}
+		branchCount := 0
+		if branches != nil {
+			// Count by loading into a noop. The collector is single-use;
+			// loading drains it. We only want a count for diagnostic
+			// purposes here.
+			err = branches.Load(nil, "", func(_, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+				branchCount++
+				return nil
+			}, etl.TransformArgs{})
+			branches.Close()
+			if err != nil {
+				logger.Warn("draining branch collector for count", "err", err)
+			}
+		}
+		fmt.Printf("RESULT: root=%x baselineTxNum=%d trieStateBytes=%d branchCount=%d\n", root, baselineTxNum, len(encodedTrieState), branchCount)
+		if expected != nil {
+			if bytes.Equal(root, expected) {
+				fmt.Printf("EXPECTED MATCH: ok\n")
+			} else {
+				fmt.Printf("EXPECTED MISMATCH: expected=%x got=%x\n", expected, root)
+			}
 		}
 	},
 }

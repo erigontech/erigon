@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,6 +33,12 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
+
+// bigIntStringRe matches a JSON entry whose value is a quoted decimal
+// number for any of the chain.Config *big.Int fields. Some third-party
+// writers JSON-encode big.Int as a string; the standard encoder emits
+// a JSON number. The pre-parse below relaxes that for known fields.
+var bigIntStringRe = regexp.MustCompile(`("(?:chainId|terminalTotalDifficulty)")\s*:\s*"(\d+)"`)
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
@@ -45,7 +52,13 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 
 	var config chain.Config
 	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
+		fixed := bigIntStringRe.ReplaceAll(data, []byte(`$1:$2`))
+		if bytes.Equal(fixed, data) {
+			return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
+		}
+		if err2 := json.Unmarshal(fixed, &config); err2 != nil {
+			return nil, fmt.Errorf("invalid chain config JSON: %x, original=%v, after-chainId-fix=%w", hash, err, err2)
+		}
 	}
 
 	if config.BorJSON != nil {

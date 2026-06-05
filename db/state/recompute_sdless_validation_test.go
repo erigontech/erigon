@@ -22,10 +22,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -95,6 +97,440 @@ func TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_NonAligned_OneTx(t *te
 		ToTxNum:        16,
 		MaxStepForReco: 2, // (16+1)/8 = 2
 	})
+}
+
+// TestRecomputeAtTxNumWithoutSD_MidBlockCS reproduces the hoodi
+// production scenario where a single block spans multiple step
+// boundaries — so the in-file cs (written at a mid-step CC trigger)
+// is a MID-BLOCK partial-execution snapshot, not a block-end state.
+// Mode B's recompute must reproduce block-end stateRoot starting
+// from this mid-block cs baseline + the partial-block tail's history
+// touches.
+//
+// Existing NonAligned cases all have cs at block-end (their fixtures
+// map blockNum = txN/stepSize, so every step boundary IS also a
+// block boundary). That coverage gap is what this test fills.
+//
+// Independent ground truth: two parallel DBs writing the same
+// sequence.
+//   - dbA: writes with a mid-step CC at the file-end step boundary
+//     (analog of rw_v3.go:388's (txN+1)%stepSize==0 trigger fires
+//     INSIDE the block). The file ends up with a mid-block cs as its
+//     latest CommitmentDomain record. This is the input fixture
+//     for RecomputeAtTxNumWithoutSD.
+//   - dbB: same writes, NO mid-step CC — only a block-end CC. The
+//     block-end CC's root is the canonical reference (R_canonical).
+//
+// Forward exec without mid-block CC (dbB) and with mid-block CC
+// (dbA's block-end CC, if we ran it) MUST produce the same root —
+// production correctness depends on this. The bug under test is
+// whether the SD-LESS RECOMPUTE PRIMITIVE on dbA reproduces
+// R_canonical when fed mid-block cs as baseline.
+func TestRecomputeAtTxNumWithoutSD_MidBlockCS(t *testing.T) {
+	t.Parallel()
+	const (
+		stepSize uint64 = 8
+		// One "block" spans txN [0, 15] — TWO full steps. Mid-step CCs
+		// at txN=7 and txN=15 are both INSIDE block 0.
+		blockEndTxN uint64  = 15
+		fileEndTxN  uint64  = 16 // BuildFiles boundary — covers steps 0 and 1
+		toTxNum     uint64  = blockEndTxN
+		maxStep     kv.Step = 2 // (15+1)/8 = 2 → covers files with endStep <= 2
+		// numAccounts/numStorage chosen LARGER than the simple cases to
+		// give the trie real branching structure (more like hoodi's
+		// 85 acct + 96 storage touches).
+		numAccounts = 64
+		numStorage  = 64
+	)
+
+	ctx := t.Context()
+
+	accountKeys := make([][]byte, numAccounts)
+	for i := 0; i < numAccounts; i++ {
+		accountKeys[i] = makeTestAccountAddr(uint64(i))
+	}
+	storageKeys := make([][]byte, numStorage)
+	for i := 0; i < numStorage; i++ {
+		storageKeys[i] = makeTestStorageKey(uint64(i), 1)
+	}
+
+	writeAt := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
+		t.Helper()
+		for i := 0; i < numAccounts; i++ {
+			acc := accounts.Account{
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 1000),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, accountKeys[i], accounts.SerialiseV3(&acc), txNum, nil))
+		}
+		for i := 0; i < numStorage; i++ {
+			var val [32]byte
+			val[31] = byte(txNum + 1)
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKeys[i], val[:], txNum, nil))
+		}
+	}
+
+	// build returns the block-end commitment root computed by SD's
+	// ComputeCommitment after the supplied write/CC sequence. The
+	// caller controls whether mid-step CCs fire.
+	build := func(t *testing.T, midStepCC bool) ([]byte, *kvAggHandles) {
+		t.Helper()
+		db, agg := testDbAndAggregatorv3(t, stepSize)
+		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
+		var blockEndRoot []byte
+		{
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			for txNum := uint64(0); txNum <= blockEndTxN; txNum++ {
+				writeAt(domains, rwTx, txNum)
+				// Mid-step CC at every step boundary EXCEPT the block
+				// end itself. All CCs use blockNum=0 since the entire
+				// run is still inside block 0.
+				if midStepCC && (txNum+1)%stepSize == 0 && txNum != blockEndTxN {
+					_, err := domains.ComputeCommitment(ctx, rwTx, true, 0, txNum, "", nil)
+					require.NoError(t, err)
+					require.NoError(t, domains.Flush(ctx, rwTx))
+				}
+			}
+			// Block-end CC — canonical root regardless of whether
+			// mid-step CCs fired.
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, 0, blockEndTxN, "", nil)
+			require.NoError(t, err)
+			blockEndRoot = append([]byte(nil), rh...)
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, 0, blockEndTxN))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+			require.NoError(t, rwTx.Commit())
+		}
+		require.NoError(t, agg.BuildFiles(fileEndTxN))
+		return blockEndRoot, &kvAggHandles{db: db, agg: agg}
+	}
+
+	// dbB: ground-truth path — block-end CC only, no mid-step CC.
+	canonicalRoot, _ := build(t, false /* midStepCC */)
+	require.NotEmpty(t, canonicalRoot)
+
+	// dbA: production-like — mid-step CC at txN=7 (still inside block 0)
+	// AND a block-end CC at txN=15. The block-end CC anchors block 0's
+	// canonical root in the writable shadow / commitment file; the mid-
+	// step CC is the partial-block snapshot that mode B's recompute
+	// would later load if the block-end record were unavailable.
+	dbARoot, handlesA := build(t, true /* midStepCC */)
+	require.Equal(t, canonicalRoot, dbARoot,
+		"sanity: forward exec must produce the same block-end root regardless of mid-step CCs")
+
+	// Now exercise the recompute primitive on dbA. To force it to read
+	// the MID-BLOCK cs (not the block-end cs that build() also wrote),
+	// we wipe the writable shadow's commitment records past the mid-
+	// step boundary. After this, the only KeyCommitmentState visible
+	// is the mid-block cs collated into the file at endStep=2.
+	//
+	// This mirrors mode B's setup: after admin SetHead unwinds past
+	// the block-end's step, the block-end cs is wiped; only the
+	// in-file mid-step cs remains as baseline.
+	wipeShadowPastMidStep := func(t *testing.T, db kv.TemporalRwDB) {
+		t.Helper()
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		// Delete every KeyCommitmentState dup at step > 1 (the mid-step
+		// boundary is at step 1: (7+1)/stepSize=1). The block-end CC
+		// at txN=15 wrote a dup at step 1 too (15/8=1) — so we need
+		// finer-grained wiping. Simpler: delete every dup whose value
+		// step prefix decodes to step > 1 OR whose tx-encoded txNum > 7.
+		c, err := rwTx.RwCursorDupSort("CommitmentVals")
+		require.NoError(t, err)
+		defer c.Close()
+		_, v, err := c.SeekExact(commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		for v != nil {
+			// CommitmentVals dup layout: 8B inv-step prefix + raw cs bytes.
+			// Decode inv-step; if step > 1 — we want to KEEP it (the
+			// mid-step cs lives at step 1). But we actually want to keep
+			// only the smaller-txnum cs at step 1, deleting the larger.
+			// Simpler approach: decode raw cs bytes, drop if cs.txNum > 7.
+			if len(v) >= 16 {
+				txN, _ := commitmentdb.DecodeTxBlockNums(v[8:])
+				if txN > 7 {
+					require.NoError(t, c.DeleteCurrent())
+				}
+			}
+			_, nv, err := c.NextDup()
+			require.NoError(t, err)
+			v = nv
+		}
+		require.NoError(t, rwTx.Commit())
+	}
+	wipeShadowPastMidStep(t, handlesA.db)
+
+	// Run the recompute against the mid-block cs baseline.
+	gotRoot, baselineTxNum := func() ([]byte, uint64) {
+		roTx, err := handlesA.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		root, _, btx, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, t.TempDir(), toTxNum, maxStep, stepSize)
+		require.NoError(t, err, "RecomputeAtTxNumWithoutSD failed")
+		if branches != nil {
+			branches.Close()
+		}
+		return append([]byte(nil), root...), btx
+	}()
+
+	t.Logf("MidBlockCS: canonical=%x recompute=%x baselineTxNum=%d toTxNum=%d", canonicalRoot, gotRoot, baselineTxNum, toTxNum)
+	require.Equal(t, uint64(7), baselineTxNum, "recompute must pick the mid-block cs (txN=7), not the block-end cs (txN=15)")
+	require.Equal(t, canonicalRoot, gotRoot,
+		"mid-block-cs recompute root must match canonical forward-exec root")
+}
+
+// kvAggHandles bundles the test DB + aggregator so build() can return
+// both for the caller's use.
+type kvAggHandles struct {
+	db  kv.TemporalRwDB
+	agg *state.Aggregator
+}
+
+// TestRecomputeAtTxNumWithoutSD_MidBlockCS_HoodiPatterns extends the
+// basic MidBlockCS test with patterns observed in the hoodi production
+// failure but absent from the simpler tests:
+//
+//   - Pre-existing untouched keys: a large set of accounts/storage
+//     written in step 0 and NEVER touched again. They sit in the
+//     baseline trie with leaf hashes from step 0; they must remain
+//     correct through the mid-block-cs recompute without re-touching.
+//   - DELETEs: storage slots written then later set to all-zeros
+//     within the partial-block tail (analog to hoodi's consolidation-
+//     contract slot 0 = 0).
+//   - Contracts: accounts with non-empty CodeHash + Incarnation > 0
+//     (analog to hoodi sys-contract accounts).
+//
+// If this test fails with the same wrong-root pattern as hoodi while
+// the simpler MidBlockCS passes, the bug is in one of these specific
+// patterns.
+func TestRecomputeAtTxNumWithoutSD_MidBlockCS_HoodiPatterns(t *testing.T) {
+	t.Parallel()
+	const (
+		stepSize uint64 = 8
+		// Multi-step pre-existing data:
+		//   Step 0 [0, 7]:  preExistingTxNums — write many untouched keys
+		//   Step 1 [8, 15]: block 0 first half (mid-block CC at txN=15)
+		//   Step 2 [16, 23]: block 0 second half + block-end at txN=23
+		// So block 0 spans txN [8, 23] and mid-step CC at txN=15 is
+		// MID-BLOCK. Files cover up to step 2.
+		preExistingEndTxN uint64  = 7
+		blockStartTxN     uint64  = 8
+		midBlockCSTxN     uint64  = 15 // (txN+1)%8==0, inside block 0
+		blockEndTxN       uint64  = 23
+		fileEndTxN        uint64  = 24 // BuildFiles covers steps 0..2
+		toTxNum           uint64  = blockEndTxN
+		maxStep           kv.Step = 3 // (23+1)/8 = 3 → keeps files endStep <= 3
+		// Larger account/storage sets to expand the trie's branching.
+		numPreExistingAccts   = 256
+		numPreExistingStorage = 256
+		numBlockTouchedAccts  = 32
+		numBlockTouchedStor   = 32
+		numDeletedStorage     = 8 // subset of pre-existing storage that gets deleted
+		numContracts          = 8 // contract accounts (non-zero codeHash + incarnation)
+	)
+
+	ctx := t.Context()
+
+	// Pre-existing keys — written once at txN=0, never touched again.
+	preAccts := make([][]byte, numPreExistingAccts)
+	for i := range preAccts {
+		preAccts[i] = makeTestAccountAddr(uint64(i + 10000)) // offset to avoid collisions
+	}
+	preStorage := make([][]byte, numPreExistingStorage)
+	for i := range preStorage {
+		preStorage[i] = makeTestStorageKey(uint64(i+10000), 1)
+	}
+	// Block-touched keys — written within block 0 (both halves).
+	blockAccts := make([][]byte, numBlockTouchedAccts)
+	for i := range blockAccts {
+		blockAccts[i] = makeTestAccountAddr(uint64(i))
+	}
+	blockStor := make([][]byte, numBlockTouchedStor)
+	for i := range blockStor {
+		blockStor[i] = makeTestStorageKey(uint64(i), 1)
+	}
+	// Deleted storage — first numDeletedStorage of preStorage, deleted
+	// in the partial-block tail at txN=20 (between mid-block CC and
+	// block end).
+	deletedStor := preStorage[:numDeletedStorage]
+	// Contract code hash for first numContracts of blockAccts (the
+	// loop checks i < numContracts directly).
+	contractCodeHash := func() accounts.CodeHash {
+		var h common.Hash
+		for i := range h {
+			h[i] = byte(0xAB ^ i)
+		}
+		return accounts.InternCodeHash(h)
+	}()
+
+	writePreExisting := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
+		t.Helper()
+		for i, key := range preAccts {
+			acc := accounts.Account{
+				Nonce:    1,
+				Balance:  *uint256.NewInt(uint64(i + 1)),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, accounts.SerialiseV3(&acc), txNum, nil))
+		}
+		for i, key := range preStorage {
+			var val [32]byte
+			val[31] = byte(i + 1)
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, val[:], txNum, nil))
+		}
+	}
+	writeBlockTouches := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
+		t.Helper()
+		for i, key := range blockAccts {
+			isContract := i < numContracts
+			acc := accounts.Account{
+				Nonce:   txNum,
+				Balance: *uint256.NewInt(txNum * 1000),
+			}
+			if isContract {
+				acc.CodeHash = contractCodeHash
+				acc.Incarnation = 1
+			} else {
+				acc.CodeHash = accounts.EmptyCodeHash
+			}
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, accounts.SerialiseV3(&acc), txNum, nil))
+		}
+		for i, key := range blockStor {
+			var val [32]byte
+			val[31] = byte(txNum + uint64(i))
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, val[:], txNum, nil))
+		}
+	}
+	deleteStorageInTail := func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, txNum uint64) {
+		t.Helper()
+		for _, key := range deletedStor {
+			require.NoError(t, domains.DomainDel(kv.StorageDomain, rwTx, key, txNum, nil))
+		}
+	}
+
+	build := func(t *testing.T, midStepCC bool) ([]byte, *kvAggHandles) {
+		t.Helper()
+		db, agg := testDbAndAggregatorv3(t, stepSize)
+		// Hoodi has ReplaceKeysInValues=true. Match production.
+		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+
+		var blockEndRoot []byte
+		{
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			// Pre-existing data: write all once at txN=0, then advance txN
+			// to fill the step (writing nothing additional). At step-0
+			// boundary (txN=7), call CC with blockNum=0 — but this CC
+			// happens at a block boundary in our timeline (pre-existing
+			// is "block -1" if you will; we treat it as setup).
+			writePreExisting(domains, rwTx, 0)
+			// CC at end of step 0 anchors pre-existing data in the
+			// commitment file. Use blockNum=0 — TxNums entry says block
+			// "pre-existing" ends at txN=7.
+			_, err = domains.ComputeCommitment(ctx, rwTx, true, 0, preExistingEndTxN, "", nil)
+			require.NoError(t, err)
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, 0, preExistingEndTxN))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+
+			// Block 0 first half: txN [8, 15]. All block-touched keys
+			// written at every txN.
+			for txN := blockStartTxN; txN <= midBlockCSTxN; txN++ {
+				writeBlockTouches(domains, rwTx, txN)
+			}
+			// Mid-block CC at txN=15 if requested.
+			if midStepCC {
+				_, err = domains.ComputeCommitment(ctx, rwTx, true, 1, midBlockCSTxN, "", nil)
+				require.NoError(t, err)
+				require.NoError(t, domains.Flush(ctx, rwTx))
+			}
+
+			// Block 0 second half: txN [16, 23]. Block-touched writes +
+			// DELETEs in the tail at txN=20.
+			for txN := midBlockCSTxN + 1; txN <= blockEndTxN; txN++ {
+				writeBlockTouches(domains, rwTx, txN)
+				if txN == 20 {
+					deleteStorageInTail(domains, rwTx, txN)
+				}
+			}
+			// Block-end CC — canonical root.
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, 1, blockEndTxN, "", nil)
+			require.NoError(t, err)
+			blockEndRoot = append([]byte(nil), rh...)
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, 1, blockEndTxN))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+			require.NoError(t, rwTx.Commit())
+		}
+		require.NoError(t, agg.BuildFiles(fileEndTxN))
+		return blockEndRoot, &kvAggHandles{db: db, agg: agg}
+	}
+
+	canonicalRoot, _ := build(t, false /* midStepCC */)
+	require.NotEmpty(t, canonicalRoot)
+
+	dbARoot, handlesA := build(t, true /* midStepCC */)
+	require.Equal(t, canonicalRoot, dbARoot,
+		"sanity: forward exec must produce the same block-end root regardless of mid-step CCs")
+
+	// Wipe block-end cs so recompute picks mid-block cs (txN=15).
+	wipeShadowPastMidStep := func(t *testing.T, db kv.TemporalRwDB) {
+		t.Helper()
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		c, err := rwTx.RwCursorDupSort("CommitmentVals")
+		require.NoError(t, err)
+		defer c.Close()
+		_, v, err := c.SeekExact(commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		for v != nil {
+			if len(v) >= 16 {
+				txN, _ := commitmentdb.DecodeTxBlockNums(v[8:])
+				if txN > midBlockCSTxN {
+					require.NoError(t, c.DeleteCurrent())
+				}
+			}
+			_, nv, err := c.NextDup()
+			require.NoError(t, err)
+			v = nv
+		}
+		require.NoError(t, rwTx.Commit())
+	}
+	wipeShadowPastMidStep(t, handlesA.db)
+
+	gotRoot, baselineTxNum := func() ([]byte, uint64) {
+		roTx, err := handlesA.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		root, _, btx, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, t.TempDir(), toTxNum, maxStep, stepSize)
+		require.NoError(t, err, "RecomputeAtTxNumWithoutSD failed")
+		if branches != nil {
+			branches.Close()
+		}
+		return append([]byte(nil), root...), btx
+	}()
+
+	t.Logf("HoodiPatterns: canonical=%x recompute=%x baselineTxNum=%d toTxNum=%d", canonicalRoot, gotRoot, baselineTxNum, toTxNum)
+	require.Equal(t, uint64(midBlockCSTxN), baselineTxNum, "recompute must pick mid-block cs")
+	require.Equal(t, canonicalRoot, gotRoot,
+		"mid-block-cs recompute root must match canonical block-end root with hoodi-like patterns (pre-existing untouched + DELETEs + contracts)")
 }
 
 // TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_ShadowAheadOfTarget
