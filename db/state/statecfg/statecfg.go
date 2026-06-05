@@ -22,6 +22,9 @@ type DomainCfg struct {
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
 
 	FileVersion DomainVersionTypes
+
+	// KVWriteVersion derives the version stamped on a new .kv file from live config; nil => DataKV.Current.
+	KVWriteVersion func(*DomainCfg) version.Version
 }
 
 func (d DomainCfg) Tables() []string {
