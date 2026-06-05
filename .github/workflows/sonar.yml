@@ -44,6 +44,17 @@ jobs:
         if: inputs.cache-warming-only
         run: go test -run=^$ -cover ./...
 
+      # The runner image ships the same JRE major version the scanner would
+      # otherwise download from scanner.sonarcloud.io (a 403-prone CDN);
+      # if the image ever drops it, the scanner falls back to downloading.
+      - name: Use preinstalled JDK for SonarCloud scanner
+        if: '!inputs.cache-warming-only'
+        run: |
+          if [ -x "${JAVA_HOME_21_X64}/bin/java" ]; then
+            echo "SONAR_SCANNER_SKIP_JRE_PROVISIONING=true" >> "$GITHUB_ENV"
+            echo "SONAR_SCANNER_JAVA_EXE_PATH=${JAVA_HOME_21_X64}/bin/java" >> "$GITHUB_ENV"
+          fi
+
       # The scan reaches external services (scanner-binaries CDN, GPG keyserver,
       # sonarcloud.io) that intermittently 403 or time out; one spaced retry
       # rides out short blips instead of failing the gate.
