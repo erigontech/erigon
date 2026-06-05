@@ -1604,12 +1604,13 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
-	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
+	v, step, found, _, err := dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
+	return v, step, found, err
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, bool, error) {
 	if dt.d.Disable {
-		return nil, 0, false, nil
+		return nil, 0, false, false, nil
 	}
 
 	var v []byte
@@ -1626,7 +1627,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 
 	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
+		return nil, 0, false, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
 		if metrics != nil {
@@ -1635,7 +1636,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 			}
 			changeset.IncReadTier(dt.name, changeset.TierDb)
 		}
-		return v, foundStep, true, nil
+		return v, foundStep, true, true, nil
 	}
 
 	v, foundInFile, fromFileCache, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
@@ -1651,9 +1652,9 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 	}
 
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
+		return nil, 0, false, false, fmt.Errorf("getLatestFromFiles: %w", err)
 	}
-	return v, kv.Step(endTxNum / dt.stepSize), foundInFile, nil
+	return v, kv.Step(endTxNum / dt.stepSize), foundInFile, false, nil
 }
 
 // RangeAsOf - if key doesn't exists in history - then look in latest state

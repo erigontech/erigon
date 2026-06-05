@@ -2480,21 +2480,24 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
-	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
+	v, step, ok, _, err = at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
+	return v, step, ok, err
 }
 
-func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+// MeteredGetLatest also reports whether the value was resolved from MDBX
+// (fromDb) so callers can make cache-placement decisions.
+func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, fromDb bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, fromDb bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
-		return nil, kv.Step(0), false, err
+		return nil, kv.Step(0), false, false, err
 	}
 	if ok && step <= maxStep {
 		if metrics != nil {
@@ -2503,12 +2506,12 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxSte
 			}
 			changeset.IncReadTier(domain, changeset.TierDb)
 		}
-		return v, step, true, nil
+		return v, step, true, true, nil
 	}
 
 	v, found, fromFileCache, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
 	if !found {
-		return nil, kv.Step(0), false, err
+		return nil, kv.Step(0), false, false, err
 	}
 	if metrics != nil {
 		if fromFileCache {
@@ -2526,7 +2529,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxSte
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	return v, kv.Step(fileEndTxNum / at.StepSize()), found, false, err
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {

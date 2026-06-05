@@ -924,7 +924,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, fromDb bool, err error)
 	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
@@ -945,7 +945,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 				// backing tx is the single source of truth for this key at this point.
 				var vDB []byte
 				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+					vDB, _, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
 				} else {
 					vDB, _, _ = tx.GetLatest(domain, k)
 				}
@@ -979,7 +979,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// any account the EVM has already loaded) and probe L2b before paying
 	// the code-file accessor stack cost.
 	var codeEthHash []byte
-	if domain == kv.CodeDomain && sd.stateCache != nil {
+	if domain == kv.CodeDomain && sd.stateCache != nil && !dbg.ScDebugDisableL2B {
 		if h := sd.codeHashForAddr(tx, k); len(h) > 0 {
 			codeEthHash = h
 			if cv, ok := sd.stateCache.GetCodeByHash(codeEthHash); ok {
@@ -989,8 +989,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	fromDb := true
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+		v, step, _, fromDb, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
 	} else {
 		v, step, err = tx.GetLatest(domain, k)
 	}
@@ -998,8 +999,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful storage read
-	if sd.stateCache != nil {
+	// Populate state cache on successful storage read. In db-only mode
+	// (STATE_CACHE_DB_ONLY) file-resolved values are left to the shared
+	// domain file cache: each tier caches what it is authoritative for,
+	// and the file cache keeps its hit reinforcement.
+	if sd.stateCache != nil && (fromDb || !dbg.StateCacheDbOnly) {
 		if domain == kv.CodeDomain && len(codeEthHash) > 0 && len(v) > 0 {
 			sd.stateCache.PutCodeWithHash(k, v, codeEthHash)
 		} else {

@@ -114,6 +114,8 @@ var (
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
+	StateCacheDbOnly      = EnvBool("STATE_CACHE_DB_ONLY", false)
+	ScDebugDisableL2B     = EnvBool("SC_DEBUG_DISABLE_L2B", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)
 	ReadAheadStorageSlots = EnvInt("READAHEAD_STORAGE_SLOTS", 0)
 
