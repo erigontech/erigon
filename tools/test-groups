@@ -19,7 +19,6 @@ MODULE = "github.com/erigontech/erigon"
 # ./execution/tests/...) MUST precede it, or it resolves empty and its tests run
 # silently inside the broader shard.
 GROUPS: OrderedDict[str, set[str]] = OrderedDict([
-    ("execution-eest-zkevm",      {"./execution/tests/eest_zkevm_witness/..."}),
     ("execution-tests",           {"./execution/tests/..."}),
     ("execution-other",         {"./execution/..."}),
     ("consensus",               {"./cl/..."}),

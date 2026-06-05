@@ -216,9 +216,9 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	return err
 }
 
-// RunWithTester runs the block test and returns the ExecModuleTester it built.
-// The returned tester's lifetime is bound to t (via t.Cleanup); callers MUST NOT Close it.
-func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error) {
+// newTester builds the ExecModuleTester for this block test. tb may be nil for
+// CLI usage, in which case the caller owns the tester's lifecycle and MUST Close it.
+func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTester, error) {
 	config, ok := testforks.Forks[bt.json.Network]
 	if !ok {
 		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
@@ -231,55 +231,12 @@ func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTe
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := execmoduletester.New(t, mOpts...)
-
-	bt.br = m.BlockReader
-	// import pre accounts & construct test genesis block & state root
-	genesisHash := m.Genesis.Hash()
-	if genesisHash != bt.json.Genesis.Hash {
-		return nil, fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", genesisHash[:6], bt.json.Genesis.Hash[:6])
-	}
-	genesisRoot := m.Genesis.Root()
-	if genesisRoot != bt.json.Genesis.StateRoot {
-		return nil, fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", genesisRoot[:6], bt.json.Genesis.StateRoot[:6])
-	}
-
-	validBlocks, err := bt.insertBlocks(m)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(bt.json.BestBlock) != cmlast {
-		return nil, fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
-	}
-	newDB := state.New(m.NewStateReader(tx))
-	if err := bt.validatePostState(newDB); err != nil {
-		return nil, fmt.Errorf("post state validation failed: %w", err)
-	}
-
-	if err := bt.validateImportedHeaders(tx, validBlocks, m); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return execmoduletester.New(tb, mOpts...), nil
 }
 
-// RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
-func (bt *BlockTest) RunCLI() error {
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
-	}
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
-	defer m.Close()
-
+// runChecks imports the test blocks into m and validates the result against the
+// fixture (genesis, head block hash, post-state, imported headers).
+func (bt *BlockTest) runChecks(m *execmoduletester.ExecModuleTester) error {
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
 	genesisHash := m.Genesis.Hash()
@@ -312,6 +269,39 @@ func (bt *BlockTest) RunCLI() error {
 	}
 
 	return bt.validateImportedHeaders(tx, validBlocks, m)
+}
+
+// RunWithTester runs the block test and returns the ExecModuleTester it built.
+// The returned tester's lifetime is bound to t (via t.Cleanup); callers MUST NOT Close it.
+func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error) {
+	m, err := bt.newTester(t)
+	if err != nil {
+		return nil, err
+	}
+	if err := bt.runChecks(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// RunWithTesterCLI is the CLI counterpart of RunWithTester: it builds the tester
+// with a nil testing.TB and returns it even on failure so the caller owns its
+// lifecycle and MUST Close it.
+func (bt *BlockTest) RunWithTesterCLI() (*execmoduletester.ExecModuleTester, error) {
+	m, err := bt.newTester(nil)
+	if err != nil {
+		return nil, err
+	}
+	return m, bt.runChecks(m)
+}
+
+// RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
+func (bt *BlockTest) RunCLI() error {
+	m, err := bt.RunWithTesterCLI()
+	if m != nil {
+		defer m.Close()
+	}
+	return err
 }
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {

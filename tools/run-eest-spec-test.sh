@@ -27,6 +27,12 @@
 #                                              detection doesn't fire.
 #   blocktests-devnet-race-amsterdam           race-detector variant filtered
 #                                              to the Amsterdam fork only.
+#   zkevm-witness                              zkevm execution-witness conformance
+#                                              (eest_zkevm corpus) via the zkevmtest
+#                                              runner; compares debug_executionWitness
+#                                              (canonical) per block.
+#   zkevm-witness-race-all                     race-detector variant of the above over
+#                                              the whole corpus (run via evm.race).
 #   *-parallel                                  any of the above with "-parallel"
 #                                              appended runs with
 #                                              ERIGON_EXEC3_PARALLEL=true. Every
@@ -59,6 +65,7 @@ shard="$1"
 # Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
 # inherit from the parent shard (stable/devnet).
 case "$shard" in
+	*zkevm*)      base=test-fixtures-cache/eest_zkevm/fixtures ;;
 	*-stable*)    base=test-fixtures-cache/eest_stable/fixtures ;;
 	*-devnet*)    base=test-fixtures-cache/eest_devnet/fixtures ;;
 	*-benchmark*) base=test-fixtures-cache/eest_benchmark/fixtures ;;
@@ -120,6 +127,10 @@ case "$shard_route" in
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
+	zkevm-witness*)
+		# Whole eest_zkevm blockchain_tests corpus; the "-race-all" variant differs
+		# only in the binary (evm.race, picked by the Makefile), not the fixtures.
+		cmd=zkevmtest;   path="$base/blockchain_tests" ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac
 
@@ -132,7 +143,9 @@ if [[ ! -x "$evm_bin" ]]; then
 	exit 2
 fi
 if [[ ! -d "$path" ]]; then
-	echo "fixture path $path does not exist; run 'make test-fixtures-eest' first" >&2
+	fixtures_target=test-fixtures-eest
+	case "$shard" in *zkevm*) fixtures_target=test-fixtures-zkevm ;; esac
+	echo "fixture path $path does not exist; run 'make $fixtures_target' first" >&2
 	exit 2
 fi
 
