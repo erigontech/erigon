@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -37,6 +38,23 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
+
+func TestGetBlobsHappyPath(t *testing.T) {
+	require := require.New(t)
+	pool, ctx := newGetBlobsTestPool(t, 1)
+
+	blobHashes := addTestBlobTxn(t, pool, ctx, 1, 0)
+	require.Len(blobHashes, 2) // makeBlobTxn carries two blobs
+
+	got := pool.GetBlobs(blobHashes)
+	require.Len(got, len(blobHashes))
+	for i, bundle := range got {
+		require.NotEmpty(bundle.Blob, "blob %d should be present", i)
+		require.NotEmpty(bundle.Proofs, "blob %d should have proofs", i)
+		require.Equal(blobHashes[i], common.Hash(kzg.KZGToVersionedHash(bundle.Commitment)),
+			"blob %d must resolve to the blob whose commitment hashes to the requested hash", i)
+	}
+}
 
 func TestGetBlobsRemovedAfterMined(t *testing.T) {
 	require := require.New(t)
