@@ -79,7 +79,7 @@ type EngineServer struct {
 	internalCL       bool // true when any embedded CL is active (suppresses "no CL" warning)
 	executionService execmodule.ExecutionModule
 	txpool           txpoolproto.TxpoolClient // gRPC client, reused by the embedded eth API
-	blobGetter       txpool.BlobGetter        // non-gRPC interface for remote or embedded blob retrieval; for embedded it avoids unnecessary gRPC hops
+	blobGetter       txpool.BlobGetter        // interface for remote or embedded blob retrieval; for embedded it avoids unnecessary gRPC hops
 
 	chainRW chainreader.ChainReaderWriterEth1
 	filters *rpchelper.Filters
