@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -222,7 +223,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	header := block.HeaderNoCopy()
 
 	if execCfg.ChainConfig().IsPrague(header.Time) {
-		hash := common.Hash{}
+		hash := empty.RequestsHash
 		if len(current.Requests) > 0 {
 			hash = *current.Requests.Hash()
 		}
