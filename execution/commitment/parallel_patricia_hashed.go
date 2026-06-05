@@ -43,14 +43,6 @@ import (
 //   - a TrieContextFactory that yields per-worker PatriciaContext instances so
 //     DB reads run concurrently.
 //   - an atomic root-hash pointer published at the end of Process.
-//
-// Task 6 wires Process with single-worker / no-splitPoint scope: each leafTask
-// emerging from Prepare gets a freshly-pooled worker, the worker scans its
-// nibble bucket once, applies keys via followAndUpdate, folds to the root and
-// publishes the root hash. Multi-worker correctness (the barrier protocol
-// that lets siblings deposit cells at split-points) is added in Task 7 — and
-// only then is it safe to exercise updates that produce more than one
-// leafTask under any nibble bucket.
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
@@ -235,16 +227,12 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 // Process is the entry point for parallel commitment computation. It expects
 // updates.mode == ModeParallel with a populated parallelUpdate.
 //
-// Task 7 scope: the fold-time barrier protocol allows multiple leafTasks to
-// converge at shared split-points. Each worker folds its subtree, deposits a
-// cell at every ancestor split-point it crosses, and either exits (a sibling
-// still has work) or — as the last sibling to arrive — continues folding
-// upward through the merged grid. The topmost finisher computes the root
-// hash. Multi-bucket batches without any split-point are still rejected here:
-// when Prepare emits zero split-points but more than one leafTask, the
-// workers would fold to root independently and produce inconsistent answers.
-// That case is a Task 10 concern (synthetic root barrier or callerside
-// merging) and is detected explicitly.
+// Each worker folds its subtree, deposits a cell at every ancestor split-point
+// it crosses, and either exits (a sibling still has work) or — as the last
+// sibling to arrive — continues folding upward through the merged grid; the
+// topmost finisher computes the root hash. A multi-bucket batch with no
+// split-point is rejected: independent workers would each fold to root with
+// only their own bucket touched and produce inconsistent answers.
 func (p *ParallelPatriciaHashed) Process(
 	ctx context.Context,
 	updates *Updates,
@@ -313,7 +301,7 @@ func (p *ParallelPatriciaHashed) Process(
 	// touched, producing M mutually-inconsistent root states. The barrier
 	// protocol relies on at least one shared split-point to merge them.
 	if len(pu.splitPoints) == 0 && len(pu.leafQueue) > 1 {
-		return nil, fmt.Errorf("[%s] ParallelPatriciaHashed: %d leafTasks emerged with no split-points; multi-bucket merging requires a Task 10 root barrier", logPrefix, len(pu.leafQueue))
+		return nil, fmt.Errorf("[%s] ParallelPatriciaHashed: %d leafTasks emerged with no split-points; multi-bucket merging without a shared split-point is not supported", logPrefix, len(pu.leafQueue))
 	}
 
 	if warmuper != nil {
@@ -400,8 +388,8 @@ func (p *ParallelPatriciaHashed) Process(
 		p.rootHash.Store(&pending.hash)
 	}
 
-	// The topmost finisher publishes the root hash via rootHash. For Task 6
-	// scope (single leafTask, no split-points) the lone worker publishes too.
+	// The topmost finisher publishes the root hash via rootHash; with a single
+	// leafTask and no split-points the lone worker publishes it too.
 	if rh := p.rootHash.Load(); rh != nil {
 		out := make([]byte, len(*rh))
 		copy(out, *rh)
@@ -656,9 +644,8 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 	// Stage 1: fold the worker's grid down toward the first enclosing
 	// split-point's depth. Two outcomes:
 	//
-	//   - No enclosing split-point (Task 6 single-leafTask scope): fold all
-	//     the way to activeRows == 0; hph.root carries the worker's entire
-	//     subtree cell.
+	//   - No enclosing split-point: fold all the way to activeRows == 0;
+	//     hph.root carries the worker's entire subtree cell.
 	//
 	//   - Enclosing split-point at depth D = len(sp.prefix): fold while
 	//     depths[deepest] > D+1 so the worker's deepest active row settles
@@ -808,8 +795,7 @@ func (p *ParallelPatriciaHashed) publishRootFromWorker(hph *HexPatriciaHashed) e
 }
 
 // findEnclosingSplitPoint returns the deepest split-point whose prefix is a
-// strict prefix of leafTaskPrefix. Returns nil if no enclosing split-point
-// exists (Task 6's "single-leafTask, no splits" path).
+// strict prefix of leafTaskPrefix, or nil if none encloses it.
 func findEnclosingSplitPoint(pu *parallelUpdate, leafTaskPrefix []byte) *splitPoint {
 	// Walk the prefix from longest-to-shortest. Stop at length 0 (root
 	// split-point) inclusive.

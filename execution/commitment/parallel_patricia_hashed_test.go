@@ -238,11 +238,11 @@ func TestParallelPatriciaHashedSkeletonRootHashAfterRelease(t *testing.T) {
 //
 // This is the helper that enforces the cardinal correctness rule for every
 // end-to-end ModeParallel test. raiseMinSplitKeys, when > 0, raises the
-// split-point threshold on the parallel side so tests in Task 6 scope can
-// suppress split-point emission (the barrier protocol arrives in Task 7).
+// split-point threshold on the parallel side so tests that need a single
+// leafTask can suppress split-point emission.
 //
 // Worker count defaults to 1. Use assertEquivalentRootWorkers when a test
-// needs multiple workers running concurrently (Task 7 barrier tests use this
+// needs multiple workers running concurrently (the barrier tests use this
 // for race detector coverage).
 func assertEquivalentRoot(
 	t *testing.T,
@@ -346,22 +346,6 @@ func TestParallelProcessSkeleton_SingleNibbleBucket(t *testing.T) {
 
 	root := assertEquivalentRoot(t, plainKeys, updates, 0)
 	require.NotEmpty(t, root)
-}
-
-// TestParallelProcessSkeleton_MultipleNibblesNoSplit: accounts span multiple
-// root nibbles but with MinSplitKeys raised so high that no split-point is
-// emitted. Each nibble produces its own leafTask, but the test sets
-// NumWorkers=1 so workers run serially — and there is at most one leafTask
-// per nibble, satisfying the Task 6 invariant.
-//
-// Note: this exercises the multi-bucket dispatch path (each nibble has its
-// own goroutine) but each goroutine still owns its bucket entirely.
-//
-// SKIPPED until Task 7: the current Process implementation rejects multiple
-// surviving workers because there is no barrier to merge their roots, which
-// happens whenever more than one nibble bucket is touched.
-func TestParallelProcessSkeleton_MultipleNibblesNoSplit(t *testing.T) {
-	t.Skip("multi-bucket leafTasks require the Task 7 barrier protocol to merge worker roots")
 }
 
 // TestParallelProcessSkeleton_RaisedThresholdSuppressesSplit: even at the
@@ -525,7 +509,7 @@ func TestParallelProcessSkeleton_GroupLeafTasksByNibble(t *testing.T) {
 
 // TestParallelProcessSkeleton_WarmupAncestorsNoOp ensures the helper accepts
 // a nil warmuper and a parallelUpdate without split-points without panicking
-// — Task 6 leafTask-only configurations exercise the no-op branch.
+// — single-leafTask configurations exercise the no-op branch.
 func TestParallelProcessSkeleton_WarmupAncestorsNoOp(t *testing.T) {
 	t.Parallel()
 	p := NewParallelPatriciaHashed(mockTrieCtxFactory(NewMockState(t)), length.Addr, DefaultTrieConfig())
@@ -537,7 +521,7 @@ func TestParallelProcessSkeleton_WarmupAncestorsNoOp(t *testing.T) {
 	})
 }
 
-// --- Task 7: fold-time barrier protocol tests -------------------------------
+// --- fold-time barrier protocol tests -------------------------------
 //
 // Every test below drives a multi-leafTask update set through both modes via
 // assertEquivalentRoot. The split-point structure is inferred from the
@@ -678,9 +662,9 @@ func TestParallelBarrier_ChainedSplitPoints(t *testing.T) {
 
 // TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit: when Prepare
 // emits multiple leafTasks but zero split-points, Process explicitly errors
-// rather than folding workers to inconsistent roots. This is the
-// counter-example to Task 7's correctness scope; the case is left for Task
-// 10 (synthetic root barrier).
+// rather than folding workers to inconsistent roots. Merging multiple
+// buckets without a shared split-point is left for a future synthetic
+// root barrier.
 //
 // Setup: 4 + 4 accounts in two top-level nibbles (below MinSplitKeys); root
 // is not a split-point but produces two leafTasks. Process must reject.

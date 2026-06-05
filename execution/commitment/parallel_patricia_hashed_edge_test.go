@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// Task 9 edge-case tests for ParallelPatriciaHashed.
+// Edge-case tests for ParallelPatriciaHashed.
 //
 // Every end-to-end test in this file MUST drive the same update set through
 // both sequential HexPatriciaHashed (ModeDirect) and ParallelPatriciaHashed
@@ -305,7 +305,7 @@ func TestParallelBloatnetShape(t *testing.T) {
 // at depth 64 (fanout=16, subtreeCount above threshold) and 16 leafTasks
 // covering the slot subtrees.
 //
-// This is the case Task 8's fuzz harness flagged: workers folding from
+// Workers folding from
 // deep storage depth must not overflow cell.extension (sized [64]byte) when
 // they deposit at the split-point. The deposit code in
 // depositRootIntoSplitPoint trims leading nibbles from the cell's extension
@@ -338,8 +338,8 @@ func TestParallelSingleAccountManyStorage(t *testing.T) {
 
 // TestParallelEmptyUpdates: ModeParallel must handle a zero-touched-key
 // batch by returning the same empty-trie root the sequential path returns.
-// This duplicates the skeleton test's coverage but is named per the Task 9
-// plan so the edge-case sweep is self-contained.
+// This duplicates the skeleton test's coverage so the edge-case sweep is
+// self-contained.
 func TestParallelEmptyUpdates(t *testing.T) {
 	t.Parallel()
 	root := assertEquivalentRoot(t, nil, nil, parallelEdgeMinSplitKeys)
