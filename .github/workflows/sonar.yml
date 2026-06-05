@@ -50,7 +50,7 @@ jobs:
       - name: Use preinstalled JDK for SonarCloud scanner
         if: '!inputs.cache-warming-only'
         run: |
-          if [ -x "${JAVA_HOME_21_X64}/bin/java" ]; then
+          if [ -n "${JAVA_HOME_21_X64}" ] && [ -x "${JAVA_HOME_21_X64}/bin/java" ]; then
             echo "SONAR_SCANNER_SKIP_JRE_PROVISIONING=true" >> "$GITHUB_ENV"
             echo "SONAR_SCANNER_JAVA_EXE_PATH=${JAVA_HOME_21_X64}/bin/java" >> "$GITHUB_ENV"
           fi
