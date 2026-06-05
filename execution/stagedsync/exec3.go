@@ -600,13 +600,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			// Bug 2 fix from commit 43a64a0b66 (parallel executor: fix two cache bugs):
-			// validate stateCache entries against this block's parent hash so stale
-			// values from a prior fork-validation are cleared before reads.
-			if stateCache := te.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-			}
-
 			var dbBAL types.BlockAccessList
 			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
 			// a separate db.View() as it can deadlock with the stageloop's

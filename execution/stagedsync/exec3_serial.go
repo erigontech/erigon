@@ -82,7 +82,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation)
 	}
 
-	stateCache := se.doms.GetStateCache()
+	stateCache := se.doms.GetStateCache() // for periodic PrintStatsAndReset only
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum)
@@ -113,10 +113,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
 		go warmTxsHashes(b)
-
-		if stateCache != nil {
-			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-		}
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()

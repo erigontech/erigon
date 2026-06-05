@@ -728,6 +728,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 func (pe *parallelExecutor) LogExecution() {
 	pe.progress.LogExecution(pe.rs.StateV3, pe)
+	if stateCache := pe.doms.GetStateCache(); stateCache != nil {
+		stateCache.PrintStatsAndReset()
+	}
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -1055,17 +1058,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	// Validate state cache before processing block - ensures cache is cleared after reorgs
-	// This matches the behavior in serial execution (exec3_serial.go)
-	if len(execRequest.tasks) > 0 {
-		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
-			parentHash := txTask.Header.ParentHash
-			blockHash := execRequest.blockHash
-			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(parentHash, blockHash)
-			}
-		}
-	}
+	// The state cache is a SharedDomain implementation detail: it is populated
+	// only at flush (committed, fork-agnostic state) and invalidated only on
+	// unwind (txNum/epoch — see StateCache.Unwind). The executor does not touch
+	// it during forward execution.
 
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor

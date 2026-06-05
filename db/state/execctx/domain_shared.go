@@ -789,14 +789,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	// never per-write — so they mirror committed, fork-agnostic state:
 	// CommitmentDomain → BranchCache, Accounts/Storage/Code → StateCache.
 	if sd.branchCache != nil || sd.stateCache != nil {
-		if err := sd.mem.FlushWithCallback(ctx, tx, func(domain kv.Domain, k []byte, v []byte, step kv.Step) {
+		if err := sd.mem.FlushWithCallback(ctx, tx, func(domain kv.Domain, k []byte, v []byte, txNum uint64) {
 			switch domain {
 			case kv.CommitmentDomain:
 				if sd.branchCache != nil {
 					if len(v) == 0 {
 						sd.branchCache.Invalidate(k)
 					} else {
-						sd.branchCache.Put(k, v, uint64(step), "sd.Flush")
+						sd.branchCache.Put(k, v, txNum/sd.StepSize(), "sd.Flush")
 					}
 				}
 			case kv.AccountsDomain:
@@ -806,7 +806,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 						sd.stateCache.Delete(kv.CodeDomain, k)
 						sd.stateCache.DeleteAddrCodeHash(k)
 					} else {
-						sd.stateCache.Put(kv.AccountsDomain, k, v)
+						sd.stateCache.Put(kv.AccountsDomain, k, v, txNum)
 						sd.stateCache.DeleteAddrCodeHash(k)
 					}
 				}
@@ -815,7 +815,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.StorageDomain, k)
 					} else {
-						sd.stateCache.Put(kv.StorageDomain, k, v)
+						sd.stateCache.Put(kv.StorageDomain, k, v, txNum)
 					}
 				}
 			case kv.CodeDomain:
@@ -823,7 +823,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.CodeDomain, k)
 					} else {
-						sd.stateCache.Put(kv.CodeDomain, k, v)
+						sd.stateCache.Put(kv.CodeDomain, k, v, txNum)
 					}
 				}
 			}
@@ -1029,12 +1029,18 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful storage read
+	// Populate state cache on successful read. Stamp with an upper bound on the
+	// value's write txNum (the read only gives us the file/step it came from):
+	// the last txNum of that step. An unwind below this bound can't leave the
+	// value stale, so frozen-step reads stay warm across unwinds while
+	// recent-step reads are dropped. (CodeCache addr layers are cleared wholesale
+	// on unwind, so PutCodeWithHash needs no txNum.)
 	if sd.stateCache != nil {
 		if domain == kv.CodeDomain && len(codeEthHash) > 0 && len(v) > 0 {
 			sd.stateCache.PutCodeWithHash(k, v, codeEthHash)
 		} else {
-			sd.stateCache.Put(domain, k, v)
+			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
+			sd.stateCache.Put(domain, k, v, readTxNum)
 		}
 	}
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {

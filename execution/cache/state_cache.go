@@ -32,8 +32,11 @@ import (
 const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (100 MB — investigation knob; permanent default returns to 1 GB)
 	DefaultAccountCacheBytes = 100 * datasize.MB
-	// DefaultStorageCacheBytes is the byte limit for storage cache (100 MB — investigation knob; permanent default returns to 1 GB)
-	DefaultStorageCacheBytes = 100 * datasize.MB
+	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB: the
+	// measured mainnet-tip storage working set is ~106 MB for 95% of reads
+	// (top 1% of keys = 48%, ~10 MB for 80%); 150 MB leaves headroom over the
+	// 95% set so eviction pressure doesn't push the hot set out.
+	DefaultStorageCacheBytes = 150 * datasize.MB
 	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
 	DefaultCommitmentCacheBytes = 128 * datasize.MB
 
@@ -204,8 +207,9 @@ func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
 	cc.DeleteAddrCodeHash(addr)
 }
 
-// Put stores data for the given domain and key.
-func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
+// Put stores data for the given domain and key, stamped with the txNum the
+// value reflects (for txNum/epoch unwind invalidation).
+func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -213,7 +217,7 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
-	cache.Put(key, common.Copy(value))
+	cache.Put(key, common.Copy(value), txNum)
 }
 
 // Delete removes the data for the given domain and key.
@@ -234,25 +238,15 @@ func (c *StateCache) Clear() {
 	}
 }
 
-// ValidateAndPrepare validates and prepares all caches for a new block.
-// Returns true if all caches were valid, false if any were cleared.
-func (c *StateCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
-	allValid := true
+// Unwind invalidates, across all caches, entries reflecting state above
+// unwindToTxNum on a now-dead fork. Diffset-free and O(1) (GenericCache bumps
+// an epoch + lowers a floor; CodeCache clears its mutable addr layers). This is
+// the sole cache-invalidation path on unwind — the executor never touches the
+// cache during forward execution.
+func (c *StateCache) Unwind(unwindToTxNum uint64) {
 	for _, cache := range c.caches {
 		if cache != nil {
-			if !cache.ValidateAndPrepare(parentHash, incomingBlockHash) {
-				allValid = false
-			}
-		}
-	}
-	return allValid
-}
-
-// ClearWithHash clears all caches and sets their block hash.
-func (c *StateCache) ClearWithHash(hash common.Hash) {
-	for _, cache := range c.caches {
-		if cache != nil {
-			cache.ClearWithHash(hash)
+			cache.Unwind(unwindToTxNum)
 		}
 	}
 }
@@ -282,46 +276,5 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
 		code.PrintStatsAndReset()
-	}
-}
-
-func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, revertFromHash, newBlockHash common.Hash) {
-	// If the cache's block hash doesn't match the block we're unwinding from,
-	// the cache was modified by a rolled-back tx (e.g. ValidatePayload).
-	// Clear everything and set the new hash — surgical eviction can't fix stale data
-	// from a different execution path.
-	for _, cache := range c.caches {
-		if cache != nil && cache.GetBlockHash() != revertFromHash {
-			c.ClearWithHash(newBlockHash)
-			return
-		}
-	}
-
-	for _, entry := range diffset[kv.AccountsDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.CodeDomain, k)
-		c.Delete(kv.AccountsDomain, k)
-		// Unwind may revert a codeHash change (SELFDESTRUCT undone, CREATE
-		// reverted) — drop the addr → codeHash mapping so the next read
-		// repopulates from the canonical post-revert account record.
-		c.DeleteAddrCodeHash(k)
-	}
-	for _, entry := range diffset[kv.CodeDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.CodeDomain, k)
-	}
-	for _, entry := range diffset[kv.StorageDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.StorageDomain, k)
-	}
-	for _, entry := range diffset[kv.CommitmentDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.CommitmentDomain, k)
-	}
-	// Update block hash after successful surgical eviction
-	for _, cache := range c.caches {
-		if cache != nil {
-			cache.SetBlockHash(newBlockHash)
-		}
 	}
 }
