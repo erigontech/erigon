@@ -123,13 +123,6 @@
   workers: 12
   max-allowed-failures: 0
   exec3-parallel: true
-# zkevm execution-witness conformance (eest_zkevm corpus). The runner enables the
-# BAL executor + historical-commitment schema per fixture and compares
-# debug_executionWitness (canonical) against each block's executionWitness. Known
-# divergences (#21563, #21566) are absorbed inside the runner, so the budget stays 0.
-- shard: zkevm-witness
-  workers: 12
-  max-allowed-failures: 0
-- shard: zkevm-witness-race-all
+- shard: zkevm-witness-race
   workers: 8
   max-allowed-failures: 0

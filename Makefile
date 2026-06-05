@@ -266,14 +266,14 @@ test-fixtures-zkevm:
 # tools/eest-spec-shards.yml (single source of truth shared with
 # .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
-# "-race-" dispatch through the race-instrumented evm.race binary so race
+# "-race" dispatch through the race-instrumented evm.race binary so race
 # coverage works without polluting the non-race shards. zkevm-* shards provision
 # the eest_zkevm corpus (test-fixtures-zkevm); all others provision the
 # eest_{stable,devnet,benchmark} corpora (test-fixtures-eest).
-EEST_SPEC_RACE_SHARDS       := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race-")) | select(test("^zkevm") | not)')
-EEST_SPEC_SHARDS            := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race-") | not) | select(test("^zkevm") | not)')
-EEST_SPEC_ZKEVM_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race-"))')
-EEST_SPEC_ZKEVM_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race-") | not)')
+EEST_SPEC_RACE_SHARDS       := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race")) | select(test("^zkevm") | not)')
+EEST_SPEC_SHARDS            := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race") | not) | select(test("^zkevm") | not)')
+EEST_SPEC_ZKEVM_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race"))')
+EEST_SPEC_ZKEVM_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race") | not)')
 
 .PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_RACE_SHARDS)) evm.race
 

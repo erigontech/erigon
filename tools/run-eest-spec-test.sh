@@ -31,7 +31,7 @@
 #                                              (eest_zkevm corpus) via the zkevmtest
 #                                              runner; compares debug_executionWitness
 #                                              (canonical) per block.
-#   zkevm-witness-race-all                     race-detector variant of the above over
+#   zkevm-witness-race                         race-detector variant of the above over
 #                                              the whole corpus (run via evm.race).
 #   *-parallel                                  any of the above with "-parallel"
 #                                              appended runs with
@@ -128,7 +128,7 @@ case "$shard_route" in
 		path="$base/blockchain_tests_engine_x/$gas_dir"
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
 	zkevm-witness*)
-		# Whole eest_zkevm blockchain_tests corpus; the "-race-all" variant differs
+		# Whole eest_zkevm blockchain_tests corpus; the "-race" variant differs
 		# only in the binary (evm.race, picked by the Makefile), not the fixtures.
 		cmd=zkevmtest;   path="$base/blockchain_tests" ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
