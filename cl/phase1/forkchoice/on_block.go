@@ -216,9 +216,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return err
 	}
 	monitor.ObserveFullBlockProcessingTime(startStateProcess)
-	if status != fork_graph.Success {
-		log.Debug("[OnBlock] AddChainSegment non-success", "status", status.String(), "slot", block.Block.Slot)
-	}
 	switch status {
 	case fork_graph.PreValidated:
 		return nil
@@ -233,8 +230,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
 	}
-	// Note: highestSeen was already updated before AddChainSegment (line ~216)
-	// so aggregates/attestations for this slot are accepted promptly. No second
+	// Note: highestSeen was already updated above (before AddChainSegment) so
+	// aggregates/attestations for this slot are accepted promptly. No second
 	// update needed here.
 
 	// Remove the parent from the head set
