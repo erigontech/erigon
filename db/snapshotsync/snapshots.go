@@ -1507,7 +1507,8 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				}
 				// Skip if a merge/dump/another recovery is already building this
 				// (type, range); otherwise claim it so we don't double-build.
-				if !s.TryAcquireRange(t, segment.From(), segment.To()) {
+				from, to := segment.From(), segment.To()
+				if !s.TryAcquireRange(t, from, to) {
 					continue
 				}
 				info := segment.FileInfo(dir)
@@ -1519,7 +1520,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				indexBuilder := s.IndexBuilder(t.Type())
 
 				g.Go(func() error {
-					defer s.ReleaseRange(info.Type.Enum(), info.From, info.To)
+					defer s.ReleaseRange(t, from, to)
 					p := &background.Progress{}
 					ps.Add(p)
 					defer notifySegmentIndexingFinished(info.Name())

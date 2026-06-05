@@ -632,7 +632,10 @@ var BlockCompressCfg = seg.Cfg{
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (uint64, error) {
 	// Claim this (type, range) so a concurrent OpenFolder doesn't pick up the
 	// .seg before its index is built and race our BuildIndexes below.
-	if inProgress != nil && inProgress.TryAcquireRange(f.Type.Enum(), f.From, f.To) {
+	if inProgress != nil {
+		if !inProgress.TryAcquireRange(f.Type.Enum(), f.From, f.To) {
+			return 0, fmt.Errorf("dump %s: range is already being built", f.Name())
+		}
 		defer inProgress.ReleaseRange(f.Type.Enum(), f.From, f.To)
 	}
 	var lastKeyValue uint64
