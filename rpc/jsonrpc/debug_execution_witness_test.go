@@ -103,38 +103,91 @@ func hasEmptyCode(accessed *accessedState) bool {
 	return false
 }
 
-// TestEmptyCodeTrigger_OnAccountLoad asserts the legacy empty-`0x` entry is
-// emitted when an empty-code account is materialized, which happens on a plain
-// account load (ReadAccountData) as well as on a code load (ReadAccountCode).
-func TestEmptyCodeTrigger_OnAccountLoad(t *testing.T) {
-	emptyAcc := common.HexToAddress("0x1111111111111111111111111111111111111111")
+// TestEmptyCodeTrigger asserts when the legacy empty-"0x" entry is emitted and
+// when it is not. The trigger fires only when an account transitions from
+// non-existent (None) to existing-with-empty-code — matching Reth's
+// has_new_contract() — or when empty bytecode is explicitly deployed via
+// UpdateAccountCode. Reading an existing EOA must NOT trigger the entry.
+func TestEmptyCodeTrigger(t *testing.T) {
+	existingEOA := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	newAddr := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	contractAddr := common.HexToAddress("0x3333333333333333333333333333333333333333")
+
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{
-		emptyAcc: {Nonce: 1},
+		existingEOA: {Nonce: 1},
 	}}
 
-	t.Run("data read triggers", func(t *testing.T) {
+	// Reading an existing EOA must NOT emit "0x" (regression: old code set
+	// emptyCodeAccessed on every empty-code account read, producing spurious entries).
+	t.Run("existing EOA data read does not trigger", func(t *testing.T) {
 		rs := NewRecordingState(inner)
-		if _, err := rs.ReadAccountData(accounts.InternAddress(emptyAcc)); err != nil {
+		if _, err := rs.ReadAccountData(accounts.InternAddress(existingEOA)); err != nil {
 			t.Fatal(err)
 		}
-		if !rs.emptyCodeAccessed {
-			t.Error("emptyCodeAccessed not set by an empty-code account data read")
-		}
-		if !hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
-			t.Error("empty 0x code entry missing after an empty-code account load")
+		if hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("existing EOA read must not emit 0x in the legacy witness")
 		}
 	})
 
-	t.Run("code load triggers", func(t *testing.T) {
+	t.Run("existing EOA code read does not trigger", func(t *testing.T) {
 		rs := NewRecordingState(inner)
-		if _, err := rs.ReadAccountCode(accounts.InternAddress(emptyAcc)); err != nil {
+		if _, err := rs.ReadAccountCode(accounts.InternAddress(existingEOA)); err != nil {
 			t.Fatal(err)
 		}
-		if !rs.emptyCodeAccessed {
-			t.Error("emptyCodeAccessed not set by a code load")
+		if hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("existing EOA code read must not emit 0x in the legacy witness")
+		}
+	})
+
+	// UpdateAccountCode with empty bytecode (e.g. CREATE2 deploying nothing) triggers.
+	t.Run("UpdateAccountCode empty code triggers", func(t *testing.T) {
+		rs := NewRecordingState(inner)
+		if err := rs.UpdateAccountCode(accounts.InternAddress(contractAddr), 1, accounts.EmptyCodeHash, []byte{}); err != nil {
+			t.Fatal(err)
 		}
 		if !hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
-			t.Error("empty 0x code entry missing after a code load")
+			t.Error("0x entry missing after UpdateAccountCode with empty bytecode")
+		}
+	})
+
+	// ETH transfer / coinbase receiving fees for the first time: account is new
+	// (not in pre-state) and ends up with empty code in the overlay.
+	t.Run("new account in overlay triggers", func(t *testing.T) {
+		rs := NewRecordingState(inner)
+		// newAddr is not in inner (pre-state); simulate its creation via the public API.
+		if err := rs.UpdateAccountData(accounts.InternAddress(newAddr), nil, &accounts.Account{Nonce: 0}); err != nil {
+			t.Fatal(err)
+		}
+		if !hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("0x entry missing for a brand-new account with empty code in the overlay")
+		}
+	})
+
+	// An existing account modified in-block keeps its empty code but must NOT
+	// trigger an extra "0x" — it already existed in the pre-state.
+	t.Run("existing account updated in overlay does not trigger", func(t *testing.T) {
+		rs := NewRecordingState(inner)
+		original := &accounts.Account{Nonce: 1}
+		if err := rs.UpdateAccountData(accounts.InternAddress(existingEOA), original, &accounts.Account{Nonce: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("updating an existing EOA in the overlay must not emit 0x")
+		}
+	})
+
+	// CREATE that deploys empty bytecode detected via CreatedContracts loop
+	// (Erigon's SetCode skips UpdateAccountCode when code is nil/empty).
+	t.Run("CreateContract with empty code overlay triggers", func(t *testing.T) {
+		rs := NewRecordingState(inner)
+		if err := rs.CreateContract(accounts.InternAddress(contractAddr)); err != nil {
+			t.Fatal(err)
+		}
+		if err := rs.UpdateAccountData(accounts.InternAddress(contractAddr), nil, &accounts.Account{}); err != nil {
+			t.Fatal(err)
+		}
+		if !hasEmptyCode(collectAccessedState(rs, witnessModeLegacy)) {
+			t.Error("0x entry missing for a CREATE with empty code detected via CreatedContracts")
 		}
 	})
 }

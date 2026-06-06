@@ -142,11 +142,6 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return acc, nil
 	}
 	acc, err := s.inner.ReadAccountData(address)
-	if acc != nil && acc.IsEmptyCodeHash() {
-		// Pre-state load of an empty-code account materializes the empty
-		// bytecode (legacy's single empty entry); overlay reads are post-state.
-		s.emptyCodeAccessed = true
-	}
 	if s.tracing(addr) {
 		if acc != nil {
 			fmt.Printf("[TRACE] ReadAccountData %s -> inner nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
@@ -270,9 +265,8 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 				s.PreStateCode[addr] = code
 			}
 		}
-	} else {
-		s.emptyCodeAccessed = true
 	}
+	// Empty code means this is an EOA read, not a deployed-empty-code contract; do not set emptyCodeAccessed.
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] ReadAccountCode %s -> inner len=%d\n", addr.Hex(), len(code))
 	}
@@ -353,6 +347,8 @@ func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation
 	s.ModifiedCode[addr] = common.Copy(code)
 	if len(code) > 0 {
 		s.createdCodeHashes[codeHash.Value()] = struct{}{}
+	} else {
+		s.emptyCodeAccessed = true
 	}
 	// Keep accountOverlay CodeHash in sync so ReadAccountData returns a
 	// consistent CodeHash even before UpdateAccountData is called.
@@ -984,6 +980,36 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 			}
 		}
 		emptyEntry = rs.emptyCodeAccessed
+		// A CREATE that deploys empty code: Erigon's SetCode skips UpdateAccountCode
+		// when bytes.Equal(nil, []byte{}) is true, so emptyCodeAccessed is never set
+		// via UpdateAccountCode. Detect it here: any newly created contract whose
+		// final code hash is empty → one "0x" entry (matching Reth's bundle_state.contracts).
+		if !emptyEntry {
+			for addr := range rs.CreatedContracts {
+				if acc, ok := rs.accountOverlay[addr]; ok && acc != nil && acc.CodeHash.IsEmpty() {
+					emptyEntry = true
+					break
+				}
+			}
+		}
+
+		// Also emit "0x" when any account in accountOverlay has KECCAK_EMPTY code but
+		// did not exist in the pre-state. This mirrors Reth's has_new_contract() which
+		// fires when an account's code hash transitions from None (non-existent) to
+		// KECCAK_EMPTY. Covers: coinbase receiving fees for the first time, ETH
+		// transfers to brand-new addresses, etc.
+		if !emptyEntry {
+			for addr, overlaidAcc := range rs.accountOverlay {
+				if overlaidAcc == nil || !overlaidAcc.CodeHash.IsEmpty() {
+					continue
+				}
+				preAcc, _ := rs.inner.ReadAccountData(accounts.InternAddress(addr))
+				if preAcc == nil {
+					emptyEntry = true
+					break
+				}
+			}
+		}
 	}
 
 	uniqueCodes := make([][]byte, 0, len(allCodesByHash)+1)
