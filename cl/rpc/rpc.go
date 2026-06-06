@@ -46,6 +46,16 @@ import (
 
 const maxMessageLength = 18 * datasize.MB
 
+// blobSidecarRawBytes is the fixed SSZ size of a BlobSidecar (the blob dominates; fork-independent).
+func blobSidecarRawBytes() int { return (&cltypes.BlobSidecar{}).EncodingSizeSSZ() }
+
+// columnSidecarRawBytes upper-bounds one DataColumnSidecar: at most MaxBlobsPerBlockUpperBound
+// cells plus their commitments/proofs, with slack for the header and inclusion proof.
+func (b *BeaconRpcP2P) columnSidecarRawBytes() int {
+	maxBlobs := b.beaconConfig.MaxBlobsPerBlockUpperBound()
+	return int(maxBlobs)*(cltypes.BytesPerCell+96) + 512
+}
+
 // BeaconRpcP2P represents a beacon chain RPC client.
 type BeaconRpcP2P struct {
 	// ctx is the context for the RPC client.
@@ -78,8 +88,8 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 	return rpc
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte) ([]*cltypes.SignedBeaconBlock, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData)
+func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -96,8 +106,8 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	return responsePacket, pid, nil
 }
 
-func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.BlobSidecar, string, error) {
-	responses, pid, err := b.sendRequest(ctx, topic, reqData)
+func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.BlobSidecar, string, error) {
+	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -129,7 +139,8 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	}
 
 	data := buffer.Bytes()
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid)
+	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), uint64(filteredReq.Len())*b.beaconConfig.NumberOfColumns)
+	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
 		return nil, pid, err
 	}
@@ -164,7 +175,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), count*uint64(len(columns))))
 	if err != nil {
 		return nil, pid, err
 	}
@@ -191,7 +202,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count))
 	if err != nil {
 		return nil, pid, err
 	}
@@ -221,7 +232,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 		return nil, "", err
 	}
 
-	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes())
+	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), uint64(len(roots))))
 	if err != nil {
 		return nil, pid, err
 	}
@@ -247,7 +258,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 	}
 
 	data := buffer.Bytes()
-	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
+	blobs, pid, err := b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, communication.MaxWireResponseBytes(blobSidecarRawBytes(), uint64(req.Len())))
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid request") {
 			b.BanPeer(pid)
@@ -268,7 +279,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 	}
 
 	data := buffer.Bytes()
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, communication.MaxWireResponseBytes(blobSidecarRawBytes(), count*b.beaconConfig.MaxBlobsPerBlockUpperBound()))
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
@@ -286,7 +297,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRangeTopic := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data)
+	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count))
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
@@ -302,7 +313,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	data := buffer.Bytes()
 	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
 	blocksByRootTopic := communication.BeaconBlocksByRootProtocolV2 + "," + communication.BeaconBlocksByRootProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRootTopic, data)
+	return b.sendBlocksRequest(ctx, blocksByRootTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), uint64(len(roots))))
 }
 
 // Peers retrieves peer count.
@@ -414,12 +425,14 @@ func (b *BeaconRpcP2P) sendRequest(
 	ctx context.Context,
 	topic string,
 	reqPayload []byte,
+	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
 	ctx, cn := context.WithTimeout(ctx, time.Second*2)
 	defer cn()
 	message, err := b.sentinel.SendRequest(ctx, &sentinelproto.RequestData{
-		Data:  reqPayload,
-		Topic: topic,
+		Data:             reqPayload,
+		Topic:            topic,
+		MaxResponseBytes: maxResponseBytes,
 	})
 	if err != nil {
 		return nil, "", err
@@ -432,13 +445,15 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	topic string,
 	reqPayload []byte,
 	peerId string,
+	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
 	ctx, cn := context.WithTimeout(ctx, time.Second*2)
 	defer cn()
 	message, err := b.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
-		Pid:   peerId,
-		Data:  reqPayload,
-		Topic: topic,
+		Pid:              peerId,
+		Data:             reqPayload,
+		Topic:            topic,
+		MaxResponseBytes: maxResponseBytes,
 	})
 	if err != nil {
 		return nil, "", err
