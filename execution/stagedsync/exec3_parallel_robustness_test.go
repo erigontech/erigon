@@ -24,10 +24,10 @@ import (
 )
 
 // TestChangesetWindowStart covers the pure helper that decides where the
-// changeset window of a batch begins. Regression for #21650: parallel exec
-// used to evaluate the window once at startBlockNum, so any batch longer
-// than MaxReorgDepth produced no changesets at all and the node could not
-// reorg afterwards.
+// changeset window of a batch begins. Evaluating the window once at
+// startBlockNum (instead of per block) would leave any batch longer than
+// MaxReorgDepth without changesets, making the node unable to reorg
+// afterwards.
 func TestChangesetWindowStart(t *testing.T) {
 	cases := []struct {
 		name                     string
@@ -85,7 +85,7 @@ func TestChangesetWindowStart(t *testing.T) {
 			want:          math.MaxUint64,
 		},
 		{
-			name:          "incident shape (#21650): batch to 6137 must cover 6134..6137",
+			name:          "long catch-up batch keeps a shallow reorg below its tip unwindable",
 			maxReorgDepth: 96,
 			startBlockNum: 5138,
 			maxBlockNum:   6137,

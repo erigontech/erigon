@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
