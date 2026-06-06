@@ -439,7 +439,9 @@ func (p *ParallelPatriciaHashed) runLeafTask(ctx context.Context, updates *Updat
 	}
 	hph.ResetContext(workerCtx)
 
-	if err := dfsSubtree(task.node, task.prefix, func(hk, pk []byte) error {
+	path := make([]byte, 0, 144)
+	path = append(path, task.prefix...)
+	if err := dfsSubtree(task.node, path, func(hk, pk []byte) error {
 		return hph.followAndUpdate(hk, pk, nil)
 	}); err != nil {
 		hph.resetForReuse()
@@ -454,14 +456,15 @@ func (p *ParallelPatriciaHashed) runLeafTask(ctx context.Context, updates *Updat
 }
 
 // dfsSubtree visits node's subtree in nibble order, calling fn(hashedKey, plainKey)
-// at every terminating node; hashedKey is rebuilt from prefix down the path. A
-// node emits its own key BEFORE descending, so an account precedes its storage.
-func dfsSubtree(node *prefixNode, prefix []byte, fn func(hashedKey, plainKey []byte) error) error {
+// at every terminating node; hashedKey is path, grown/truncated in place down the
+// walk (fn must not retain it). A node emits its key BEFORE descending, so an
+// account precedes its storage.
+func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte) error) error {
 	if node == nil {
 		return nil
 	}
 	if node.plainKey != nil {
-		if err := fn(prefix, node.plainKey); err != nil {
+		if err := fn(path, node.plainKey); err != nil {
 			return err
 		}
 	} else if node.bitmap == 0 {
@@ -471,13 +474,13 @@ func dfsSubtree(node *prefixNode, prefix []byte, fn func(hashedKey, plainKey []b
 	for bm := node.bitmap; bm != 0; {
 		nib := byte(bits.TrailingZeros16(bm))
 		child := node.children[childIdx]
-		childPrefix := make([]byte, len(prefix)+1+len(child.ext))
-		copy(childPrefix, prefix)
-		childPrefix[len(prefix)] = nib
-		copy(childPrefix[len(prefix)+1:], child.ext)
-		if err := dfsSubtree(child, childPrefix, fn); err != nil {
+		base := len(path)
+		path = append(path, nib)
+		path = append(path, child.ext...)
+		if err := dfsSubtree(child, path, fn); err != nil {
 			return err
 		}
+		path = path[:base]
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
