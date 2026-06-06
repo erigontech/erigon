@@ -17,6 +17,7 @@
 package recsplit
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -50,7 +51,7 @@ var murmurRefVectors = []struct {
 func TestMurmur128RefVectors(t *testing.T) {
 	for _, v := range murmurRefVectors {
 		key := []byte(v.s)
-		if h1, h2 := murmur128WithSeed(key, v.seed); h1 != v.h1 || h2 != v.h2 {
+		if h1, h2 := Murmur128WithSeed(key, v.seed); h1 != v.h1 || h2 != v.h2 {
 			t.Errorf("key %q seed %d: got (%x,%x) want (%x,%x)", v.s, v.seed, h1, h2, v.h1, v.h2)
 		}
 		for split := 0; split <= len(key); split++ {
@@ -82,7 +83,34 @@ func TestMurmur128PairEquivalence(t *testing.T) {
 	}
 }
 
-// murmur128WithSeed must be bit-identical to the library used to build existing index files
+// Key lengths match real index keys: 8=txnum, 20=address, 32=hash, 52=addr+slot, 80=commitment path
+var murmurBenchSizes = []int{8, 20, 32, 52, 80, 128}
+
+func BenchmarkMurmur128(b *testing.B) {
+	rnd := rand.New(rand.NewSource(44))
+	for _, size := range murmurBenchSizes {
+		key := make([]byte, size)
+		rnd.Read(key)
+		b.Run(fmt.Sprintf("port/len%d", size), func(b *testing.B) {
+			var sink uint64
+			for b.Loop() {
+				h1, _ := Murmur128WithSeed(key, 42)
+				sink = h1
+			}
+			_ = sink
+		})
+		b.Run(fmt.Sprintf("library/len%d", size), func(b *testing.B) {
+			var sink uint64
+			for b.Loop() {
+				h1, _ := murmur3.Sum128WithSeed(key, 42)
+				sink = h1
+			}
+			_ = sink
+		})
+	}
+}
+
+// Murmur128WithSeed must be bit-identical to the library used to build existing index files
 func TestMurmur128Equivalence(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 	for length := 0; length <= 130; length++ {
@@ -91,7 +119,7 @@ func TestMurmur128Equivalence(t *testing.T) {
 			rnd.Read(key)
 			seed := rnd.Uint32()
 			wantHi, wantLo := murmur3.Sum128WithSeed(key, seed)
-			gotHi, gotLo := murmur128WithSeed(key, seed)
+			gotHi, gotLo := Murmur128WithSeed(key, seed)
 			if gotHi != wantHi || gotLo != wantLo {
 				t.Fatalf("mismatch len=%d seed=%d key=%x: got (%x,%x) want (%x,%x)",
 					length, seed, key, gotHi, gotLo, wantHi, wantLo)

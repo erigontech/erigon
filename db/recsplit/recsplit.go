@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -518,7 +517,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
+	hi, lo := Murmur128WithSeed(key, rs.salt)
 	bucketIdx := uint32(remap(hi, rs.bucketCount))
 	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], bucketIdx)
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[4:], lo)

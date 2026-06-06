@@ -32,7 +32,7 @@ func NewIndexReader(index *Index) *IndexReader {
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
 	// in-package murmur3 port is bit-identical to the library but faster for short keys
-	return murmur128WithSeed(key, r.salt)
+	return Murmur128WithSeed(key, r.salt)
 }
 
 // Lookup wraps index Lookup
