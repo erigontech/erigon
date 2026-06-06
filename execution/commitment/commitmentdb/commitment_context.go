@@ -207,7 +207,11 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant 
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64) *TrieContext {
+// trieContext builds the main (root-fold) trie read context. readCtx carries
+// the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
+// metrics); the main fold is single-goroutine so it owns that accumulator
+// exclusively. Warmup/concurrent-mount readers get their own via the factories.
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
@@ -218,9 +222,9 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		probeTx:  tx,
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader.Clone(tx)
+		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReaderForWorker(readCtx, tx, sdc.sharedDomains)
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -346,7 +350,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	trieContext := sdc.trieContext(tx, blockNum, txNum)
+	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
+	// The fold is single-goroutine, so this lock-free accumulator is owned
+	// exclusively here; merged into the shared metrics when commitment finishes.
+	// Warmup/concurrent-mount workers accumulate + merge independently.
+	commitMetrics := changeset.NewWorkerMetrics()
+	defer sdc.sharedDomains.MergeWorkerMetrics(commitMetrics)
+	readCtx := changeset.ContextWithWorkerMetrics(ctx, commitMetrics)
+
+	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
 
 	// If trie trace is configured, wrap the context with a recorder.
 	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
@@ -659,7 +671,7 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0, 0) // blockNum/txNum not yet known; trieContext only used for reading here
+	trieContext := sdc.trieContext(tx, 0, 0, ctx) // blockNum/txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
