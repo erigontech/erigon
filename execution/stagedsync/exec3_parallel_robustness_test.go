@@ -12,6 +12,7 @@ package stagedsync
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,86 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
+
+// TestChangesetWindowStart covers the pure helper that decides where the
+// changeset window of a batch begins. Regression for #21650: parallel exec
+// used to evaluate the window once at startBlockNum, so any batch longer
+// than MaxReorgDepth produced no changesets at all and the node could not
+// reorg afterwards.
+func TestChangesetWindowStart(t *testing.T) {
+	cases := []struct {
+		name                     string
+		alwaysGenerateChangesets bool
+		maxReorgDepth            uint64
+		frozenBlocks             uint64
+		startBlockNum            uint64
+		maxBlockNum              uint64
+		want                     uint64
+	}{
+		{
+			name:          "big batch: window covers the last maxReorgDepth blocks",
+			maxReorgDepth: 96,
+			startBlockNum: 1,
+			maxBlockNum:   1000,
+			want:          904,
+		},
+		{
+			name:          "small batch: whole batch in window",
+			maxReorgDepth: 96,
+			startBlockNum: 950,
+			maxBlockNum:   1000,
+			want:          950,
+		},
+		{
+			name:          "batch end below maxReorgDepth: window from batch start",
+			maxReorgDepth: 96,
+			startBlockNum: 1,
+			maxBlockNum:   96,
+			want:          1,
+		},
+		{
+			name:                     "alwaysGenerateChangesets overrides depth and frozen gates",
+			alwaysGenerateChangesets: true,
+			maxReorgDepth:            96,
+			frozenBlocks:             2000,
+			startBlockNum:            1,
+			maxBlockNum:              1000,
+			want:                     1,
+		},
+		{
+			name:          "frozen blocks push the window up",
+			maxReorgDepth: 96,
+			frozenBlocks:  950,
+			startBlockNum: 1,
+			maxBlockNum:   1000,
+			want:          950,
+		},
+		{
+			name:          "fully frozen batch has no window",
+			maxReorgDepth: 96,
+			frozenBlocks:  2000,
+			startBlockNum: 1,
+			maxBlockNum:   1000,
+			want:          math.MaxUint64,
+		},
+		{
+			name:          "incident shape (#21650): batch to 6137 must cover 6134..6137",
+			maxReorgDepth: 96,
+			startBlockNum: 5138,
+			maxBlockNum:   6137,
+			want:          6041,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := changesetWindowStart(tc.alwaysGenerateChangesets, tc.maxReorgDepth, tc.frozenBlocks, tc.startBlockNum, tc.maxBlockNum)
+			if got != tc.want {
+				t.Fatalf("changesetWindowStart got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
 
 // TestApplyLoopMissingBlocks covers the pure completeness-check helper.
 // Every entry asserts a single invariant — see the comment on each case.

@@ -333,6 +333,14 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
+// WithoutAlwaysGenerateChangesets reverts to the production default where
+// changesets are generated only for blocks within MaxReorgDepth of the batch end.
+func WithoutAlwaysGenerateChangesets() Option {
+	return func(opts *options) {
+		opts.alwaysGenerateChangesets = false
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -340,27 +348,29 @@ func WithFcuBackgroundPrune() Option {
 }
 
 type options struct {
-	stepSize            *uint64
-	experimentalBAL     bool
-	genesis             *types.Genesis
-	chainConfig         *chain.Config
-	key                 *ecdsa.PrivateKey
-	engine              rules.Engine
-	pruneMode           *prune.Mode
-	withTxPool          bool
-	enableDomains       []kv.Domain
-	fcuBackgroundCommit bool
-	fcuBackgroundPrune  bool
+	stepSize                 *uint64
+	experimentalBAL          bool
+	genesis                  *types.Genesis
+	chainConfig              *chain.Config
+	key                      *ecdsa.PrivateKey
+	engine                   rules.Engine
+	pruneMode                *prune.Mode
+	withTxPool               bool
+	enableDomains            []kv.Domain
+	fcuBackgroundCommit      bool
+	fcuBackgroundPrune       bool
+	alwaysGenerateChangesets bool
 }
 
 func applyOptions(opts []Option) options {
 	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	defaultPruneMode := prune.MockMode
 	opt := options{
-		key:             defaultKey,
-		pruneMode:       &defaultPruneMode,
-		chainConfig:     chain.TestChainBerlinConfig,
-		experimentalBAL: false,
+		key:                      defaultKey,
+		pruneMode:                &defaultPruneMode,
+		chainConfig:              chain.TestChainBerlinConfig,
+		experimentalBAL:          false,
+		alwaysGenerateChangesets: true,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -420,7 +430,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
-	cfg.AlwaysGenerateChangesets = true
+	cfg.AlwaysGenerateChangesets = opt.alwaysGenerateChangesets
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
