@@ -431,15 +431,10 @@ func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
 	jumpSuperQ := (i / superQ) * superQSize * 2
 	jumpInsideSuperQ := (i % superQ) / q
 	idx16 := 4*(jumpSuperQ+2) + 2*jumpInsideSuperQ
-	idx64 = idx16 / 4
-	shift = 16 * (idx16 % 4)
-	mask := uint64(0xffff) << shift
-	jumpCumKeys := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
-	idx16++
-	idx64 = idx16 / 4
-	shift = 16 * (idx16 % 4)
-	mask = uint64(0xffff) << shift
-	jumpPosition := ef.jump[jumpSuperQ+1] + (ef.jump[idx64]&mask)>>shift
+	// idx16 is even, so both 16-bit entries live in the same jump word
+	w := ef.jump[idx16/4] >> (16 * (idx16 % 4))
+	jumpCumKeys := ef.jump[jumpSuperQ] + w&0xffff
+	jumpPosition := ef.jump[jumpSuperQ+1] + (w>>16)&0xffff
 	//fmt.Printf("i = %d, jumpCumKeys = %d, jumpPosition = %d\n", i, jumpCumKeys, jumpPosition)
 
 	currWordCumKeys = jumpCumKeys / 64
