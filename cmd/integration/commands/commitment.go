@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -171,6 +172,17 @@ func init() {
 	cmdCommitmentRecomputeAt.Flags().StringVar(&recomputeExpectedRoot, "expected-root", "", "optional hex-encoded expected root; mismatch is reported but not fatal")
 	commitmentCmd.AddCommand(cmdCommitmentRecomputeAt)
 
+	// commitment verify-files — sweep all commitment .kv files in the
+	// datadir and run the integrity check (Phase A/B/C plus the
+	// partial-block forward-replay check). Surfaces files whose interior
+	// BranchData doesn't reproduce the canonical header.StateRoot under
+	// trie replay — the corruption shape from issue #21487.
+	withChain(cmdCommitmentVerifyFiles)
+	withDataDir(cmdCommitmentVerifyFiles)
+	withConfig(cmdCommitmentVerifyFiles)
+	cmdCommitmentVerifyFiles.Flags().BoolVar(&verifyFilesFailFast, "fail-fast", false, "stop at the first file that fails verification")
+	commitmentCmd.AddCommand(cmdCommitmentVerifyFiles)
+
 	rootCmd.AddCommand(commitmentCmd)
 }
 
@@ -179,7 +191,50 @@ var (
 	recomputeBlock        uint64
 	recomputeMaxStep      uint64
 	recomputeExpectedRoot string
+
+	verifyFilesFailFast bool
 )
+
+// integration commitment verify-files — sweep every commitment .kv
+// file in the datadir and run integrity.CheckCommitmentRoot, which
+// includes the partial-block forward-replay check that catches
+// internally-inconsistent BranchData (correct cs root, wrong interior
+// children — issue #21487).
+var cmdCommitmentVerifyFiles = &cobra.Command{
+	Use:   "verify-files",
+	Short: "Walk every commitment .kv file and verify interior consistency against canonical headers",
+	Long: `Iterates every commitment .kv file in the datadir and runs the integrity check
+pipeline against each. For block-end files this compares the stored cs root to
+the corresponding header.StateRoot. For partial-block (mid-block) files it
+forward-replays the trie to AtBlock's end and checks the result equals the
+canonical header.StateRoot — catching the corruption shape where the cs root
+matches canonical but the interior BranchData entries don't.
+
+Useful after a preverified-torrent bootstrap to spot files whose torrent
+piece-hash passed but whose internal trie structure is inconsistent.
+
+Example:
+  integration commitment verify-files \
+    --datadir /erigon/tmp/erigon-hoodi-phase4.I503p --chain hoodi
+`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		blockReader, _ := blocksIO(db, logger)
+		ctx := cmd.Context()
+		if err := integrity.CheckCommitmentRootFileData(ctx, db, blockReader, verifyFilesFailFast, logger); err != nil {
+			fmt.Printf("FAIL: %v\n", err)
+			return
+		}
+		fmt.Printf("OK: all commitment files verified\n")
+	},
+}
 
 var commitmentCmd = &cobra.Command{
 	Use:   "commitment",

@@ -112,6 +112,21 @@ var (
 	// txNum) pair the file claims is internally inconsistent against
 	// the canonical txnum index. Quarantine.
 	ErrCommitmentTxNumRange = fmt.Errorf("%w: txNum outside AtBlock's txnum range", ErrIntegrity)
+
+	// ErrCommitmentReplayMismatch: replaying the trie forward from a
+	// partial-block (mid-block) commitment file's recorded txNum to
+	// the end of AtBlock did NOT reproduce the canonical
+	// header.StateRoot. The file's `KeyCommitmentState` (its recorded
+	// root) may match canonical, but its interior BranchData entries
+	// are inconsistent — the trie's unfold path reads the corrupt
+	// children during downstream replay and diverges. Real corruption;
+	// quarantine.
+	//
+	// For partial-block files VerifyCommitmentMatchesHeader cannot run
+	// directly (the consensus anchor for the mid-block state itself
+	// doesn't exist), but AtBlock's *end* has one. A correctly-built
+	// file must reach it via forward replay.
+	ErrCommitmentReplayMismatch = fmt.Errorf("%w: replay to AtBlock end != header.Root", ErrIntegrity)
 )
 
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),

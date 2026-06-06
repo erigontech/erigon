@@ -52,6 +52,54 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+// CheckCommitmentRootFileData walks every commitment .kv file and
+// runs only the file-data path: Phase A/B/C plus the partial-block
+// forward-replay added for issue #21487. Does NOT run the SD-based
+// recompute that CheckCommitmentRoot also invokes — that path has a
+// separate correctness gap on chain-tip files (produces wrong roots
+// even against known-canonical archives). This function is the right
+// one to use as a corruption gate at file ingestion.
+func CheckCommitmentRootFileData(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	aggTx := state.AggTx(tx)
+	defer aggTx.Close()
+	allFiles := aggTx.Files(kv.CommitmentDomain)
+	files := make([]state.VisibleFile, 0, len(allFiles))
+	for _, f := range allFiles {
+		if strings.HasSuffix(f.Fullpath(), ".kv") {
+			files = append(files, f)
+		}
+	}
+	logger.Info("[integrity] CommitmentRootFileData files discovered", "total", len(allFiles), "kvFiles", len(files))
+	if len(files) == 0 {
+		logger.Warn("[integrity] CommitmentRootFileData: no commitment .kv files found, nothing to check")
+		return nil
+	}
+	var integrityErr error
+	for _, file := range files {
+		fileName := filepath.Base(file.Fullpath())
+		logger.Info("[integrity] CommitmentRootFileData", "kv", fileName)
+		_, err := checkCommitmentRootViaFileData(ctx, tx, br, file, logger)
+		if err != nil {
+			err = fmt.Errorf("%w: in %s", err, fileName)
+			if !errors.Is(err, ErrIntegrity) {
+				return err
+			}
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+	}
+	return integrityErr
+}
+
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -289,7 +337,17 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 		return info, err
 	}
 	if info.PartialBlock() {
-		logger.Info("[integrity] CommitmentRoot skipping partial block",
+		// For a mid-block cs, info.RootHash has no canonical consensus
+		// anchor — but AtBlock's *end* has one (header.StateRoot).
+		// Replay history from the file's recorded txNum to
+		// BlockMaxTxNum; a correctly-built file reproduces header.Root,
+		// a file with internally-inconsistent BranchData (correct cs
+		// root but wrong interior children — Erigon issue #21487)
+		// diverges.
+		if err := VerifyCommitmentForwardReplay(ctx, tx, br, info, f, logger); err != nil {
+			return info, err
+		}
+		logger.Info("[integrity] CommitmentRoot partial-block replay verified",
 			"file", filepath.Base(f.Fullpath()),
 			"blockNum", info.BlockNum, "txNum", info.TxNum,
 			"blockMinTxNum", info.BlockMinTxNum, "blockMaxTxNum", info.BlockMaxTxNum)
@@ -299,6 +357,62 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 		return info, err
 	}
 	return info, nil
+}
+
+// VerifyCommitmentForwardReplay checks a partial-block (mid-block)
+// commitment file by replaying history forward from its recorded
+// txNum to info.BlockMaxTxNum and comparing the resulting trie root
+// to the canonical header.StateRoot for info.BlockNum.
+//
+// A correctly-built file reproduces header.Root. A file with an
+// internally-inconsistent BranchData layout — correct
+// KeyCommitmentState (the cs root matches canonical), but wrong
+// interior children — fails: the trie's unfold path during
+// RecomputeAtTxNumWithoutSD reads the corrupt children, re-folds
+// into a divergent subtree, and the resulting root mismatches the
+// header.
+//
+// Concrete corruption shape seen on hoodi snapshot bootstrap (issue
+// #21487): the preverified torrent's `v2.0-commitment.256-264.kv`
+// passes piece-hash verification (the bytes match the torrent info
+// hash) but the trie nodes it encodes are inconsistent across step
+// boundaries — likely a merge across non-canonical sources at the
+// publisher.
+//
+// Returns nil on success, ErrCommitmentReplayMismatch (wrapping the
+// divergent values) on the corruption case, or an upstream error if
+// the recompute / header lookup failed.
+func VerifyCommitmentForwardReplay(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, info CommitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
+	h, err := br.HeaderByNumber(ctx, tx, info.BlockNum)
+	if err != nil {
+		return err
+	}
+	if h == nil {
+		return fmt.Errorf("%w: block %d", ErrAnchorHeaderMissing, info.BlockNum)
+	}
+	stepSize := tx.Debug().StepSize()
+	if stepSize == 0 {
+		return fmt.Errorf("%w: stepSize == 0", ErrIntegrity)
+	}
+	// The file holds the latest entries at step toStep-1; cap the
+	// recompute's reads at the file's toStep so we measure THIS file
+	// (and the in-block-tail history it relies on), not anything past
+	// it.
+	maxStep := kv.Step(f.EndRootNum() / stepSize)
+	tmpDir := ""
+	root, _, _, branches, rerr := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, tx, tmpDir, info.BlockMaxTxNum, maxStep, stepSize)
+	if branches != nil {
+		branches.Close()
+	}
+	if rerr != nil {
+		return fmt.Errorf("%w: recompute(toTxNum=%d, maxStep=%d): %w", ErrIntegrity, info.BlockMaxTxNum, maxStep, rerr)
+	}
+	got := common.Hash(root)
+	if got != h.Root {
+		return fmt.Errorf("%w: file=%s block=%d cs.TxNum=%d -> recomputed=%s header.Root=%s",
+			ErrCommitmentReplayMismatch, filepath.Base(f.Fullpath()), info.BlockNum, info.TxNum, got, h.Root)
+	}
+	return nil
 }
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info CommitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
