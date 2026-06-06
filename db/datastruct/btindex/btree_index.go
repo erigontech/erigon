@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -433,7 +433,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 		if err != nil {
 			return err
 		}
-		hi, _ := recsplit.Murmur128WithSeed(key, salt)
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		if existenceFilter != nil {
 			if err := existenceFilter.AddHash(hi); err != nil {
 				return err

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package recsplit
+package murmur3
 
 import (
 	"encoding/binary"
@@ -26,11 +26,11 @@ const (
 	murmurC2 = 0x4cf5ad432745937f
 )
 
-// Murmur128WithSeed is MurmurHash3 x64 128-bit, bit-identical to
+// Sum128WithSeed is MurmurHash3 x64 128-bit, bit-identical to
 // github.com/spaolacci/murmur3.Sum128WithSeed but allocation- and
 // indirection-free, which is measurably faster for the short keys
 // hashed on every index lookup.
-func Murmur128WithSeed(key []byte, seed uint32) (uint64, uint64) {
+func Sum128WithSeed(key []byte, seed uint32) (uint64, uint64) {
 	h1, h2 := uint64(seed), uint64(seed)
 	clen := len(key)
 
@@ -148,14 +148,14 @@ func murmurTail(h1, h2 uint64, tail []byte, clen int) (uint64, uint64) {
 	return h1, h2
 }
 
-// murmur128PairWithSeed hashes the virtual concatenation key1||key2, bit-identical
-// to Murmur128WithSeed on the concatenated bytes but without materializing them.
-func murmur128PairWithSeed(key1, key2 []byte, seed uint32) (uint64, uint64) {
+// Sum128PairWithSeed hashes the virtual concatenation key1||key2, bit-identical
+// to Sum128WithSeed on the concatenated bytes but without materializing them.
+func Sum128PairWithSeed(key1, key2 []byte, seed uint32) (uint64, uint64) {
 	if len(key1) == 0 {
-		return Murmur128WithSeed(key2, seed)
+		return Sum128WithSeed(key2, seed)
 	}
 	if len(key2) == 0 {
-		return Murmur128WithSeed(key1, seed)
+		return Sum128WithSeed(key1, seed)
 	}
 	h1, h2 := uint64(seed), uint64(seed)
 	clen := len(key1) + len(key2)

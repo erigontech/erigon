@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -483,7 +484,7 @@ type InvertedIndexRoTx struct {
 
 // hashKey - change of salt will require re-gen of indices
 func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
-	return recsplit.Murmur128WithSeed(k, *iit.salt)
+	return murmur3.Sum128WithSeed(k, *iit.salt)
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {

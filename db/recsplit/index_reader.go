@@ -16,6 +16,10 @@
 
 package recsplit
 
+import (
+	"github.com/erigontech/erigon/common/murmur3"
+)
+
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
 	index *Index
@@ -31,8 +35,7 @@ func NewIndexReader(index *Index) *IndexReader {
 }
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
-	// in-package murmur3 port is bit-identical to the library but faster for short keys
-	return Murmur128WithSeed(key, r.salt)
+	return murmur3.Sum128WithSeed(key, r.salt)
 }
 
 // Lookup wraps index Lookup
@@ -43,7 +46,7 @@ func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 
 // Lookup2 looks up the concatenation key1||key2 without materializing it
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
-	bucketHash, fingerprint := murmur128PairWithSeed(key1, key2, r.salt)
+	bucketHash, fingerprint := murmur3.Sum128PairWithSeed(key1, key2, r.salt)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
