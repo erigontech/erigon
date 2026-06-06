@@ -2068,9 +2068,9 @@ func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount 
 	}
 }
 
-// Regression for #21650: a batch longer than MaxReorgDepth must still produce
-// changesets for the last MaxReorgDepth blocks, otherwise no reorg of any
-// depth is possible after the batch.
+// A batch longer than MaxReorgDepth must still produce changesets for the
+// last MaxReorgDepth blocks, otherwise no reorg of any depth is possible
+// after the batch.
 func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -2104,9 +2104,9 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	}))
 }
 
-// Reproduces #21650 end-to-end: after a single batch execution longer than
-// MaxReorgDepth, an FCU onto a fork branching a few blocks below the tip must
-// unwind and re-execute instead of failing with ReorgTooDeep.
+// After a single batch execution longer than MaxReorgDepth, an FCU onto a
+// fork branching a few blocks below the tip must unwind and re-execute
+// instead of failing with ReorgTooDeep.
 func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
