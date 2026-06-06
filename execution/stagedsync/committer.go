@@ -123,12 +123,13 @@ func newCommitmentCalculator(
 	in chan applyResult,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
-	// Create the calculator's own Updates buffer in ModeUpdate.
-	// ModeUpdate stores actual values (balance, nonce, storage) in the btree,
-	// so ComputeCommitment reads values from the Updates rather than sd.mem.
+	// ModeUpdate carries values in its btree for the trie to read; the parallel
+	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
-	calcUpdates.SetMode(commitment.ModeUpdate)
+	if sdCtxUpdates.Mode() != commitment.ModeParallel {
+		calcUpdates.SetMode(commitment.ModeUpdate)
+	}
 
 	// Open a persistent read-only TX for lazy-loading state from the domain.
 	// This lives for the calculator's lifetime, like worker TX handles.
