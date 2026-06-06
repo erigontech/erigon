@@ -1547,9 +1547,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.treeIdx = make(map[string]*KeyUpdate)
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
-		t.sortPerNibble = true
 		t.parallel = newParallelUpdate()
-		t.initCollector()
 	}
 	return t
 }
@@ -1571,11 +1569,9 @@ func (t *Updates) SetMode(m Mode) {
 		if t.keys == nil {
 			t.keys = make(map[string]struct{})
 		}
-		t.sortPerNibble = true
 		if t.parallel == nil {
 			t.parallel = newParallelUpdate()
 		}
-		t.initCollector()
 	}
 	t.Reset()
 }
@@ -2048,7 +2044,6 @@ func (t *Updates) Reset() {
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
-		t.initCollector()
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]

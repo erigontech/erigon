@@ -241,8 +241,8 @@ func (pu *parallelUpdate) Prepare(ctx PatriciaContext) error {
 // prepareDFS implements the recursive walk for Prepare. accPrefix is the
 // nibble path from the trie root to (but not including) node.ext. isRoot marks
 // the trie root, which needs special handling: leafTasks emerging from the
-// root must have a non-empty prefix so the worker can route them to a single
-// Updates.nibbles[prefix[0]] ETL collector.
+// root must carry a non-empty prefix, each rooting a distinct top-nibble
+// subtree the worker DFS-walks.
 func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accPrefix []byte, isRoot bool) error {
 	if node == nil {
 		return nil
@@ -275,9 +275,8 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 	}
 
 	// Root that does not qualify as a split-point: still descend one level so
-	// each emerging leafTask gets a non-empty prefix routing to a single
-	// nibbles[i] bucket; otherwise several top-level nibbles would collapse
-	// into one task and break the single-scan dispatch contract.
+	// each emerging leafTask gets a non-empty prefix rooting a distinct
+	// top-nibble subtree, instead of one task covering the whole trie.
 	if isRoot && !qualifiesAsSplit {
 		return pu.recurseChildren(ctx, node, nil)
 	}
