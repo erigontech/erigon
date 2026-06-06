@@ -454,7 +454,7 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 // AggregatorRoTx.MeteredGetLatest pattern). The plan is to migrate GetLatest
 // callers onto this ctx-carrying form in a follow-up, then drop the split.
 func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, changeset.WorkerMetricsFromContext(ctx))
+	return gt.sd.getLatestMetered(name, gt.tx, k, changeset.MetricsFromContext(ctx))
 }
 
 // GetCodeSize returns the length of the code at addr without loading the
@@ -500,10 +500,10 @@ func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx}
 }
 
-// MergeWorkerMetrics folds a worker's lock-free accumulator into the shared
+// MergeMetrics folds a worker's lock-free accumulator into the shared
 // DomainMetrics under a single lock. Called once when a worker finishes (not
 // per read), so the global metrics write-lock stays off the hot path.
-func (sd *SharedDomains) MergeWorkerMetrics(wm *changeset.WorkerMetrics) {
+func (sd *SharedDomains) MergeMetrics(wm *changeset.DomainMetrics) {
 	sd.metrics.Merge(wm)
 }
 
@@ -981,14 +981,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 // without any shared accumulator or lock. Mirrors temporalGetter.GetLatestContext
 // for readers that hold the SD directly (e.g. the committer's asOfStateReader).
 func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, changeset.WorkerMetricsFromContext(ctx))
+	return sd.getLatestMetered(domain, tx, k, changeset.MetricsFromContext(ctx))
 }
 
 // getLatestMetered is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
-func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *changeset.WorkerMetrics) (v []byte, step kv.Step, err error) {
+func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *changeset.DomainMetrics) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -1027,7 +1027,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	}
 
 	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.WorkerMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
