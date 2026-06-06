@@ -1006,9 +1006,8 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 		if slot == nil {
 			return fmt.Errorf("entry %d is nil", i)
 		}
-		// Each SlotChanges entry MUST contain at least one StorageChange.
-		if len(slot.Changes) == 0 {
-			return errors.New("empty slot changes")
+		if err := validateStorageChangeEntries(slot.Changes); err != nil {
+			return fmt.Errorf("entry %d: %w", i, err)
 		}
 	}
 

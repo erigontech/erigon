@@ -237,7 +237,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 
 	bal := BlockAccessList{ac}
 	err := bal.Validate()
-	
+
 	if err == nil {
 		t.Fatal("expected error for empty slot changes, but got nil")
 	}
