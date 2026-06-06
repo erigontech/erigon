@@ -372,6 +372,8 @@ func (sdb *IntraBlockState) Reset() {
 	// references are dropped, while the next execution lazily allocates fresh ones.
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0
@@ -834,6 +836,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 			return accounts.ZeroAddress, false, err
 		}
 		if delegation, ok := types.ParseDelegation(code); ok {
+			sdb.callCodeAccessHook(addr, code)
 			return delegation, true, nil
 		}
 	}
@@ -1052,6 +1055,43 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 
 		if readAccount == nil || err != nil {
 			return nil, StorageRead, UnknownVersion, err
+		}
+
+		// CachedReaderV3 bypasses the versionMap, so a prior in-block SD'd
+		// address still returns its pre-SD record. Without this gate the
+		// stale nonce/codeHash flows through refreshVersionedAccount (which
+		// only overwrites fields a versionMap cell exists for), so Empty()
+		// returns false and the EVM misses CallNewAccountGas.
+		if sdRes := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); sdRes.Status() == MVReadResultDone {
+			if destructed, ok := sdRes.Value().(bool); ok && destructed {
+				destructTxIndex := sdRes.DepIdx()
+				revivalLimit := sdb.txIndex - 1
+				revived := false
+				// Same-tx re-creation (metamorphic SD+CREATE2): both
+				// SelfDestructPath and AddressPath are written at the SAME
+				// TxIdx, so >= (not strict >) is needed on AddressPath.
+				if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
+					revived = true
+				}
+				if !revived {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					return nil, StorageRead, UnknownVersion, nil
+				}
+			}
 		}
 	}
 
@@ -1771,16 +1811,13 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}()
 	}
 
-	source := StorageRead
-	version := UnknownVersion
-
 	if sdb.versionMap == nil {
 		previous, err = sdb.getStateObject(addr, true)
 		if err != nil {
 			return err
 		}
 	} else {
-		readAccount, accountSource, accountVersion, err := sdb.getVersionedAccount(addr, true)
+		readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
 
 		if err != nil {
 			return err
@@ -1807,8 +1844,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 					// so.deleted early exit.  Reuse the cached stateObject to preserve the
 					// correct selfdestructed flag and accumulated incarnation.
 					previous = so
-					source = accountSource
-					version = accountVersion
 				} else if sdb.versionMap != nil {
 					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
 					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
@@ -1836,8 +1871,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			if previous == nil {
 				previous = newObject(sdb, addr, account, account)
 				previous.selfdestructed = destructed
-				source = accountSource
-				version = accountVersion
 			}
 		} else if so, ok := sdb.stateObjects[addr]; ok && so.deleted {
 			// The account was selfdestructed in an earlier transaction within the
@@ -1878,7 +1911,11 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// read's version. IncarnationPath is only ever written by
 	// CreateAccount/Selfdestruct, so a present cell always reflects a real
 	// prior in-block create/destruct that the new incarnation must exceed.
-	incSource, incVersion := source, version
+	// Don't inherit outer (source, version): it may carry
+	// refreshVersionedAccount's BalancePath promotion (MapRead, V_bal),
+	// which stamps IncarnationPath with a cell vm never wrote and trips
+	// the validator's recursive AddressPath check.
+	incSource, incVersion := StorageRead, UnknownVersion
 	if sdb.versionMap != nil {
 		if res := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
 			incSource = MapRead
@@ -1897,7 +1934,8 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// versionMap entry at a different version → ErrDependency panic → the
 	// worker spins in a non-converging dep-abort retry loop ("too many
 	// incarnations"). Mirrors the IncarnationPath treatment above.
-	balSource, balVersion := source, version
+	// Same default as IncarnationPath above.
+	balSource, balVersion := StorageRead, UnknownVersion
 	if sdb.versionMap != nil {
 		if res := sdb.versionMap.Read(addr, BalancePath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
 			balSource = MapRead
@@ -2494,6 +2532,16 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
+		// A sub-field cell may promote (source, version) to MapRead without
+		// a matching AddressPath cell. Stamping AddressPath with that
+		// promotion makes the validator non-converging when vm.Read returns
+		// None for AddressPath.
+		if source == MapRead {
+			if res := sdb.versionMap.Read(addr, AddressPath, accounts.NilKey, sdb.txIndex); res.Status() != MVReadResultDone {
+				source = StorageRead
+				version = UnknownVersion
+			}
+		}
 		versionRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, source, version, &data)
 	}
 }

@@ -606,7 +606,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					}
 
 					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							return err
 						}
@@ -1691,8 +1691,12 @@ func (result *execResult) calcFees(
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
 	emptyRemoval := chainRules.IsSpuriousDragon
-	coinbaseEmptyPre := coinbaseAcc == nil ||
-		(coinbaseAcc.Balance.IsZero() && coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite)
+	// nil pre-state must not short-circuit to empty=true: a worker may
+	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
+	// must respect those writes — otherwise SelfDestructPath is emitted
+	// and normalizeWriteSet's sdSet filter drops them.
+	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
@@ -3154,14 +3158,26 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 					continue
 				}
 			} else if stateReader != nil {
-				// No prior TX wrote this key — compare against pre-block value.
-				preVal, found, err := stateReader.ReadAccountStorage(w.Address, w.Key)
-				if err == nil {
-					if !found && writeVal.IsZero() {
-						continue // both zero — no-op
+				// SD-then-revival: latest SelfDestructPath may be false (a
+				// later TxIdx revived), but the SD's per-slot DELETE cascade
+				// already fixed the baseline at zero for any post-SD write.
+				// History scan catches that; the sdOk latest-value read above
+				// misses it. Narrower than an IncarnationPath probe: pure
+				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
+				// so its same-value SSTOREs still no-op against pre-block.
+				if vm.AnyDoneBoolWriteEquals(w.Address, state.SelfDestructPath, accounts.NilKey, txIndex-1, true) {
+					if writeVal.IsZero() {
+						continue
 					}
-					if found && writeVal.Eq(&preVal) {
-						continue // same as pre-block — no-op
+				} else {
+					preVal, found, err := stateReader.ReadAccountStorage(w.Address, w.Key)
+					if err == nil {
+						if !found && writeVal.IsZero() {
+							continue
+						}
+						if found && writeVal.Eq(&preVal) {
+							continue
+						}
 					}
 				}
 			}

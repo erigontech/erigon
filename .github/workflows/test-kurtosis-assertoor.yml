@@ -9,6 +9,14 @@ env:
   LIGHTHOUSE_IMAGE: "sigp/lighthouse:v7.0.1"
   TEKU_IMAGE: "consensys/teku:25.9.1"
   ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
+  # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
+  # are tagged with the CLI version) can be cached too. The vector and fluent-bit
+  # tags are dictated by the Kurtosis release — sync them when bumping (see
+  # logs_aggregator_functions and logs_collector_functions consts in
+  # kurtosis-tech/kurtosis).
+  KURTOSIS_VERSION: "1.15.2"
+  KURTOSIS_VECTOR_IMAGE: "timberio/vector:0.45.0-debian"
+  KURTOSIS_FLUENTBIT_IMAGE: "fluent/fluent-bit:4.0.0"
 
 on:
   workflow_dispatch:
@@ -146,12 +154,26 @@ jobs:
       - name: Fast checkout git repository
         uses: actions/checkout@v6
 
+      - name: Conditional Docker Login
+        # Only login if we can. Workflow works without it but we want to avoid
+        # rate limiting by Docker Hub when possible. External repos don't
+        # have access to our Docker secrets.
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          !github.event.pull_request.head.repo.fork
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+
       - name: Restore cached third-party containers
         id: cache-cl-images
         uses: actions/cache@v5
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
@@ -159,17 +181,57 @@ jobs:
           docker load -i /tmp/docker-cache/lighthouse.tar
           docker load -i /tmp/docker-cache/teku.tar
           docker load -i /tmp/docker-cache/assertoor.tar
+          docker load -i /tmp/docker-cache/kurtosis-engine.tar
+          docker load -i /tmp/docker-cache/kurtosis-core.tar
+          docker load -i /tmp/docker-cache/kurtosis-expander.tar
+          docker load -i /tmp/docker-cache/vector.tar
+          docker load -i /tmp/docker-cache/fluentbit.tar
 
       - name: Pull third-party containers and save to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/docker-cache
-          docker pull ${{ env.LIGHTHOUSE_IMAGE }}
-          docker pull ${{ env.TEKU_IMAGE }}
-          docker pull ${{ env.ASSERTOOR_IMAGE }}
-          docker save ${{ env.LIGHTHOUSE_IMAGE }} -o /tmp/docker-cache/lighthouse.tar
-          docker save ${{ env.TEKU_IMAGE }}        -o /tmp/docker-cache/teku.tar
-          docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${LIGHTHOUSE_IMAGE}"
+          pull "${TEKU_IMAGE}"
+          pull "${ASSERTOOR_IMAGE}"
+          pull "kurtosistech/engine:${KURTOSIS_VERSION}"
+          pull "kurtosistech/core:${KURTOSIS_VERSION}"
+          pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
+          pull "${KURTOSIS_VECTOR_IMAGE}"
+          pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
+          docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
+          docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
+          docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
+          docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
+          docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+
+      - name: Install Kurtosis CLI and start engine
+        # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
+        # where a registry blip fails the whole test step. Start it here from
+        # the pre-loaded images, with cheap retries.
+        run: |
+          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+          sudo apt-get update
+          sudo apt-get install -y kurtosis-cli=${KURTOSIS_VERSION}
+          kurtosis analytics disable
+          for n in 1 2 3; do
+            if kurtosis engine start; then exit 0; fi
+            echo "kurtosis engine start failed (attempt $n of 3)"
+            kurtosis engine stop || true
+            sleep $((10 * n))
+          done
+          exit 1
 
       - name: Download erigon image artifact
         uses: actions/download-artifact@v8
@@ -204,6 +266,7 @@ jobs:
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
+            kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
             ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
             ethereum_package_args: "${{ matrix.package_args }}"

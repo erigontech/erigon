@@ -684,7 +684,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		}
 		defer idx.Close()
 
-		rd := idx.GetReaderFromPool()
+		rd := idx.Reader()
 		defer rd.Close()
 		if rd.Empty() {
 			log.Warn("[dbg] allow files deletion because accessor broken", "accessor", idx.FileName())

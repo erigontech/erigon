@@ -743,7 +743,11 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	if accountCopy.Nonce != original.Nonce {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
 	}
-	if accountCopy.Incarnation != original.Incarnation {
+	// Emit only on up-revs. A value-transfer to a same-block SD'd address
+	// leaves newObj.Incarnation at 0 while original carries the prior
+	// block's value; emitting the down-rev would clobber the SD-side
+	// IncarnationPath cell and break a same-block CREATE2's prevInc.
+	if accountCopy.Incarnation > original.Incarnation {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
 	}
 	if accountCopy.CodeHash != original.CodeHash {
