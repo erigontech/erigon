@@ -206,6 +206,7 @@ func init() {
 		&runCommand,
 		&blockTestCommand,
 		&engineXTestCommand,
+		&zkevmTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}
