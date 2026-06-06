@@ -49,6 +49,8 @@ func BenchmarkGetBlobs(b *testing.B) {
 
 	b.Run("WithPoolWriters", func(b *testing.B) {
 		stop := make(chan struct{})
+		started := make(chan struct{})
+		var startedOnce sync.Once
 		var wg sync.WaitGroup
 		var writerCounter uint64
 		writers := max(2, runtime.GOMAXPROCS(0)-1)
@@ -67,9 +69,14 @@ func BenchmarkGetBlobs(b *testing.B) {
 						writerCounter++
 					}
 					pool.lock.Unlock()
+					startedOnce.Do(func() { close(started) })
 				}
 			}()
 		}
+
+		// Wait until a writer has actually contended on pool.lock before measuring: at -benchtime=1x
+		// the measured loop is a single call that can finish before any writer goroutine is scheduled.
+		<-started
 
 		b.ReportAllocs()
 		b.ResetTimer()
