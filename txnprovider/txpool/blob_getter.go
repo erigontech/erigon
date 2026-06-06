@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,14 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package engine_helpers
+package txpool
 
-import "github.com/erigontech/erigon/rpc"
+import "github.com/erigontech/erigon/common"
 
-const MaxBuilders = 128
-
-var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
-var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
-var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
-var TooLargeRequestErr = rpc.CustomError{Code: -38004, Message: "Too large request"}
-var ReorgTooDeepErr = rpc.CustomError{Code: -38006, Message: "Too deep reorg"}
+type BlobGetter interface {
+	GetBlobs(blobHashes []common.Hash) []PoolBlobBundle
+}
