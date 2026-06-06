@@ -780,7 +780,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("genesis block", func(t *testing.T) {
 		// Note: commitment history starts from 1 in this test suite
 		blockNum := rpc.BlockNumber(0)
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -794,12 +794,18 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("by block number", func(t *testing.T) {
 		// Test with block number 1
 		blockNum := rpc.BlockNumber(1)
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.Nil(t, result.Keys, "Keys must remain nil (Geth compatibility)")
+		require.NotNil(t, result.Keys, "Keys must be populated with accessed address/slot preimages")
+		for i, k := range result.Keys {
+			require.Contains(t, []int{20, 32}, len(k), "key %d must be a 20B address or 32B slot preimage", i)
+			if i > 0 {
+				require.Negative(t, bytes.Compare(result.Keys[i-1], k), "keys must be sorted and deduplicated")
+			}
+		}
 		if len(result.Headers) > 0 {
 			require.Contains(t, result.headerByNumber, uint64(0), "parent header (block 0) must be present in lookup map when Headers is non-empty")
 		}
@@ -813,7 +819,7 @@ func TestExecutionWitness(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -822,7 +828,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("multiple blocks", func(t *testing.T) {
 		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
-			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 
 			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
 			require.NotNil(t, result, "Result should not be nil for block %d", blockNum)
@@ -832,7 +838,7 @@ func TestExecutionWitness(t *testing.T) {
 
 	t.Run("latest block", func(t *testing.T) {
 		blockNum := rpc.LatestBlockNumber
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
@@ -841,7 +847,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("non-existent block", func(t *testing.T) {
 		// Very high block number that doesn't exist
 		blockNum := rpc.BlockNumber(999999999)
-		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 		require.Error(t, err, "should error for non-existent block")
 	})
 }
