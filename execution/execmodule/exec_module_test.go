@@ -2076,10 +2076,7 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithoutAlwaysGenerateChangesets(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithKey(privKey))
 
 	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
 	chainLen := int(maxReorgDepth) + 14
@@ -2112,10 +2109,7 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithoutAlwaysGenerateChangesets(),
-	)
+	m := execmoduletester.New(t, execmoduletester.WithKey(privKey))
 
 	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
 	chainLen := int(maxReorgDepth) + 14

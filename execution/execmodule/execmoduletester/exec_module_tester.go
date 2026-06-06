@@ -333,11 +333,11 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
-// WithoutAlwaysGenerateChangesets reverts to the production default where
-// changesets are generated only for blocks within MaxReorgDepth of the batch end.
-func WithoutAlwaysGenerateChangesets() Option {
+// WithAlwaysGenerateChangesets mirrors --experimental.always-generate-changesets,
+// for tests that reorg deeper than MaxReorgDepth.
+func WithAlwaysGenerateChangesets() Option {
 	return func(opts *options) {
-		opts.alwaysGenerateChangesets = false
+		opts.alwaysGenerateChangesets = true
 	}
 }
 
@@ -366,11 +366,10 @@ func applyOptions(opts []Option) options {
 	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	defaultPruneMode := prune.MockMode
 	opt := options{
-		key:                      defaultKey,
-		pruneMode:                &defaultPruneMode,
-		chainConfig:              chain.TestChainBerlinConfig,
-		experimentalBAL:          false,
-		alwaysGenerateChangesets: true,
+		key:             defaultKey,
+		pruneMode:       &defaultPruneMode,
+		chainConfig:     chain.TestChainBerlinConfig,
+		experimentalBAL: false,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -430,7 +429,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
-	cfg.AlwaysGenerateChangesets = opt.alwaysGenerateChangesets
+	if opt.alwaysGenerateChangesets {
+		cfg.AlwaysGenerateChangesets = true
+	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
