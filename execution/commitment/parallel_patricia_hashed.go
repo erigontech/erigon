@@ -480,8 +480,8 @@ func (p *ParallelPatriciaHashed) runLeafTask(ctx context.Context, updates *Updat
 
 	path := make([]byte, 0, 144)
 	path = append(path, task.prefix...)
-	if err := dfsSubtree(task.node, path, func(hk, pk []byte) error {
-		return hph.followAndUpdate(hk, pk, nil)
+	if err := dfsSubtree(task.node, path, func(hk, pk []byte, upd *Update) error {
+		return hph.followAndUpdate(hk, pk, upd)
 	}); err != nil {
 		hph.resetForReuse()
 		p.workerPool.Put(hph)
@@ -494,16 +494,16 @@ func (p *ParallelPatriciaHashed) runLeafTask(ctx context.Context, updates *Updat
 	return nil
 }
 
-// dfsSubtree visits node's subtree in nibble order, calling fn(hashedKey, plainKey)
-// at every terminating node; hashedKey is path, grown/truncated in place down the
-// walk (fn must not retain it). A node emits its key BEFORE descending, so an
-// account precedes its storage.
-func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte) error) error {
+// dfsSubtree visits node's subtree in nibble order, calling fn(hashedKey, plainKey,
+// update) at every terminating node; hashedKey is path, grown/truncated in place
+// down the walk (fn must not retain it). A node emits its key BEFORE descending,
+// so an account precedes its storage.
+func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
 	if node == nil {
 		return nil
 	}
 	if node.plainKey != nil {
-		if err := fn(path, node.plainKey); err != nil {
+		if err := fn(path, node.plainKey, node.update); err != nil {
 			return err
 		}
 	} else if node.bitmap == 0 {

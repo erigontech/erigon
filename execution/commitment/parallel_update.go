@@ -132,9 +132,10 @@ func newParallelUpdate() *parallelUpdate {
 	}
 }
 
-// Insert adds a hashed key (in nibble form) and its plainKey to the prefix trie.
-func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte) {
-	pu.trie.Insert(hashedKey, plainKey)
+// Insert adds a hashed key (in nibble form), its plainKey, and an optional
+// carried value (nil = fold re-reads from ctx) to the prefix trie.
+func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte, update *Update) {
+	pu.trie.Insert(hashedKey, plainKey, update)
 }
 
 // internKey copies plainKey into the per-batch arena for stable trie retention.

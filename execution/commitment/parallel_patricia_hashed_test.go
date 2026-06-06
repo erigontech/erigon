@@ -431,14 +431,14 @@ func TestDFSSubtree(t *testing.T) {
 	t.Parallel()
 
 	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"))
-	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"))
-	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"))
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D")) // terminator that is a prefix of A and B
+	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
+	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
+	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"), nil)
+	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil) // terminator that is a prefix of A and B
 
 	type kv struct{ hk, pk string }
 	var got []kv
-	err := dfsSubtree(pu.trie.root, nil, func(hk, pk []byte) error {
+	err := dfsSubtree(pu.trie.root, nil, func(hk, pk []byte, _ *Update) error {
 		got = append(got, kv{hk: fmt.Sprintf("%x", hk), pk: string(pk)})
 		return nil
 	})
@@ -457,8 +457,8 @@ func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
 	t.Parallel()
 
 	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil)
-	err := dfsSubtree(pu.trie.root, nil, func(_, _ []byte) error { return nil })
+	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
+	err := dfsSubtree(pu.trie.root, nil, func(_, _ []byte, _ *Update) error { return nil })
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plainKey")
 }

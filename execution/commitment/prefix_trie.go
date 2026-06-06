@@ -28,7 +28,8 @@ const prefixSlabSize = 16384
 type prefixNode struct {
 	ext      []byte
 	children []*prefixNode
-	plainKey []byte // un-hashed key; set only where a key terminates
+	plainKey []byte  // un-hashed key; set only where a key terminates
+	update   *Update // carried per-key value (nil = re-read from ctx); set only where a key terminates
 	subtreeCount uint32
 	bitmap       uint16
 }
@@ -134,10 +135,11 @@ func commonPrefixLen(a, b []byte) int {
 }
 
 // Insert adds hashedKey (in nibble form) to the trie and records plainKey on the
-// node where the key terminates. Each call bumps subtreeCount on every node along
-// the traversal path — duplicate inserts therefore increase counts but allocate
-// no new nodes. plainKey backing must stay stable for the trie's lifetime.
-func (t *prefixTrie) Insert(hashedKey, plainKey []byte) {
+// node where the key terminates, along with an optional carried value (update;
+// nil means the fold re-reads it from ctx). Each call bumps subtreeCount on every
+// node along the traversal path — duplicate inserts therefore increase counts but
+// allocate no new nodes. plainKey backing must stay stable for the trie's lifetime.
+func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) {
 	node := t.root
 	keyOffset := 0
 	for {
@@ -160,7 +162,9 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte) {
 			oldChild.subtreeCount = oldSubtreeCount
 			// terminator on node was a key reaching past m; it moves to oldChild
 			oldChild.plainKey = node.plainKey
+			oldChild.update = node.update
 			node.plainKey = nil
+			node.update = nil
 
 			node.ext = oldExt[:m]
 
@@ -169,6 +173,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte) {
 				node.bitmap = uint16(1) << oldExt[m]
 				node.children = []*prefixNode{oldChild}
 				node.plainKey = plainKey
+				node.update = update
 				return
 			}
 
@@ -177,6 +182,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte) {
 			newLeaf.ext = append([]byte(nil), remain[m+1:]...)
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
+			newLeaf.update = update
 
 			oldNib := oldExt[m]
 			node.bitmap = (uint16(1) << oldNib) | (uint16(1) << newNib)
@@ -193,6 +199,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte) {
 		if keyOffset == len(hashedKey) {
 			// Key terminates exactly at this node.
 			node.plainKey = plainKey
+			node.update = update
 			return
 		}
 
@@ -203,6 +210,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte) {
 			newLeaf.ext = append([]byte(nil), hashedKey[keyOffset+1:]...)
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
+			newLeaf.update = update
 			node.bitmap |= uint16(1) << nib
 			node.children = append(node.children, nil)
 			copy(node.children[idx+1:], node.children[idx:])

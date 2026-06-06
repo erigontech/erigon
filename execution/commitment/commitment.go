@@ -1666,7 +1666,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
-			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes))
+			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes), nil)
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1739,7 +1739,11 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
-			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes))
+			// Carry the value so the parallel fold uses it directly instead of
+			// re-reading account/storage from ctx (which lags cc.state).
+			u := new(Update)
+			*u = *update
+			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes), u)
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1775,7 +1779,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		if _, ok := t.keys[dedupKey]; !ok {
 			// No plainKey for a hashed-only touch; the parallel fold rejects such a
 			// terminator. Only witness gen uses this, and it runs the sequential trie.
-			t.parallel.Insert(hashedKey, nil)
+			t.parallel.Insert(hashedKey, nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:

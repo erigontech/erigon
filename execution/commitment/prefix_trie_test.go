@@ -81,7 +81,7 @@ func TestPrefixTrieEmpty(t *testing.T) {
 func TestPrefixTrieSingleInsert(t *testing.T) {
 	tr := newPrefixTrie()
 	key := nibs(0x01, 0x02, 0x03, 0x04)
-	tr.Insert(key, nil)
+	tr.Insert(key, nil, nil)
 
 	// root + one leaf
 	assert.Equal(t, 2, tr.arena.nodeCount())
@@ -97,8 +97,8 @@ func TestPrefixTrieSingleInsert(t *testing.T) {
 
 func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 	tr := newPrefixTrie()
-	tr.Insert(nibs(0x01, 0x02, 0x03), nil)
-	tr.Insert(nibs(0x05, 0x06, 0x07), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
+	tr.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
 
 	assert.Equal(t, 3, tr.arena.nodeCount())
 	assert.Equal(t, uint32(2), tr.root.subtreeCount)
@@ -115,8 +115,8 @@ func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 	tr := newPrefixTrie()
 	// Both keys descend on 0x01, then share extension [0x02, 0x03], then diverge.
-	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil)
-	tr.Insert(nibs(0x01, 0x02, 0x03, 0x06, 0x07), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil, nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03, 0x06, 0x07), nil, nil)
 
 	// root -> child (ext=[0x02,0x03], bitmap has 2 children) -> two grandchildren
 	assert.Equal(t, 4, tr.arena.nodeCount())
@@ -137,12 +137,12 @@ func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 func TestPrefixTrieDivergenceAtEndOfExtension(t *testing.T) {
 	tr := newPrefixTrie()
 	// First insert creates leaf with ext = [0x02, 0x03, 0x04, 0x05].
-	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil, nil)
 	// Second insert shares 0x01,0x02,0x03,0x04 with leaf, then continues — m == len(ext) - 1.
 	// Actually shares 0x01, descends into leaf ext = [0x02,0x03,0x04,0x05], common prefix = 4 (full),
 	// then we need a tail. So this lands on the descend-into-existing-child path after splitting.
 	// Use a key that shares fully then descends with a new nibble:
-	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07), nil, nil)
 
 	// Walk through expected structure:
 	// root -> child (ext=[0x02,0x03,0x04,0x05], one child at nibble 0x06) -> grandchild (ext=[0x07])
@@ -163,12 +163,12 @@ func TestPrefixTrieDivergenceAtEndOfExtension(t *testing.T) {
 func TestPrefixTrieDuplicateInsert(t *testing.T) {
 	tr := newPrefixTrie()
 	key := nibs(0x01, 0x02, 0x03, 0x04)
-	tr.Insert(key, nil)
+	tr.Insert(key, nil, nil)
 	nodesAfterFirst := tr.arena.nodeCount()
 
 	// Insert same key twice more — no growth.
-	tr.Insert(key, nil)
-	tr.Insert(key, nil)
+	tr.Insert(key, nil, nil)
+	tr.Insert(key, nil, nil)
 
 	assert.Equal(t, nodesAfterFirst, tr.arena.nodeCount(), "duplicate inserts must not grow the trie")
 	assert.Equal(t, uint32(3), tr.root.subtreeCount, "subtreeCount must reflect path traversals")
@@ -182,7 +182,7 @@ func TestPrefixTrieDeepInsert(t *testing.T) {
 	for i := range deep {
 		deep[i] = byte(i % 16)
 	}
-	tr.Insert(deep, nil)
+	tr.Insert(deep, nil, nil)
 
 	// root + one leaf
 	assert.Equal(t, 2, tr.arena.nodeCount())
@@ -198,7 +198,7 @@ func TestPrefixTrieSubtreeCountAccumulation(t *testing.T) {
 	for i := 0; i < N; i++ {
 		// keep first three nibbles shared, vary the rest deterministically
 		k := []byte{0x01, 0x02, 0x03, byte(i & 0x0F), byte((i >> 4) & 0x0F), byte(i & 0x0F)}
-		tr.Insert(k, nil)
+		tr.Insert(k, nil, nil)
 	}
 	assert.Equal(t, uint32(N), tr.root.subtreeCount)
 
@@ -213,12 +213,12 @@ func TestPrefixTrieMixedPrefixCountsPropagate(t *testing.T) {
 	for _, suf := range [][]byte{
 		{0x02, 0x00}, {0x02, 0x01}, {0x02, 0x02}, {0x02, 0x03},
 	} {
-		tr.Insert(append([]byte{0x01}, suf...), nil)
+		tr.Insert(append([]byte{0x01}, suf...), nil, nil)
 	}
 	for _, suf := range [][]byte{
 		{0x06, 0x00}, {0x06, 0x01}, {0x06, 0x02},
 	} {
-		tr.Insert(append([]byte{0x05}, suf...), nil)
+		tr.Insert(append([]byte{0x05}, suf...), nil, nil)
 	}
 
 	assert.Equal(t, uint32(7), tr.root.subtreeCount)
@@ -229,9 +229,9 @@ func TestPrefixTrieMixedPrefixCountsPropagate(t *testing.T) {
 
 func TestPrefixTrieArenaReuse(t *testing.T) {
 	tr := newPrefixTrie()
-	tr.Insert(nibs(0x01, 0x02, 0x03), nil)
-	tr.Insert(nibs(0x01, 0x02, 0x04), nil)
-	tr.Insert(nibs(0x05, 0x06, 0x07), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
+	tr.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
+	tr.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
 	first := tr.arena.nodeCount()
 
 	tr.Reset()
@@ -241,9 +241,9 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 	assert.Empty(t, tr.root.children)
 
 	// Re-insert the same set — should produce same node count.
-	tr.Insert(nibs(0x01, 0x02, 0x03), nil)
-	tr.Insert(nibs(0x01, 0x02, 0x04), nil)
-	tr.Insert(nibs(0x05, 0x06, 0x07), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
+	tr.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
+	tr.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
 	assert.Equal(t, first, tr.arena.nodeCount())
 }
 
@@ -267,9 +267,9 @@ func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 
 func TestPrefixTrieWalkDFSOrder(t *testing.T) {
 	tr := newPrefixTrie()
-	tr.Insert(nibs(0x01, 0x02, 0x03), nil)
-	tr.Insert(nibs(0x01, 0x05, 0x06), nil)
-	tr.Insert(nibs(0x07, 0x08, 0x09), nil)
+	tr.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
+	tr.Insert(nibs(0x01, 0x05, 0x06), nil, nil)
+	tr.Insert(nibs(0x07, 0x08, 0x09), nil, nil)
 
 	entries := collectWalk(tr)
 
