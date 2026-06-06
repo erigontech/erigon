@@ -109,11 +109,6 @@ type SharedDomains struct {
 	disableInlineTouchKey bool
 	mem                   kv.TemporalMemBatch
 	metrics               changeset.DomainMetrics
-	// mainWM is the lock-free metrics accumulator for the main goroutine's
-	// reads (direct GetLatest + the main commitment/exec getter). Trie-warmup
-	// workers get their own via AsGetterWorker; all are combined into metrics
-	// at task boundaries. Keeps the global metrics write-lock off the hot path.
-	mainWM *changeset.WorkerMetrics
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -203,7 +198,6 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 		logger: logger,
 		//trace:   true,
 		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
-		mainWM:   changeset.NewWorkerMetrics(),
 		stepSize: tx.Debug().StepSize(),
 	}
 
@@ -440,15 +434,16 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 type temporalGetter struct {
 	sd *SharedDomains
 	tx kv.TemporalTx
-	// wm is the accumulator GetLatest records into: sd.mainWM for the main
-	// goroutine (AsGetter), or nil to collect nothing (AsGetterNoMetrics) for
-	// concurrent callers whose per-worker metering isn't wired yet (parallel
-	// exec workers) — they must not write the shared main accumulator (a race).
-	wm *changeset.WorkerMetrics
 }
 
+// GetLatest collects no read metrics. There is no process-wide accumulator:
+// AsGetter is used by many concurrent goroutines (RPC, engine, exec) and a
+// shared lock-free accumulator would be raced/unbounded. Metrics are collected
+// only per-task via GetLatestContext (the commitment/warmup worker readers),
+// merged into the shared DomainMetrics at task end. Wiring the exec/RPC read
+// paths onto per-task contexts is a follow-up.
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, gt.wm)
+	return gt.sd.getLatestMetered(name, gt.tx, k, nil)
 }
 
 // GetLatestContext is the context-aware read: it records into the per-worker,
@@ -495,15 +490,14 @@ func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, wm: sd.mainWM}
+	return &temporalGetter{sd: sd, tx: tx}
 }
 
-// AsGetterNoMetrics returns a getter whose GetLatest collects no metrics. Use
-// for concurrent callers that share this SD but don't yet have per-worker
-// metrics wiring (parallel exec workers): metering them into sd.mainWM would be
-// a data race. Their per-worker metering is a follow-up (the state-read path).
+// AsGetterNoMetrics is retained as an explicit-intent alias of AsGetter (which
+// already collects no metrics) for concurrent callers (parallel exec workers)
+// where the no-metrics choice is deliberate pending per-task wiring.
 func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, wm: nil}
+	return &temporalGetter{sd: sd, tx: tx}
 }
 
 // MergeWorkerMetrics folds a worker's lock-free accumulator into the shared
@@ -975,26 +969,25 @@ func (sd *SharedDomains) DetachBranchCache() {
 	sd.branchCache = nil
 }
 
-// TemporalDomain satisfaction. Reads on behalf of the main goroutine, recording
-// metrics into the shared lock-free main accumulator.
+// TemporalDomain satisfaction. Collects no read metrics — see
+// temporalGetter.GetLatest for why there is no process-wide accumulator.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, sd.mainWM)
+	return sd.getLatestMetered(domain, tx, k, nil)
 }
 
 // GetLatestContext is the context-aware read for callers that read on behalf of
 // a concurrent worker: metrics go to the per-worker, lock-free accumulator
 // carried by ctx (nil ctx-value => no metrics). Lets a worker's reader meter
-// without touching sd.mainWM (a race) or any lock. Mirrors
-// temporalGetter.GetLatestContext for readers that hold the SD directly (e.g.
-// the committer's asOfStateReader).
+// without any shared accumulator or lock. Mirrors temporalGetter.GetLatestContext
+// for readers that hold the SD directly (e.g. the committer's asOfStateReader).
 func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatestMetered(domain, tx, k, changeset.WorkerMetricsFromContext(ctx))
 }
 
 // getLatestMetered is the read implementation. wm is the caller's lock-free
-// metrics accumulator (the main goroutine's sd.mainWM, or a warmup worker's
-// private one); a nil wm disables metrics for the call. No global metrics lock
-// is taken on this hot path — accumulators are combined later via Merge.
+// per-task/per-worker metrics accumulator (nil disables metrics for the call).
+// No global metrics lock is taken on this hot path — accumulators are combined
+// into the shared DomainMetrics later via Merge.
 func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *changeset.WorkerMetrics) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
@@ -1278,28 +1271,13 @@ func decodeAccountCodeHash(enc []byte) []byte {
 	return h[:]
 }
 
-// flushMainWM folds the main goroutine's lock-free accumulator into the shared
-// DomainMetrics and resets it, so a subsequent read of sd.metrics reflects the
-// main goroutine's reads. Must be called from the main goroutine (the sole
-// writer of mainWM). Warmup workers merge their own accumulators independently
-// via MergeWorkerMetrics; both serialize on sd.metrics' lock.
-func (sd *SharedDomains) flushMainWM() {
-	if sd.mainWM == nil {
-		return
-	}
-	sd.metrics.Merge(sd.mainWM)
-	sd.mainWM.Reset()
-}
-
 func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
-	sd.flushMainWM()
 	return &sd.metrics
 }
 
 func (sd *SharedDomains) LogMetrics() []any {
 	var metrics []any
 
-	sd.flushMainWM()
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
 
