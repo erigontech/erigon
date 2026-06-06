@@ -520,6 +520,19 @@ func NewDomainMetrics() *DomainMetrics {
 	return &DomainMetrics{Domains: map[kv.Domain]*DomainIOMetrics{}}
 }
 
+// Reset zeroes a per-worker instance after its counts have been merged into the
+// aggregate, so it can be reused for the next task. Lock-free: called by the
+// single owning worker. The Domains map is cleared but kept allocated.
+func (dm *DomainMetrics) Reset() {
+	if dm == nil {
+		return
+	}
+	dm.DomainIOMetrics = DomainIOMetrics{}
+	for k := range dm.Domains {
+		delete(dm.Domains, k)
+	}
+}
+
 // domainEntry returns the per-domain counters, creating them on first use.
 // Lock-free: only called on a single-owner per-worker instance (the per-domain
 // roll-up into the aggregate happens in Merge, under the aggregate's lock).

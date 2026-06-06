@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -126,6 +127,11 @@ type Worker struct {
 	dirs datadir.Dirs
 
 	metrics *WorkerMetrics
+	// readMetrics is this worker's private domain read-metrics accumulator
+	// (lock-free, single-owner). The worker's state reader records into it; it
+	// is merged into the shared SharedDomains metrics + reset once per task (a
+	// lock per task, not per read), at the point the result is queued.
+	readMetrics *changeset.DomainMetrics
 }
 
 // installWorkerGetHash replaces the EVM's GetHash function with one that
@@ -177,8 +183,9 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 
 		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 
-		dirs:    dirs,
-		metrics: metrics,
+		dirs:        dirs,
+		metrics:     metrics,
+		readMetrics: changeset.NewDomainMetrics(),
 	}
 	w.runnable.Store(true)
 	w.ibs = state.New(w.stateReader)
@@ -226,7 +233,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	} else {
 		var getter kv.TemporalGetter
 		if chainTx != nil {
-			getter = rs.Domains().AsGetterNoMetrics(chainTx)
+			getter = rs.Domains().AsGetterMetered(chainTx, rw.readMetrics)
 		}
 		// Use CachedReaderV3 for parallel workers — caches account data
 		// on first read per block, providing a stable pre-block committed
@@ -292,7 +299,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetterNoMetrics(rw.chainTx))
+			typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -361,6 +368,13 @@ func (rw *Worker) Run() (err error) {
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
+		// Fold this task's reads into the shared metrics and reset. Off the hot
+		// path (the result is already queued): a single lock per task replacing
+		// the old lock-per-read. Skipped entirely when read metrics are off.
+		if dbg.KVReadLevelledMetrics && rw.rs != nil {
+			rw.rs.Domains().MergeMetrics(rw.readMetrics)
+			rw.readMetrics.Reset()
+		}
 	}
 	return nil
 }
@@ -415,7 +429,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterNoMetrics(rw.chainTx))
+		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -447,7 +461,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterNoMetrics(rw.chainTx), nil))
+		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics), nil))
 	}
 
 	// Set the per-block committed state cache from the task.
@@ -533,7 +547,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetterNoMetrics(nil))
+				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, reconWorkers[i].readMetrics))
 			}
 
 			if err = reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {

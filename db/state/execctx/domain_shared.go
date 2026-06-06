@@ -434,16 +434,16 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 type temporalGetter struct {
 	sd *SharedDomains
 	tx kv.TemporalTx
+	// m is an optional per-worker metrics instance to record reads into. nil
+	// (the AsGetter default) collects nothing — there is no process-wide
+	// accumulator, since AsGetter is used by many concurrent goroutines (RPC,
+	// engine) where a shared one would be raced/unbounded. Exec workers pass
+	// their own instance via AsGetterMetered and merge it at task end.
+	m *changeset.DomainMetrics
 }
 
-// GetLatest collects no read metrics. There is no process-wide accumulator:
-// AsGetter is used by many concurrent goroutines (RPC, engine, exec) and a
-// shared lock-free accumulator would be raced/unbounded. Metrics are collected
-// only per-task via GetLatestContext (the commitment/warmup worker readers),
-// merged into the shared DomainMetrics at task end. Wiring the exec/RPC read
-// paths onto per-task contexts is a follow-up.
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, nil)
+	return gt.sd.getLatestMetered(name, gt.tx, k, gt.m)
 }
 
 // GetLatestContext is the context-aware read: it records into the per-worker,
@@ -493,11 +493,18 @@ func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx}
 }
 
-// AsGetterNoMetrics is retained as an explicit-intent alias of AsGetter (which
-// already collects no metrics) for concurrent callers (parallel exec workers)
-// where the no-metrics choice is deliberate pending per-task wiring.
+// AsGetterNoMetrics is an explicit-intent alias of AsGetter (collects no
+// metrics), for concurrent callers (RPC/engine) where that is deliberate.
 func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx}
+}
+
+// AsGetterMetered returns a getter that records reads into the caller's own
+// per-worker metrics instance m. m must be single-owner (one goroutine); the
+// caller merges it into the shared metrics via MergeMetrics at task end (a lock
+// per task, not per read) and Resets it. Used by parallel-exec workers.
+func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *changeset.DomainMetrics) kv.TemporalGetter {
+	return &temporalGetter{sd: sd, tx: tx, m: m}
 }
 
 // MergeMetrics folds a worker's lock-free accumulator into the shared
