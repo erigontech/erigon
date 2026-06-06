@@ -59,6 +59,12 @@ type ParallelPatriciaHashed struct {
 	// caching a root that was never committed to the DB if the deferred
 	// branch apply fails.
 	pendingRoot atomic.Pointer[publishedRoot]
+
+	// leaveDeferredForCaller makes Process skip the inline applyDeferredUpdates
+	// and hand the worker-accumulated deferred branch updates to the caller
+	// instead — the deferred-commitment (fork validation / parallel apply) path.
+	leaveDeferredForCaller bool
+	deferredForCaller      []*DeferredBranchUpdate
 }
 
 // publishedRoot bundles the candidate root hash with the worker's final root
@@ -118,6 +124,29 @@ func (p *ParallelPatriciaHashed) SetMinSplitKeys(n uint32) {
 		n = MinSplitKeys
 	}
 	p.minSplitKeys = n
+}
+
+// SetLeaveDeferredForCaller makes Process leave the worker-accumulated deferred
+// branch updates for the caller to flush instead of applying them inline.
+// Mirrors HexPatriciaHashed; used by the deferred-commitment (fork validation /
+// parallel apply) path.
+func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
+	p.leaveDeferredForCaller = leave
+}
+
+// HasPendingDeferredUpdates reports whether Process left deferred branch updates
+// for the caller to flush.
+func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
+	return len(p.deferredForCaller) > 0
+}
+
+// TakeDeferredUpdates returns the deferred branch updates staged for the caller
+// and clears them; the caller takes ownership and returns them to the pool after
+// flushing (via PendingCommitmentUpdate.Clear).
+func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
+	d := p.deferredForCaller
+	p.deferredForCaller = nil
+	return d
 }
 
 // RootTrie exposes the configuration template. Callers must NOT use it as
@@ -353,7 +382,17 @@ func (p *ParallelPatriciaHashed) Process(
 		return nil, waitErr
 	}
 
-	if err := p.applyDeferredUpdates(pu); err != nil {
+	if p.leaveDeferredForCaller {
+		// Deferred-commitment mode: stage the worker-accumulated deferred branch
+		// updates for the caller to flush into the correct block's changeset
+		// instead of applying them inline. The staged root is still promoted
+		// below; the root hash comes from the in-memory fold and does not depend
+		// on the branch apply.
+		pu.deferredMu.Lock()
+		p.deferredForCaller = pu.deferredCombined
+		pu.deferredCombined = nil
+		pu.deferredMu.Unlock()
+	} else if err := p.applyDeferredUpdates(pu); err != nil {
 		// Deferred branch apply failed: discard the staged root so neither
 		// p.rootHash nor p.template.root surface a state that was never
 		// persisted to the DB. The pending pointer is dropped on the next

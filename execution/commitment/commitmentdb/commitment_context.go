@@ -452,15 +452,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
 		hph.SetLeaveDeferredForCaller(true)
 		defer hph.SetLeaveDeferredForCaller(false)
-	} else if _, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok && sdc.deferCommitmentUpdates {
-		// ParallelPatriciaHashed applies worker-accumulated deferred branch
-		// updates inline at the end of Process via applyDeferredUpdates; there
-		// is no hook to stash them for later flush. Combining the parallel trie
-		// with deferred mode would write branches at the current txNum but
-		// bypass FlushPendingUpdates, breaking per-block changeset attribution
-		// during fork validation and parallel initial-sync apply. Fail loudly
-		// rather than silently producing incorrect state.
-		return nil, errors.New("ParallelPatriciaHashed does not support deferred commitment updates; disable --experimental.parallel-commitment when running with fork validation or parallel block apply")
+	} else if ptrie, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok && sdc.deferCommitmentUpdates {
+		ptrie.SetLeaveDeferredForCaller(true)
+		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
@@ -492,15 +486,25 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	// Handle deferred branch updates left by Process() on the branch encoder.
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.HasPendingDeferredUpdates() {
-		// Store deferred updates for later flushing (fork validation path).
-		// This path is reached only when deferCommitmentUpdates is true because
-		// Process() applies inline by default.
-		sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
-			BlockNum: blockNum,
-			TxNum:    txNum,
-			Deferred: hph.TakeDeferredUpdates(),
+	// Handle deferred branch updates left by Process() on the trie. Reached only
+	// when deferCommitmentUpdates is true (fork validation / parallel apply),
+	// since Process() applies inline by default.
+	switch trie := sdc.patriciaTrie.(type) {
+	case *commitment.HexPatriciaHashed:
+		if trie.HasPendingDeferredUpdates() {
+			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+				BlockNum: blockNum,
+				TxNum:    txNum,
+				Deferred: trie.TakeDeferredUpdates(),
+			}
+		}
+	case *commitment.ParallelPatriciaHashed:
+		if trie.HasPendingDeferredUpdates() {
+			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+				BlockNum: blockNum,
+				TxNum:    txNum,
+				Deferred: trie.TakeDeferredUpdates(),
+			}
 		}
 	}
 
