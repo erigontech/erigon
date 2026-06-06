@@ -333,11 +333,13 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
-// WithAlwaysGenerateChangesets mirrors --experimental.always-generate-changesets,
-// for tests that reorg deeper than MaxReorgDepth.
-func WithAlwaysGenerateChangesets() Option {
+// WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
+// regardless of the tester default: true for tests that reorg deeper than
+// MaxReorgDepth, false for tests that rely on the windowed-changesets
+// production behaviour.
+func WithAlwaysGenerateChangesets(v bool) Option {
 	return func(opts *options) {
-		opts.alwaysGenerateChangesets = true
+		opts.alwaysGenerateChangesets = &v
 	}
 }
 
@@ -359,7 +361,7 @@ type options struct {
 	enableDomains            []kv.Domain
 	fcuBackgroundCommit      bool
 	fcuBackgroundPrune       bool
-	alwaysGenerateChangesets bool
+	alwaysGenerateChangesets *bool
 }
 
 func applyOptions(opts []Option) options {
@@ -429,8 +431,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
-	if opt.alwaysGenerateChangesets {
-		cfg.AlwaysGenerateChangesets = true
+	if opt.alwaysGenerateChangesets != nil {
+		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
 	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
