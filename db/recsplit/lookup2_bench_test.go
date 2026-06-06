@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// buildLookup2BenchIndex builds an enums index over 20-byte random keys,
+// buildLookup2BenchIndex builds an index over 20-byte random keys,
 // looked up as the txnKey(8)||key(12) split that production Lookup2 callers use.
 func buildLookup2BenchIndex(b *testing.B, keys [][]byte) *Index {
 	b.Helper()
@@ -39,7 +39,7 @@ func buildLookup2BenchIndex(b *testing.B, keys [][]byte) *Index {
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   DefaultLeafSize,
-		Enums:      true,
+		Enums:      false, // production Lookup2 targets (.vi files) are built without enums
 		NoFsync:    true,
 	}, logger)
 	if err != nil {
