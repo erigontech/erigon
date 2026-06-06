@@ -17,19 +17,15 @@
 package commitment
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/bits"
 	"runtime"
-	"sort"
 	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon/db/etl"
 )
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
@@ -318,33 +314,24 @@ func (p *ParallelPatriciaHashed) Process(
 		p.warmupSplitAncestors(pu, warmuper)
 	}
 
-	// Group leafTasks by their root nibble. The ETL collector for a nibble
-	// bucket can only be scanned once, so each bucket runs in a single
-	// orchestrator goroutine that scans once and dispatches the keys to the
-	// (potentially many) workers participating in that bucket.
-	tasksByNibble := groupLeafTasksByNibble(pu.leafQueue)
 	for _, task := range pu.leafQueue {
 		if len(task.prefix) == 0 {
 			return nil, errors.New("ParallelPatriciaHashed: leafTask emitted without a routing prefix")
 		}
+		if task.node == nil {
+			return nil, errors.New("ParallelPatriciaHashed: leafTask emitted without a subtree node")
+		}
 	}
 
-	// foldSem bounds the total fold-phase goroutines across all buckets to
-	// p.numWorkers; without it concurrency would grow to numWorkers per bucket.
-	foldSem := make(chan struct{}, p.numWorkers)
-
+	// Each leafTask owns a disjoint trie subtree, so a flat errgroup capped at
+	// numWorkers runs build+fold per task with no per-bucket serialization.
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(p.numWorkers)
 
-	// Iterate deterministically so failures reproduce regardless of map order.
-	for nib := range 16 {
-		tasks := tasksByNibble[byte(nib)]
-		if len(tasks) == 0 {
-			continue
-		}
-		nib := byte(nib)
+	for i := range pu.leafQueue {
+		task := pu.leafQueue[i]
 		g.Go(func() error {
-			return p.runNibbleBucket(gctx, updates, nib, tasks, foldSem, onProgress)
+			return p.runLeafTask(gctx, updates, task)
 		})
 	}
 
@@ -426,157 +413,75 @@ func (p *ParallelPatriciaHashed) acquirePrepareContext() (PatriciaContext, func(
 	return p.trieCtxFactory()
 }
 
-// runNibbleBucket processes every leafTask under one root nibble. The backing
-// ETL collector can be scanned only once, so this orchestrator owns the scan
-// and routes each key to the matching worker; the workers then fold back
-// concurrently through the barrier protocol. A shared context serves the
-// single-pass dispatch; each fold goroutine takes its own context after foldSem.
-// Any dispatch or worker error cancels the whole bucket. See
-// docs/design/parallel-patricia-hashed.md (Phase 3) for the phase model.
-func (p *ParallelPatriciaHashed) runNibbleBucket(
-	ctx context.Context,
-	updates *Updates,
-	nib byte,
-	tasks []leafTask,
-	foldSem chan struct{},
-	_ func(*CommitProgress),
-) (retErr error) {
-	if len(tasks) == 0 {
-		return nil
-	}
+// runLeafTask materialises one leafTask by DFS-walking its trie subtree, applies
+// each key via followAndUpdate, then folds the worker back through the barrier.
+// foldDrainWithBarrier owns returning the worker to the pool on its paths. See
+// docs/design/parallel-patricia-hashed.md (Phase 3/4) for the phase model.
+func (p *ParallelPatriciaHashed) runLeafTask(ctx context.Context, updates *Updates, task leafTask) error {
+	hph := p.workerPool.Get().(*HexPatriciaHashed)
+	hph.resetForReuse()
+	hph.branchEncoder.setDeferUpdates(true)
+	hph.SetLeaveDeferredForCaller(true)
 
-	collector := updates.nibbles[nib]
-	if collector == nil {
-		return fmt.Errorf("ParallelPatriciaHashed: nibbles[%x] collector is nil", nib)
-	}
-
-	workers := make([]*HexPatriciaHashed, len(tasks))
-	// Defensive cleanup on early-return paths. Successful runs hand each
-	// worker off to foldDrainWithBarrier which is responsible for returning
-	// it to the pool; we set workers[i]=nil before handoff so this loop
-	// becomes a no-op for handed-off slots.
-	defer func() {
-		if retErr == nil {
-			return
-		}
-		for _, hph := range workers {
-			if hph == nil {
-				continue
-			}
-			hph.resetForReuse()
-			p.workerPool.Put(hph)
-		}
-	}()
-
-	// Dispatch is single-pass and sequential through fn, so only one hph reads
-	// from the DB at any moment. Share a single trieCtx across every hph for
-	// dispatch; per-worker trieCtxes are acquired lazily inside the fold
-	// goroutines (after foldSem) and released when the fold returns. This
-	// bounds simultaneous trieCtx (and MDBX reader-slot) usage per bucket to
-	// 1 + min(p.numWorkers, len(tasks)) instead of len(tasks).
-	dispatchCtx, dispatchCleanup := p.trieCtxFactory()
-	dispatchReleased := false
-	releaseDispatchCtx := func() {
-		if dispatchReleased {
-			return
-		}
-		dispatchReleased = true
-		if dispatchCleanup != nil {
-			dispatchCleanup()
+	if p.template != nil {
+		hph.trace = p.template.trace
+		hph.traceDomain = p.template.traceDomain
+		hph.enableWarmupCache = p.template.enableWarmupCache
+		if p.template.cache != nil {
+			hph.cache = p.template.cache
+			hph.branchEncoder.SetCache(p.template.cache)
 		}
 	}
-	defer releaseDispatchCtx()
 
-	for i := range tasks {
-		hph := p.workerPool.Get().(*HexPatriciaHashed)
-		hph.resetForReuse()
-		hph.ResetContext(dispatchCtx)
-		hph.branchEncoder.setDeferUpdates(true)
-		hph.SetLeaveDeferredForCaller(true)
-
-		if p.template != nil {
-			hph.trace = p.template.trace
-			hph.traceDomain = p.template.traceDomain
-			hph.enableWarmupCache = p.template.enableWarmupCache
-			if p.template.cache != nil {
-				hph.cache = p.template.cache
-				hph.branchEncoder.SetCache(p.template.cache)
-			}
-		}
-
-		workers[i] = hph
+	workerCtx, cleanup := p.trieCtxFactory()
+	if cleanup != nil {
+		defer cleanup()
 	}
+	hph.ResetContext(workerCtx)
 
-	// Single scan of the bucket. dispatchLeafKeys silently skips keys with no
-	// matching prefix; this is a defensive guard since every key Touch-Plain-Key
-	// routed through Updates landed in the bucket because some leafTask under
-	// it claimed it.
-	if err := dispatchLeafKeys(ctx, collector, tasks, func(idx int, hk, pk []byte) error {
-		if err := workers[idx].followAndUpdate(hk, pk, nil); err != nil {
-			return fmt.Errorf("followAndUpdate (nibble=%x task[%d]): %w", nib, idx, err)
-		}
-		return nil
+	if err := dfsSubtree(task.node, task.prefix, func(hk, pk []byte) error {
+		return hph.followAndUpdate(hk, pk, nil)
 	}); err != nil {
-		return err
+		hph.resetForReuse()
+		p.workerPool.Put(hph)
+		return fmt.Errorf("leafTask[%x] build: %w", task.prefix[0], err)
 	}
-	// Dispatch is complete; the shared roTx is no longer needed. Releasing it
-	// here keeps the bucket from holding two reader slots once the first fold
-	// goroutine acquires its own trieCtx below.
-	releaseDispatchCtx()
 
-	// Workers fold back concurrently, synchronising via splitMap deposits; the
-	// last sp.arrived decrement always triggers the finisher path, so arrival
-	// order cannot deadlock. Each per-worker trieCtx is acquired inside foldSem,
-	// so concurrent trieCtxes (and MDBX reader slots) track the fold cap.
-	sg, sgctx := errgroup.WithContext(ctx)
-	for i := range workers {
-		taskIdx := i
-		taskPrefix := tasks[i].prefix
-		// Hand off ownership: foldDrainWithBarrier resets and re-pools the
-		// worker, so the deferred cleanup above must skip this slot.
-		hph := workers[i]
-		workers[i] = nil
-		sg.Go(func() error {
-			select {
-			case foldSem <- struct{}{}:
-			case <-sgctx.Done():
-				p.releaseHandedOffWorker(hph)
-				return sgctx.Err()
-			}
-			defer func() { <-foldSem }()
-
-			workerCtx, cleanup := p.trieCtxFactory()
-			if cleanup != nil {
-				defer cleanup()
-			}
-			hph.ResetContext(workerCtx)
-
-			err := p.foldDrainWithBarrier(sgctx, hph, updates, taskPrefix)
-			if err != nil {
-				return fmt.Errorf("foldDrainWithBarrier (nibble=%x task[%d]): %w", nib, taskIdx, err)
-			}
-			return nil
-		})
-	}
-	if err := sg.Wait(); err != nil {
-		// foldDrainWithBarrier (or the deferred cleanup func above) has
-		// returned each hph to the pool and released its per-worker trieCtx.
-		return err
+	if err := p.foldDrainWithBarrier(ctx, hph, updates, task.prefix); err != nil {
+		return fmt.Errorf("leafTask[%x] fold: %w", task.prefix[0], err)
 	}
 	return nil
 }
 
-// releaseHandedOffWorker returns a worker to the pool when the fold goroutine
-// has already taken ownership (so cleanupAll's hph!=nil guard skips it) but a
-// foldSem-acquire context cancellation aborts before foldDrainWithBarrier
-// runs. The per-worker trieCtx cleanup is still owned by runNibbleBucket's
-// workers[i].cleanup and runs via cleanupAll on the error path.
-func (p *ParallelPatriciaHashed) releaseHandedOffWorker(hph *HexPatriciaHashed) {
-	if hph == nil {
-		return
+// dfsSubtree visits node's subtree in nibble order, calling fn(hashedKey, plainKey)
+// at every terminating node; hashedKey is rebuilt from prefix down the path. A
+// node emits its own key BEFORE descending, so an account precedes its storage.
+func dfsSubtree(node *prefixNode, prefix []byte, fn func(hashedKey, plainKey []byte) error) error {
+	if node == nil {
+		return nil
 	}
-	hph.resetForReuse()
-	p.workerPool.Put(hph)
+	if node.plainKey != nil {
+		if err := fn(prefix, node.plainKey); err != nil {
+			return err
+		}
+	} else if node.bitmap == 0 {
+		return errors.New("ParallelPatriciaHashed: trie leaf without a plainKey")
+	}
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := byte(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		childPrefix := make([]byte, len(prefix)+1+len(child.ext))
+		copy(childPrefix, prefix)
+		childPrefix[len(prefix)] = nib
+		copy(childPrefix[len(prefix)+1:], child.ext)
+		if err := dfsSubtree(child, childPrefix, fn); err != nil {
+			return err
+		}
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return nil
 }
 
 // foldDrainWithBarrier folds the worker's grid to its enclosing split-point,
@@ -962,81 +867,3 @@ func (p *ParallelPatriciaHashed) warmupSplitAncestors(pu *parallelUpdate, warmup
 	}
 }
 
-// dispatchLeafKeys scans the given ETL collector exactly once and routes each
-// hashed key to the leafTask whose prefix is the longest match. fn receives
-// the leafTask index (into tasks) and the hashed/plain key pair. Keys that
-// match none of the supplied tasks' prefixes are skipped silently: this lets
-// multiple workers share a nibble bucket, each invoking dispatchLeafKeys with
-// its own leafTask and filtering out keys owned by sibling workers.
-//
-// tasks may have any cardinality:
-//   - 1 task with a broad prefix covering the bucket: every key matches; fn
-//     is called for every entry.
-//   - 1 task within a multi-task bucket: fn fires only on keys whose hashed
-//     prefix matches the task's; sibling tasks' keys are skipped.
-//   - >1 tasks: the longest matching prefix wins. Tasks with disjoint
-//     prefixes are routed to distinct fn invocations.
-//
-// fn must not retain hk or pk beyond the call — they are backed by the ETL
-// collector's reusable buffers.
-func dispatchLeafKeys(
-	ctx context.Context,
-	collector *etl.Collector,
-	tasks []leafTask,
-	fn func(taskIdx int, hashedKey, plainKey []byte) error,
-) error {
-	if len(tasks) == 0 {
-		return nil
-	}
-	// Build the routing table sorted by descending prefix length so the
-	// longest-matching prefix wins. Each entry retains its original task
-	// index so callers can identify which task a key was routed to.
-	type entry struct {
-		prefix []byte
-		idx    int
-	}
-	routing := make([]entry, len(tasks))
-	for i, t := range tasks {
-		routing[i] = entry{prefix: t.prefix, idx: i}
-	}
-	sort.SliceStable(routing, func(i, j int) bool {
-		return len(routing[i].prefix) > len(routing[j].prefix)
-	})
-
-	return collector.Load(nil, "", func(hk, pk []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		matched := -1
-		for _, e := range routing {
-			if bytes.HasPrefix(hk, e.prefix) {
-				matched = e.idx
-				break
-			}
-		}
-		if matched < 0 {
-			// Key belongs to a sibling worker's leafTask. Skip silently.
-			return nil
-		}
-		return fn(matched, hk, pk)
-	}, etl.TransformArgs{Quit: ctx.Done()})
-}
-
-// groupLeafTasksByNibble bins leafTasks by their root nibble (prefix[0]). The
-// returned map is keyed by nibble (0..15). Entries with empty prefix are
-// dropped — Prepare guarantees non-root leafTasks have a non-empty prefix.
-func groupLeafTasksByNibble(leafQueue []leafTask) map[byte][]leafTask {
-	if len(leafQueue) == 0 {
-		return nil
-	}
-	out := make(map[byte][]leafTask, 16)
-	for _, t := range leafQueue {
-		if len(t.prefix) == 0 {
-			continue
-		}
-		out[t.prefix[0]] = append(out[t.prefix[0]], t)
-	}
-	return out
-}

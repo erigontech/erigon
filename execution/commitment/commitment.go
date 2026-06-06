@@ -1670,11 +1670,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
-
-			if err := t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes); err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
-			t.parallel.Insert(hashedKey)
+			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes))
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1747,11 +1743,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
-
-			if err := t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes); err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
-			t.parallel.Insert(hashedKey)
+			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes))
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1785,10 +1777,9 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			if err := t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{}); err != nil {
-				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
-			}
-			t.parallel.Insert(hashedKey)
+			// No plainKey for a hashed-only touch; the parallel fold rejects such a
+			// terminator. Only witness gen uses this, and it runs the sequential trie.
+			t.parallel.Insert(hashedKey, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:

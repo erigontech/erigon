@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"testing"
 
@@ -423,88 +424,43 @@ func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 	assert.Contains(t, err.Error(), "ModeParallel")
 }
 
-// TestParallelProcessSkeleton_DispatchLeafKeysSingleTask covers the helper
-// directly with a single leafTask — every key in the collector is routed to
-// the task with no filtering.
-func TestParallelProcessSkeleton_DispatchLeafKeysSingleTask(t *testing.T) {
+// TestDFSSubtree walks a built subtree and asserts keys emerge in sorted nibble
+// order with their plainKeys, and that a terminator that is a prefix of others
+// (account above storage) emits before its children.
+func TestDFSSubtree(t *testing.T) {
 	t.Parallel()
 
-	upds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer upds.Close()
-	ub := NewUpdateBuilder()
-	for i := range 5 {
-		addr := findAddressForNibble(0xA, i)
-		ub.Balance(addrHex(addr), uint64(i+1))
-	}
-	plainKeys, updates := ub.Build()
-	for i, k := range plainKeys {
-		i, k := i, k
-		ks := string(k)
-		upds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &updates[i]
-		})
-	}
+	pu := newParallelUpdate()
+	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"))
+	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"))
+	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"))
+	pu.Insert(nibs(0x01, 0x02), []byte("pk-D")) // terminator that is a prefix of A and B
 
-	tasks := []leafTask{{prefix: []byte{0x0A}, keyCount: uint32(len(plainKeys))}}
-	var got int
-	err := dispatchLeafKeys(context.Background(), upds.nibbles[0x0A], tasks, func(idx int, _, _ []byte) error {
-		assert.Equal(t, 0, idx, "single-task dispatch always returns idx 0")
-		got++
+	type kv struct{ hk, pk string }
+	var got []kv
+	err := dfsSubtree(pu.trie.root, nil, func(hk, pk []byte) error {
+		got = append(got, kv{hk: fmt.Sprintf("%x", hk), pk: string(pk)})
 		return nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, len(plainKeys), got, "every collected key reached the callback")
+	assert.Equal(t, []kv{
+		{hk: "0102", pk: "pk-D"},
+		{hk: "010203", pk: "pk-A"},
+		{hk: "010204", pk: "pk-B"},
+		{hk: "050607", pk: "pk-C"},
+	}, got)
 }
 
-// TestParallelProcessSkeleton_DispatchLeafKeysLongestPrefixWins covers the
-// helper directly with two leafTasks whose prefixes differ in depth. The
-// longer prefix wins for keys it matches; the shorter prefix catches the
-// rest.
-func TestParallelProcessSkeleton_DispatchLeafKeysLongestPrefixWins(t *testing.T) {
+// TestDFSSubtree_NilPlainKeyLeafErrors: a hashed-only touch leaves a terminator
+// without a plainKey, which the parallel fold cannot resolve — fail loudly.
+func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
 	t.Parallel()
 
-	upds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer upds.Close()
-
-	// Construct two keys that share the first nibble but diverge at depth 1.
-	// We hand-craft the touched keys via TouchHashedKey to keep the prefix
-	// arrangement controlled, then exercise the helper directly.
-	upds.TouchHashedKey([]byte{0x0A, 0x01, 0x02})
-	upds.TouchHashedKey([]byte{0x0A, 0x02, 0x03})
-
-	tasks := []leafTask{
-		{prefix: []byte{0x0A}, keyCount: 1},       // shorter
-		{prefix: []byte{0x0A, 0x02}, keyCount: 1}, // longer — wins for [0A 02 ...]
-	}
-
-	taskOfKey := map[string]int{}
-	err := dispatchLeafKeys(context.Background(), upds.nibbles[0x0A], tasks, func(idx int, hk, _ []byte) error {
-		taskOfKey[string(hk)] = idx
-		return nil
-	})
-	require.NoError(t, err)
-
-	assert.Equal(t, 0, taskOfKey[string([]byte{0x0A, 0x01, 0x02})], "[0A 01 02] should fall to the short prefix task")
-	assert.Equal(t, 1, taskOfKey[string([]byte{0x0A, 0x02, 0x03})], "[0A 02 03] should match the longer prefix task")
-}
-
-// TestParallelProcessSkeleton_GroupLeafTasksByNibble: bookkeeping for the
-// per-nibble dispatch loop.
-func TestParallelProcessSkeleton_GroupLeafTasksByNibble(t *testing.T) {
-	t.Parallel()
-
-	queue := []leafTask{
-		{prefix: []byte{0x01}},
-		{prefix: []byte{0x01, 0x02}},
-		{prefix: []byte{0x05, 0x06}},
-		{prefix: nil}, // dropped: empty prefix
-	}
-	got := groupLeafTasksByNibble(queue)
-	assert.Len(t, got[0x01], 2)
-	assert.Len(t, got[0x05], 1)
-	assert.Len(t, got[0x0A], 0)
+	pu := newParallelUpdate()
+	pu.Insert(nibs(0x01, 0x02, 0x03), nil)
+	err := dfsSubtree(pu.trie.root, nil, func(_, _ []byte) error { return nil })
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plainKey")
 }
 
 // TestParallelProcessSkeleton_WarmupAncestorsNoOp ensures the helper accepts

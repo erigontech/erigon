@@ -67,8 +67,31 @@ type splitPoint struct {
 // during its fold loop via splitMap lookups — there is no enclosingSP field.
 type leafTask struct {
 	prefix   []byte
+	node     *prefixNode // subtree root the worker DFS-walks for its keys
 	keyCount uint32
 }
+
+// plainKeyArena hands out stable plainKey copies from fixed chunks; a full chunk
+// is replaced, not grown, so earlier sub-slices keep their backing until reset.
+type plainKeyArena struct {
+	buf []byte
+}
+
+const plainKeyArenaChunk = 64 * 1024
+
+func (a *plainKeyArena) intern(b []byte) []byte {
+	if len(b) > plainKeyArenaChunk {
+		return append([]byte(nil), b...)
+	}
+	if cap(a.buf)-len(a.buf) < len(b) {
+		a.buf = make([]byte, 0, plainKeyArenaChunk)
+	}
+	off := len(a.buf)
+	a.buf = append(a.buf, b...)
+	return a.buf[off : off+len(b) : off+len(b)]
+}
+
+func (a *plainKeyArena) reset() { a.buf = nil }
 
 // parallelUpdate owns the per-batch state that drives parallel commitment:
 // the path-compressed prefix trie of touched keys, the freeze-time split-point
@@ -98,6 +121,8 @@ type parallelUpdate struct {
 
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
+
+	keyArena plainKeyArena
 }
 
 func newParallelUpdate() *parallelUpdate {
@@ -107,9 +132,14 @@ func newParallelUpdate() *parallelUpdate {
 	}
 }
 
-// Insert adds a hashed key (in nibble form) to the prefix trie.
-func (pu *parallelUpdate) Insert(hashedKey []byte) {
-	pu.trie.Insert(hashedKey)
+// Insert adds a hashed key (in nibble form) and its plainKey to the prefix trie.
+func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte) {
+	pu.trie.Insert(hashedKey, plainKey)
+}
+
+// internKey copies plainKey into the per-batch arena for stable trie retention.
+func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
+	return pu.keyArena.intern(plainKey)
 }
 
 // Reset clears all per-batch state so the parallelUpdate can be reused.
@@ -129,6 +159,7 @@ func (pu *parallelUpdate) Reset() {
 	}
 	pu.deferredCombined = pu.deferredCombined[:0]
 	pu.deferredMu.Unlock()
+	pu.keyArena.reset()
 }
 
 // Close releases references owned by the parallelUpdate. After Close the
@@ -144,6 +175,7 @@ func (pu *parallelUpdate) Close() {
 	}
 	pu.deferredCombined = nil
 	pu.deferredMu.Unlock()
+	pu.keyArena.reset()
 }
 
 // appendDeferred merges a worker's deferred branch updates into the shared
@@ -270,12 +302,11 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 
 	// Non-root subtree that does not qualify as a split-point — collapse the
 	// entire subtree (including this node's ext and all descendants) into a
-	// single leafTask. The collapsed prefix is the shortest nibble path shared
-	// by every touched key below; workers iterate keys in that range via the
-	// nibbles ETL bucket.
+	// single leafTask. The worker DFS-walks node to enumerate its keys.
 	nodePrefix := buildPrefix(accPrefix, node.ext)
 	pu.leafQueue = append(pu.leafQueue, leafTask{
 		prefix:   nodePrefix,
+		node:     node,
 		keyCount: node.subtreeCount,
 	})
 	return nil

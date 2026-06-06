@@ -43,15 +43,15 @@ func TestParallelUpdateConstruction(t *testing.T) {
 func TestParallelUpdateInsertDelegates(t *testing.T) {
 	pu := newParallelUpdate()
 
-	pu.Insert(nibs(0x01, 0x02, 0x03))
-	pu.Insert(nibs(0x01, 0x02, 0x04))
-	pu.Insert(nibs(0x05, 0x06, 0x07))
+	pu.Insert(nibs(0x01, 0x02, 0x03), nil)
+	pu.Insert(nibs(0x01, 0x02, 0x04), nil)
+	pu.Insert(nibs(0x05, 0x06, 0x07), nil)
 
 	// Verify the trie observed the inserts by comparing against a freshly built trie.
 	expected := newPrefixTrie()
-	expected.Insert(nibs(0x01, 0x02, 0x03))
-	expected.Insert(nibs(0x01, 0x02, 0x04))
-	expected.Insert(nibs(0x05, 0x06, 0x07))
+	expected.Insert(nibs(0x01, 0x02, 0x03), nil)
+	expected.Insert(nibs(0x01, 0x02, 0x04), nil)
+	expected.Insert(nibs(0x05, 0x06, 0x07), nil)
 
 	assert.Equal(t, expected.arena.nodeCount(), pu.trie.arena.nodeCount(),
 		"parallelUpdate.Insert must produce same node count as direct trie.Insert")
@@ -63,8 +63,8 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	pu := newParallelUpdate()
 
 	// Populate every field.
-	pu.Insert(nibs(0x01, 0x02, 0x03))
-	pu.Insert(nibs(0x05, 0x06, 0x07))
+	pu.Insert(nibs(0x01, 0x02, 0x03), nil)
+	pu.Insert(nibs(0x05, 0x06, 0x07), nil)
 	pu.splitMap.Set([]byte{0x01}, &splitPoint{prefix: []byte{0x01}, touchedBitmap: 0x05})
 	pu.leafQueue = append(pu.leafQueue, leafTask{prefix: []byte{0x01}, keyCount: 7})
 	pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
@@ -83,13 +83,13 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	assert.Empty(t, pu.deferredCombined, "deferredCombined must be cleared")
 
 	// Verify reusable: insert again works as on fresh instance.
-	pu.Insert(nibs(0x0A, 0x0B))
+	pu.Insert(nibs(0x0A, 0x0B), nil)
 	assert.Equal(t, uint32(1), pu.trie.root.subtreeCount)
 }
 
 func TestParallelUpdateClose(t *testing.T) {
 	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02))
+	pu.Insert(nibs(0x01, 0x02), nil)
 	pu.splitMap.Set([]byte{0x01}, &splitPoint{})
 	pu.leafQueue = append(pu.leafQueue, leafTask{})
 	pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
@@ -318,7 +318,7 @@ func TestPrepareSmallTrieNoSplits(t *testing.T) {
 	pre := []byte{0x0A, 0x0B}
 	keys := keysWithSharedPrefix(pre, int(MinSplitKeys)-1)
 	for _, k := range keys {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	require.NoError(t, pu.Prepare(ctx))
@@ -343,10 +343,10 @@ func TestPrepareTwoWayForkAboveThreshold(t *testing.T) {
 	// (< MinSplitKeys) so no nested split-point emerges below.
 	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0B}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0C}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	require.NoError(t, pu.Prepare(ctx))
@@ -376,10 +376,10 @@ func TestPrepareForkBelowThreshold(t *testing.T) {
 	// 8 keys total split between two branches under [0x0A]: below threshold,
 	// must collapse into a single leafTask covering both branches.
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0B}, 4) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0C}, 4) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	require.NoError(t, pu.Prepare(ctx))
@@ -400,10 +400,10 @@ func TestPrepareRootForkBelowThresholdProducesPerNibbleLeafTasks(t *testing.T) {
 	// nibble must become its own leafTask so the worker can scan a single
 	// Updates.nibbles[i] bucket.
 	for _, k := range keysWithSharedPrefix([]byte{0x01}, 4) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x02}, 4) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	require.NoError(t, pu.Prepare(ctx))
@@ -434,10 +434,10 @@ func TestPrepareDeepStorageShapeSplitsAtStorageFork(t *testing.T) {
 	}
 	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix(append(append([]byte{}, accountPrefix...), 0x01), perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix(append(append([]byte{}, accountPrefix...), 0x02), perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	require.NoError(t, pu.Prepare(ctx))
@@ -462,10 +462,10 @@ func TestPrepareUntouchedNibblePrePopulation(t *testing.T) {
 	// MinSplitKeys/2 keys per side keeps the fork at [0x0A] as the sole split-point.
 	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x03}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x07}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	dbNibbles := []int{0x03, 0x05, 0x07, 0x0A, 0x0F}
@@ -522,13 +522,13 @@ func TestPrepareLeafQueueSortedByKeyCount(t *testing.T) {
 	medCount := 2 * unit // 2u
 	bigCount := 3 * unit // 3u, still < MinSplitKeys = 4u
 	for _, k := range keysWithSharedPrefix([]byte{0x01}, medCount) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x02}, bigCount) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x03}, smallCount) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	require.NoError(t, pu.Prepare(ctx))
@@ -551,7 +551,7 @@ func TestPrepareSingleKey(t *testing.T) {
 	ctx := newPrepareMockCtx()
 
 	key := keysWithSharedPrefix([]byte{0x0A, 0x0B}, 1)[0]
-	pu.Insert(key)
+	pu.Insert(key, nil)
 
 	require.NoError(t, pu.Prepare(ctx))
 
@@ -570,10 +570,10 @@ func TestPrepareCtxBranchErrorPropagates(t *testing.T) {
 	// Force a split-point at [0x0A] so loadDBBranch fires for that prefix.
 	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x01}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x02}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 
 	err := pu.Prepare(ctx)
@@ -605,10 +605,10 @@ func TestPrepareResetClearsPreviousResults(t *testing.T) {
 	// First run: produces a split-point and two leafTasks.
 	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0B}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0C}, perSide) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	require.NoError(t, pu.Prepare(ctx))
 	require.Equal(t, 1, pu.splitMap.Len())
@@ -617,7 +617,7 @@ func TestPrepareResetClearsPreviousResults(t *testing.T) {
 	// Second run after Reset: fewer keys, no split-point, smaller leafQueue.
 	pu.Reset()
 	for _, k := range keysWithSharedPrefix([]byte{0x05}, 4) {
-		pu.Insert(k)
+		pu.Insert(k, nil)
 	}
 	require.NoError(t, pu.Prepare(ctx))
 	assert.Equal(t, 0, pu.splitMap.Len(), "Prepare must not see stale entries from previous run")
