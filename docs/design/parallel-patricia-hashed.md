@@ -40,10 +40,10 @@ in how the computation is scheduled.
 | split granularity | none | fixed: 16-way at **depth 1** only | adaptive: any node with `subtrees≥2` and `subtreeCount≥MinSplitKeys`, at **any depth**, chained |
 | merge mechanism | single bottom-up fold | each mount folds, takes `rootMu`, writes `root.grid[0][nib]`; root folded last | fold-time barrier at each split-point; last finisher rebuilds the row and folds up the chain |
 | root-update sync | — | `rootMu` mutex | atomic `arrived` counter + staged `pendingRoot` |
-| branch writes | inline `PutBranch` | inline (per mount) | deferred per worker, merged + applied once |
-| applicability | always | only when the top of the trie is a wide branch (`CanDoConcurrentNext` heuristic, re-evaluated each block; first block always sequential) | any shape, except multi-bucket-with-no-split (rejected) |
+| branch writes | inline `PutBranch` | inline (per mount) | deferred per worker, merged + applied once (or handed to the caller under parallel-apply/fork-validation) |
+| applicability | always | only when the top of the trie is a wide branch (`CanDoConcurrentNext` heuristic, re-evaluated each block; first block always sequential) | any shape, except multiple-leaf-tasks-with-no-split (rejected) |
 | depth of parallelism | — | shallow (depth 1) | deep (splits inside storage subtrees) |
-| extra inputs | — | unfolded root + 16 mounted sub-tries | prefix trie (shape oracle) + split-point DB pre-population |
+| extra inputs | — | unfolded root + 16 mounted sub-tries | prefix trie (carries keys + `plainKey`s) + split-point DB pre-population |
 
 ### How `ConcurrentPatriciaHashed` works (for contrast)
 
@@ -75,9 +75,9 @@ ones — the property the parallel design must preserve.
 
 | phase | when | what |
 | --- | --- | --- |
-| 1. Touch | `Updates.TouchPlainKey` | route each hashed key into `nibbles[hashedKey[0]]` (a per-top-nibble ETL collector) **and** insert it into an in-memory path-compressed prefix trie |
+| 1. Touch | `Updates.TouchPlainKey` | insert each hashed key into an in-memory path-compressed prefix trie, carrying the un-hashed `plainKey` on the terminating node (no ETL collectors) |
 | 2. Prepare | start of `Process` (sequential) | DFS the prefix trie → emit split-points + leaf tasks; pre-populate each split-point's cells from its on-disk branch |
-| 3. Dispatch | `Process` | group leaf tasks by root nibble; one orchestrator per nibble scans its collector once and routes keys to pooled workers |
+| 3. Dispatch | `Process` (concurrent) | each leaf task is handed to a pooled worker that DFS-walks its own trie subtree, reading `plainKey`s off terminating nodes — no per-nibble bucketing |
 | 4. Fold + barrier | `Process` (concurrent) | each worker folds its subtree to its enclosing split-point, deposits a cell, and exits; the last sibling rebuilds the merged row and folds upward through the split-point chain; the topmost finisher publishes the root |
 | 5. Commit | end of `Process` | merge every worker's deferred branch updates and apply once; promote the staged root only after the apply succeeds |
 
@@ -85,16 +85,19 @@ ones — the property the parallel design must preserve.
 
 - **`prefixTrie`** (`prefix_trie.go`) — path-compressed nibble trie of the touched
   keys, bump-allocated from a slab `prefixArena`. Each `prefixNode` holds a
-  compressed `ext`, a child `bitmap`, a dense `children` slice, and
-  `subtreeCount` (incremented on every traversal *including* the terminating
-  node — so it doubles as a terminator detector).
+  compressed `ext`, a child `bitmap`, a dense `children` slice, `subtreeCount`
+  (incremented on every traversal *including* the terminating node — so it doubles
+  as a terminator detector), and a `plainKey` set only on terminating nodes. The
+  `plainKey` bytes live once in a per-batch `plainKeyArena`; `Insert` carries a
+  terminator's `plainKey` to the correct child through path-compression splits.
 - **`splitPoint`** (`parallel_update.go`) — a barrier at a prefix. Holds
   `cells [16]cellEncodeData`, an atomic `arrived`, `touchedBitmap`, `dbBitmap`,
   and `branchBefore`. `cells` matches `DeferredBranchUpdate.cells` so DB-loaded
   cells copy in by assignment.
-- **`leafTask`** — a contiguous span of touched keys sharing `prefix`, with
-  `keyCount` for scheduling. The enclosing split-point chain is **not** stored; a
-  worker discovers it by walking `splitMap` longest-prefix-first during the fold.
+- **`leafTask`** — a touched-key subtree rooted at `node` (a `*prefixNode`) under
+  `prefix`, with `keyCount` for scheduling. The worker DFS-walks `node` to
+  enumerate its keys. The enclosing split-point chain is **not** stored; a worker
+  discovers it by walking `splitMap` longest-prefix-first during the fold.
 - **`parallelUpdate`** — the per-batch state: prefix trie, freeze-time `splitMap`
   (+ a `splitPoints` slice for iteration), `leafQueue`, and a mutex-guarded
   `deferredCombined`.
@@ -110,8 +113,8 @@ DFS classifies each node:
 - **Leaf task** otherwise: the node's whole subtree collapses into one task.
 
 The root is special-cased: even when it is not a split-point, Prepare descends one
-level so each leaf task carries a non-empty prefix routing to exactly one
-`nibbles[i]` collector. `leafQueue` is finally sorted by descending `keyCount`
+level so each leaf task roots a distinct top-nibble subtree (rather than one task
+covering the whole trie). `leafQueue` is finally sorted by descending `keyCount`
 (heaviest tasks dispatch first).
 
 **Adaptive coarsening.** Before the DFS, `Process` raises the effective threshold
@@ -121,15 +124,19 @@ each acquiring a ~1MB worker grid; at that volume the pool stops amortizing (a
 1M-flat batch otherwise allocates 16–32 GB and runs slower than sequential). The
 threshold only ever rises, so small and clustered batches keep `MinSplitKeys`.
 
-### Phase 3 — Dispatch (`runNibbleBucket`)
+### Phase 3 — Dispatch (`runLeafTask`)
 
-An ETL collector can be scanned only once, so each touched nibble bucket is owned
-by one orchestrator that scans `nibbles[nib]` once and routes each key to the
-worker whose leaf-task prefix is the longest match (`dispatchLeafKeys`). Workers
-are pooled `*HexPatriciaHashed`, each bound to a factory-provided
-`PatriciaContext`, with deferred branch updates enabled. The outer errgroup is
-capped at `numWorkers`; all of a bucket's workers share one context for the
-single-pass dispatch, taking per-worker contexts only in the fold phase.
+Each leaf task owns a disjoint trie subtree, so dispatch is a flat errgroup over
+`leafQueue` capped at `numWorkers` (heaviest first). A pooled `*HexPatriciaHashed`
+worker `dfsSubtree`-walks its `leafTask.node` in nibble order, reconstructing each
+hashed key from the path and reading the `plainKey` off the terminating node, and
+calls `followAndUpdate` — then folds back through the barrier on the same
+goroutine. There is no per-nibble bucketing, no routing scan, and no separate
+fold semaphore: build and fold for a task run on one worker, so the errgroup limit
+alone bounds both concurrency and MDBX reader slots to `numWorkers`. Each worker
+takes its own context for the whole build+fold. A node emits its own key *before*
+descending, so an account at depth 64 precedes its storage keys (sorted order),
+which the fold state machine requires.
 
 ### Phase 4 — Fold with barrier (`foldDrainWithBarrier`)
 
@@ -158,7 +165,10 @@ single context (`ApplyDeferredBranchUpdates`), so no two goroutines ever call
 `PutBranch` concurrently. The published root is **staged** on `pendingRoot` and
 promoted to `rootHash` (and mirrored into the template's root cell + root flags)
 only after the deferred apply succeeds — a failed apply never surfaces an
-unpersisted root.
+unpersisted root. Under `SetLeaveDeferredForCaller` (parallel apply / fork
+validation) the inline apply is skipped: the merged list is handed to the caller
+via `TakeDeferredUpdates` and the root is promoted directly, since the root hash
+comes from the in-memory fold and does not depend on when the branches land.
 
 ## Correctness
 
@@ -174,7 +184,10 @@ byte-for-byte. Supporting invariants:
   nibble with no terminator slot; splitting at a node where a key ends (e.g. an
   account at depth 64 above its storage) would drop that key from the branch
   hash. Detected as `subtreeCount > Σ child.subtreeCount`.
-- **Root leaf tasks carry a non-empty prefix** so each maps to one nibble bucket.
+- **Root leaf tasks carry a non-empty prefix** so each roots a distinct top-nibble subtree.
+- **`plainKey` follows the split.** `prefixTrie.Insert` must move a terminator's
+  `plainKey` to the correct child through path-compression splits; a misroute is a
+  wrong DB read and a diverged root.
 - **Single deferred apply** — all `PutBranch` writes happen from one goroutine.
 
 `go test -race ./execution/commitment/...` exercises the concurrency;
@@ -183,13 +196,14 @@ byte-for-byte. Supporting invariants:
 
 ## Concurrency & resource model
 
-- Outer errgroup limit = `numWorkers`; one orchestrator goroutine per touched
-  nibble bucket (≤16).
-- A process-wide `foldSem` (size `numWorkers`) bounds the **total** fold-phase
-  goroutine count across all buckets (otherwise it would fan out to
-  `numWorkers × buckets`).
-- Per-worker contexts are acquired inside `foldSem`, so simultaneous contexts —
-  and thus MDBX reader slots — track the fold cap, not the task count.
+- A single errgroup over `leafQueue`, limit = `numWorkers`. Each task runs
+  build (subtree DFS + `followAndUpdate`) and fold on one goroutine, so the limit
+  alone caps concurrency — there is no per-nibble bucketing and no `foldSem`.
+- Each worker holds one context for its whole build+fold, so simultaneous
+  contexts — and thus MDBX reader slots — track `numWorkers`, not the task count.
+- The frozen post-`Prepare` trie is read-only and workers walk disjoint subtrees,
+  so concurrent `plainKey`/structure reads are race-free (the split-point ban on
+  terminator nodes keeps shared ancestors off the fold path).
 - `deferredCombined` is the only shared-mutable slice during the parallel phase,
   guarded by `deferredMu`.
 
@@ -215,10 +229,18 @@ byte-for-byte. Supporting invariants:
 | storage-heavy 500K (1K acct × 499 slots) | 714 ms | 362 ms | 1.97× |
 
 Throughput peaks near 8 workers and regresses beyond it (1.45×/1.76× at 18
-workers) — bounded by memory bandwidth and limited top-level fan-out, not lock
-contention. On high-core hosts a tuned worker count beats raw `NumCPU()`;
-worker-count autotuning is future work. These numbers are for hand inspection,
-not a CI gate (too noisy for a "must be faster" assertion).
+workers) — bounded by memory bandwidth, not lock contention. On high-core hosts a
+tuned worker count beats raw `NumCPU()`; worker-count autotuning is future work.
+These numbers are for hand inspection, not a CI gate (too noisy for a "must be
+faster" assertion).
+
+The per-leafTask DFS dispatch decoupled build parallelism from the top-nibble
+count (the previous per-nibble scan capped build at ≤16 and serialized each
+bucket). On the 18-core M5 Max this is roughly perf-neutral (geomean ~-2%, up to
+-6% at w8 on bucket-imbalanced batches, memory parity) because the workload
+saturates bandwidth at ~8 workers; the benchmark's shared-lock `MockState` also
+under-reports the parallel win versus production's independent MDBX readers. The
+larger gains are expected on higher-bandwidth / >16-core hosts.
 
 On heavier loads the adaptive threshold is load-bearing: without it a 1M flat
 batch over-splits and allocates 16–32 GB (parallel slower than sequential, and
@@ -228,22 +250,41 @@ bounded set of account prefixes.
 
 ## Limitations & future work
 
-- **Multi-bucket, no split-point.** When Prepare emits more than one leaf task but
-  zero split-points, independent workers would fold to root with only their own
-  bucket touched and disagree; `Process` returns an error rather than a wrong
-  root. A synthetic root barrier (or auto-fallback to sequential) would lift this.
-- **Witness generation** still uses sequential `HexPatriciaHashed`.
-- **Fork validation / parallel block apply** paths that call
-  `deferCommitmentUpdates` handle only `*HexPatriciaHashed`; the call site errors
-  with guidance instead of using the wrong trie.
+- **Multiple leaf tasks, no split-point.** When Prepare emits more than one leaf
+  task but zero split-points, independent workers would fold to root with only
+  their own subtree touched and disagree; `Process` returns an error rather than a
+  wrong root. A synthetic root barrier (or auto-fallback to sequential) would lift
+  this.
+- **Witness generation** still uses sequential `HexPatriciaHashed`; a
+  hashed-only `TouchHashedKey` leaves a `plainKey`-less terminator the parallel
+  fold rejects, so this path is not wired for the parallel trie.
 - **Worker-count autotuning** (see Performance).
+
+### Parallel block apply / fork validation (supported)
+
+`deferCommitmentUpdates` now works with the parallel trie. Two pieces:
+
+- **ModeParallel buffer.** The parallel-exec commitment calculator
+  (`stagedsync/committer.go`) keeps its `Updates` buffer in `ModeParallel` instead
+  of forcing `ModeUpdate`, so `Process` accepts it.
+- **Caller-deferred branches.** `Process` honors `SetLeaveDeferredForCaller`:
+  it stages the merged `deferredCombined` for the caller (`TakeDeferredUpdates`)
+  rather than applying inline, so branch writes land in the correct block's
+  changeset via the pending-update flush.
+
+Leaf **values** come from the calculator's as-of state reader
+(`sd.GetAsOf(plainKey, lastTxNum+1)`, which sees `sd.mem`) rather than the
+`ModeUpdate` btree, since `ModeParallel` carries only keys. Correctness of that
+substitution is asserted at runtime by the block-root check (`ErrWrongTrieRoot`).
 
 ## Source map
 
 | file | contents |
 | --- | --- |
-| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, dispatch, fold/barrier, deposit, deferred apply |
-| `execution/commitment/parallel_update.go` | `parallelUpdate`, `Prepare` DFS, split-point emission, DB pre-population |
-| `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena |
-| `execution/commitment/commitment.go` | `Updates` (`ModeParallel`, per-nibble collectors), `InitializeTrieAndUpdates` |
+| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, `runLeafTask`/`dfsSubtree` dispatch, fold/barrier, deposit, deferred apply/hand-off |
+| `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Prepare` DFS, split-point emission, DB pre-population |
+| `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` carries `plainKey` on terminating nodes |
+| `execution/commitment/commitment.go` | `Updates` (`ModeParallel` carries keys in the prefix trie), `InitializeTrieAndUpdates` |
+| `execution/commitment/commitmentdb/commitment_context.go` | wires `ModeParallel` + caller-deferred updates into `ComputeCommitment` |
+| `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the `ModeParallel` buffer, feeds values via the as-of reader |
 | `execution/commitment/hex_concurrent_patricia_hashed.go` | `ConcurrentPatriciaHashed` (the depth-1 variant compared above) |
