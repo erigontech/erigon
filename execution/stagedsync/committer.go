@@ -528,6 +528,11 @@ type asOfStateReader struct {
 	sd    *execctx.SharedDomains
 	roTx  kv.TemporalTx
 	txNum uint64
+	// workerCtx, when non-nil, carries this worker's lock-free metrics
+	// accumulator; the CommitmentDomain read routes through GetLatestContext so
+	// a concurrent trie-warmup worker doesn't write the shared main accumulator
+	// (a race) or take the global metrics lock. Nil on the main reader.
+	workerCtx context.Context
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -539,7 +544,11 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+		if r.workerCtx != nil {
+			enc, step, err = r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
+		} else {
+			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+		}
 	} else {
 		// Account/storage/code: use GetAsOf to avoid reading future state.
 		// Check sd.mem first (in-memory data from current batch), then
@@ -568,6 +577,14 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+}
+
+// CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
+// accumulator carried by workerCtx (this reader is used as the commitment
+// reader during block assembly, where trie-warmup runs concurrently — so it
+// must not write the shared main accumulator).
+func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
 }
 
 // Keep imports used.

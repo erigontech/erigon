@@ -19,6 +19,8 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -225,6 +227,18 @@ type BranchCache struct {
 	// exactly once per cache lifetime, even though many SharedDomains
 	// instances may be created over a process's lifetime.
 	preloadClaimed atomic.Bool
+
+	// Tx-aware unwind coherence — same discipline as the state-cache
+	// GenericCache. Each entry carries the txNum its bytes are valid as of
+	// and the epoch it was written in. Unwind(txNum) bumps the epoch and
+	// lowers unwindFloor; an entry is valid iff it was written in the
+	// current epoch OR its txNum is at/below the floor. Without this the
+	// cache cannot be unwound: a reorg leaves recent canonical branches
+	// that a later fork-validation reads as a wrong trie root. Step
+	// granularity is too coarse here — an unwind to a txNum inside the
+	// latest step needs txNum precision.
+	epoch       atomic.Uint32
+	unwindFloor atomic.Uint64
 }
 
 // TryClaimPreload returns true the first time it's called on a given
@@ -264,12 +278,18 @@ type branchCacheEntry struct {
 	writeSeq       uint64
 	writeTimeNanos int64
 
-	// step is the on-disk file step the cached bytes came from. Returned
-	// by Get so callers (e.g. CheckDataAvailable) can validate against
-	// the latest visible step. 0 means "step not tracked" — fine for
-	// in-memory tests but real callers should always pass the step
-	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
-	step uint64
+	// txNum is an upper bound on the txNum the cached bytes are valid as of
+	// (the last txNum of the file/step they came from). Used to gate reads
+	// after an unwind: an entry whose txNum is above the unwind floor and
+	// whose epoch is superseded is stale. 0 means frozen/untracked — always
+	// at/below any unwind floor, so kept (correct for frozen-file preloads,
+	// which can never be unwound into). Real callers pass the value's txNum.
+	txNum uint64
+
+	// epoch is the unwind generation the entry was written in. Disambiguates
+	// a txNum reused across forks: an entry from a superseded epoch with a
+	// txNum above the floor is dropped lazily on its next Get.
+	epoch uint32
 }
 
 // DefaultBranchCacheTailCapacity is the LRU tail size used when no
@@ -300,10 +320,14 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if err != nil {
 		panic(fmt.Sprintf("BranchCache: NewLRU: %s", err))
 	}
-	return &BranchCache{
+	bc := &BranchCache{
 		tail:   tail,
 		pinned: maphash.NewMap[*branchCacheEntry](),
 	}
+	// No unwind seen yet: every entry's txNum is at/below the floor, so the
+	// epoch check never strands a valid entry.
+	bc.unwindFloor.Store(math.MaxUint64)
+	return bc
 }
 
 // isRootPrefix reports whether prefix targets the pinned root slot. The
@@ -372,7 +396,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 // eager preload of hot prefixes — e.g. the storage-trunk of big
 // contracts under PIN_CONTRACT_TRUNKS. Data is copied; safe to mutate
 // the input after the call.
-func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin string) {
+func (c *BranchCache) PinEntry(prefix []byte, data []byte, txNum uint64, origin string) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -380,7 +404,8 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin s
 	copy(dataCopy, data)
 	c.pinned.Set(prefix, &branchCacheEntry{
 		data:           dataCopy,
-		step:           step,
+		txNum:          txNum,
+		epoch:          c.epoch.Load(),
 		writeSeq:       c.writeSeq.Add(1),
 		origin:         origin,
 		writeTimeNanos: time.Now().UnixNano(),
@@ -440,8 +465,47 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if !ok {
 		return nil, 0, false
 	}
+	// Tx-aware unwind invalidation: an entry from a superseded epoch whose
+	// txNum is above the unwind floor is stale (its bytes belong to a chain
+	// segment that was unwound). Drop it lazily on read. Entries at/below
+	// the floor (incl. frozen-file preloads stamped txNum 0) stay warm.
+	if entry.epoch != c.epoch.Load() && entry.txNum > c.unwindFloor.Load() {
+		c.Invalidate(prefix)
+		if dbgBC {
+			fmt.Fprintf(os.Stderr, "[BC-EVICT] prefix=%x txNum=%d floor=%d eEpoch=%d cur=%d\n", prefix, entry.txNum, c.unwindFloor.Load(), entry.epoch, c.epoch.Load())
+		}
+		return nil, 0, false
+	}
+	if dbgBC && entry.epoch != c.epoch.Load() {
+		fmt.Fprintf(os.Stderr, "[BC-SERVE-OLD] prefix=%x txNum=%d floor=%d eEpoch=%d cur=%d\n", prefix, entry.txNum, c.unwindFloor.Load(), entry.epoch, c.epoch.Load())
+	}
 	c.bytesServed.Add(uint64(len(entry.data)))
-	return entry.data, entry.step, true
+	return entry.data, entry.txNum, true
+}
+
+var dbgBC = os.Getenv("DBG_BC") != ""
+
+// Unwind invalidates cache entries whose bytes belong to a chain segment
+// above unwindToTxNum. O(1): bump the epoch (so entries written in the new,
+// live epoch stay valid) and lower the floor to the unwind point (so entries
+// at/below it survive); stale entries (superseded epoch, txNum above the
+// floor) are dropped lazily on their next Get. Mirrors GenericCache.Unwind.
+// Driven from SharedDomains.Unwind so a reorg can't leave stale committed
+// branches that a fork-validation then reads as a wrong trie root.
+func (c *BranchCache) Unwind(unwindToTxNum uint64) {
+	c.epoch.Add(1)
+	if dbgBC {
+		fmt.Fprintf(os.Stderr, "[BC-UNWIND] txNum=%d newEpoch=%d\n", unwindToTxNum, c.epoch.Load())
+	}
+	for {
+		cur := c.unwindFloor.Load()
+		if unwindToTxNum >= cur {
+			break
+		}
+		if c.unwindFloor.CompareAndSwap(cur, unwindToTxNum) {
+			break
+		}
+	}
 }
 
 // GetDecoded retrieves the cached branch in decoded form. Lazy-decodes on
@@ -489,7 +553,7 @@ func (c *BranchCache) GetDecoded(prefix []byte) (bitmap uint16, cells *[16]cell,
 // caller buffer lifetime. step is the on-disk file step the bytes came
 // from (0 if not tracked); origin is a short label of the write site
 // captured for divergence-detection diagnostics.
-func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string) {
+func (c *BranchCache) Put(prefix []byte, data []byte, txNum uint64, origin string) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -497,7 +561,8 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string
 	copy(dataCopy, data)
 	c.store(prefix, &branchCacheEntry{
 		data:           dataCopy,
-		step:           step,
+		txNum:          txNum,
+		epoch:          c.epoch.Load(),
 		origin:         origin,
 		writeSeq:       c.writeSeq.Add(1),
 		writeTimeNanos: time.Now().UnixNano(),
@@ -511,11 +576,11 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string
 //
 // Same semantics as WarmupCache.PutBranchIfClean — see that doc for the
 // race-it-protects-against narrative.
-func (c *BranchCache) PutIfClean(prefix []byte, data []byte, step uint64, origin string) bool {
+func (c *BranchCache) PutIfClean(prefix []byte, data []byte, txNum uint64, origin string) bool {
 	if existing, ok := c.lookup(prefix); ok && existing.dirty.Load() {
 		return false
 	}
-	c.Put(prefix, data, step, origin)
+	c.Put(prefix, data, txNum, origin)
 	return true
 }
 
@@ -584,6 +649,7 @@ func (c *BranchCache) Clear() {
 	c.root.Store(nil)
 	c.pinned = maphash.NewMap[*branchCacheEntry]()
 	c.tail.Purge()
+	c.unwindFloor.Store(math.MaxUint64)
 	c.rootHits.Store(0)
 	c.rootMisses.Store(0)
 	c.pinnedHits.Store(0)

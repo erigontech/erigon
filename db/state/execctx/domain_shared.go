@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -108,6 +109,11 @@ type SharedDomains struct {
 	disableInlineTouchKey bool
 	mem                   kv.TemporalMemBatch
 	metrics               changeset.DomainMetrics
+	// mainWM is the lock-free metrics accumulator for the main goroutine's
+	// reads (direct GetLatest + the main commitment/exec getter). Trie-warmup
+	// workers get their own via AsGetterWorker; all are combined into metrics
+	// at task boundaries. Keeps the global metrics write-lock off the hot path.
+	mainWM *changeset.WorkerMetrics
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -197,6 +203,7 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 		logger: logger,
 		//trace:   true,
 		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
+		mainWM:   changeset.NewWorkerMetrics(),
 		stepSize: tx.Debug().StepSize(),
 	}
 
@@ -433,10 +440,26 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 type temporalGetter struct {
 	sd *SharedDomains
 	tx kv.TemporalTx
+	// wm is the accumulator GetLatest records into: sd.mainWM for the main
+	// goroutine (AsGetter), or nil to collect nothing (AsGetterNoMetrics) for
+	// concurrent callers whose per-worker metering isn't wired yet (parallel
+	// exec workers) — they must not write the shared main accumulator (a race).
+	wm *changeset.WorkerMetrics
 }
 
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.GetLatest(name, gt.tx, k)
+	return gt.sd.getLatestMetered(name, gt.tx, k, gt.wm)
+}
+
+// GetLatestContext is the context-aware read: it records into the per-worker,
+// lock-free accumulator carried by ctx (a nil ctx-value collects no metrics).
+// Concurrent workers (trie-warmup goroutines) pass their own accumulator via
+// ctx, so they neither share metrics state with the main goroutine nor take any
+// lock. Optional method — callers type-assert for it (mirrors the existing
+// AggregatorRoTx.MeteredGetLatest pattern). The plan is to migrate GetLatest
+// callers onto this ctx-carrying form in a follow-up, then drop the split.
+func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+	return gt.sd.getLatestMetered(name, gt.tx, k, changeset.WorkerMetricsFromContext(ctx))
 }
 
 // GetCodeSize returns the length of the code at addr without loading the
@@ -472,7 +495,22 @@ func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd, tx}
+	return &temporalGetter{sd: sd, tx: tx, wm: sd.mainWM}
+}
+
+// AsGetterNoMetrics returns a getter whose GetLatest collects no metrics. Use
+// for concurrent callers that share this SD but don't yet have per-worker
+// metrics wiring (parallel exec workers): metering them into sd.mainWM would be
+// a data race. Their per-worker metering is a follow-up (the state-read path).
+func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
+	return &temporalGetter{sd: sd, tx: tx, wm: nil}
+}
+
+// MergeWorkerMetrics folds a worker's lock-free accumulator into the shared
+// DomainMetrics under a single lock. Called once when a worker finishes (not
+// per read), so the global metrics write-lock stays off the hot path.
+func (sd *SharedDomains) MergeWorkerMetrics(wm *changeset.WorkerMetrics) {
+	sd.metrics.Merge(wm)
 }
 
 // LockChangesetAccumulator and UnlockChangesetAccumulator bracket a
@@ -580,14 +618,21 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	// After unwind the canonical commitment-domain values are rolled
-	// back; any cached entries for keys touched in the unwind window
-	// now hold stale bytes vs the post-unwind canonical state. Drop
-	// those specifically — the rest of the cache (including pinned
-	// branches whose keys weren't in the changeset) stays warm.
-	if sd.branchCache != nil && changeset != nil {
-		for _, diff := range changeset[kv.CommitmentDomain] {
-			sd.branchCache.Invalidate([]byte(diff.Key))
+	// Tx-aware unwind of the commitment BranchCache: every cached branch
+	// whose bytes belong to the rolled-back window (txNum above the unwind
+	// point, current epoch) is now stale vs the post-unwind canonical state.
+	// The changeset-gated Invalidate below only covers keys the unwound
+	// blocks explicitly wrote — it misses entries seeded by the read-pop and
+	// the trunk preload, which is what left stale committed branches that a
+	// fork-validation then read as a wrong trie root. Unwind(txNum) drops all
+	// of them (lazily, by epoch+floor) while keeping at/below-floor entries
+	// — including frozen preloads — warm.
+	if sd.branchCache != nil {
+		sd.branchCache.Unwind(txNumUnwindTo)
+		if changeset != nil {
+			for _, diff := range changeset[kv.CommitmentDomain] {
+				sd.branchCache.Invalidate([]byte(diff.Key))
+			}
 		}
 	}
 }
@@ -796,7 +841,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					if len(v) == 0 {
 						sd.branchCache.Invalidate(k)
 					} else {
-						sd.branchCache.Put(k, v, txNum/sd.StepSize(), "sd.Flush")
+						sd.branchCache.Put(k, v, txNum, "sd.Flush")
 					}
 				}
 			case kv.AccountsDomain:
@@ -918,8 +963,39 @@ func (sd *SharedDomains) ClearBranchCache() {
 	}
 }
 
-// TemporalDomain satisfaction
+// DetachBranchCache makes this SharedDomains ignore the aggregator-scope
+// BranchCache: commitment branch reads go straight to sd.mem/overlay/MDBX and
+// no read populates the shared cache. Used for fork-validation SDs, which read
+// transient fork state — sharing the canonical BranchCache let them read stale
+// committed branches (wrong trie root → INVALID payload) and pollute the cache
+// with fork-transient branches. Only sd.branchCache (the read/populate path,
+// domain_shared GetLatest) is consulted, so nil-ing it fully detaches; the
+// canonical SDs keep their warm cache.
+func (sd *SharedDomains) DetachBranchCache() {
+	sd.branchCache = nil
+}
+
+// TemporalDomain satisfaction. Reads on behalf of the main goroutine, recording
+// metrics into the shared lock-free main accumulator.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+	return sd.getLatestMetered(domain, tx, k, sd.mainWM)
+}
+
+// GetLatestContext is the context-aware read for callers that read on behalf of
+// a concurrent worker: metrics go to the per-worker, lock-free accumulator
+// carried by ctx (nil ctx-value => no metrics). Lets a worker's reader meter
+// without touching sd.mainWM (a race) or any lock. Mirrors
+// temporalGetter.GetLatestContext for readers that hold the SD directly (e.g.
+// the committer's asOfStateReader).
+func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+	return sd.getLatestMetered(domain, tx, k, changeset.WorkerMetricsFromContext(ctx))
+}
+
+// getLatestMetered is the read implementation. wm is the caller's lock-free
+// metrics accumulator (the main goroutine's sd.mainWM, or a warmup worker's
+// private one); a nil wm disables metrics for the call. No global metrics lock
+// is taken on this hot path — accumulators are combined later via Merge.
+func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *changeset.WorkerMetrics) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -934,7 +1010,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// so the value is already accessible without caching it again.
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
-			sd.metrics.UpdateCacheReads(domain, start)
+			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
 	} else {
@@ -947,7 +1023,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if sd.parent != nil {
 		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
 			if dbg.KVReadLevelledMetrics {
-				sd.metrics.UpdateCacheReads(domain, start)
+				wm.UpdateCacheReads(domain, start)
 			}
 			return v, step, nil
 		} else {
@@ -958,7 +1034,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.WorkerMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
@@ -967,9 +1043,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		v, ok := sd.stateCache.Get(domain, k)
 		if dbg.KVReadLevelledMetrics {
 			if ok {
-				sd.metrics.UpdateStateCacheHit(domain)
+				wm.UpdateStateCacheHit(domain)
 			} else {
-				sd.metrics.UpdateStateCacheMiss(domain)
+				wm.UpdateStateCacheMiss(domain)
 			}
 		}
 		if ok {
@@ -979,7 +1055,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 				// backing tx is the single source of truth for this key at this point.
 				var vDB []byte
 				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
 				} else {
 					vDB, _, _ = tx.GetLatest(domain, k)
 				}
@@ -998,8 +1074,29 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// equivalent to reading from MDBX. Cleared by sd.Flush so a new MDBX
 	// state never coexists with stale cache entries.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
-		if cv, cstep, ok := sd.branchCache.Get(k); ok {
-			return cv, kv.Step(cstep), nil
+		if cv, cTxNum, ok := sd.branchCache.Get(k); ok {
+			// Respect maxStep. sd.mem / sd.parent.mem lowered maxStep above when an
+			// unwound key reports its restored step via unwindChangeset (the per-key
+			// in-mem unwind signal). The cache's global epoch/floor is coarser than
+			// that per-key signal, so a cached entry below the floor can still belong
+			// to a step the unwind re-bound away. Serving it then diverges from the
+			// (maxStep-bounded) DB read the cache-disabled path takes. Fall through to
+			// the bounded read in that case; the Put below refreshes the entry.
+			cStep := kv.Step(cTxNum / sd.StepSize())
+			if cStep <= maxStep {
+				if dbg.EnvBool("DBG_BC", false) {
+					var vDB []byte
+					if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
+						vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
+					} else {
+						vDB, _, _ = tx.GetLatest(domain, k)
+					}
+					if !bytes.Equal(cv, vDB) {
+						fmt.Fprintf(os.Stderr, "[BC-DIVERGE] key=%x cStep=%d maxStep=%d cTxNum=%d sdTxNum=%d cached=%x db=%x\n", k, cStep, maxStep, cTxNum, sd.txNum, cv, vDB)
+					}
+				}
+				return cv, cStep, nil
+			}
 		}
 	}
 
@@ -1021,7 +1118,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
 	} else {
 		v, step, err = tx.GetLatest(domain, k)
 	}
@@ -1044,7 +1141,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
-		sd.branchCache.Put(k, v, uint64(step), "sd.GetLatest")
+		// Stamp the upper-bound txNum of the step the bytes came from, so an
+		// unwind into a recent step drops this entry (frozen-step reads, with
+		// a low txNum, stay warm). Mirrors the stateCache read-pop above.
+		sd.branchCache.Put(k, v, (uint64(step)+1)*sd.StepSize()-1, "sd.GetLatest")
 	}
 
 	return v, step, nil
@@ -1178,13 +1278,28 @@ func decodeAccountCodeHash(enc []byte) []byte {
 	return h[:]
 }
 
+// flushMainWM folds the main goroutine's lock-free accumulator into the shared
+// DomainMetrics and resets it, so a subsequent read of sd.metrics reflects the
+// main goroutine's reads. Must be called from the main goroutine (the sole
+// writer of mainWM). Warmup workers merge their own accumulators independently
+// via MergeWorkerMetrics; both serialize on sd.metrics' lock.
+func (sd *SharedDomains) flushMainWM() {
+	if sd.mainWM == nil {
+		return
+	}
+	sd.metrics.Merge(sd.mainWM)
+	sd.mainWM.Reset()
+}
+
 func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
+	sd.flushMainWM()
 	return &sd.metrics
 }
 
 func (sd *SharedDomains) LogMetrics() []any {
 	var metrics []any
 
+	sd.flushMainWM()
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
 

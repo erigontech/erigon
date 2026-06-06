@@ -17,6 +17,7 @@
 package changeset
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -514,77 +515,187 @@ type DomainMetrics struct {
 	seenFileReads sync.Map
 }
 
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
+// WorkerMetrics is a per-worker, lock-free I/O metrics accumulator. Each
+// goroutine on the hot read path (the main commitment/exec goroutine and each
+// trie-warmup worker) owns one exclusively, so updates need no synchronization
+// — no mutex, no atomics, no shared cache line. The per-worker accumulators are
+// combined into the shared DomainMetrics once per task via DomainMetrics.Merge.
+//
+// This replaces the previous design where every read called a DomainMetrics
+// method that took the global write lock (dm.Lock()); under concurrent warmup
+// workers that write lock was a hard serialization point on the hottest path.
+type WorkerMetrics struct {
+	total   DomainIOMetrics
+	domains [kv.DomainLen]DomainIOMetrics
+
+	// uniqueSeen records the first local sighting of each (domain,prefix) that
+	// fell through to a file read, so cross-worker uniqueness can be resolved
+	// once at Merge time (against DomainMetrics.seenFileReads) instead of
+	// touching a shared structure on every read. Value is the length bucket.
+	// Nil until the first UpdateFileReadsUnique call (workers that never read
+	// from files pay nothing).
+	uniqueSeen map[uniqueKey]int
+}
+
+type uniqueKey struct {
+	domain kv.Domain
+	prefix string
+}
+
+// NewWorkerMetrics returns a fresh lock-free accumulator. A nil *WorkerMetrics
+// is valid and makes every Update* a no-op, so callers that don't collect
+// metrics can pass nil.
+func NewWorkerMetrics() *WorkerMetrics { return &WorkerMetrics{} }
+
+// ctxKey is the typed-int context-key namespace for this package (the const-int
+// model used by node/app), avoiding per-key struct types.
+type ctxKey int
+
+const (
+	ckWorkerMetrics ctxKey = iota
+)
+
+// ContextWithWorkerMetrics returns a child context carrying a per-worker,
+// lock-free metrics accumulator. Concurrent workers (e.g. trie-warmup
+// goroutines) each run with their own, so reads never contend on a shared
+// metrics structure (and take no lock).
+func ContextWithWorkerMetrics(ctx context.Context, wm *WorkerMetrics) context.Context {
+	return context.WithValue(ctx, ckWorkerMetrics, wm)
+}
+
+// WorkerMetricsFromContext extracts the per-worker accumulator, or nil if none
+// was attached (in which case reads collect no metrics — a valid no-op).
+func WorkerMetricsFromContext(ctx context.Context) *WorkerMetrics {
+	if ctx == nil {
+		return nil
+	}
+	wm, _ := ctx.Value(ckWorkerMetrics).(*WorkerMetrics)
+	return wm
+}
+
+// Reset zeroes the accumulator so it can be reused after its counts have been
+// merged into the shared DomainMetrics. Used for the long-lived main-goroutine
+// accumulator, which is merged-and-reset on each metrics read.
+func (w *WorkerMetrics) Reset() {
+	if w == nil {
+		return
+	}
+	w.total = DomainIOMetrics{}
+	for i := range w.domains {
+		w.domains[i] = DomainIOMetrics{}
+	}
+	w.uniqueSeen = nil
+}
+
+func (w *WorkerMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
+	if w == nil {
+		return
+	}
+	d := time.Since(start)
+	w.total.CacheReadCount++
+	w.total.CacheReadDuration += d
+	w.domains[domain].CacheReadCount++
+	w.domains[domain].CacheReadDuration += d
+}
+
+func (w *WorkerMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
+	if w == nil {
+		return
+	}
+	d := time.Since(start)
+	w.total.DbReadCount++
+	w.total.DbReadDuration += d
+	w.domains[domain].DbReadCount++
+	w.domains[domain].DbReadDuration += d
+}
+
+func (w *WorkerMetrics) UpdateStateCacheHit(domain kv.Domain) {
+	if w == nil {
+		return
+	}
+	w.total.StateCacheHitCount++
+	w.domains[domain].StateCacheHitCount++
+}
+
+func (w *WorkerMetrics) UpdateStateCacheMiss(domain kv.Domain) {
+	if w == nil {
+		return
+	}
+	w.total.StateCacheMissCount++
+	w.domains[domain].StateCacheMissCount++
+}
+
+func (w *WorkerMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
+	if w == nil {
+		return
+	}
+	d := time.Since(start)
+	w.total.FileReadCount++
+	w.total.FileReadDuration += d
+	w.domains[domain].FileReadCount++
+	w.domains[domain].FileReadDuration += d
+}
+
+// Merge folds a worker's accumulated counters into the shared DomainMetrics
+// under a single lock acquisition (once per task, not once per read). Unique
+// file-read prefixes are deduplicated across workers here, against the global
+// seenFileReads set, so the cross-worker uniqueness count stays correct without
+// any shared structure on the hot path.
+func (dm *DomainMetrics) Merge(w *WorkerMetrics) {
+	if w == nil {
+		return
+	}
 	dm.Lock()
 	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
+	addIOMetrics(&dm.DomainIOMetrics, &w.total)
+	for d := range w.domains {
+		src := &w.domains[d]
+		if src.isZero() {
+			continue
+		}
+		dst, ok := dm.Domains[kv.Domain(d)]
+		if !ok {
+			dst = &DomainIOMetrics{}
+			dm.Domains[kv.Domain(d)] = dst
+		}
+		addIOMetrics(dst, src)
+	}
+	for uk, bucket := range w.uniqueSeen {
+		domainKey := uk.domain.String() + ":" + uk.prefix
+		if _, already := dm.seenFileReads.LoadOrStore(domainKey, struct{}{}); already {
+			continue
+		}
+		dm.UniqueFileReadCount++
+		dm.UniqueLenBuckets[bucket]++
+		if dst, ok := dm.Domains[uk.domain]; ok {
+			dst.UniqueFileReadCount++
+			dst.UniqueLenBuckets[bucket]++
+		} else {
+			nd := &DomainIOMetrics{UniqueFileReadCount: 1}
+			nd.UniqueLenBuckets[bucket] = 1
+			dm.Domains[uk.domain] = nd
 		}
 	}
 }
 
-func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
-	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
+// addIOMetrics adds src's cumulative read-side counters into dst. CachePut*
+// fields are intentionally excluded: those track mem-batch buffer occupancy
+// (functional state, reset on flush), not cumulative read metrics, and are
+// accounted separately off this path.
+func addIOMetrics(dst, src *DomainIOMetrics) {
+	dst.CacheReadCount += src.CacheReadCount
+	dst.CacheReadDuration += src.CacheReadDuration
+	dst.DbReadCount += src.DbReadCount
+	dst.DbReadDuration += src.DbReadDuration
+	dst.FileReadCount += src.FileReadCount
+	dst.FileReadDuration += src.FileReadDuration
+	dst.StateCacheHitCount += src.StateCacheHitCount
+	dst.StateCacheMissCount += src.StateCacheMissCount
 }
 
-func (dm *DomainMetrics) UpdateStateCacheHit(domain kv.Domain) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.StateCacheHitCount++
-	if d, ok := dm.Domains[domain]; ok {
-		d.StateCacheHitCount++
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{StateCacheHitCount: 1}
-	}
-}
-
-func (dm *DomainMetrics) UpdateStateCacheMiss(domain kv.Domain) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.StateCacheMissCount++
-	if d, ok := dm.Domains[domain]; ok {
-		d.StateCacheMissCount++
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{StateCacheMissCount: 1}
-	}
-}
-
-func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
+func (m *DomainIOMetrics) isZero() bool {
+	return m.CacheReadCount == 0 && m.DbReadCount == 0 && m.FileReadCount == 0 &&
+		m.StateCacheHitCount == 0 && m.StateCacheMissCount == 0
 }
 
 // lenBucket maps a prefix byte-length to its UniqueLenBuckets index.
@@ -616,45 +727,26 @@ func lenBucket(n int) int {
 	}
 }
 
-// UpdateFileReadsUnique records a file read while also tracking whether
-// the prefix has been seen before for this domain. Same gate as
-// UpdateFileReads (dbg.KVReadLevelledMetrics); call this instead when
-// the read-amplification ratio (FileReadCount / UniqueFileReadCount)
-// is wanted on the metric output. The key bytes are copied into the
-// internal dedup map; do not mutate after the call.
-func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
-	// Composite "<domain>:<key>" so two domains can hold the same prefix
-	// shape (commitment compact-encoded paths vs accounts plain addresses)
-	// without colliding.
-	domainKey := domain.String() + ":" + string(key)
-	_, alreadySeen := dm.seenFileReads.LoadOrStore(domainKey, struct{}{})
-	bucket := lenBucket(len(key))
-
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if !alreadySeen {
-		dm.UniqueFileReadCount++
-		dm.UniqueLenBuckets[bucket]++
+// UpdateFileReadsUnique records a file read in the worker-local accumulator,
+// remembering the (domain,prefix) first-sighting so cross-worker uniqueness can
+// be resolved at Merge time. Lock-free: the key bytes are copied into a
+// per-worker map; nothing shared is touched on the hot path. The key bytes are
+// copied; do not mutate after the call.
+func (w *WorkerMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
+	if w == nil {
+		return
 	}
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-		if !alreadySeen {
-			d.UniqueFileReadCount++
-			d.UniqueLenBuckets[bucket]++
-		}
-	} else {
-		newD := &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-		if !alreadySeen {
-			newD.UniqueFileReadCount = 1
-			newD.UniqueLenBuckets[bucket] = 1
-		}
-		dm.Domains[domain] = newD
+	d := time.Since(start)
+	w.total.FileReadCount++
+	w.total.FileReadDuration += d
+	w.domains[domain].FileReadCount++
+	w.domains[domain].FileReadDuration += d
+
+	if w.uniqueSeen == nil {
+		w.uniqueSeen = make(map[uniqueKey]int)
+	}
+	uk := uniqueKey{domain: domain, prefix: string(key)}
+	if _, ok := w.uniqueSeen[uk]; !ok {
+		w.uniqueSeen[uk] = lenBucket(len(key))
 	}
 }

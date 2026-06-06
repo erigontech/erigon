@@ -226,7 +226,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	} else {
 		var getter kv.TemporalGetter
 		if chainTx != nil {
-			getter = rs.Domains().AsGetter(chainTx)
+			getter = rs.Domains().AsGetterNoMetrics(chainTx)
 		}
 		// Use CachedReaderV3 for parallel workers — caches account data
 		// on first read per block, providing a stable pre-block committed
@@ -292,7 +292,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+			typedReader.SetGetter(rw.rs.Domains().AsGetterNoMetrics(rw.chainTx))
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -415,7 +415,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+		typedReader.SetGetter(rw.rs.Domains().AsGetterNoMetrics(rw.chainTx))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -447,7 +447,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetter(rw.chainTx), nil))
+		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterNoMetrics(rw.chainTx), nil))
 	}
 
 	// Set the per-block committed state cache from the task.
@@ -533,7 +533,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetter(nil))
+				reader = state.NewReaderV3(rs.Domains().AsGetterNoMetrics(nil))
 			}
 
 			if err = reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {

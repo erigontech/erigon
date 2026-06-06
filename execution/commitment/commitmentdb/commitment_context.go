@@ -38,6 +38,9 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	// MergeWorkerMetrics folds a finished worker's lock-free metrics accumulator
+	// into the shared metrics (once, not per read).
+	MergeWorkerMetrics(wm *changeset.WorkerMetrics)
 	StepSize() uint64
 	Trace() bool
 	CommitmentCapture() bool
@@ -500,6 +503,14 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}
+		// Warmup workers run concurrently with the main commitment goroutine.
+		// Each gets its own lock-free metrics accumulator carried in a per-worker
+		// context, so reads neither share metrics state with the main goroutine
+		// (a data race) nor take the global metrics write lock (the prior hard
+		// serialization point). The accumulator is folded into the shared metrics
+		// once at teardown.
+		wm := changeset.NewWorkerMetrics()
+		workerCtx := changeset.ContextWithWorkerMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
@@ -507,11 +518,12 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
+			sdc.sharedDomains.MergeWorkerMetrics(wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
@@ -539,6 +551,11 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		collectors = append(collectors, collector)
 		mu.Unlock()
 
+		// Concurrent mounts run in parallel; each gets its own lock-free metrics
+		// accumulator via a per-worker context so they don't share metrics state
+		// (a race) or take the global metrics lock. Folded in at teardown.
+		wm := changeset.NewWorkerMetrics()
+		workerCtx := changeset.ContextWithWorkerMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
@@ -547,11 +564,12 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 			localCollector: collector,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
+			sdc.sharedDomains.MergeWorkerMetrics(wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup

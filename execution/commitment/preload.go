@@ -124,7 +124,11 @@ func (p *ContractTrunkPreload) Run(
 			break
 		}
 
-		cache.PinEntry(prefix, v, step, "preload-trunk")
+		// Trunk preload reads frozen .kv files only (below any unwind point),
+		// so the bytes can never go stale on a reorg — stamp txNum 0 ("frozen,
+		// always valid") so the tx-aware Get keeps them warm across unwinds.
+		_ = step
+		cache.PinEntry(prefix, v, 0, "preload-trunk")
 		// Copy prefix because nibbles.HexToCompact may return a slice
 		// over a reused buffer; we need a stable handle for later
 		// Invalidate on demotion.
