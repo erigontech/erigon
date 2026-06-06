@@ -26,6 +26,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -454,6 +455,11 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	bucket := remap(bucketHash, idx.bucketCount)
 	cumKeys, cumKeysNext, bitPos := idx.ef.Get3(bucket)
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
+	if idx.enums {
+		// touch the fixed-bits word so its miss overlaps the unary-word miss in ReadReset
+		fixedWord := gr.data[bitPos>>6]
+		runtime.KeepAlive(fixedWord)
+	}
 	gr.ReadReset(int(bitPos), idx.skipBits(m))
 	var level int
 	for m > idx.secondaryAggrBound { // fanout = 2
@@ -492,6 +498,15 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		}
 		level++
 	}
+	// rec is confined to [cumKeys, cumKeys+m); touch both ends of that range so the
+	// final offset load overlaps the remaining Golomb-Rice reads instead of following them
+	if idx.enums {
+		base := unsafe.Pointer(unsafe.SliceData(idx.data))
+		prefetch := *(*byte)(unsafe.Add(base, uintptr(1+8+idx.bytesPerRec*int(cumKeys+1))))
+		prefetch += *(*byte)(unsafe.Add(base, uintptr(1+8+idx.bytesPerRec*int(cumKeys+uint64(m)))))
+		runtime.KeepAlive(prefetch)
+	}
+
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
