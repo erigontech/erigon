@@ -121,6 +121,12 @@ principle. Exclude unless/until they gain real logic:
 | db/snaptype2 | 3.5% | — | — | **Deferred (no pure surface).** Package is mostly snapshot-type *registration data* (vars) plus file/DB functions: TxsAmountBasedOnBodiesSnapshots (needs a built seg.Decompressor) and the HeaderFreezer methods (need a kv DB + collector). No meaningful pure unit tests without a snapshot-file/DB harness — revisit in a later T2 pass. |
 | execution/types (log.go) | 46.9% | **47.5%** (pkg) | clean | **Large package — log.go sub-area done.** Covered the pure Log functions: Log.Copy/Logs.Copy (deep-copy + nil), ToErigonLogs, ToRPCTransactionLog, ContainingTopics (addr/topic/maxLogs paths), Log + LogForStorage RLP round-trips with -ve decode cases, and ErigonLog/RPCLog UnmarshalJSON (valid + missing-required-field + bad-json). Package % moves little because log.go is one file of ~34. **The rest of execution/types (block.go 57 fns, transactions, blob_tx_wrapper, BAL, receipts, signing) warrants its own dedicated wave** — see recommendation below. |
 
+## execution/types wave (in progress)
+
+| File | Notes |
+|------|-------|
+| block_access_list.go | EIP-7928 BAL. Func-avg ~0%→**~83%**. Added complementary tests (existing file already covered Validate/MaxItems/RLP/Hash-empty): GetIndex (all 4 change types), Normalize (sort+dedup of slots/reads/balance/nonce/code), per-type DecodeRLP error paths (index>uint32, value>32 bytes), decodeMinimalHash too-large, Hash non-empty + DebugString, and full execution-proto and types-proto round-trips with -ve (nil account, missing address). Cleanup: removed unused dead generic `sortByBytes`. |
+
 ## Recommendation: execution/types as its own wave
 
 `execution/types` (root, 47.5%) is by far the largest core package and is
