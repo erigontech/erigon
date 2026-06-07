@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	libchain "github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -804,7 +803,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithBlockBufferSize(128), execmoduletester.WithPruneMode(pm))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithPruneMode(pm))
 
 	head := uint64(4)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
@@ -2189,6 +2188,27 @@ func TestEIP2718Transition(t *testing.T) {
 	}
 }
 
+// eip1559Config is a PoW (Ethash) config with London active from genesis, so
+// blockgen and verification agree on difficulty and the miner earns the PoW
+// block reward this test asserts on.
+func eip1559Config() *libchain.Config {
+	return &libchain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 libchain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
+		Ethash:                new(libchain.EthashConfig),
+	}
+}
+
 // TestEIP1559Transition tests the following:
 //
 //  1. A transaction whose feeCap is greater than the baseFee is valid.
@@ -2200,7 +2220,6 @@ func TestEIP2718Transition(t *testing.T) {
 //  6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
 	t.Parallel()
-	t.Skip("needs fixing")
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
@@ -2213,7 +2232,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = accounts.InternAddress(crypto.PubkeyToAddress(key2.PublicKey))
 		funds   = new(uint256.Int).Mul(&u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: chainspec.Sepolia.Config,
+			Config: eip1559Config(),
 			Alloc: types.GenesisAlloc{
 				addr1.Value(): {Balance: funds.ToBig()},
 				addr2.Value(): {Balance: funds.ToBig()},
@@ -2284,7 +2303,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		statedb := state.New(m.NewHistoryStateReader(1, tx))
+		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
@@ -2332,7 +2351,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		statedb := state.New(m.NewHistoryStateReader(1, tx))
+		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
 		baseFee := block.BaseFee()
 		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
 		effectiveTip := tip.Uint64()

@@ -1472,7 +1472,7 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		dt.mapReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
 	if dt.mapReaders[i] == nil {
-		dt.mapReaders[i] = dt.files[i].src.index.GetReaderFromPool()
+		dt.mapReaders[i] = dt.files[i].src.index.Reader()
 	}
 	return dt.mapReaders[i]
 }

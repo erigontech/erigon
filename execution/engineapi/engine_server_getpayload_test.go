@@ -115,6 +115,7 @@ func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule)
 		true,  // proposing
 		true,  // consuming
 		nil,   // txPool
+		nil,   // blobGetter
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
