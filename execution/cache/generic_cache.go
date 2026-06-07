@@ -60,9 +60,10 @@ type GenericCache[T any] struct {
 
 	// Cache coherence across unwinds is txNum/epoch based — no block awareness,
 	// no diffset. An entry is valid iff it was written in the current epoch OR
-	// its txNum is at/below unwindFloor (so it predates every unwind seen and
-	// can't be stale). Unwind bumps the epoch and lowers the floor (O(1), no
-	// scan); stale entries are dropped lazily on their next read. txNum slots
+	// its txNum is strictly below unwindFloor (the first unwound txNum), so it
+	// predates every unwind seen and can't be stale. Unwind bumps the epoch and
+	// lowers the floor (O(1), no scan); stale entries are dropped lazily on their
+	// next read. txNum slots
 	// are reused across forks, so the epoch — not the txNum — is what tells a
 	// dead fork's write apart from the live fork's at the same txNum.
 	epoch       atomic.Uint32
@@ -170,9 +171,14 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 		return zero, false
 	}
 	// Lazy unwind invalidation: an entry from a superseded epoch whose txNum is
-	// above the unwind floor reflects dead-fork state — drop it and miss so the
-	// read falls through to the reverted domain and repopulates.
-	if e.epoch != c.epoch.Load() && e.txNum > c.unwindFloor.Load() {
+	// at or above the unwind floor reflects dead-fork state — drop it and miss so
+	// the read falls through to the reverted domain and repopulates. The floor is
+	// the first unwound txNum (Min(UnwindPoint+1), the first txNum of the first
+	// rolled-back block), so an entry stamped exactly at the floor belongs to a
+	// dead block — e.g. an EIP-4788 beacon-root write in the block-begin system
+	// tx — and must be dropped; >= not > (the surviving block's last txNum is
+	// floor-1, so this never drops a live entry).
+	if e.epoch != c.epoch.Load() && e.txNum >= c.unwindFloor.Load() {
 		c.data.Remove(h)
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
@@ -234,13 +240,14 @@ func (c *GenericCache[T]) Clear() {
 	c.currentSize.Store(0)
 }
 
-// Unwind invalidates entries that reflect state above unwindToTxNum on a
-// now-dead fork. O(1): bump the epoch (so entries written in the new, live
-// epoch stay valid) and lower the floor to the unwind point (so entries at or
-// below it — which predate the unwind and can't be stale — stay warm). Stale
-// entries (old epoch, txNum above the floor) are dropped lazily on their next
-// read. The floor only ever moves down, to the deepest unwind seen, so a later
-// shallower unwind can't resurrect entries an earlier deeper one invalidated.
+// Unwind invalidates entries that reflect dead-fork state. unwindToTxNum is the
+// first rolled-back txNum (Min(UnwindPoint+1)); every entry at or above it is on
+// the dead fork. O(1): bump the epoch (so entries written in the new, live epoch
+// stay valid) and lower the floor to unwindToTxNum (so entries strictly below it
+// — which predate the unwind and can't be stale — stay warm). Stale entries (old
+// epoch, txNum >= floor) are dropped lazily on their next read. The floor only
+// ever moves down, to the deepest unwind seen, so a later shallower unwind can't
+// resurrect entries an earlier deeper one invalidated.
 func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
 	c.epoch.Add(1)
 	for {

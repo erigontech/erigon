@@ -689,7 +689,7 @@ func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
 	c.Put(below, makeValue(1), 50)  // predates the unwind
 	c.Put(above, makeValue(2), 150) // written in the unwound range
 
-	c.Unwind(100) // keep <=100, drop >100
+	c.Unwind(100) // floor=100 (first unwound txNum): keep <100, drop >=100
 
 	v, ok := c.Get(below)
 	assert.True(t, ok, "entry below the unwind point must stay warm")
@@ -698,6 +698,30 @@ func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
 	_, ok = c.Get(above)
 	assert.False(t, ok, "entry above the unwind point must be invalidated")
 	assert.Equal(t, 1, c.Len(), "the stale entry is evicted lazily on its read")
+}
+
+// Boundary regression: unwindToTxNum is the FIRST rolled-back txNum
+// (Min(UnwindPoint+1)), so an entry stamped at exactly that txNum belongs to the
+// first dead block and must be evicted — the drop rule is txNum>=floor, not
+// txNum>floor. This reproduces the Sidechain Reorg wrong-root bug: an EIP-4788
+// beacon-root storage write runs in a block's begin-system-tx, stamped at the
+// block's first txNum; when that block is the first unwound one, txNum==floor and
+// a strict `>` left the dead-fork value served stale.
+func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
+	c := NewDomainCache(1 * datasize.MB)
+	atFloor := makeAddr(1)
+	belowFloor := makeAddr(2)
+	c.Put(atFloor, makeValue(1), 100)   // first txNum of the first unwound block
+	c.Put(belowFloor, makeValue(2), 99) // last txNum of the surviving block
+
+	c.Unwind(100) // floor=100, epoch->1
+
+	_, ok := c.Get(atFloor)
+	assert.False(t, ok, "entry at txNum==floor is on the dead fork and must be evicted")
+
+	v, ok := c.Get(belowFloor)
+	assert.True(t, ok, "entry at txNum==floor-1 predates the unwind and must stay warm")
+	assert.Equal(t, makeValue(2), v)
 }
 
 // The reused-txNum case: after an unwind, the live fork re-writes a key at the
