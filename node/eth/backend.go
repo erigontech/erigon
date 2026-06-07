@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
@@ -163,6 +164,7 @@ type Ethereum struct {
 	rpcFilters          *rpchelper.Filters
 	rpcDaemonStateCache kvcache.Cache
 	mcpRPC              *mcp.ErigonMCPServer
+	httpRpcCfg          *httpcfg.HttpCfg
 
 	miningSealingQuit   chan struct{}
 	pendingBlocks       chan *types.Block
@@ -1165,13 +1167,15 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.logger.Info("[RPC] extra API namespaces registered", "count", len(httpRpcCfg.ExtraAPIs))
 	}
 
+	httpRpcCfgPtr := &httpRpcCfg
 	s.bgComponentsEg.Go(func() error {
-		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
+		err := rpcdaemoncli.StartRpcServer(ctx, httpRpcCfgPtr, s.apiList, s.logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("cli.StartRpcServer error", "err", err)
 		}
 		return err
 	})
+	s.httpRpcCfg = httpRpcCfgPtr
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		s.bgComponentsEg.Go(func() error {
@@ -1191,6 +1195,15 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
+}
+
+// InProcServer returns the in-process RPC server once it's started.
+// Returns nil if the RPC server hasn't bound yet. Callers should poll.
+func (s *Ethereum) InProcServer() *rpc.Server {
+	if s.httpRpcCfg == nil {
+		return nil
+	}
+	return s.httpRpcCfg.InProcServer
 }
 
 func (s *Ethereum) StateDiffClient() *direct.StateDiffClientDirect {
