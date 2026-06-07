@@ -533,6 +533,74 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
+// mockStorageEnum stands in for the roTx-backed RangeAsOf enumeration of an
+// account's persisted storage subtree, returning a fixed slot set per address.
+type mockStorageEnum struct {
+	slots map[accounts.Address][]accounts.StorageKey
+}
+
+func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
+	for _, k := range m.slots[addr] {
+		if err := fn(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TestSDOfPreExistingContract_DeletesUntouchedSlots locks in that a
+// self-destruct deletes the WHOLE persisted storage subtree, not just the
+// slots the EVM touched this block. Serial's BlockStateCache.Flush wipes the
+// subtree via DomainDelPrefix(StorageDomain, addr), which enumerates every
+// on-disk slot and DomainDel's it (each TouchKey'd into the commitment
+// buffer). The parallel calculator builds the commitment key set from
+// calcState alone (the exec loop's DomainDel runs with inline TouchKey
+// disabled), and slots the EVM never read/wrote never enter vm.StorageKeys,
+// so without enumerating the subtree those slots survive as stale trie
+// leaves and the root diverges.
+func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
+	// Slots that exist on disk but are never read/written this block, so they
+	// never enter cs.storageState through the writes stream.
+	untouched1 := accounts.InternKey(common.Hash{0x11})
+	untouched2 := accounts.InternKey(common.Hash{0x22})
+
+	cs := newTestCalcState()
+	cs.storageEnum = &mockStorageEnum{slots: map[accounts.Address][]accounts.StorageKey{
+		addr: {untouched1, untouched2},
+	}}
+
+	// Pure SD of a pre-existing contract, no storage writes in the block.
+	cs.ApplyWrites(state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: uint64(3)},
+		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}},
+	})
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+
+	addrBytes := addr.Value()
+	gotSlots := map[common.Hash]commitment.Update{}
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		if len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]) {
+			var h common.Hash
+			copy(h[:], k[20:])
+			gotSlots[h] = *u
+		}
+		return nil
+	}))
+
+	require.Len(t, gotSlots, 2,
+		"both untouched on-disk slots must be deleted on SD (matches serial's DomainDelPrefix)")
+	for _, sk := range []accounts.StorageKey{untouched1, untouched2} {
+		u, ok := gotSlots[sk.Value()]
+		require.True(t, ok, "untouched slot %x must emit a delete", sk.Value())
+		assert.Equal(t, commitment.DeleteUpdate, u.Flags,
+			"untouched slot %x must emit DeleteUpdate", sk.Value())
+	}
+}
+
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {
 	t.Helper()
 	var found *commitment.Update

@@ -7,12 +7,15 @@ import (
 	"runtime/pprof"
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -571,6 +574,40 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+}
+
+// asOfStorageEnumerator lists the persisted storage slots under an address via
+// the calculator's stable roTx snapshot (the pre-cycle baseline the trie was
+// built from), so a self-destruct deletes the whole subtree. The exec loop's
+// DomainDelPrefix runs with inline TouchKey disabled in parallel mode, so this
+// is the parallel path's equivalent of serial's per-slot delete touches.
+type asOfStorageEnumerator struct {
+	reader *asOfStateReader
+}
+
+func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
+	addrVal := addr.Value()
+	toKey, _ := kv.NextSubtree(addrVal[:])
+	it, err := e.reader.roTx.RangeAsOf(kv.StorageDomain, addrVal[:], toKey, e.reader.txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 || len(k) != 52 || !bytes.HasPrefix(k, addrVal[:]) {
+			continue
+		}
+		var h common.Hash
+		copy(h[:], k[20:])
+		if err := fn(accounts.InternKey(h)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Keep imports used.

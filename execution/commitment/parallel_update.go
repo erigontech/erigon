@@ -275,6 +275,13 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		qualifiesAsSplit = false
 	}
 
+	// A storage-region split-point (prefix >= depth 64) would orphan the account
+	// leaf when its subtree is deposited at an enclosing account-region split, so
+	// keep each account's storage whole within one leafTask.
+	if qualifiesAsSplit && nodeDepth >= 64 {
+		qualifiesAsSplit = false
+	}
+
 	// Root that does not qualify as a split-point: still descend one level so
 	// each emerging leafTask gets a non-empty prefix rooting a distinct
 	// top-nibble subtree, instead of one task covering the whole trie.

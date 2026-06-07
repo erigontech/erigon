@@ -117,6 +117,9 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
 			pph.ResetContext(ms)
 		}
+		// Each iteration rebuilds the trie from a fresh MockState, so the
+		// long-lived template must not carry the previous iteration's root.
+		pph.RootTrie().Reset()
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
 		b.StartTimer()
 
@@ -126,6 +129,92 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		require.NoError(b, err)
 		upds.Close()
 		b.StartTimer()
+	}
+}
+
+func benchWorkerCounts() []int {
+	w := []int{1, 4, 8, runtime.NumCPU()}
+	slices.Sort(w)
+	return slices.Compact(w)
+}
+
+// buildMixedCorpus builds approximately nKeys keys: random accounts each with a
+// small random number of storage slots.
+func buildMixedCorpus(seed int64, nKeys int) ([][]byte, []Update) {
+	rnd := rand.New(rand.NewSource(seed))
+	ub := NewUpdateBuilder()
+	n := 0
+	for n < nKeys {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		a := hex.EncodeToString(addr)
+		ub.Balance(a, rnd.Uint64()+1)
+		n++
+		for s := 0; s < rnd.Intn(5) && n < nKeys; s++ {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			val := make([]byte, 32)
+			rnd.Read(val)
+			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+			n++
+		}
+	}
+	return ub.Build()
+}
+
+// build1MWhaleCorpus: three whale accounts (750k/150k/5k storage slots) plus a
+// 95k single-slot tail — ~1M storage keys. Stresses within-account storage,
+// which single-level mount cannot parallelise (the 750k whale runs on one
+// worker).
+func build1MWhaleCorpus(b testing.TB) ([][]byte, []Update) {
+	b.Helper()
+	rnd := rand.New(rand.NewSource(919273))
+	ub := NewUpdateBuilder()
+	addStorage := func(a string, slots int) {
+		for range slots {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			val := make([]byte, 32)
+			rnd.Read(val)
+			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+		}
+	}
+	for _, slots := range []int{750_000, 150_000, 5_000} {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		a := hex.EncodeToString(addr)
+		ub.Balance(a, rnd.Uint64()+1)
+		addStorage(a, slots)
+	}
+	for range 95_000 {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		a := hex.EncodeToString(addr)
+		ub.Balance(a, rnd.Uint64()+1)
+		addStorage(a, 1)
+	}
+	return ub.Build()
+}
+
+func Benchmark_Commitment_SmallCounts(b *testing.B) {
+	workers := benchWorkerCounts()
+	for _, nKeys := range []int{10, 20, 241, 1546} {
+		pk, updates := buildMixedCorpus(int64(nKeys)*1_000_003+7, nKeys)
+		b.Run(fmt.Sprintf("keys=%d", nKeys), func(b *testing.B) {
+			b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
+			for _, w := range workers {
+				b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
+			}
+		})
+	}
+}
+
+func Benchmark_Commitment_1MWhales(b *testing.B) {
+	pk, updates := build1MWhaleCorpus(b)
+	b.Logf("corpus keys=%d", len(pk))
+	b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
+	for _, w := range benchWorkerCounts() {
+		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
 	}
 }
 

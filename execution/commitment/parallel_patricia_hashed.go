@@ -21,11 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
@@ -295,7 +298,7 @@ func (p *ParallelPatriciaHashed) Process(
 	// worker inherits it during runNibbleBucket — otherwise the warmuper's
 	// prefetches are wasted and workers re-read every branch from the DB.
 	var warmuper *Warmuper
-	if warmup.Enabled {
+	if warmup.Enabled && dbg.EnvWarmupParallelProcess {
 		if warmup.CtxFactory == nil {
 			warmup.CtxFactory = p.trieCtxFactory
 		}
@@ -329,6 +332,34 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 	if err := pu.Prepare(prepareCtx); err != nil {
 		return nil, fmt.Errorf("[%s] parallel commitment prepare: %w", logPrefix, err)
+	}
+
+	if os.Getenv("ERIGON_CMT_MOUNT") == "1" {
+		rh, mErr := p.processMounted(ctx, updates)
+		if mErr != nil {
+			pu.deferredMu.Lock()
+			for _, upd := range pu.deferredCombined {
+				putDeferredUpdate(upd)
+			}
+			pu.deferredCombined = pu.deferredCombined[:0]
+			pu.deferredMu.Unlock()
+			return nil, mErr
+		}
+		if p.leaveDeferredForCaller {
+			pu.deferredMu.Lock()
+			p.deferredForCaller = pu.deferredCombined
+			pu.deferredCombined = nil
+			pu.deferredMu.Unlock()
+		} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
+			return nil, aErr
+		}
+		out := make([]byte, len(rh))
+		copy(out, rh)
+		p.rootHash.Store(&out)
+		if warmuper != nil {
+			warmuper.DrainPending()
+		}
+		return out, nil
 	}
 
 	// Reject multi-bucket no-split configurations: without any split-point,
@@ -723,7 +754,10 @@ func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibb
 
 	c := hph.root // shallow copy
 	trim := depositDepth
-	if c.extLen > 0 {
+	// Only a hash-only sub-branch carries the split-point path in its extension; a
+	// leaf's extension is a key tail whose leading nibbles are not implied by the
+	// slot position, so trimming it would corrupt the stored branch.
+	if c.extLen > 0 && c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 		t := min(trim, c.extLen)
 		c.extLen -= t
 		copy(c.extension[:c.extLen], c.extension[t:t+c.extLen])
