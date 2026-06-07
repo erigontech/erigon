@@ -40,6 +40,66 @@
         "measured_at": "2025-09-01",
         "source": "manual"
       }
+    },
+    "chiado": {
+      "archive": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      },
+      "full": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      },
+      "minimal": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      }
+    },
+    "sepolia": {
+      "archive": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      },
+      "full": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      },
+      "minimal": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      }
+    },
+    "hoodi": {
+      "archive": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      },
+      "full": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      },
+      "minimal": {
+        "bytes": null,
+        "display": null,
+        "measured_at": null,
+        "source": "ci"
+      }
     }
   }
 }
