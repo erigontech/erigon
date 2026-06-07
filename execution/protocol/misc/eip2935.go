@@ -32,7 +32,6 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState)
 		return err
 	}
 	if codeSize == 0 {
-		// log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
 		return nil
 	}
 	headerNum := header.Number.Uint64()

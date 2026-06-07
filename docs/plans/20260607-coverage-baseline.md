@@ -115,6 +115,7 @@ principle. Exclude unless/until they gain real logic:
 | Package | Before | After | Lint | Notes |
 |---------|--------|-------|------|-------|
 | execution/types/accounts | 22.7% | **93.5%** | clean | +2 test files (codec + key_types), all error branches have -ve tests; comment-hygiene: fixed copy-pasted "hash"→"address" docs, removed dead commented-out block in DeserialiseV3. Remaining gaps are unreachable/deep RLP branches (l>128 encode, multi-byte length prefixes). |
+| execution/protocol/misc | 20.8% | **54.8%** | clean | +3 test files covering all pure-logic functions (blob-gas math, Cancun header presence/absence, deposit-log parse/validate, ETH transfer/burn log builders, PoS header, DAO extra-data, gaslimit verify/calc, eip1559 verify) with full -ve coverage; comment-hygiene: removed dead commented log.Debug + commented t.Logf. Remaining 0% funcs are state/syscall-dependent (ApplyDAOHardFork, CurrentFees, eip2935 store, eip4788, eip7002/7251 dequeue, Transfer) — **T2/T3, deferred** (need IntraBlockState/kv harness). |
 
 ## Change log
 
