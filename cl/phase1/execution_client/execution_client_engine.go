@@ -153,12 +153,11 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 	}
 
 	if payload.Version() >= clparams.GloasVersion {
+		bal := hexutil.Bytes{}
 		if payload.BlockAccessList != nil {
-			request.BlockAccessList = payload.BlockAccessList.Bytes()
+			bal = payload.BlockAccessList.Bytes()
 		}
-		if request.BlockAccessList == nil {
-			request.BlockAccessList = hexutil.Bytes{}
-		}
+		request.BlockAccessList = &bal
 		slotNumber := hexutil.Uint64(payload.SlotNumber)
 		request.SlotNumber = &slotNumber
 	}
@@ -532,13 +531,13 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 	if ep.SlotNumber != nil {
 		block.SlotNumber = uint64(*ep.SlotNumber)
 	}
-	if len(ep.BlockAccessList) > 0 {
+	if ep.BlockAccessList != nil && len(*ep.BlockAccessList) > 0 {
 		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
 		if beaconCfg != nil {
 			maxBytes = beaconCfg.MaxBytesPerTransaction
 		}
 		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
-		if err := block.BlockAccessList.SetBytes(ep.BlockAccessList); err != nil {
+		if err := block.BlockAccessList.SetBytes(*ep.BlockAccessList); err != nil {
 			return nil, err
 		}
 	}

@@ -136,11 +136,11 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash())
 		require.NoError(t, err)
 
-		balBytes := payload.ExecutionPayload.BlockAccessList
-		require.NotNil(t, balBytes)
-		require.NotEmpty(t, balBytes)
+		balPtr := payload.ExecutionPayload.BlockAccessList
+		require.NotNil(t, balPtr)
+		require.NotEmpty(t, *balPtr)
 
-		bal, err := types.DecodeBlockAccessListBytes(balBytes)
+		bal, err := types.DecodeBlockAccessListBytes(*balPtr)
 		require.NoError(t, err)
 		require.NoError(t, bal.Validate())
 		require.NotEmpty(t, bal)
@@ -1074,11 +1074,11 @@ func pushAddrSelfdestruct(addr common.Address) []byte {
 
 func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) types.BlockAccessList {
 	t.Helper()
-	balBytes := payload.ExecutionPayload.BlockAccessList
-	require.NotNil(t, balBytes)
-	require.NotEmpty(t, balBytes)
+	balPtr := payload.ExecutionPayload.BlockAccessList
+	require.NotNil(t, balPtr)
+	require.NotEmpty(t, *balPtr)
 
-	bal, err := types.DecodeBlockAccessListBytes(balBytes)
+	bal, err := types.DecodeBlockAccessListBytes(*balPtr)
 	require.NoError(t, err)
 	require.NoError(t, bal.Validate())
 	require.NotEmpty(t, bal)

@@ -352,7 +352,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(req.BlockAccessList) == 0 {
+		bal := *req.BlockAccessList
+		if len(bal) == 0 {
 			blockAccessList = make(types.BlockAccessList, 0)
 			hash := empty.BlockAccessListHash
 			header.BlockAccessListHash = &hash
@@ -361,9 +362,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
 			}
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(bal)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
 				return &engine_types.PayloadStatus{
 					Status:          engine_types.InvalidStatus,
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
@@ -375,9 +376,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
 				}, nil
 			}
-			hash := crypto.HashData(req.BlockAccessList)
+			hash := crypto.HashData(bal)
 			header.BlockAccessListHash = &hash
-			blockAccessListBytes = req.BlockAccessList
+			blockAccessListBytes = bal
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
@@ -1111,12 +1112,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		ep.SlotNumber = &sn
 	}
 	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
-		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
-		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
-		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
-			ep.BlockAccessList = encoded
+			bal := hexutil.Bytes(encoded)
+			ep.BlockAccessList = &bal
 		}
 	}
 

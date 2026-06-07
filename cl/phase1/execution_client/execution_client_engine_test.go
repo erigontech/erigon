@@ -27,10 +27,27 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
-func TestBuildExecutionPayload_BlockAccessListAlwaysPresent(t *testing.T) {
+func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 
-	tests := []struct {
+	t.Run("pre-Gloas payload omits blockAccessList", func(t *testing.T) {
+		block := cltypes.NewEth1Block(clparams.ElectraVersion, &beaconCfg)
+		block.Extra = solid.NewExtraData()
+		block.Transactions = &solid.TransactionsSSZ{}
+		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+
+		ep := buildExecutionPayload(block)
+
+		raw, err := json.Marshal(ep)
+		require.NoError(t, err)
+
+		var m map[string]interface{}
+		require.NoError(t, json.Unmarshal(raw, &m))
+		_, ok := m["blockAccessList"]
+		require.False(t, ok, "blockAccessList must be absent from JSON for pre-Gloas blocks")
+	})
+
+	gloasTests := []struct {
 		name    string
 		block   *cltypes.Eth1Block
 		wantHex string
@@ -57,7 +74,7 @@ func TestBuildExecutionPayload_BlockAccessListAlwaysPresent(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range gloasTests {
 		t.Run(tt.name, func(t *testing.T) {
 			ep := buildExecutionPayload(tt.block)
 

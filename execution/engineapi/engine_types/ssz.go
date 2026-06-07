@@ -121,8 +121,10 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	}
 	if version >= clparams.GloasVersion {
 		block.BlockAccessList = solid.NewByteListSSZ(sszMaxBytesPerTransaction)
-		if err := block.BlockAccessList.SetBytes(p.BlockAccessList); err != nil {
-			return nil, err
+		if p.BlockAccessList != nil {
+			if err := block.BlockAccessList.SetBytes(*p.BlockAccessList); err != nil {
+				return nil, err
+			}
 		}
 		if p.SlotNumber != nil {
 			block.SlotNumber = uint64(*p.SlotNumber)
@@ -163,9 +165,11 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 		p.BlobGasUsed, p.ExcessBlobGas = &bg, &ebg
 	}
 	if version >= clparams.GloasVersion {
+		bal := hexutil.Bytes{}
 		if block.BlockAccessList != nil {
-			p.BlockAccessList = block.BlockAccessList.Bytes()
+			bal = block.BlockAccessList.Bytes()
 		}
+		p.BlockAccessList = &bal
 		slot := hexutil.Uint64(block.SlotNumber)
 		p.SlotNumber = &slot
 	}
