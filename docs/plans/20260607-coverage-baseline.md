@@ -119,6 +119,18 @@ principle. Exclude unless/until they gain real logic:
 | execution/protocol/rules/merge | 6.8% | **12.5%** | clean | **T3** consensus-engine wrapper. Added header-validation -ve tests (verifyHeader 13%→35%: extra-data, block time, gas limit/used, block number, uncle hash) + TxDependencies, reusing existing readerMock. The verifyHeader Config-dependent tail (Shanghai/Cancun/Prague/Amsterdam/1559/blob branches) and the large Finalize/Initialize/Prepare/CalculateRewards/Seal functions need a full chain-reader + IntraBlockState harness — **deferred**. Package % is low by construction (bulk is state glue). |
 | db/snaptype | 16.8% | **38.7%** | clean | +1 test file covering pure filename/type logic with -ve cases: IsCorrectFileName, IsCaplin, IsTorrentPartial, ext helpers, IsSeedableExtension, Hex2InfoHash (incl. panic-on-bad-hex), filename builders, IsStateFile/V2, FileInfo methods (Name/Dir/Base/Len/GetRange/GetType/GetGrouping/CompareTo/As), ParseFileName/ParseRange invalid inputs, ParseFileNameOld, plus a t.TempDir() test for ParseDir/TmpFiles/Segments/IdxFiles (incl. not-exist path). Cleanup: removed a stray debug `println` in ParseFileNameOld. Remaining gaps are index-building/extract functions needing a seg/DB harness. |
 | db/snaptype2 | 3.5% | — | — | **Deferred (no pure surface).** Package is mostly snapshot-type *registration data* (vars) plus file/DB functions: TxsAmountBasedOnBodiesSnapshots (needs a built seg.Decompressor) and the HeaderFreezer methods (need a kv DB + collector). No meaningful pure unit tests without a snapshot-file/DB harness — revisit in a later T2 pass. |
+| execution/types (log.go) | 46.9% | **47.5%** (pkg) | clean | **Large package — log.go sub-area done.** Covered the pure Log functions: Log.Copy/Logs.Copy (deep-copy + nil), ToErigonLogs, ToRPCTransactionLog, ContainingTopics (addr/topic/maxLogs paths), Log + LogForStorage RLP round-trips with -ve decode cases, and ErigonLog/RPCLog UnmarshalJSON (valid + missing-required-field + bad-json). Package % moves little because log.go is one file of ~34. **The rest of execution/types (block.go 57 fns, transactions, blob_tx_wrapper, BAL, receipts, signing) warrants its own dedicated wave** — see recommendation below. |
+
+## Recommendation: execution/types as its own wave
+
+`execution/types` (root, 47.5%) is by far the largest core package and is
+foundational. Its 0%-heavy files cluster as: `block.go` (57), `blob_tx_wrapper`
+(38), `transaction` (29), `aa_transaction` (26), `block_access_list` (19),
+`set_code_tx`/`legacy_tx`/`dynamic_fee_tx`/`access_list_tx` (tx variants),
+`receipt` (9), signing/marshalling. Suggested sub-order (pure-first):
+`block_access_list` (EIP-7928 RLP, rich -ve) → `receipt` → `block.go` accessors
+→ tx-type encode/decode → signing. This is enough work to be a wave of its own
+rather than a single package pass.
 
 ## Change log
 
