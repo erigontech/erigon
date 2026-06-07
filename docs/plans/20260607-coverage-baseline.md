@@ -132,6 +132,20 @@ principle. Exclude unless/until they gain real logic:
 
 | transaction_signing.go (+ tx Sender/AsMessage) | Signing sub-wave. transaction_signing.go func-avg → **87.8%**, **no remaining 0% funcs**. Added: MakeSigner (nil + Prague config via AllProtocolChanges), MakeFrontierSigner, LatestSigner, Signer.String/Equal/SetMalleable, MustSignNewTx, and sign→recover round-trips (crypto.GenerateKey + SignTx + Sender) for legacy, dynamic-fee and set-code txs, exercising Sender/GetSender/SetSender/cachedSender/WithSignature/AsMessage. This also lifted set_code_tx.go's remaining signer-dependent funcs (WithSignature 89%, AsMessage 74%, Sender 86%) and the legacy/dynamic-fee sender paths. |
 
+| access_list_tx.go | EIP-2930. Func-avg 64.6%→**89.8%**. AccessList.StorageKeys, Protected/GetAuthorizations/Unwrap/GetAccessList, sign→recover (Sender/GetSender/cachedSender/AsMessage with IsBerlin). |
+| transaction.go | Func-avg 26.7%→**89.3%**. NewMessage + full Message accessor/setter API (value/gas/fees/data/accessList/check-flags/isFree/ChangeGas/blob hashes/BlobGas/authorizations), CalcEffectiveGasTip (all branches), Transactions.Len/EncodeIndex. |
+| create_address.go | 50%→**100%**. CreateAddress + CreateAddress2 (determinism + input-sensitivity). |
+| blob_tx.go | EIP-4844. 55.4%→**78.6%**. Sign→recover + AsMessage happy path and all -ve branches (pre-Cancun, nil-To, no-blobs, wrong KZG version byte), copy (deep). |
+
+### execution/types — round summary
+
+Package own-test coverage **46.9% → 61.9%**. Covered this round: log, block_access_list,
+receipt, block, set_code_tx, access_list_tx, blob_tx, transaction, transaction_signing,
+create_address (+ accounts/* earlier). **Remaining (left for a later round):**
+`blob_tx_wrapper.go` (KZG wrapper internals), `aa_transaction.go`/`aa_abi.go` (account
+abstraction, specialized), `transaction_marshalling.go` (tx JSON), `genesis.go`, and the
+generated `gen_*.go` marshalers (codegen — normally excluded from coverage targets).
+
 ## Recommendation: execution/types as its own wave
 
 `execution/types` (root, 47.5%) is by far the largest core package and is
