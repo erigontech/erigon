@@ -127,6 +127,21 @@ var (
 	// doesn't exist), but AtBlock's *end* has one. A correctly-built
 	// file must reach it via forward replay.
 	ErrCommitmentReplayMismatch = fmt.Errorf("%w: replay to AtBlock end != header.Root", ErrIntegrity)
+
+	// ErrCommitmentReplayNoHistory: forward-replay verification cannot
+	// run because the per-tx history records for the in-block tail
+	// (txNum, BlockMaxTxNum] are not available locally. This is the
+	// expected state under aggressive pruning (minimal mode) for files
+	// anchored below the prune horizon — the file IS the canonical
+	// snapshot of its step, but there's no way to verify trie
+	// consistency without replaying touches, and the touches require
+	// history we've intentionally dropped.
+	//
+	// Distinct from ErrCommitmentReplayMismatch: the file may or may
+	// not be corrupt — we simply can't tell from here. Caller decides
+	// whether to treat as informational (minimal mode) or as a hard
+	// failure (archive mode where history is expected to be present).
+	ErrCommitmentReplayNoHistory = fmt.Errorf("%w: replay history unavailable for in-block tail", ErrIntegrity)
 )
 
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),

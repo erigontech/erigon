@@ -45,6 +45,8 @@ func TestCommitmentTypedErrors_WrapErrIntegrity(t *testing.T) {
 		{"ErrAnchorBodyMissing", ErrAnchorBodyMissing},
 		{"ErrCommitmentHeaderMismatch", ErrCommitmentHeaderMismatch},
 		{"ErrCommitmentTxNumRange", ErrCommitmentTxNumRange},
+		{"ErrCommitmentReplayMismatch", ErrCommitmentReplayMismatch},
+		{"ErrCommitmentReplayNoHistory", ErrCommitmentReplayNoHistory},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -68,6 +70,8 @@ func TestCommitmentTypedErrors_DistinctIdentities(t *testing.T) {
 		ErrAnchorBodyMissing,
 		ErrCommitmentHeaderMismatch,
 		ErrCommitmentTxNumRange,
+		ErrCommitmentReplayMismatch,
+		ErrCommitmentReplayNoHistory,
 	}
 	for i, a := range sentinels {
 		for j, b := range sentinels {

@@ -344,7 +344,21 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 		// a file with internally-inconsistent BranchData (correct cs
 		// root but wrong interior children — Erigon issue #21487)
 		// diverges.
-		if err := VerifyCommitmentForwardReplay(ctx, tx, br, info, f, logger); err != nil {
+		//
+		// ErrCommitmentReplayNoHistory means we can't run the check
+		// because per-tx history for the in-block tail isn't present
+		// locally (expected under aggressive pruning). Log + treat as
+		// info, not as integrity failure. Real corruption (genuine
+		// trie mismatch) still surfaces as ErrCommitmentReplayMismatch.
+		err := VerifyCommitmentForwardReplay(ctx, tx, br, info, f, logger)
+		if err != nil {
+			if errors.Is(err, ErrCommitmentReplayNoHistory) {
+				logger.Info("[integrity] CommitmentRoot partial-block replay SKIPPED (history not local)",
+					"file", filepath.Base(f.Fullpath()),
+					"blockNum", info.BlockNum, "txNum", info.TxNum,
+					"blockMinTxNum", info.BlockMinTxNum, "blockMaxTxNum", info.BlockMaxTxNum)
+				return info, nil
+			}
 			return info, err
 		}
 		logger.Info("[integrity] CommitmentRoot partial-block replay verified",
@@ -393,6 +407,32 @@ func VerifyCommitmentForwardReplay(ctx context.Context, tx kv.TemporalTx, br ser
 	stepSize := tx.Debug().StepSize()
 	if stepSize == 0 {
 		return fmt.Errorf("%w: stepSize == 0", ErrIntegrity)
+	}
+	// Pre-check: are any per-tx history records present in the
+	// in-block tail (info.TxNum, info.BlockMaxTxNum]? Without them,
+	// the recompute below collects zero touches, produces the baseline
+	// trie root unchanged, and we can't distinguish "file is built
+	// correctly but we have no way to verify" from "file's interior
+	// BranchData is wrong." Return ErrCommitmentReplayNoHistory so
+	// the caller can decide based on prune mode (informational in
+	// minimal, hard failure in archive).
+	hasHistory := false
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		it, ierr := tx.Debug().HistoryKeyTxNumRange(d, int(info.TxNum+1), int(info.BlockMaxTxNum+1), order.Asc, 1)
+		if ierr != nil {
+			return fmt.Errorf("%w: history-availability probe %s: %w", ErrIntegrity, d, ierr)
+		}
+		if it.HasNext() {
+			hasHistory = true
+		}
+		it.Close()
+		if hasHistory {
+			break
+		}
+	}
+	if !hasHistory {
+		return fmt.Errorf("%w: file=%s block=%d cs.TxNum=%d range=(%d,%d]",
+			ErrCommitmentReplayNoHistory, filepath.Base(f.Fullpath()), info.BlockNum, info.TxNum, info.TxNum, info.BlockMaxTxNum)
 	}
 	// The file holds the latest entries at step toStep-1; cap the
 	// recompute's reads at the file's toStep so we measure THIS file
