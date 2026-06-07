@@ -2133,6 +2133,15 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		beaconCfg.SecondsPerSlot = slotTime
 		beaconCfg.InitializeForkSchedule()
+
+		// Merge extra genesis alloc from embedding applications before computing hash.
+		if len(cfg.ExtraGenesisAlloc) > 0 {
+			for addr, acct := range cfg.ExtraGenesisAlloc {
+				cfg.Genesis.Alloc[addr] = acct
+			}
+			logger.Info("ExtraGenesisAlloc merged into genesis", "accounts", len(cfg.ExtraGenesisAlloc))
+		}
+
 		genesisTime := uint64(time.Now().Unix())
 		// Compute the EL genesis block hash so the beacon state's Eth1Data
 		// matches the actual chain genesis.

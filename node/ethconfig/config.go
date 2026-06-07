@@ -189,6 +189,11 @@ type Config struct {
 	// If nil, the Ethereum main net block is used.
 	Genesis *types.Genesis `toml:",omitempty"`
 
+	// ExtraGenesisAlloc is merged into Genesis.Alloc by SetEthConfig before
+	// computing the genesis hash. Used by embedding applications to inject
+	// additional contracts at genesis without modifying core chain setup.
+	ExtraGenesisAlloc types.GenesisAlloc `toml:"-"`
+
 	// Protocol options
 	NetworkID uint64 // Network ID to use for selecting peers to connect to
 
