@@ -1160,6 +1160,10 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		testingEntry = &entry
 	}
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	if len(httpRpcCfg.ExtraAPIs) > 0 {
+		s.apiList = append(s.apiList, httpRpcCfg.ExtraAPIs...)
+		s.logger.Info("[RPC] extra API namespaces registered", "count", len(httpRpcCfg.ExtraAPIs))
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)

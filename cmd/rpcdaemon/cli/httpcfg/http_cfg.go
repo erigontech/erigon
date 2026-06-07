@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -120,4 +121,15 @@ type HttpCfg struct {
 	// When set, these listeners are passed to StartHTTPEndpoint instead of binding a new port.
 	HttpListener    net.Listener
 	AuthRpcListener net.Listener
+
+	// ExtraAPIs are additional RPC namespaces injected by embedding applications.
+	// They are appended to the standard API list unconditionally (namespace
+	// filtering still applies via the API allowlist).
+	ExtraAPIs []rpc.API
+
+	// InProcServer is populated by StartRpcServer with the live *rpc.Server
+	// instance after all APIs are registered. Embedding applications can use
+	// rpc.DialInProc(cfg.InProcServer) to obtain a zero-copy in-process client
+	// that calls registered methods without network overhead.
+	InProcServer *rpc.Server
 }
