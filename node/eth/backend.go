@@ -377,7 +377,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// spec later still trips this gate, which is intended (going
 		// from trust-everyone to a specific universe is a real
 		// trust-posture change).
-		mxChainName := config.Genesis.Config.ChainName
+		// config.Genesis (and its chain config) is nil for some dev/test node
+		// setups; an absent chain name resolves to an empty embedded trust spec,
+		// i.e. the fingerprint of an empty root set — the same as an "any" spec.
+		var mxChainName string
+		if config.Genesis != nil && config.Genesis.Config != nil {
+			mxChainName = config.Genesis.Config.ChainName
+		}
 		trustSpec := snapcfg.GetEmbeddedTrustRoots(mxChainName)
 		if override := strings.TrimSpace(config.Snapshot.TrustRoots); override != "" {
 			trustSpec = override
