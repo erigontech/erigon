@@ -51,7 +51,7 @@ type ExecutionPayload struct {
 	BlobGasUsed     *hexutil.Uint64       `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64       `json:"excessBlobGas"`
 	SlotNumber      *hexutil.Uint64       `json:"slotNumber,omitempty"`
-	BlockAccessList hexutil.Bytes         `json:"blockAccessList,omitempty"`
+	BlockAccessList hexutil.Bytes         `json:"blockAccessList"`
 	SSZVersion      clparams.StateVersion `json:"-"`
 }
 

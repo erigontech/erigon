@@ -156,6 +156,9 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 		if payload.BlockAccessList != nil {
 			request.BlockAccessList = payload.BlockAccessList.Bytes()
 		}
+		if request.BlockAccessList == nil {
+			request.BlockAccessList = hexutil.Bytes{}
+		}
 		slotNumber := hexutil.Uint64(payload.SlotNumber)
 		request.SlotNumber = &slotNumber
 	}
