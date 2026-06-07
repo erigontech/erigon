@@ -152,18 +152,14 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-// InitializeTrieAndUpdates constructs the trie + updates buffer. branchCache
-// should be the aggregator-scope shared cache; nil falls back to a fresh
-// per-init cache (test helpers, isolated benchmarks).
-func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string, branchCache *BranchCache) (Trie, *Updates) {
-	if branchCache == nil {
-		branchCache = NewBranchCache(DefaultBranchCacheTailCapacity)
-	}
-	switch tv {
+// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg. The
+// aggregator-scope BranchCache is attached separately via Trie.SetBranchCache
+// by the caller (wired from SharedDomains via the BranchCacheProvider lookup).
+func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
+	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil)
+		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		trie := NewConcurrentPatriciaHashed(root, nil)
-		trie.SetBranchCache(branchCache)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
@@ -177,8 +173,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string, branchCa
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil)
-		trie.SetBranchCache(branchCache)
+		trie := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -356,10 +351,11 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates    bool
-	deferred        []*DeferredBranchUpdate
-	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	branchCache     *BranchCache                        // set via HexPatriciaHashed.SetBranchCache
+	deferUpdates       bool
+	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
+	deferred           []*DeferredBranchUpdate
+	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	branchCache        *BranchCache                        // set via HexPatriciaHashed.SetBranchCache (cross-block, aggregator-scope)
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -369,9 +365,9 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-// SetDeferUpdates enables or disables deferred update collection.
+// setDeferUpdates enables or disables deferred update collection.
 // When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
-func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
+func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
 	if defer_ {
 		if be.deferred == nil {
@@ -617,8 +613,6 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-const maxDeferredUpdates = 50_000
-
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
 // and defers encoding for parallel execution later.
@@ -631,7 +625,11 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	cells *[16]cellEncodeData,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
-	needsFlush := len(be.deferred) >= maxDeferredUpdates
+	limit := be.maxDeferredUpdates
+	if limit == 0 {
+		limit = DefaultMaxDeferredUpdates
+	}
+	needsFlush := len(be.deferred) >= limit
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}
@@ -744,6 +742,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 }
 
 type BranchData []byte
+
+// ChildCount returns the number of children present in the branch.
+func (branchData BranchData) ChildCount() int {
+	if len(branchData) < 4 {
+		return 0
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+}
 
 func (branchData BranchData) String() string {
 	if len(branchData) == 0 {

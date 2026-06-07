@@ -17,7 +17,7 @@ import (
 func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	hph := NewHexPatriciaHashed(length.Addr, nil)
+	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 
 	// Build a cell with account data.
 	c := new(cell)
@@ -103,7 +103,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	t.Parallel()
 
-	hph := NewHexPatriciaHashed(length.Addr, nil)
+	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 
 	// Build a singleton cell with BOTH account and storage data at depth=2.
 	c := new(cell)
@@ -194,7 +194,7 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	t.Parallel()
 
-	hph := NewHexPatriciaHashed(length.Addr, nil)
+	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 
 	c := new(cell)
 	addr := common.HexToAddress("0x4c888535841acbe0709b0758083f61d375bc02b4")
@@ -274,7 +274,7 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 func TestVerifyBranchHashes_Storage(t *testing.T) {
 	t.Parallel()
 
-	hph := NewHexPatriciaHashed(length.Addr, nil)
+	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 
 	// Build a cell with storage data (depth >= 64 = pure storage cell).
 	c := new(cell)

@@ -244,7 +244,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 					h := common.Hash(root)
 					result.Root = &h
 					if emitStateRoot {
-						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h.Bytes()); printErr != nil {
+						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
 							log.Warn("Failed to write to stderr", "err", printErr)
 						}
 					}

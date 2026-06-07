@@ -284,7 +284,7 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 	// now a log that the subscription cares about
 	var a common.Address
-	a.SetBytes(address1.Bytes())
+	a.SetBytes(address1[:])
 	log.Address = gointerfaces.ConvertAddressToH160(a)
 
 	f.OnNewLogs(log)

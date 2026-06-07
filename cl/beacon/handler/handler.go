@@ -88,7 +88,7 @@ type ApiHandler struct {
 	sentinel             sentinelproto.SentinelClient
 	blobStoage           blob_storage.BlobStorage
 	columnStorage        blob_storage.DataColumnStorage
-	caplinSnapshots      *freezeblocks.CaplinSnapshots
+	caplinSnapshots      caplinBlobSnapshotReader
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	peerDas das.PeerDas
@@ -190,6 +190,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	var blobSnapshots caplinBlobSnapshotReader
+	if caplinSnapshots != nil {
+		blobSnapshots = caplinSnapshots
+	}
 
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
@@ -228,7 +232,7 @@ func NewApiHandler(
 		emitters:                         emitters,
 		blobStoage:                       blobStoage,
 		columnStorage:                    columnStorage,
-		caplinSnapshots:                  caplinSnapshots,
+		caplinSnapshots:                  blobSnapshots,
 		attestationProducer:              attestationProducer,
 		blobBundles:                      blobBundles,
 		engine:                           engine,
