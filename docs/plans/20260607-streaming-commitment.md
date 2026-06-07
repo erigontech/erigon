@@ -209,13 +209,13 @@ constraint 1) instead of 16 persistent hphs.
 - Create: `execution/commitment/streaming_commitment_test.go`
 - Modify: `execution/commitment/wide_nested_parallel_test.go` (add a `streaming` arm to `runIncremental`/`requireIncrementalEquiv`)
 
-- [ ] define `StreamingCommitter` owning prefix trie ref, base trie, worker pool ref, trieCtxFactory, and `map[splitKey]*splitState{cell,dirty,gen,deferred,mu}` (the `dirty/gen/mu` fields are used by the Task-4 scheduler; struct is shared)
-- [ ] `TouchKey(hk,pk,upd)` = prefix-trie `Insert` + locate/create split + mark dirty (gen++); no folding yet
-- [ ] `Process()` = fold every dirty split (stateless `mountTo`+`followAndUpdate`+`foldMounted`, reuse) → merge via the existing stitch → root
-- [ ] `Reset()`/`Release()` lifecycle
-- [ ] **add a `streaming` arm to `runIncremental`/`requireIncrementalEquiv`** (wide_nested_parallel_test.go) next to the `parallel` arm — the committer then inherits the WHOLE existing incremental + deletes + worker-count + branch-parity matrix for free (`TestVerifyParallel_*Incremental`, `*StorageIncrementalDeletes`)
-- [ ] write the one net-new Task-1 test: feed `buildMixedCorpus` via `TouchKey` in **randomized (execution) order** (NOT sorted — order-independence is the premise; the in-order walk re-sorts at fold) → root+branches == sequential
-- [ ] run tests (incl. `-race`) — must pass before next task
+- [x] define `StreamingCommitter` owning prefix trie ref, base trie, worker pool ref, trieCtxFactory, and `map[splitKey]*splitState{cell,dirty,gen,deferred,mu}` (the `dirty/gen/mu` fields are used by the Task-4 scheduler; struct is shared) — base trie is built per-`Process` in the lazy path (a persistent base buys nothing until the Task-4 scheduler)
+- [x] `TouchKey(hk,pk,upd)` = prefix-trie `Insert` + locate/create split + mark dirty (gen++); no folding yet
+- [x] `Process()` = fold every dirty split (stateless `mountTo`+`followAndUpdate`+`foldMounted`, reuse) → merge via the existing stitch → root
+- [x] `Reset()`/`Release()` lifecycle
+- [x] **add a `streaming` arm to `runIncremental`/`requireIncrementalEquiv`** (wide_nested_parallel_test.go) next to the `parallel` arm — the committer then inherits the WHOLE existing incremental + deletes + worker-count + branch-parity matrix for free (`TestVerifyParallel_*Incremental`, `*StorageIncrementalDeletes`). Streaming arm feeds `nil` updates (ctx-read at fold), matching how the proven barrier arm (`WrapKeyUpdates` ModeParallel) inserts `nil` and re-reads the full account from ctx — a carried *partial* update would drop the DB codeHash. Carried-update support is Task 6.
+- [x] write the one net-new Task-1 test: feed `buildMixedCorpus` via `TouchKey` in **randomized (execution) order** (NOT sorted — order-independence is the premise; the in-order walk re-sorts at fold) → root+branches == sequential (`TestStreaming_RandomOrderParity`, workers 1/4/8)
+- [x] run tests (incl. `-race`) — must pass before next task
 
 ### Task 2: Per-split stateless re-fold + deferred capture (reuse deep fan-out)
 

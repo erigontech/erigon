@@ -183,18 +183,28 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 	return k2, u2
 }
 
+// runMode selects which commitment engine runIncremental drives.
+type runMode int
+
+const (
+	modeSeq runMode = iota
+	modeParallel
+	modeStreaming
+)
+
 // runIncremental applies two batches to one MockState (batch-1 branches become
 // DB state for batch-2) and returns the final root and the MockState.
-func runIncremental(t *testing.T, parallel bool, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
+func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ctx := context.Background()
 	ms := NewMockState(t)
-	if parallel {
+	if mode != modeSeq {
 		ms.SetConcurrentCommitment(true)
 	}
 	process := func(keys [][]byte, upds []Update) []byte {
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-		if parallel {
+		switch mode {
+		case modeParallel:
 			tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 			defer tr.Release()
 			tr.SetNumWorkers(workers)
@@ -213,29 +223,48 @@ func runIncremental(t *testing.T, parallel bool, workers int, k1 [][]byte, u1 []
 			r, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
 			require.NoError(t, err)
 			return r
+		case modeStreaming:
+			sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			defer sc.Release()
+			sc.SetNumWorkers(workers)
+			for _, k := range keys {
+				sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+			}
+			r, err := sc.Process(ctx)
+			require.NoError(t, err)
+			return r
+		default:
+			tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+			defer tr.Release()
+			ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
+			defer ut.Close()
+			r, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
+			require.NoError(t, err)
+			return r
 		}
-		tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-		defer tr.Release()
-		ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
-		defer ut.Close()
-		r, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		return r
 	}
 	process(k1, u1)
 	return process(k2, u2), ms
 }
 
-// requireIncrementalEquiv asserts the parallel root matches the sequential root
-// after the same two batches, dumping divergent branches on mismatch.
+// requireIncrementalEquiv asserts the parallel AND streaming roots match the
+// sequential root after the same two batches, dumping divergent branches on
+// mismatch.
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
-	seqRoot, seqMs := runIncremental(t, false, 0, k1, u1, k2, u2)
-	parRoot, parMs := runIncremental(t, true, workers, k1, u1, k2, u2)
+	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+
+	parRoot, parMs := runIncremental(t, modeParallel, workers, k1, u1, k2, u2)
 	if !bytes.Equal(seqRoot, parRoot) {
 		branchDiff(t, seqMs, parMs)
 	}
 	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
+
+	strRoot, strMs := runIncremental(t, modeStreaming, workers, k1, u1, k2, u2)
+	if !bytes.Equal(seqRoot, strRoot) {
+		branchDiff(t, seqMs, strMs)
+	}
+	require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) vs sequential root mismatch", workers)
 }
 
 // branchDiff logs every stored branch prefix whose encoding differs between the
