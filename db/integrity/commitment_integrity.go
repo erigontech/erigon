@@ -85,6 +85,18 @@ func CheckCommitmentRootFileData(ctx context.Context, db kv.TemporalRoDB, br ser
 		logger.Info("[integrity] CommitmentRootFileData", "kv", fileName)
 		_, err := checkCommitmentRootViaFileData(ctx, tx, br, file, logger)
 		if err != nil {
+			// ErrAnchorBodyMissing happens whenever Phase C can't run
+			// because the body for the anchor block isn't on disk —
+			// expected under aggressive pruning (minimal mode) for
+			// files anchored below the prune horizon. Phase A
+			// (record-internal) still ran; Phase B / Phase D (real
+			// trie checks) ran where applicable. The body cross-check
+			// is the weakest of the three and missing it doesn't
+			// imply corruption. Skip with info, don't FAIL the sweep.
+			if errors.Is(err, ErrAnchorBodyMissing) {
+				logger.Info("[integrity] CommitmentRootFileData body cross-check SKIPPED (body pruned)", "kv", fileName)
+				continue
+			}
 			err = fmt.Errorf("%w: in %s", err, fileName)
 			if !errors.Is(err, ErrIntegrity) {
 				return err
