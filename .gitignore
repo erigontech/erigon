@@ -81,6 +81,8 @@ docker-compose.*.yml
 .env
 coverage-test.out
 coverage-test-all.out
+coverage-baseline.out
+coverage-baseline-func.txt
 cpu_*.out
 mem_*.out
 bench_*.txt
