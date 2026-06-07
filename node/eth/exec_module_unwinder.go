@@ -48,7 +48,8 @@ func (a providerUnwinderAdapter) BlockAligned() bool { return a.p.BlockAligned()
 
 func (a providerUnwinderAdapter) Unwind(ctx context.Context, toBlock uint64, args execmodule.UnwindArgs) error {
 	return a.p.Unwind(ctx, toBlock, storagecomp.UnwindOpts{
-		Tx: args.Tx,
+		Tx:     args.Tx,
+		Engine: args.Engine,
 	})
 }
 

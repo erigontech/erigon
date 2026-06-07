@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
+	rules "github.com/erigontech/erigon/execution/protocol/rules"
 )
 
 // Unwinder is the seam between SetHead's existing exec-stage unwind
@@ -84,17 +85,22 @@ type Unwinder interface {
 	AbortUnwind()
 }
 
+// Reference rules.EngineReader to keep the import used until / unless we
+// add an interface method that needs it. UnwindArgs.Engine is typed by it.
+var _ rules.EngineReader = (rules.EngineReader)(nil)
+
 // UnwindArgs carries the inputs SetHead supplies to the Unwinder.
 // Mirrors storage.UnwindOpts shape; the adapter at the wiring point
 // translates between the two so neither package leaks into the other.
-//
-// Mode B as implemented today (snapshot-trim + DB-reset, no
-// commitment write) only needs a writable temporal tx. The
-// commitment-recompute path (next commit) will add the fields it
-// requires back here.
 type UnwindArgs struct {
 	// Tx is the writable temporal transaction the storage-layer
 	// sub-ops run inside. SetHead owns its lifecycle (the Unwinder
 	// does NOT commit; control returns to SetHead which commits).
 	Tx kv.TemporalRwTx
+
+	// Engine is the consensus engine used by the partial-block re-exec
+	// path inside Provider.Unwind when a mid-block step cut is detected
+	// and per-tx history is absent locally. May be nil if the caller
+	// knows the unwind target is NOT in a partial-block scenario.
+	Engine rules.EngineReader
 }

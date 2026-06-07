@@ -56,6 +56,12 @@ type UnwindTestDeps struct {
 	// trimmed files.
 	SnapDir string
 
+	// SnapTmpDir is the scratch directory passed to seg writers during
+	// boundary-step file regeneration (production uses config.Dirs.Tmp).
+	// Required for mode-B unwinds that hit the regen path; an empty value
+	// makes the seg compressor panic on an empty mkdir path.
+	SnapTmpDir string
+
 	Logger log.Logger
 }
 
@@ -148,6 +154,7 @@ func NewProviderForUnwindTest(deps UnwindTestDeps) *Provider {
 		Inventory:              deps.Inventory,
 		blockAlignedBoundaries: true,
 		snapDir:                deps.SnapDir,
+		snapTmpDir:             deps.SnapTmpDir,
 		logger:                 deps.Logger,
 	}
 }

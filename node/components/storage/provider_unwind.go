@@ -18,10 +18,16 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // UnwindOpts holds the per-call inputs Provider.Unwind needs that it
@@ -33,6 +39,14 @@ type UnwindOpts struct {
 	// sub-ops run inside. SetHead owns its lifecycle; Provider.Unwind
 	// does NOT commit.
 	Tx kv.TemporalRwTx
+
+	// Engine is the consensus engine used by the partial-block re-exec
+	// path (mid-block step cut, no per-tx history locally — typical of
+	// minimal-prune datadirs). May be nil for callers that know toBlock
+	// is NOT in a mid-block-cut scenario; Provider.Unwind detects the
+	// scenario upfront via the file-side commitment state and returns a
+	// clear error if Engine is nil but required.
+	Engine rules.EngineReader
 }
 
 // Unwind is the storage-layer entry point for an *administrative*
@@ -95,14 +109,41 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		return fmt.Errorf("storage.Provider.Unwind: opts.Tx is nil")
 	}
 
-	// 1. Compute the commitment anchor (recompute trie at lastTxNum,
-	//    validate root against header). NO writes to the DB — the
-	//    recompute's branches are captured in a collector that the
-	//    Apply step (5) drains after the wipe. Failure here surfaces
-	//    a consensus mismatch loud and early.
+	// 1. Probe-compute the commitment anchor. Two outcomes:
+	//    - Success: the chain has enough local history to validate
+	//      directly. Captures the recompute result for Apply (step 5).
+	//    - ErrHistoryGap: snapshot step boundary cuts mid-block AND
+	//      per-tx history is absent locally (typical minimal-prune
+	//      datadirs where exec started at the snapshot tip). Mode-B
+	//      then routes through the wipe-first re-exec path below.
+	//
+	// Detecting mid-block-cut UPFRONT (before any mutation) is the
+	// classification the user-direction 2026-06-04 calls out: pick the
+	// flow based on the chain's data shape, not "always try X first."
 	recompute, err := p.ensureCommitmentAtBlockCompute(ctx, opts.Tx, toBlock)
 	if err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor compute: %w", err)
+		var gap *commitmentdb.ErrHistoryGap
+		if !errors.As(err, &gap) {
+			// Genuine consensus mismatch (not the gap-shape error) —
+			// refuse loud and early, no mutation.
+			return fmt.Errorf("storage.Provider.Unwind: commitment-anchor compute: %w", err)
+		}
+		// Mid-block-cut + no history — partial-block re-exec required.
+		if opts.Engine == nil {
+			return fmt.Errorf("storage.Provider.Unwind: %w (UnwindOpts.Engine is nil)", err)
+		}
+		if p.logger != nil {
+			p.logger.Info("[storage] Provider.Unwind: history gap detected, switching to wipe-first partial-block re-exec flow",
+				"fromTxN", gap.FromTxNum, "fromBlock", gap.FromBlock, "toTxN", gap.ToTxNum, "toBlock", gap.ToBlock)
+		}
+		recompute, err = p.unwindWithReExec(ctx, opts.Tx, toBlock, opts.Engine, gap)
+		if err != nil {
+			return fmt.Errorf("storage.Provider.Unwind: wipe-first re-exec: %w", err)
+		}
+		// unwindWithReExec already ran the snapshot-trim + DB-reset +
+		// commitment-apply for us; jump straight to regen+verify.
+		defer recompute.Close()
+		return p.unwindFinalize(ctx, opts.Tx, toBlock, recompute)
 	}
 	defer recompute.Close() // idempotent — Apply also closes
 
@@ -132,6 +173,15 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
 	}
 
+	return p.unwindFinalize(ctx, opts.Tx, toBlock, recompute)
+}
+
+// unwindFinalize runs the regen + verify tail shared by both the
+// standard and the wipe-first re-exec mode-B flows. By the time this
+// runs the writable shadow is clean past toBlock and the commitment
+// anchor has been written. It stages boundary-step regen files for the
+// post-commit FinalizeUnwind swap, then verifies DB-image consistency.
+func (p *Provider) unwindFinalize(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64, recompute *commitmentRecomputeResult) error {
 	// 6. Regenerate every state-domain boundary-step .kv so the
 	//    on-disk content reflects the unwind target. Without this the
 	//    boundary-step file's KeyCommitmentState record (at the
@@ -141,11 +191,11 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	//    files for FinalizeUnwind to atomically swap + rebuild
 	//    accessors against post-commit. See
 	//    docs/plans/20260603-mode-b-boundary-step-regen-plan.md.
-	lastTxNum, err := rawdbv3.TxNums.Max(ctx, opts.Tx, toBlock)
+	lastTxNum, err := rawdbv3.TxNums.Max(ctx, tx, toBlock)
 	if err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: lookup lastTxNum: %w", err)
 	}
-	pendingRegen, err := p.regenerateBoundaryStepFiles(ctx, opts.Tx, toBlock, lastTxNum, recompute.encodedTrieState)
+	pendingRegen, err := p.regenerateBoundaryStepFiles(ctx, tx, toBlock, lastTxNum, recompute.encodedTrieState)
 	if err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: regenerate boundary-step files: %w", err)
 	}
@@ -161,9 +211,98 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	//    mode-B back via the caller's AbortUnwind, which is far better
 	//    than leaving a half-unwound DB that surfaces hours later as
 	//    a wrong-block-data or wrong-state-root error.
-	if err := verifyPostUnwindDBImage(ctx, opts.Tx, toBlock, lastTxNum); err != nil {
+	if err := verifyPostUnwindDBImage(ctx, tx, toBlock, lastTxNum); err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: %w", err)
 	}
 
 	return nil
+}
+
+// unwindWithReExec is the partial-block-cut variant of mode-B. Entered
+// when the upfront ensureCommitmentAtBlockCompute returns ErrHistoryGap
+// (= the snapshot step boundary cut mid-block AND per-tx history is
+// absent locally — typical of minimal-prune datadirs whose exec started
+// at the snapshot tip).
+//
+// Flow (wipe-first, then re-exec, then validate):
+//
+//  1. Snapshot-trim past toBlock (staged for post-commit FS deletion).
+//  2. DB-reset + WipeWritableShadowPast — clears forward-exec entries
+//     past toBlock so they don't shadow our re-exec output via GetLatest.
+//  3. PopulateHistoryByReExec — re-executes the affected blocks
+//     (partial for the gap.FromBlock; full for subsequent), writing
+//     per-tx state into the writable shadow at txN ≤ toTxN. Because
+//     forward-exec entries past toBlock are wiped, GetLatest now
+//     returns our re-exec output for keys we touched.
+//  4. ensureCommitmentAtBlockCompute — re-attempt the recompute.
+//     HistoryKeyTxNumRange now finds our re-exec records;
+//     trie.Process folds in the touched keys; GetAsOf walks through
+//     the (now-existing) anchor records OR falls back to GetLatest
+//     (which serves re-exec output post-wipe). The recompute validates
+//     against header.stateRoot.
+//  5. ensureCommitmentAtBlockApply — writes the validated commitment
+//     anchor at toTxN.
+//
+// On any failure the caller's tx.Rollback (via AbortUnwind) reverts
+// every step.
+func (p *Provider) unwindWithReExec(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64, engine rules.EngineReader, gap *commitmentdb.ErrHistoryGap) (*commitmentRecomputeResult, error) {
+	// Snapshot per-block receipts BEFORE the wipe. The wipe whole-step
+	// clears the RCache domain at stepContaining (which spans the gap's
+	// txnums), so post-wipe ReadReceiptsCacheV2 returns zero. The
+	// partial-block resume in PopulateHistoryByReExec needs receipts for
+	// fromBlock to reconstruct the gas pool from prior txns' cumulative
+	// gas usage. Reading them upfront preserves the data through the
+	// upcoming wipe.
+	preWipeReceipts := make(map[uint64]types.Receipts, gap.ToBlock-gap.FromBlock+1)
+	txNumsReader := p.BlockReader.TxnumReader()
+	for blockN := gap.FromBlock; blockN <= gap.ToBlock; blockN++ {
+		block, _, berr := p.BlockReader.BlockWithSenders(ctx, tx, common.Hash{}, blockN)
+		if berr != nil {
+			return nil, fmt.Errorf("snapshot pre-wipe receipts: BlockWithSenders(%d): %w", blockN, berr)
+		}
+		if block == nil {
+			return nil, fmt.Errorf("snapshot pre-wipe receipts: block %d not found", blockN)
+		}
+		receipts, rerr := rawdb.ReadReceiptsCacheV2(tx, block, txNumsReader)
+		if rerr != nil {
+			return nil, fmt.Errorf("snapshot pre-wipe receipts: block %d: %w", blockN, rerr)
+		}
+		preWipeReceipts[blockN] = receipts
+	}
+
+	// Snapshot-trim staged for post-commit FS deletion.
+	removed, err := p.unwindSnapshotsPastBlock(ctx, tx, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot-trim: %w", err)
+	}
+	if p.logger != nil && len(removed) > 0 {
+		p.logger.Info("[storage] Provider.Unwind(reexec): snapshot files trimmed past toBlock", "toBlock", toBlock, "files", len(removed))
+	}
+
+	// DB-reset + writable-shadow wipe past toBlock.
+	if err := p.unwindDBPastBlock(ctx, tx, toBlock); err != nil {
+		return nil, fmt.Errorf("db-reset: %w", err)
+	}
+
+	// Re-exec: populates writable shadow at txN ≤ toTxN. After this
+	// the recompute's GetAsOf fallback (via wiped GetLatest) serves
+	// our re-exec output.
+	if err := p.PopulateHistoryByReExec(ctx, tx, engine, gap.FromTxNum, gap.FromBlock, gap.ToBlock, preWipeReceipts); err != nil {
+		return nil, fmt.Errorf("re-exec: %w", err)
+	}
+
+	// Re-attempt the recompute. Should succeed: history records exist
+	// in (cs.txN, toTxN], and GetAsOf fallback returns re-exec output.
+	recompute, err := p.ensureCommitmentAtBlockCompute(ctx, tx, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("post-reexec commitment compute: %w", err)
+	}
+
+	// Apply the validated commitment anchor.
+	if err := p.ensureCommitmentAtBlockApply(ctx, tx, toBlock, recompute); err != nil {
+		recompute.Close()
+		return nil, fmt.Errorf("commitment-anchor apply: %w", err)
+	}
+
+	return recompute, nil
 }

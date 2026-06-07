@@ -46,6 +46,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -592,7 +593,7 @@ Example:
 			logger.Error("mktemp", "err", err)
 			return
 		}
-		defer os.RemoveAll(tmpDir)
+		defer dir.RemoveAll(tmpDir)
 
 		fmt.Printf("RecomputeAtTxNumWithoutSD: toTxNum=%d maxStep=%d stepSize=%d\n", recomputeToTxNum, recomputeMaxStep, stepSize)
 		root, encodedTrieState, baselineTxNum, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, tmpDir, recomputeToTxNum, kv.Step(recomputeMaxStep), stepSize)

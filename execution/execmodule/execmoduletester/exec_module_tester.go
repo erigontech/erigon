@@ -780,6 +780,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ChainConfig: mock.ChainConfig,
 			Inventory:   mock.adminUnwindInventory,
 			SnapDir:     dirs.Snap,
+			SnapTmpDir:  dirs.Tmp,
 			Logger:      logger,
 		})
 		unwinder = testProviderUnwinder{p: mock.AdminUnwindProvider}
@@ -1030,6 +1031,17 @@ func (emt *ExecModuleTester) RescanAdminUnwindInventory(tb testing.TB) {
 	if emt.adminUnwindInventory == nil {
 		return
 	}
+	// Quiesce the aggregator before snapshotting the on-disk layout into the
+	// inventory. Background build+merge that runs after this scan would delete
+	// boundary-step files (e.g. merging v2.0-storage.1-2.kv into a wider file),
+	// leaving the inventory pointing at files the mode-B regen path can no
+	// longer open. Admin SetHead is a deliberate stop-the-world op, so waiting
+	// for the aggregator to settle here mirrors production.
+	if agg, ok := emt.DB.(dbstate.HasAgg); ok {
+		if a, ok := agg.Agg().(*dbstate.Aggregator); ok {
+			<-a.WaitForBuildAndMerge(emt.Ctx)
+		}
+	}
 	freshly := storage.BuildInventoryFromSnapDirForTest(emt.adminUnwindSnapDir)
 	for _, f := range freshly.AllLocalFiles() {
 		_ = emt.adminUnwindInventory.AddFile(f)
@@ -1065,7 +1077,7 @@ type testProviderUnwinder struct {
 func (a testProviderUnwinder) BlockAligned() bool { return a.p.BlockAligned() }
 
 func (a testProviderUnwinder) Unwind(ctx context.Context, toBlock uint64, args execmodule.UnwindArgs) error {
-	return a.p.Unwind(ctx, toBlock, storage.UnwindOpts{Tx: args.Tx})
+	return a.p.Unwind(ctx, toBlock, storage.UnwindOpts{Tx: args.Tx, Engine: args.Engine})
 }
 
 func (a testProviderUnwinder) FinalizeUnwind() error { return a.p.FinalizeUnwind() }

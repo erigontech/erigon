@@ -61,7 +61,9 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 		return fmt.Errorf("SetHead mode B: %w", err)
 	}
 
-	args := UnwindArgs{Tx: tx}
+	// Engine is threaded in so Provider.Unwind can run the partial-block
+	// re-exec path internally when a mid-block step cut is detected.
+	args := UnwindArgs{Tx: tx, Engine: e.engine}
 
 	if err := e.unwinder.Unwind(ctx, targetBlock, args); err != nil {
 		// Unwind staged FS / inventory / network ops up to the point

@@ -131,6 +131,13 @@ func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.Tem
 	tmpDir := p.snapDir
 	root, encodedTrieState, baselineTxNum, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, tx, tmpDir, lastTxNum, stepBoundary, stepSize)
 	if err != nil {
+		// ErrHistoryGap from the primitive doesn't carry ToBlock —
+		// patch it in (caller-side context) so setHeadModeB's retry
+		// loop can run a focused historic re-exec.
+		if gap, ok := commitmentdb.IsHistoryGap(err); ok {
+			gap.ToBlock = toBlock
+			return nil, gap
+		}
 		return nil, fmt.Errorf("RecomputeAtTxNumWithoutSD(toBlock=%d, lastTxNum=%d, stepBoundary=%d): %w", toBlock, lastTxNum, stepBoundary, err)
 	}
 	if common.Hash(root) != header.Root {
