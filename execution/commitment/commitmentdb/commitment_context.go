@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -40,7 +40,7 @@ type sd interface {
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	// MergeMetrics folds a finished worker's lock-free metrics accumulator
 	// into the shared metrics (once, not per read).
-	MergeMetrics(wm *changeset.DomainMetrics)
+	MergeMetrics(wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
 	Trace() bool
 	CommitmentCapture() bool
@@ -56,7 +56,7 @@ type sd interface {
 	// cache-fp log line to break the aggregate `files=N` count down
 	// per domain (Storage value loads vs Commitment branch reads
 	// vs Account loads).
-	Metrics() *changeset.DomainMetrics
+	Metrics() *kvmetrics.DomainMetrics
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -354,9 +354,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	// The fold is single-goroutine, so this lock-free accumulator is owned
 	// exclusively here; merged into the shared metrics when commitment finishes.
 	// Warmup/concurrent-mount workers accumulate + merge independently.
-	commitMetrics := changeset.NewDomainMetrics()
+	commitMetrics := kvmetrics.NewDomainMetrics()
 	defer sdc.sharedDomains.MergeMetrics(commitMetrics)
-	readCtx := changeset.ContextWithMetrics(ctx, commitMetrics)
+	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
 
@@ -521,8 +521,8 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		// (a data race) nor take the global metrics write lock (the prior hard
 		// serialization point). The accumulator is folded into the shared metrics
 		// once at teardown.
-		wm := changeset.NewDomainMetrics()
-		workerCtx := changeset.ContextWithMetrics(ctx, wm)
+		wm := kvmetrics.NewDomainMetrics()
+		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
@@ -566,8 +566,8 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		// Concurrent mounts run in parallel; each gets its own lock-free metrics
 		// accumulator via a per-worker context so they don't share metrics state
 		// (a race) or take the global metrics lock. Folded in at teardown.
-		wm := changeset.NewDomainMetrics()
-		workerCtx := changeset.ContextWithMetrics(ctx, wm)
+		wm := kvmetrics.NewDomainMetrics()
+		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),

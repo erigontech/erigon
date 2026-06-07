@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/cache"
@@ -108,7 +109,7 @@ type SharedDomains struct {
 	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
 	disableInlineTouchKey bool
 	mem                   kv.TemporalMemBatch
-	metrics               changeset.DomainMetrics
+	metrics               kvmetrics.DomainMetrics
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -197,7 +198,7 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
+		metrics:  kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize: tx.Debug().StepSize(),
 	}
 
@@ -439,7 +440,7 @@ type temporalGetter struct {
 	// accumulator, since AsGetter is used by many concurrent goroutines (RPC,
 	// engine) where a shared one would be raced/unbounded. Exec workers pass
 	// their own instance via AsGetterMetered and merge it at task end.
-	m *changeset.DomainMetrics
+	m *kvmetrics.DomainMetrics
 }
 
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
@@ -454,7 +455,7 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 // AggregatorRoTx.MeteredGetLatest pattern). The plan is to migrate GetLatest
 // callers onto this ctx-carrying form in a follow-up, then drop the split.
 func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, changeset.MetricsFromContext(ctx))
+	return gt.sd.getLatestMetered(name, gt.tx, k, kvmetrics.MetricsFromContext(ctx))
 }
 
 // GetCodeSize returns the length of the code at addr without loading the
@@ -503,14 +504,14 @@ func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
 // per-worker metrics instance m. m must be single-owner (one goroutine); the
 // caller merges it into the shared metrics via MergeMetrics at task end (a lock
 // per task, not per read) and Resets it. Used by parallel-exec workers.
-func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *changeset.DomainMetrics) kv.TemporalGetter {
+func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx, m: m}
 }
 
 // MergeMetrics folds a worker's lock-free accumulator into the shared
 // DomainMetrics under a single lock. Called once when a worker finishes (not
 // per read), so the global metrics write-lock stays off the hot path.
-func (sd *SharedDomains) MergeMetrics(wm *changeset.DomainMetrics) {
+func (sd *SharedDomains) MergeMetrics(wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
 }
 
@@ -988,14 +989,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 // without any shared accumulator or lock. Mirrors temporalGetter.GetLatestContext
 // for readers that hold the SD directly (e.g. the committer's asOfStateReader).
 func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, changeset.MetricsFromContext(ctx))
+	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx))
 }
 
 // getLatestMetered is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
-func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *changeset.DomainMetrics) (v []byte, step kv.Step, err error) {
+func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *kvmetrics.DomainMetrics) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -1034,7 +1035,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	}
 
 	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
@@ -1278,7 +1279,7 @@ func decodeAccountCodeHash(enc []byte) []byte {
 	return h[:]
 }
 
-func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
+func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
 	return &sd.metrics
 }
 

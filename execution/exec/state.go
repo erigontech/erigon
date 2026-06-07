@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -131,7 +131,7 @@ type Worker struct {
 	// (lock-free, single-owner). The worker's state reader records into it; it
 	// is merged into the shared SharedDomains metrics + reset once per task (a
 	// lock per task, not per read), at the point the result is queued.
-	readMetrics *changeset.DomainMetrics
+	readMetrics *kvmetrics.DomainMetrics
 }
 
 // installWorkerGetHash replaces the EVM's GetHash function with one that
@@ -185,7 +185,7 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 
 		dirs:        dirs,
 		metrics:     metrics,
-		readMetrics: changeset.NewDomainMetrics(),
+		readMetrics: kvmetrics.NewDomainMetrics(),
 	}
 	w.runnable.Store(true)
 	w.ibs = state.New(w.stateReader)

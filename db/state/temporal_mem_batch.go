@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 type iodir int
@@ -95,13 +96,13 @@ type TemporalMemBatch struct {
 	// above the unwind target.
 	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
-	metrics *changeset.DomainMetrics
+	metrics *kvmetrics.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           ioMetrics.(*changeset.DomainMetrics),
+		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
 	}
 	aggTx := AggTx(tx)
@@ -163,7 +164,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutKeySize += putKeySize
 			dm.CachePutValueSize += putValueSize
 		} else {
-			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
+			sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
 				CachePutCount:     1,
 				CachePutSize:      putKeySize + putValueSize,
 				CachePutKeySize:   putKeySize,
