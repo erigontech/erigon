@@ -120,7 +120,8 @@ var (
 var cobraFlagValues struct {
 	webseeds string
 	//preverifiedSource string
-	datadir string
+	datadir      string
+	chainTomlURL string
 }
 
 func init() {
@@ -130,6 +131,7 @@ func init() {
 	withChainFlag(rootCmd)
 
 	rootCmd.Flags().StringVar(&cobraFlagValues.webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
+	rootCmd.Flags().StringVar(&cobraFlagValues.chainTomlURL, utils.SnapChainTomlURLFlag.Name, utils.SnapChainTomlURLFlag.Value, utils.SnapChainTomlURLFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
@@ -279,7 +281,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain, strings.TrimSpace(cobraFlagValues.chainTomlURL))
 		if err != nil {
 			return err
 		}
