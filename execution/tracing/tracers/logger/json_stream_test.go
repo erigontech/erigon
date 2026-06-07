@@ -225,6 +225,13 @@ func TestJsonStreamLogger_EnableMemory(t *testing.T) {
 			t.Error("expected 'memory' field to be absent, but it was present")
 		}
 	})
+
+	t.Run("enableMemory=true with empty memory excludes memory field", func(t *testing.T) {
+		obj := captureOnOpcode(t, &LogConfig{EnableMemory: true}, nil, nil, nil)
+		if _, ok := obj["memory"]; ok {
+			t.Error("expected 'memory' field to be absent when memory is empty, but it was present")
+		}
+	})
 }
 
 // TestJsonStreamLogger_EnableReturnData verifies that the returnData field is present

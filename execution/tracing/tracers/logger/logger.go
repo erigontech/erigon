@@ -71,7 +71,7 @@ type StructLog struct {
 	Op            vm.OpCode                   `json:"op"`
 	Gas           uint64                      `json:"gas"`
 	GasCost       uint64                      `json:"gasCost"`
-	Memory        []byte                      `json:"memory"`
+	Memory        []byte                      `json:"memory,omitempty"`
 	MemorySize    int                         `json:"memSize"`
 	Stack         []*big.Int                  `json:"stack"`
 	ReturnData    []byte                      `json:"returnData"`
