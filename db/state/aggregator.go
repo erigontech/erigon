@@ -115,6 +115,12 @@ type Aggregator struct {
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
+	// metricsCollector is the process-level KV-read metrics aggregator. Every
+	// read path (exec, commitment, warmup, RPC, engine) sends its finished
+	// per-worker metrics here; a single goroutine folds them, grouped by source.
+	// Lives at aggregator scope (process lifetime) like the BranchCache/StateCache.
+	metricsCollector *kvmetrics.Collector
+
 	onFilesChange kv.OnFilesChange
 	onFilesDelete kv.OnFilesChange
 
@@ -158,6 +164,8 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 
 		produce: true,
 	}
+	a.metricsCollector = kvmetrics.NewCollector()
+	a.metricsCollector.Start(&a.wg)
 	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
 	// nil pointer — recalcVisibleFiles will overwrite it during ConfigureDomains.
 	a.visible.Store(&aggregatorVisible{})
@@ -563,6 +571,7 @@ func (a *Aggregator) Close() {
 	}
 	a.ctxCancel()
 	a.ctxCancel = nil
+	a.metricsCollector.Stop() // drain buffered samples, then let wg.Wait join the goroutine
 	a.wg.Wait()
 
 	a.dirtyFilesLock.Lock()
@@ -2432,6 +2441,14 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 		return nil
 	}
 	return at.d[kv.CommitmentDomain].d.branchCache
+}
+
+// MetricsCollector exposes the aggregator-scope KV-read metrics collector.
+// Fetched by SharedDomains through the duck-typed kvmetrics.MetricsCollectorProvider
+// interface (same pattern as BranchCache), so every read path can send its
+// finished per-worker metrics to one process-level aggregate.
+func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
+	return at.a.metricsCollector
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }

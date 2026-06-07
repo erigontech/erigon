@@ -1,6 +1,9 @@
 package kvmetrics
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // Source identifies which read path produced a batch of metrics, so the
 // Collector can group (and Prometheus can label) IO by subsystem. The previous
@@ -33,6 +36,14 @@ func (s Source) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+// MetricsCollectorProvider is implemented by *state.AggregatorRoTx. SharedDomains
+// fetches the process-level collector through tx.AggTx().(MetricsCollectorProvider)
+// — the same duck-type pattern as commitment.BranchCacheProvider — so the leaf
+// kvmetrics package need not be imported into a cycle with db/state.
+type MetricsCollectorProvider interface {
+	MetricsCollector() *Collector
 }
 
 // sample carries a finished per-worker instance to the collector. Ownership of m
@@ -90,14 +101,19 @@ func (c *Collector) Start(wg *sync.WaitGroup) {
 }
 
 func (c *Collector) run() {
+	ticker := time.NewTicker(publishInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case s := <-c.in:
 			c.fold(s)
 		case rc := <-c.snapReq:
 			rc <- c.snapshot()
+		case <-ticker.C:
+			c.publish()
 		case <-c.quit:
 			c.drain()
+			c.publish() // final push so the last interval's reads aren't lost
 			close(c.done)
 			return
 		}

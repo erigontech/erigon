@@ -181,6 +181,12 @@ type SharedDomains struct {
 	// is per-batch so the controller's tick maps to batches not blocks,
 	// but cooldown thresholds are tunable to compensate.
 	adaptivePinController *commitment.AdaptivePinController
+
+	// collector is the process-level KV-read metrics collector (aggregator
+	// scope). Finished per-worker metrics are sent here (ownership transfer)
+	// tagged by source. nil for test setups whose AggTx doesn't implement
+	// kvmetrics.MetricsCollectorProvider.
+	collector *kvmetrics.Collector
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -214,6 +220,9 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 		branchCache = p.BranchCache()
 	}
 	sd.branchCache = branchCache
+	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
+		sd.collector = p.MetricsCollector()
+	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
 
 	// Construct the adaptive pin controller alongside the cache. The
@@ -502,17 +511,40 @@ func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
 
 // AsGetterMetered returns a getter that records reads into the caller's own
 // per-worker metrics instance m. m must be single-owner (one goroutine); the
-// caller merges it into the shared metrics via MergeMetrics at task end (a lock
-// per task, not per read) and Resets it. Used by parallel-exec workers.
+// caller hands it off via MergeMetrics at task end (a lock per task, not per
+// read) and allocates a fresh instance. Used by parallel-exec workers.
 func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx, m: m}
 }
 
-// MergeMetrics folds a worker's lock-free accumulator into the shared
-// DomainMetrics under a single lock. Called once when a worker finishes (not
-// per read), so the global metrics write-lock stays off the hot path.
-func (sd *SharedDomains) MergeMetrics(wm *kvmetrics.DomainMetrics) {
+// AsGetterCollected returns a getter that records reads into its own fresh
+// metrics instance, plus a flush closure that hands those metrics to the
+// process-level collector tagged with source. Used by concurrent short-lived
+// callers (RPC, engine) that have no task-end merge: the caller defers flush()
+// at request teardown. Collection is gated on dbg.KVReadLevelledMetrics; when
+// off (the default) the getter collects nothing and flush is a no-op.
+func (sd *SharedDomains) AsGetterCollected(tx kv.TemporalTx, source kvmetrics.Source) (getter kv.TemporalGetter, flush func()) {
+	if !dbg.KVReadLevelledMetrics || sd.collector == nil {
+		return &temporalGetter{sd: sd, tx: tx}, func() {}
+	}
+	m := kvmetrics.NewDomainMetrics()
+	return &temporalGetter{sd: sd, tx: tx, m: m}, func() { sd.collector.Send(source, m) }
+}
+
+// MergeMetrics hands a finished worker's lock-free accumulator to BOTH sinks:
+// the per-batch sd.metrics (under a single lock, for the per-batch log line) and
+// the process-level collector (lock-free, grouped by source, for Prometheus).
+// Ownership of wm transfers to the collector — the caller must allocate a fresh
+// instance afterwards and not touch wm again. Called once when a worker finishes
+// (not per read), so the metrics write-lock stays off the hot path.
+func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
+	sd.collector.Send(source, wm)
+}
+
+// Collector returns the process-level KV-read metrics collector (may be nil).
+func (sd *SharedDomains) Collector() *kvmetrics.Collector {
+	return sd.collector
 }
 
 // LockChangesetAccumulator and UnlockChangesetAccumulator bracket a

@@ -368,12 +368,15 @@ func (rw *Worker) Run() (err error) {
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
-		// Fold this task's reads into the shared metrics and reset. Off the hot
-		// path (the result is already queued): a single lock per task replacing
-		// the old lock-per-read. Skipped entirely when read metrics are off.
+		// Hand this task's reads to the per-batch aggregate (log line) and the
+		// process-level collector (Prometheus), then allocate a fresh instance.
+		// Off the hot path (the result is already queued): one lock per task plus
+		// a lock-free channel send, replacing the old lock-per-read. The send
+		// takes ownership of readMetrics, so we must not Reset+reuse it — a fresh
+		// instance is allocated instead. Skipped entirely when read metrics are off.
 		if dbg.KVReadLevelledMetrics && rw.rs != nil {
-			rw.rs.Domains().MergeMetrics(rw.readMetrics)
-			rw.readMetrics.Reset()
+			rw.rs.Domains().MergeMetrics(kvmetrics.SourceExec, rw.readMetrics)
+			rw.readMetrics = kvmetrics.NewDomainMetrics()
 		}
 	}
 	return nil

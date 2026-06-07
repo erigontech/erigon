@@ -38,9 +38,10 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	// MergeMetrics folds a finished worker's lock-free metrics accumulator
-	// into the shared metrics (once, not per read).
-	MergeMetrics(wm *kvmetrics.DomainMetrics)
+	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
+	// the per-batch aggregate and the process-level collector (once, not per
+	// read), tagged with source.
+	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
 	Trace() bool
 	CommitmentCapture() bool
@@ -355,7 +356,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	// exclusively here; merged into the shared metrics when commitment finishes.
 	// Warmup/concurrent-mount workers accumulate + merge independently.
 	commitMetrics := kvmetrics.NewDomainMetrics()
-	defer sdc.sharedDomains.MergeMetrics(commitMetrics)
+	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
 	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
@@ -535,7 +536,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
-			sdc.sharedDomains.MergeMetrics(wm)
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
@@ -581,7 +582,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
-			sdc.sharedDomains.MergeMetrics(wm)
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
