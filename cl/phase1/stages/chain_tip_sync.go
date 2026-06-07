@@ -463,9 +463,19 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				}
 			}
 		}
-		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+		// Flush must run under a bounded context. Using context.Background()
+		// here can deadlock with the EL exec stage: blockCollector.Flush
+		// blocks waiting for the EL to accept the inserted blocks, but the
+		// EL stage waits for Caplin to issue a forkchoice update before it
+		// advances — and Caplin can't issue one because the clstages thread
+		// is stuck inside this Flush. Use a bounded deadline so a stalled
+		// EL surfaces as a Warn and the clstages loop can move on, eventually
+		// driving an FCU that unblocks the EL.
+		flushCtx, flushCancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := cfg.blockCollector.Flush(flushCtx); err != nil {
 			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 		}
+		flushCancel()
 	}
 
 	if args.seenSlot >= args.targetSlot {
