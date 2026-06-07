@@ -75,7 +75,7 @@ func (a Address) MarshalText() ([]byte, error) {
 	return a.Value().MarshalText()
 }
 
-// UnmarshalText parses a hash in hex syntax.
+// UnmarshalText parses an address in hex syntax.
 func (a *Address) UnmarshalText(input []byte) error {
 	var value common.Address
 	if err := value.UnmarshalText(input); err != nil {
@@ -85,7 +85,7 @@ func (a *Address) UnmarshalText(input []byte) error {
 	return nil
 }
 
-// UnmarshalJSON parses a hash in hex syntax.
+// UnmarshalJSON parses an address in hex syntax.
 func (a *Address) UnmarshalJSON(input []byte) error {
 	var value common.Address
 	if err := value.UnmarshalJSON(input); err != nil {
