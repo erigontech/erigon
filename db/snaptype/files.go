@@ -296,7 +296,6 @@ func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok
 		if len(parts) > 1 {
 			secParts := strings.Split(parts[1], "-")
 			if len(secParts) > 1 {
-				println(secParts[1])
 				res.TypeString = secParts[1]
 				res.Type, _ = ParseFileType(res.TypeString)
 			}
