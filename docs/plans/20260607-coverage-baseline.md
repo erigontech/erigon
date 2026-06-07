@@ -85,7 +85,23 @@ Top-level package + notable sub-packages. Tier and target per the framework.
 | execution/exec | T3 | **2.8%** | best-effort | needs DB/state harness |
 | execution/execmodule | T3 | **40.1%** | best-effort | execmoduletester 51.7%, moduleutil 61.8%, chainreader 0% |
 
-### Declaration-only packages — EXCLUDED from targets (no testable behavior)
+### Shared in-memory state reader (`execution/state/statetest`)
+
+New importable test harness: `statetest.Reader` is a pre-seedable in-memory
+`state.StateReader` (mirrors the `httptest` pattern). `NewReader().WithBalance/
+WithNonce/WithCode/WithStorage(...).State()` yields a writable
+`*state.IntraBlockState` with **no database** — unlocking unit tests for
+state-mutating logic that was previously deferred as T2. Package covered 83.3%.
+
+**First use — `execution/protocol/misc` 54.8% → 71.3%:** the previously-deferred
+state functions now have real behavior tests — `Transfer` (debit/credit +
+bailout), `ApplyDAOHardFork` (drains a seeded account into the refund contract),
+`StoreBlockHashesEip2935` (no-code no-op + writes parent hash at the ring slot),
+and `DequeueWithdrawalRequests7002`/`DequeueConsolidationRequests7251` (empty-code
+error, syscall-data → FlatRequest, syscall-error, nil-result). The same harness
+is now available to `execution/exec`, `merge`, and other state-dependent packages.
+
+## Declaration-only packages — EXCLUDED from targets (no testable behavior)
 
 A 0% package is not automatically a target. Some are 0% because they contain
 **only declarations** — interfaces, type/const definitions, sentinel `error`
