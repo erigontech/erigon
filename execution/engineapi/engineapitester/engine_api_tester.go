@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -397,7 +396,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
-		ChainDB:              ethBackend.ChainKV(),
 		cleanup:              cleanup,
 	}, nil
 }
@@ -428,13 +426,7 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
-	// ChainDB is the running backend's temporal DB. Retained on the tester so
-	// callers (e.g. EngineXTestRunner.Run between tests in the same group) can
-	// reach the aggregator's BranchCache and clear it without rebuilding the
-	// whole tester. The reference must NOT be Closed by callers — the tester's
-	// cleanup owns the lifecycle.
-	ChainDB kv.RwDB
-	cleanup *cleanupHandle
+	cleanup              *cleanupHandle
 }
 
 func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *testing.T, eat EngineApiTester)) {

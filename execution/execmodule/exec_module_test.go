@@ -178,6 +178,79 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	require.NoError(t, err)
 }
 
+// TestValidateForkPayloadOffNonTipCanonicalBlockWithCache exercises the
+// unwind/fork-payload caching path in ExecModule.ValidateChain. A fork that
+// branches off a NON-tip canonical block forces validateChain to
+// unwindToCommonCanonical (unwinding only the canonical blocks above the branch
+// point), chain the validation SharedDomains to e.currentContext so the unwound
+// blocks' diffsets are reachable via the parent link, and mask the BranchCache
+// with the resulting unwind set. If any of that is wrong the re-executed fork
+// produces a wrong trie root, so a Success validation status is the correctness
+// assertion. The existing side-fork test only branches at genesis (full unwind);
+// this covers the partial-unwind round trip the ValidateChain parent-link
+// comment guards.
+func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	to := common.Address{0xaa}
+	baseFee := m.Genesis.BaseFee().Uint64()
+	mkTx := func(nonce, amount uint64) types.Transaction {
+		tx, err := types.SignTx(
+			types.NewTransaction(nonce, to, uint256.NewInt(amount), 50000, uint256.NewInt(baseFee), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		return tx
+	}
+
+	// blockgen reads the latest committed DB state, so each segment must be
+	// generated while the chain head sits at its intended parent. Build and
+	// finalize the shared prefix genesis → 1 → 2 first (nonces 0,1), each block
+	// carrying a state-touching txn so the BranchCache + commitment hold real
+	// entries. After this the head is block 2.
+	prefix, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		b.AddTx(mkTx(uint64(i), 1_000))
+	})
+	require.NoError(t, err)
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, prefix.Blocks))
+	block2 := prefix.Blocks[1]
+
+	// With the head at block 2 (signer nonce 2), generate both continuations off
+	// block 2 before inserting either: the canonical tip (block 3, nonce 2) and a
+	// longer fork (blocks 3',4' at nonces 2,3) that branches off the same non-tip
+	// block 2.
+	canonicalTip, err := blockgen.GenerateChain(m.ChainConfig, block2, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+		b.AddTx(mkTx(2, 1_000))
+	})
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, block2, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		b.AddTx(mkTx(uint64(2+i), 2_000))
+	})
+	require.NoError(t, err)
+
+	// Finalize the canonical tip (head → block 3).
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, canonicalTip.Blocks))
+
+	// Validating fork.Blocks[0] (height 3, parent = block 2) must unwind canonical
+	// block 3 back to block 2; fork.Blocks[1] then head-extends and the FCU reorgs
+	// onto the longer fork.
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, fork.Blocks))
+
+	// Reorg back onto the original canonical block 3 (same common ancestor,
+	// block 2) to exercise the BranchCache masking in the other direction:
+	// unwind the fork blocks and re-validate canonical block 3 off block 2.
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, canonicalTip.Blocks))
+}
+
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
 	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
