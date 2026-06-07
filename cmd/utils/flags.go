@@ -2126,7 +2126,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		beaconCfg.CapellaForkEpoch = 0
 		beaconCfg.DenebForkEpoch = 0
 		beaconCfg.ElectraForkEpoch = 0
-		beaconCfg.FuluForkEpoch = 0
+		beaconCfg.FuluForkEpoch = ^uint64(0) // Fulu disabled pending EL support
 		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
 		if slotTime < 2 {
 			slotTime = 2
@@ -2173,7 +2173,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 				"CAPELLA_FORK_EPOCH: 0\n"+
 				"DENEB_FORK_EPOCH: 0\n"+
 				"ELECTRA_FORK_EPOCH: 0\n"+
-				"FULU_FORK_EPOCH: 0\n"+
 				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
 			genesisTime, beaconCfg.SecondsPerSlot)
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
