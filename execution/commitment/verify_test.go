@@ -351,33 +351,27 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 // the other indicates a bug regardless of which root looks "more correct".
 //
 // The shared helper assertEquivalentRootWorkers lives in
-// parallel_patricia_hashed_test.go (same package). raiseMinSplitKeys is set
-// to 2 here — the minimum value SetMinSplitKeys accepts before falling back
-// to the global default — so every multi-bucket batch yields at least one
-// split-point. That keeps the barrier protocol in the path under test;
-// single-bucket batches degrade naturally to a single leafTask with no
-// barrier.
+// parallel_patricia_hashed_test.go (same package).
 
 // randomBatchShape categorises the structural shape of an update batch the
 // ModeParallel arm must handle. Each shape stresses a different portion of
-// the prefix-trie / split-point / barrier pipeline.
+// the mount/fold pipeline.
 type randomBatchShape int
 
 const (
 	// shapeAccountsOnly — every key is an EOA-style address; no storage.
-	// Touches one nibble bucket per address; with enough addresses across
-	// distinct top nibbles produces a root split-point.
+	// Touches one nibble bucket per address; addresses across distinct top
+	// nibbles fan out to separate mount workers.
 	shapeAccountsOnly randomBatchShape = iota
 	// shapeStorageHeavySingle — one account with many storage slots. The
 	// prefix trie's first 64 nibbles collapse via path compression; the
 	// fork sits deep under the account's hashed prefix.
 	shapeStorageHeavySingle
 	// shapeStorageSpread — several accounts each with their own storage. A
-	// realistic mainnet-shape batch; the split-points cluster at the top
-	// nibble level and inside each account's storage subtree.
+	// realistic mainnet-shape batch spanning many root nibbles.
 	shapeStorageSpread
 	// shapeInsertsAndDeletes — a mix of insert / delete account updates.
-	// Exercises the touched-and-deleted barrier path in loadSiblingsIntoGrid.
+	// Exercises the touched-and-deleted fold path.
 	shapeInsertsAndDeletes
 	// shapeEmpty — no touched keys. Both modes must return the empty-trie
 	// root.
@@ -489,12 +483,6 @@ func generateUpdate(shape randomBatchShape, isStorage bool, rnd *rand.Rand) Upda
 	return u
 }
 
-// parallelEquivMinSplitKeys is the lowest non-zero value SetMinSplitKeys
-// accepts (0 falls back to the global default). It makes every two-key fork
-// a split-point so multi-bucket batches always exercise the barrier protocol
-// during the equivalence harness — the path most likely to regress.
-const parallelEquivMinSplitKeys uint32 = 2
-
 // TestVerifyParallel_AllShapes exercises one batch per named shape. Each
 // shape is run as a subtest so failures point at the offending shape rather
 // than the bulk loop below.
@@ -516,7 +504,7 @@ func TestVerifyParallel_AllShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			plainKeys, updates := generateBatch(tc.shape, tc.n, tc.seed)
-			root := assertEquivalentRootWorkers(t, plainKeys, updates, parallelEquivMinSplitKeys, 4)
+			root := assertEquivalentRootWorkers(t, plainKeys, updates, 4)
 			require.NotEmpty(t, root, "root hash must be non-empty for shape %s", tc.name)
 		})
 	}
@@ -552,7 +540,7 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 		}
 		seed := rnd.Int63()
 		plainKeys, updates := generateBatch(shape, n, seed)
-		_ = assertEquivalentRootWorkers(t, plainKeys, updates, parallelEquivMinSplitKeys, 4)
+		_ = assertEquivalentRootWorkers(t, plainKeys, updates, 4)
 	}
 }
 
@@ -584,6 +572,6 @@ func FuzzParallelEquivalence(f *testing.F) {
 		}
 		shape := randomBatchShape(int(shapeByte) % 5)
 		plainKeys, updates := generateBatch(shape, int(keysCount), seed)
-		_ = assertEquivalentRootWorkers(t, plainKeys, updates, parallelEquivMinSplitKeys, 2)
+		_ = assertEquivalentRootWorkers(t, plainKeys, updates, 2)
 	})
 }

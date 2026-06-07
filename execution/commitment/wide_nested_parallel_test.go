@@ -59,8 +59,8 @@ var (
 )
 
 // genWideNested builds a trie wide at the top that forks at depths 1..4: 8 top
-// nibbles × 4 × 2, several keys per leaf group, so with MinSplitKeys=2 there are
-// nested split-points at every level — the structure random keys never produce.
+// nibbles × 4 × 2, several keys per leaf group — deeply nested branching that
+// random keys never produce.
 func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1)
@@ -198,7 +198,6 @@ func runIncremental(t *testing.T, parallel bool, workers int, k1 [][]byte, u1 []
 			tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 			defer tr.Release()
 			tr.SetNumWorkers(workers)
-			tr.SetMinSplitKeys(parallelEquivMinSplitKeys)
 			tr.ResetContext(ms)
 			ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 			defer ut.Close()
@@ -276,7 +275,7 @@ func branchDiff(t *testing.T, seq, par *MockState) {
 func TestVerifyParallel_WideNested(t *testing.T) {
 	t.Parallel()
 	keys, upds := genWideNested(t)
-	require.NotEmpty(t, assertEquivalentRootWorkers(t, keys, upds, parallelEquivMinSplitKeys, 8))
+	require.NotEmpty(t, assertEquivalentRootWorkers(t, keys, upds, 8))
 }
 
 // TestVerifyParallel_WideNestedIncremental: batch 1 commits the whole wide-nested
@@ -324,7 +323,6 @@ func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer parTrie.Release()
 	parTrie.SetNumWorkers(8)
-	parTrie.SetMinSplitKeys(parallelEquivMinSplitKeys)
 	parTrie.ResetContext(parMs)
 	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer parUpds.Close()

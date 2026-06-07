@@ -140,6 +140,10 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
+	// The root-row fold reaches the template via foldPropagate (single child) or
+	// foldBranch (multi child); only the latter sets rootPresent, so set it here
+	// to keep EncodeCurrentState's restore-then-continue state correct.
+	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}

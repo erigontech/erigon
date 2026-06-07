@@ -567,7 +567,6 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Equal(t, ModeParallel, ut.mode)
 	require.NotNil(t, ut.parallel, "parallel field must be allocated")
 	require.NotNil(t, ut.parallel.trie, "parallel trie must be allocated")
-	require.NotNil(t, ut.parallel.splitMap, "parallel splitMap must be allocated")
 	require.NotNil(t, ut.keys, "keys dedup map must be allocated")
 	require.False(t, ut.sortPerNibble, "ModeParallel carries keys in the prefix trie, not per-nibble collectors")
 	for i := 0; i < len(ut.nibbles); i++ {

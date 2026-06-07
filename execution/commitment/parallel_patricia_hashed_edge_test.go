@@ -40,18 +40,6 @@ import (
 // need an established DB state before the test batch runs) use the
 // stagedRootEquivalence helper defined below; it persists MockState across
 // batches so PutBranch writes from batch N visit ctx.Branch on batch N+1.
-//
-// The helper always exercises the barrier protocol by lowering the
-// split-point threshold to parallelEdgeMinSplitKeys (=2): every two-child
-// fork above the touched-key threshold becomes a barrier, which is the
-// surface most prone to regression.
-
-// parallelEdgeMinSplitKeys is the threshold passed to SetMinSplitKeys for
-// edge-case tests. Two means every fork with >=2 touched siblings becomes a
-// split-point regardless of subtreeCount, keeping the barrier protocol in the
-// path under test for batches that would otherwise be too small to trigger a
-// split in the default 32-threshold configuration.
-const parallelEdgeMinSplitKeys uint32 = 2
 
 // stagedBatch is one phase in a multi-phase test: a (plainKeys, updates)
 // pair plus a short label for failure messages.
@@ -66,9 +54,7 @@ type stagedBatch struct {
 // sequential and parallel tries and asserts both sides produce byte-equal
 // root hashes after every batch. State persists across batches: the MockState
 // PutBranch/Branch maps survive, so a later batch sees the DB state the
-// earlier batches established. This is what lets delete-pattern tests
-// validate the untouched-nibble fix in Prepare — by phase 2 the DB already
-// carries the cells phase 1 wrote.
+// earlier batches established.
 //
 // numWorkers controls the parallel side's worker pool. Returns the final
 // root hash for caller-side assertions.
@@ -86,7 +72,6 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer parTrie.Release()
 	parTrie.SetNumWorkers(numWorkers)
-	parTrie.SetMinSplitKeys(parallelEdgeMinSplitKeys)
 	parTrie.ResetContext(parMs)
 
 	var prevRoot []byte
@@ -292,7 +277,7 @@ func TestParallelBloatnetShape(t *testing.T) {
 	}
 	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, parallelEdgeMinSplitKeys, 8)
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 8)
 	require.NotEmpty(t, root)
 	t.Logf("bloatnet root (%d touched keys, %d accounts): %x",
 		len(plainKeys), numAccounts, root)
@@ -331,7 +316,7 @@ func TestParallelSingleAccountManyStorage(t *testing.T) {
 	}
 	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, parallelEdgeMinSplitKeys, 4)
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 4)
 	require.NotEmpty(t, root)
 	t.Logf("single-account-%d-slots root: %x", numSlots, root)
 }
@@ -342,7 +327,7 @@ func TestParallelSingleAccountManyStorage(t *testing.T) {
 // self-contained.
 func TestParallelEmptyUpdates(t *testing.T) {
 	t.Parallel()
-	root := assertEquivalentRoot(t, nil, nil, parallelEdgeMinSplitKeys)
+	root := assertEquivalentRoot(t, nil, nil)
 	require.NotEmpty(t, root, "empty-trie root is the empty hash")
 }
 
@@ -355,7 +340,7 @@ func TestParallelSingleTouchedKey(t *testing.T) {
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("4c888535841acbe0709b0758083f61d375bc02b4", 9001).
 		Build()
-	root := assertEquivalentRoot(t, plainKeys, updates, parallelEdgeMinSplitKeys)
+	root := assertEquivalentRoot(t, plainKeys, updates)
 	require.NotEmpty(t, root)
 }
 
@@ -381,7 +366,7 @@ func TestParallelMixedAccountStorage(t *testing.T) {
 	}
 	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, parallelEdgeMinSplitKeys, 8)
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 8)
 	require.NotEmpty(t, root)
 }
 
@@ -403,7 +388,7 @@ func TestParallelOnlyOneAccountTouchedManyTimes(t *testing.T) {
 	require.Equal(t, 1, len(plainKeys), "UpdateBuilder merges per-account updates into one key")
 	require.Equal(t, BalanceUpdate|NonceUpdate|CodeUpdate, updates[0].Flags)
 
-	root := assertEquivalentRoot(t, plainKeys, updates, parallelEdgeMinSplitKeys)
+	root := assertEquivalentRoot(t, plainKeys, updates)
 	require.NotEmpty(t, root)
 }
 
@@ -427,7 +412,6 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer parTrie.Release()
 	parTrie.SetNumWorkers(4)
-	parTrie.SetMinSplitKeys(parallelEdgeMinSplitKeys)
 	parTrie.ResetContext(parMs)
 
 	runBatch := func(label string, plainKeys [][]byte, updates []Update) {
