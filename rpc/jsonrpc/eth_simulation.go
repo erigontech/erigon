@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -168,6 +169,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 	defer sharedDomains.Close()
+	// Meter this request's state reads under the rpc source (flushed at Close).
+	// SimulateV1 owns this SharedDomains on a single goroutine.
+	sharedDomains.StartRequestMetrics(kvmetrics.SourceRPC)
 	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// Iterate over each given SimulatedBlock

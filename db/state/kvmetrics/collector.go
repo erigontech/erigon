@@ -108,6 +108,7 @@ func (c *Collector) run() {
 		case s := <-c.in:
 			c.fold(s)
 		case rc := <-c.snapReq:
+			c.drain() // fold everything already buffered so the snapshot is current
 			rc <- c.snapshot()
 		case <-ticker.C:
 			c.publish()

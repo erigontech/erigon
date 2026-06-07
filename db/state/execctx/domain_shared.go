@@ -187,6 +187,15 @@ type SharedDomains struct {
 	// tagged by source. nil for test setups whose AggTx doesn't implement
 	// kvmetrics.MetricsCollectorProvider.
 	collector *kvmetrics.Collector
+
+	// reqMetrics is an optional request-scoped accumulator for callers that read
+	// through the plain AsGetter (nil per-read metrics) on a single goroutine —
+	// e.g. an RPC handler that owns this SharedDomains for one request. Enabled
+	// via StartRequestMetrics(source) and flushed to the collector at Close.
+	// Single-owner (the request goroutine); never set on exec SDs, whose workers
+	// pass their own per-worker instance via AsGetterMetered.
+	reqMetrics *kvmetrics.DomainMetrics
+	reqSource  kvmetrics.Source
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -517,20 +526,6 @@ func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMe
 	return &temporalGetter{sd: sd, tx: tx, m: m}
 }
 
-// AsGetterCollected returns a getter that records reads into its own fresh
-// metrics instance, plus a flush closure that hands those metrics to the
-// process-level collector tagged with source. Used by concurrent short-lived
-// callers (RPC, engine) that have no task-end merge: the caller defers flush()
-// at request teardown. Collection is gated on dbg.KVReadLevelledMetrics; when
-// off (the default) the getter collects nothing and flush is a no-op.
-func (sd *SharedDomains) AsGetterCollected(tx kv.TemporalTx, source kvmetrics.Source) (getter kv.TemporalGetter, flush func()) {
-	if !dbg.KVReadLevelledMetrics || sd.collector == nil {
-		return &temporalGetter{sd: sd, tx: tx}, func() {}
-	}
-	m := kvmetrics.NewDomainMetrics()
-	return &temporalGetter{sd: sd, tx: tx, m: m}, func() { sd.collector.Send(source, m) }
-}
-
 // MergeMetrics hands a finished worker's lock-free accumulator to BOTH sinks:
 // the per-batch sd.metrics (under a single lock, for the per-batch log line) and
 // the process-level collector (lock-free, grouped by source, for Prometheus).
@@ -545,6 +540,29 @@ func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.Dom
 // Collector returns the process-level KV-read metrics collector (may be nil).
 func (sd *SharedDomains) Collector() *kvmetrics.Collector {
 	return sd.collector
+}
+
+// StartRequestMetrics enables request-scoped metering for plain AsGetter reads on
+// this SharedDomains, tagged with source. For single-goroutine owners (an RPC
+// handler). The accumulator is flushed to the collector at Close. No-op when read
+// metrics are off or there is no collector. Do NOT use on a SharedDomains shared
+// across goroutines — the accumulator is single-owner.
+func (sd *SharedDomains) StartRequestMetrics(source kvmetrics.Source) {
+	if !dbg.KVReadLevelledMetrics || sd.collector == nil {
+		return
+	}
+	sd.reqMetrics = kvmetrics.NewDomainMetrics()
+	sd.reqSource = source
+}
+
+// flushRequestMetrics hands any request-scoped accumulator to the collector.
+// Called at Close. Idempotent.
+func (sd *SharedDomains) flushRequestMetrics() {
+	if sd.reqMetrics == nil {
+		return
+	}
+	sd.collector.Send(sd.reqSource, sd.reqMetrics)
+	sd.reqMetrics = nil
 }
 
 // LockChangesetAccumulator and UnlockChangesetAccumulator bracket a
@@ -830,6 +848,7 @@ func (sd *SharedDomains) Close() {
 		return
 	}
 
+	sd.flushRequestMetrics()
 	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
 
@@ -1035,6 +1054,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	var start time.Time
 	if dbg.KVReadLevelledMetrics {
 		start = time.Now()
+		// Plain AsGetter reads (wm == nil) on a request-scoped SD fold into the
+		// request accumulator. Short-circuits for exec workers (wm != nil), which
+		// never touch reqMetrics — so no cross-goroutine access.
+		if wm == nil {
+			wm = sd.reqMetrics
+		}
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
