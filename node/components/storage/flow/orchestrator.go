@@ -650,21 +650,6 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
 		o.recordPeerClaimLocked(entry, peerID)
-		// Track phase-1 file names regardless of locality so the
-		// post-Indexed gate in tryFireInitialStateReady waits for the
-		// lifecycle to advance EVERY known phase-1 file to Indexed —
-		// including locally-present files. Phase-1 = state-domain +
-		// ALL block file types (headers + bodies + transactions). This
-		// is what InitialStateReady gates on: the EL's RoSnapshots
-		// OpenFolder uses alignMin=true and FrozenBlocks collapses to
-		// min(headers, bodies, transactions) — so all three types must
-		// be Indexed before postIndexed's FillDBFromSnapshots can see
-		// a non-zero blocksAvailable. Caplin's "headers only" path
-		// uses BlockHeadersReady (a SEPARATE earlier signal), so it's
-		// not blocked by bodies/tx; it can start its work in parallel.
-		if domain != "" || entry.Kind != snapshot.KindCaplin {
-			o.phase1Files[entry.Name] = struct{}{}
-		}
 	}
 	o.peerMu.Unlock()
 
@@ -674,19 +659,48 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 
 	// First pass: decide which entries to request and mark them pending under
 	// a single lock, so subsequent coverage checks in the same manifest see
-	// their own earlier selections.
+	// their own earlier selections. Phase-1 file tracking is folded into the
+	// same pass: an entry is phase-1-eligible only when it will be present
+	// on disk (already local, or scheduled for download). Manifest entries
+	// that get deduped out — a smaller (un-merged) step range subsumed by a
+	// larger merged sibling — are NOT eligible: the downloader skips them,
+	// so the lifecycle never advances them to Indexed, and adding them to
+	// phase1Files would deadlock tryFireInitialStateReady waiting for a
+	// LifecycleIndexed signal that can never arrive.
+	//
+	// Phase-1 covers state-domain files AND every block file kind
+	// (headers + bodies + transactions). Caplin .seg flows through
+	// requestSimpleGaps (phase1=false) and is intentionally excluded from
+	// the gate. InitialStateReady fires only after the full phase-1 set is
+	// Indexed: postIndexed's FillDBFromSnapshots uses
+	// blockReader.FrozenBlocks() computed under alignMin=true as
+	// min(headers, bodies, transactions) — any missing block-kind collapses
+	// the count to 0 and the seed becomes a no-op (observed 2026-05-18:
+	// kv.HeaderTD left unpopulated; Caplin's BlockCollector then failed for
+	// 9.5h on a missing parent TD). Caplin's "headers only" path uses
+	// BlockHeadersReady, a separate earlier signal — that stays unaffected.
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
+		eligibleForPhase1 := domain != "" || entry.Kind != snapshot.KindCaplin
 		if o.haveLocally(domain, entry.Name) {
+			if eligibleForPhase1 {
+				o.phase1Files[entry.Name] = struct{}{}
+			}
 			continue
 		}
 		role := fileRole(entry.Name)
 		if o.coverageForRoleLocked(domain, role).IsComplete(entry.FromStep, entry.ToStep) {
+			// Subsumed by a larger merged sibling already scheduled (or
+			// locally present). Do not gate on this entry — it won't be
+			// fetched and won't be indexed.
 			continue
 		}
 		o.pending[entry.Name] = entry
 		toRequest = append(toRequest, entry)
+		if eligibleForPhase1 {
+			o.phase1Files[entry.Name] = struct{}{}
+		}
 	}
 	o.peerMu.Unlock()
 
