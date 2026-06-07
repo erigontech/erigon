@@ -54,6 +54,35 @@ func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 	}
 }
 
+// TestCollectorTrySendNeverBlocks proves TrySend returns immediately even when
+// the buffer is full and nothing drains it (collector not Started): excess sends
+// return false (the caller retains its data) rather than blocking. This is the
+// guarantee that the exec hot path never back-pressures on metrics.
+func TestCollectorTrySendNeverBlocks(t *testing.T) {
+	t.Parallel()
+	c := NewCollector() // deliberately NOT Started → nothing drains c.in
+
+	var falses int64
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < collectorBufferSize*3; i++ {
+			if !c.TrySend(SourceExec, NewDomainMetrics()) {
+				falses++
+			}
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("TrySend blocked on a full buffer — must never back-pressure the producer")
+	}
+	if falses == 0 {
+		t.Fatal("expected TrySend to report a full buffer once it filled")
+	}
+}
+
 // TestCollectorFoldsBySource verifies the grouped totals are correct and that a
 // drained Stop does not lose buffered samples.
 func TestCollectorFoldsBySource(t *testing.T) {

@@ -128,10 +128,17 @@ type Worker struct {
 
 	metrics *WorkerMetrics
 	// readMetrics is this worker's private domain read-metrics accumulator
-	// (lock-free, single-owner). The worker's state reader records into it; it
-	// is merged into the shared SharedDomains metrics + reset once per task (a
-	// lock per task, not per read), at the point the result is queued.
+	// (lock-free, single-owner). The worker's state reader records into it; at
+	// task end it is folded into the per-batch log aggregate and the collector
+	// accumulator, then reset (a lock per task, not per read).
 	readMetrics *kvmetrics.DomainMetrics
+	// collectorAcc retains this worker's reads destined for the process-level
+	// collector. At task end the task's readMetrics is folded in, then a
+	// non-blocking TrySend hands it off (and a fresh one is allocated). If the
+	// collector buffer is momentarily full the send is skipped and the worker
+	// keeps adding to the same accumulator — so the collector path never blocks
+	// execution and never drops counts. Flushed (blocking) when Run exits.
+	collectorAcc *kvmetrics.DomainMetrics
 }
 
 // installWorkerGetHash replaces the EVM's GetHash function with one that
@@ -183,9 +190,10 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 
 		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 
-		dirs:        dirs,
-		metrics:     metrics,
-		readMetrics: kvmetrics.NewDomainMetrics(),
+		dirs:         dirs,
+		metrics:      metrics,
+		readMetrics:  kvmetrics.NewDomainMetrics(),
+		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.runnable.Store(true)
 	w.ibs = state.New(w.stateReader)
@@ -368,15 +376,29 @@ func (rw *Worker) Run() (err error) {
 		if err := rw.results.Add(rw.ctx, result); err != nil {
 			return err
 		}
-		// Hand this task's reads to the per-batch aggregate (log line) and the
-		// process-level collector (Prometheus), then allocate a fresh instance.
-		// Off the hot path (the result is already queued): one lock per task plus
-		// a lock-free channel send, replacing the old lock-per-read. The send
-		// takes ownership of readMetrics, so we must not Reset+reuse it — a fresh
-		// instance is allocated instead. Skipped entirely when read metrics are off.
+		// Fold this task's reads into the per-batch log aggregate and the
+		// retained collector accumulator, then reset. Off the hot path (the
+		// result is already queued). The collector hand-off is a non-blocking
+		// TrySend: on a full buffer it is skipped and collectorAcc keeps growing
+		// (retried next task), so execution never blocks and no count is lost.
+		// Skipped entirely when read metrics are off.
 		if dbg.KVReadLevelledMetrics && rw.rs != nil {
-			rw.rs.Domains().MergeMetrics(kvmetrics.SourceExec, rw.readMetrics)
-			rw.readMetrics = kvmetrics.NewDomainMetrics()
+			doms := rw.rs.Domains()
+			doms.LogMergeMetrics(rw.readMetrics)
+			rw.collectorAcc.Merge(rw.readMetrics)
+			rw.readMetrics.Reset()
+			if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
+				rw.collectorAcc = kvmetrics.NewDomainMetrics()
+			}
+		}
+	}
+	// Worker is done: flush whatever the collector buffer was too full to take
+	// during the run. Blocking is fine here (off the hot path, at teardown), and
+	// it must not be lost. Only the collector — the per-task log merges already
+	// folded this data into sd.metrics via LogMergeMetrics.
+	if dbg.KVReadLevelledMetrics && rw.rs != nil {
+		if c := rw.rs.Domains().Collector(); c != nil {
+			c.Send(kvmetrics.SourceExec, rw.collectorAcc)
 		}
 	}
 	return nil

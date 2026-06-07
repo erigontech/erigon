@@ -162,9 +162,29 @@ func (c *Collector) snapshot() map[Source]*DomainMetrics {
 	return out
 }
 
-// Send transfers ownership of m to the collector, tagged with source. The caller
-// must allocate a fresh *DomainMetrics for its next unit of work and not touch m
-// again. A nil collector or nil m is a no-op. Safe for concurrent callers.
+// TrySend transfers ownership of m to the collector tagged with source, WITHOUT
+// blocking. Returns true if it was queued (the caller must then allocate a fresh
+// instance and not touch m again), false if the buffer was momentarily full (the
+// caller retains ownership of m and should keep accumulating into it, retrying
+// later — nothing is dropped). This is the hot-path send (exec workers): metrics
+// never block execution and never lose counts. nil collector/m → false (the
+// caller keeps its data).
+func (c *Collector) TrySend(source Source, m *DomainMetrics) bool {
+	if c == nil || m == nil {
+		return false
+	}
+	select {
+	case c.in <- sample{source: source, m: m}:
+		return true
+	default:
+		return false
+	}
+}
+
+// Send transfers ownership of m to the collector, blocking until it is queued.
+// For low-frequency boundary producers (commitment fold, warmup teardown, an RPC
+// request closing) that are off the per-tx hot path, where a brief, rare wait is
+// acceptable and losing the sample is not. nil collector/m is a no-op.
 func (c *Collector) Send(source Source, m *DomainMetrics) {
 	if c == nil || m == nil {
 		return
@@ -172,8 +192,8 @@ func (c *Collector) Send(source Source, m *DomainMetrics) {
 	select {
 	case c.in <- sample{source: source, m: m}:
 	case <-c.quit:
-		// Collector is stopping; the buffer-drain has the rest. Dropping a
-		// straggler here is acceptable (process is tearing down).
+		// Collector is stopping (Aggregator.Close); no producer should still be
+		// sending. Give up rather than block forever on a buffer no one drains.
 	}
 }
 

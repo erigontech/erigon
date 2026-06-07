@@ -526,15 +526,25 @@ func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMe
 	return &temporalGetter{sd: sd, tx: tx, m: m}
 }
 
-// MergeMetrics hands a finished worker's lock-free accumulator to BOTH sinks:
-// the per-batch sd.metrics (under a single lock, for the per-batch log line) and
-// the process-level collector (lock-free, grouped by source, for Prometheus).
-// Ownership of wm transfers to the collector — the caller must allocate a fresh
-// instance afterwards and not touch wm again. Called once when a worker finishes
-// (not per read), so the metrics write-lock stays off the hot path.
+// MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
+// per-batch sd.metrics (under one lock, for the per-batch log line) and the
+// process-level collector (grouped by source, for Prometheus). For low-frequency
+// boundary producers (commitment fold, warmup teardown) off the per-tx hot path:
+// the collector send blocks if the buffer is momentarily full (rare, brief, and
+// lossless). Ownership of wm transfers to the collector — the caller must not
+// touch wm again. The exec hot path does NOT use this (see LogMergeMetrics +
+// Collector().TrySend, which never blocks and retains on a full buffer).
 func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
 	sd.collector.Send(source, wm)
+}
+
+// LogMergeMetrics folds wm into the per-batch sd.metrics aggregate only (the log
+// line), without touching the collector. The exec hot path calls this each task
+// for the log, and feeds the collector separately via a retained accumulator so
+// a full collector buffer can never block or drop. wm is read, not retained.
+func (sd *SharedDomains) LogMergeMetrics(wm *kvmetrics.DomainMetrics) {
+	sd.metrics.Merge(wm)
 }
 
 // Collector returns the process-level KV-read metrics collector (may be nil).
