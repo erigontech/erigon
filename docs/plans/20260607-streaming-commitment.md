@@ -223,13 +223,13 @@ constraint 1) instead of 16 persistent hphs.
 - Modify: `execution/commitment/streaming_commitment.go`
 - Modify: `execution/commitment/streaming_commitment_test.go`
 
-- [ ] `foldSplit(s *splitState)`: pooled hph, `mountTo(base)`, in-order-walk `followAndUpdate` of s's prefix-trie keys (carried `upd` or nil→ctx), `foldMounted` → cell; big-storage account → `concurrentStorageRoot`
-- [ ] merged split cell **trims correctly** (leaf vs hash-only sub-branch, per the proven stitch at parallel_mount.go:160-167) and big-storage account sets `CodeHash = empty.CodeHash` (else account-leaf hash is silently wrong while storageRoot matches)
-- [ ] capture the fold's deferred branch updates into `s.deferred` (replace prior)
-- [ ] never fold to root (assert fold stops at split boundary)
-- [ ] write **branch-parity** test for an account-leaf split + a big-storage account split — exercises the trim/CodeHash correctness (reuse the `TestDeepIntegration_BranchParity` corpus)
-- [ ] existing-DB-unfold, deletes-across-64, storage-only/account-only are **inherited from the Task-1 `streaming` arm matrix** (`*Incremental`, `*StorageIncrementalDeletes`) — do NOT write bespoke copies; just confirm those arms pass with `foldSplit` wired in
-- [ ] run tests — must pass before next task
+- [x] `foldSplit(s *splitState)`: pooled hph, `mountTo(base)`, in-order-walk `followAndUpdate` of s's prefix-trie keys (carried `upd` or nil→ctx), `foldMounted` → cell; big-storage account → `concurrentStorageRoot` (reused via held `*ParallelPatriciaHashed.dfsSubtreeDeep`)
+- [x] merged split cell **trims correctly** (leaf vs hash-only sub-branch — the proven `stitchSplitCells`) and big-storage account's storageRoot/CodeHash assembly is correct (CodeHash carried by the account `Update`; `setAccountStorageRoot` injects only the storageRoot) — verified by `TestStreaming_DeepBranchParity`
+- [x] capture the fold's deferred branch updates into `s.deferred` (replace prior)
+- [x] never fold to root (`foldMounted` returns the split cell at depth 1; never `fold()`-to-root in `foldSplit`)
+- [x] write **branch-parity** test for an account-leaf split + a big-storage account split — exercises the trim/CodeHash correctness (reuse the `TestDeepIntegration_BranchParity` corpus) → `TestStreaming_DeepBranchParity` (workers 1/4/8)
+- [x] existing-DB-unfold, deletes-across-64, storage-only/account-only are **inherited from the Task-1 `streaming` arm matrix** (`*Incremental`, `*StorageIncrementalDeletes`) — confirmed passing with `foldSplit` wired in (incl. `-race`)
+- [x] run tests — must pass before next task
 
 ### Task 3: Replace-per-split deferred + Process merge/flush
 

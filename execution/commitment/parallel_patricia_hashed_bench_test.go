@@ -212,8 +212,12 @@ func Benchmark_Commitment_SmallCounts(b *testing.B) {
 func Benchmark_Commitment_1MWhales(b *testing.B) {
 	pk, updates := build1MWhaleCorpus(b)
 	b.Logf("corpus keys=%d", len(pk))
+	ncpu := runtime.NumCPU()
+	workers := []int{ncpu, ncpu * 2, ncpu * 4}
+	slices.Sort(workers)
+	workers = slices.Compact(workers)
 	b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
-	for _, w := range benchWorkerCounts() {
+	for _, w := range workers {
 		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
 	}
 }

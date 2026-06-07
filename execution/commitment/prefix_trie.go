@@ -26,10 +26,10 @@ const prefixSlabSize = 16384
 // subtreeCount is incremented on every insert that traverses the node — it counts
 // path traversals, not distinct keys.
 type prefixNode struct {
-	ext      []byte
-	children []*prefixNode
-	plainKey []byte  // un-hashed key; set only where a key terminates
-	update   *Update // carried per-key value (nil = re-read from ctx); set only where a key terminates
+	ext          []byte
+	children     []*prefixNode
+	plainKey     []byte  // un-hashed key; set only where a key terminates
+	update       *Update // carried per-key value (nil = re-read from ctx); set only where a key terminates
 	subtreeCount uint32
 	bitmap       uint16
 }

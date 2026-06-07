@@ -59,6 +59,11 @@ type StreamingCommitter struct {
 	trie       *prefixTrie
 	splits     map[byte]*splitState
 
+	// pph is held only to reuse the proven deep storage fan-out
+	// (dfsSubtreeDeep / concurrentStorageRoot) for big-storage accounts; its
+	// factory and worker count are kept in sync with sc at Process time.
+	pph *ParallelPatriciaHashed
+
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
 
@@ -77,6 +82,7 @@ func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, c
 		numWorkers:     runtime.NumCPU(),
 		trie:           newPrefixTrie(),
 		splits:         make(map[byte]*splitState),
+		pph:            NewParallelPatriciaHashed(ctxFactory, accountKeyLen, cfg),
 	}
 	sc.resetPool()
 	return sc
@@ -102,6 +108,9 @@ func (sc *StreamingCommitter) SetNumWorkers(n int) {
 // SetTrieContextFactory replaces the per-worker context factory.
 func (sc *StreamingCommitter) SetTrieContextFactory(f TrieContextFactory) {
 	sc.trieCtxFactory = f
+	if sc.pph != nil {
+		sc.pph.SetTrieContextFactory(f)
+	}
 }
 
 // SetLeaveDeferredForCaller makes Process leave the accumulated deferred branch
@@ -179,22 +188,10 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		}
 	}
 
-	var (
-		cells   [16]cell
-		present [16]bool
+	sc.pph.SetNumWorkers(sc.numWorkers)
+	sc.pph.SetTrieContextFactory(sc.trieCtxFactory)
 
-		deferredMu sync.Mutex
-		deferred   []*DeferredBranchUpdate
-	)
-	appendDeferred := func(d []*DeferredBranchUpdate) {
-		if len(d) == 0 {
-			return
-		}
-		deferredMu.Lock()
-		deferred = append(deferred, d...)
-		deferredMu.Unlock()
-	}
-
+	var present [16]bool
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(sc.numWorkers)
 
@@ -202,52 +199,35 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	for bm := root.bitmap; bm != 0; {
 		nib := bits.TrailingZeros16(bm)
 		child := root.children[childIdx]
-		ni, ch := nib, child
-		g.Go(func() error {
-			w := sc.workerPool.Get().(*HexPatriciaHashed)
-			w.mountTo(base, ni)
-			w.SetTrace(sc.trace)
-			wctx, cleanup := sc.trieCtxFactory()
-			if cleanup != nil {
-				defer cleanup()
-			}
-			w.ResetContext(wctx)
-			w.branchEncoder.setDeferUpdates(true)
-			w.SetLeaveDeferredForCaller(true)
-
-			path := make([]byte, 0, 144)
-			path = append(path, byte(ni))
-			path = append(path, ch.ext...)
-			if err := dfsSubtree(ch, path, func(hk, pk []byte, upd *Update) error {
-				return w.followAndUpdate(hk, pk, upd)
-			}); err != nil {
-				w.resetForReuse()
-				sc.workerPool.Put(w)
-				return fmt.Errorf("split[%x] build: %w", ni, err)
-			}
-			c, err := w.foldMounted(gctx, ni)
-			if err != nil {
-				w.resetForReuse()
-				sc.workerPool.Put(w)
-				return fmt.Errorf("split[%x] fold: %w", ni, err)
-			}
-			cells[ni] = c
-			present[ni] = true
-			if d := w.TakeDeferredUpdates(); len(d) > 0 {
-				appendDeferred(d)
-			}
-			w.resetForReuse()
-			sc.workerPool.Put(w)
-			return nil
-		})
+		ni := byte(nib)
+		s := sc.splits[ni]
+		if s == nil {
+			s = &splitState{prefix: []byte{ni}}
+			sc.splits[ni] = s
+		}
+		present[nib] = true
+		ch := child
+		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
 	if err := g.Wait(); err != nil {
-		for _, upd := range deferred {
-			putDeferredUpdate(upd)
-		}
+		sc.dropSplitDeferred()
 		return nil, err
+	}
+
+	var (
+		cells    [16]cell
+		deferred []*DeferredBranchUpdate
+	)
+	for nib := range 16 {
+		if !present[nib] {
+			continue
+		}
+		s := sc.splits[byte(nib)]
+		cells[nib] = s.cell
+		deferred = append(deferred, s.deferred...)
+		s.deferred = nil
 	}
 
 	stitchSplitCells(base, &cells, &present)
@@ -264,7 +244,7 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		}
 	}
 	if d := base.TakeDeferredUpdates(); len(d) > 0 {
-		appendDeferred(d)
+		deferred = append(deferred, d...)
 	}
 
 	if sc.leaveDeferredForCaller {
@@ -302,6 +282,75 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 	}
 }
 
+// foldSplit re-folds one top-nibble subtree statelessly: mount a pooled worker
+// on the unfolded base, replay the split's keys in sorted (in-order) prefix-trie
+// order via the deep walk (a big-storage account's storage fans out concurrently
+// through concurrentStorageRoot), fold to the split cell — never to the root —
+// and capture the fold's deferred branch updates into s, replacing any prior set.
+func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
+	ni := s.prefix[0]
+	w := sc.workerPool.Get().(*HexPatriciaHashed)
+	w.mountTo(base, int(ni))
+	w.SetTrace(sc.trace)
+	wctx, cleanup := sc.trieCtxFactory()
+	if cleanup != nil {
+		defer cleanup()
+	}
+	w.ResetContext(wctx)
+	w.branchEncoder.setDeferUpdates(true)
+	w.SetLeaveDeferredForCaller(true)
+
+	var pu parallelUpdate
+	path := make([]byte, 0, 144)
+	path = append(path, ni)
+	path = append(path, child.ext...)
+	if err := sc.pph.dfsSubtreeDeep(ctx, w, &pu, child, path); err != nil {
+		w.resetForReuse()
+		sc.workerPool.Put(w)
+		for _, upd := range pu.deferredCombined {
+			putDeferredUpdate(upd)
+		}
+		return fmt.Errorf("split[%x] build: %w", ni, err)
+	}
+	c, err := w.foldMounted(ctx, int(ni))
+	if err != nil {
+		w.resetForReuse()
+		sc.workerPool.Put(w)
+		for _, upd := range pu.deferredCombined {
+			putDeferredUpdate(upd)
+		}
+		return fmt.Errorf("split[%x] fold: %w", ni, err)
+	}
+
+	newDeferred := pu.deferredCombined
+	if d := w.TakeDeferredUpdates(); len(d) > 0 {
+		newDeferred = append(newDeferred, d...)
+	}
+	w.resetForReuse()
+	sc.workerPool.Put(w)
+
+	s.mu.Lock()
+	for _, upd := range s.deferred {
+		putDeferredUpdate(upd)
+	}
+	s.deferred = newDeferred
+	s.cell = c
+	s.dirty = false
+	s.mu.Unlock()
+	return nil
+}
+
+// dropSplitDeferred returns every split's staged deferred branch updates to the
+// pool — the error-unwind for a failed Process so no pooled entries leak.
+func (sc *StreamingCommitter) dropSplitDeferred() {
+	for _, s := range sc.splits {
+		for _, upd := range s.deferred {
+			putDeferredUpdate(upd)
+		}
+		s.deferred = nil
+	}
+}
+
 func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) error {
 	defer func() {
 		for _, upd := range deferred {
@@ -330,22 +379,31 @@ func (sc *StreamingCommitter) Reset() {
 	if sc.trie != nil {
 		sc.trie.Reset()
 	}
+	sc.dropSplitDeferred()
 	clear(sc.splits)
 	for _, upd := range sc.deferredForCaller {
 		putDeferredUpdate(upd)
 	}
 	sc.deferredForCaller = nil
+	if sc.pph != nil {
+		sc.pph.Reset()
+	}
 	sc.resetPool()
 }
 
 // Release drops all owned state. After Release the committer must not be used.
 // Repeat calls are safe no-ops.
 func (sc *StreamingCommitter) Release() {
+	sc.dropSplitDeferred()
 	sc.trie = nil
 	sc.splits = nil
 	for _, upd := range sc.deferredForCaller {
 		putDeferredUpdate(upd)
 	}
 	sc.deferredForCaller = nil
+	if sc.pph != nil {
+		sc.pph.Release()
+		sc.pph = nil
+	}
 	sc.resetPool()
 }

@@ -107,3 +107,27 @@ func TestStreaming_RandomOrderParity(t *testing.T) {
 		requireBranchParity(t, seqMs, strMs)
 	}
 }
+
+// TestStreaming_DeepBranchParity drives the deep-fan-out corpus (an account whose
+// touched storage exceeds deepStorageThreshold, alongside many small accounts)
+// through TouchKey in randomized order and asserts root + every stored branch
+// match sequential. This exercises foldSplit's big-storage path
+// (concurrentStorageRoot) and the account-leaf storageRoot/CodeHash assembly.
+func TestStreaming_DeepBranchParity(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildBigAccountCorpus(15_000)
+
+	idx := make([]int, len(keys))
+	for i := range idx {
+		idx[i] = i
+	}
+	rnd := rand.New(rand.NewSource(0xD00D))
+	rnd.Shuffle(len(idx), func(i, j int) { idx[i], idx[j] = idx[j], idx[i] })
+
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+	for _, w := range []int{1, 4, 8} {
+		strRoot, strMs := streamingRoot(t, w, keys, upds, idx)
+		require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) deep root != sequential", w)
+		requireBranchParity(t, seqMs, strMs)
+	}
+}
