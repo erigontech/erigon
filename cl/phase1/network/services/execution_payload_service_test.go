@@ -402,7 +402,13 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.LessOrEqual(t, impl.pendingCount.Load(), int32(maxPendingEnvelopes))
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+	stored := 0
+	impl.pendingEnvelopes.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Equal(t, 5, stored)
 }
 
 func TestExecutionPayloadServiceNames(t *testing.T) {
