@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -25,38 +26,77 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	antiquarytests "github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestGetHeadersIncludesFinalized(t *testing.T) {
-	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	blockRoot, err := blocks[0].Block.HashSSZ()
 	require.NoError(t, err)
+	canonicalOnlyBlockRoot, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
 	parentRoot := blocks[0].Block.ParentRoot
+	canonicalOnlyParentRoot := blocks[1].Block.ParentRoot
 	missingParentRoot := common.Hash{0xbe, 0xef}
+	nonCanonicalBlock := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.Phase0Version)
+	nonCanonicalBlock.Block.Slot = blocks[len(blocks)-1].Block.Slot + 1
+	nonCanonicalBlock.Block.ParentRoot = parentRoot
+	nonCanonicalBlock.Block.StateRoot = common.Hash{0xca, 0xfe}
+	nonCanonicalRoot, err := nonCanonicalBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	blockReader := handler.blockReader.(*antiquarytests.MockBlockReader)
+	blockReader.U[nonCanonicalBlock.Block.Slot] = nonCanonicalBlock
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, nonCanonicalBlock, false))
+	require.NoError(t, tx.Commit())
+
+	type expectedHeader struct {
+		root      common.Hash
+		canonical bool
+	}
 
 	for _, tc := range []struct {
 		name          string
 		parentRoot    common.Hash
 		finalizedSlot uint64
 		finalized     bool
-		expectedRoots []common.Hash
+		expected      []expectedHeader
 	}{
 		{
 			name:          "not finalized",
 			parentRoot:    parentRoot,
 			finalizedSlot: 0,
 			finalized:     false,
-			expectedRoots: []common.Hash{common.Hash(blockRoot)},
+			expected: []expectedHeader{
+				{root: common.Hash(blockRoot), canonical: true},
+				{root: common.Hash(nonCanonicalRoot), canonical: false},
+			},
 		},
 		{
 			name:          "finalized",
-			parentRoot:    parentRoot,
+			parentRoot:    canonicalOnlyParentRoot,
 			finalizedSlot: math.MaxUint64,
 			finalized:     true,
-			expectedRoots: []common.Hash{common.Hash(blockRoot)},
+			expected: []expectedHeader{
+				{root: common.Hash(canonicalOnlyBlockRoot), canonical: true},
+			},
+		},
+		{
+			name:          "non canonical child keeps envelope not finalized",
+			parentRoot:    parentRoot,
+			finalizedSlot: math.MaxUint64,
+			finalized:     false,
+			expected: []expectedHeader{
+				{root: common.Hash(blockRoot), canonical: true},
+				{root: common.Hash(nonCanonicalRoot), canonical: false},
+			},
 		},
 		{
 			name:          "no matching headers",
@@ -87,10 +127,10 @@ func TestGetHeadersIncludesFinalized(t *testing.T) {
 			require.NotNil(t, body.ExecutionOptimistic)
 			require.NotNil(t, body.Finalized)
 			require.Equal(t, tc.finalized, *body.Finalized)
-			require.Len(t, body.Data, len(tc.expectedRoots))
-			for i, expectedRoot := range tc.expectedRoots {
-				require.Equal(t, expectedRoot, body.Data[i].Root)
-				require.True(t, body.Data[i].Canonical)
+			require.Len(t, body.Data, len(tc.expected))
+			for i, expected := range tc.expected {
+				require.Equal(t, expected.root, body.Data[i].Root)
+				require.Equal(t, expected.canonical, body.Data[i].Canonical)
 			}
 		})
 	}
