@@ -73,6 +73,18 @@ func (sc *StreamingCommitter) shouldEagerFold(s *splitState) bool {
 // seam: a low floor makes small-corpus scheduler tests exercise eager folds.
 func (sc *StreamingCommitter) SetEagerFold(n uint64) { sc.eagerFloor = n }
 
+// SetNestedCache toggles the nested storage sub-cell cache (default on). The
+// apples-to-apples bench flips it off to compare gate-only streaming against the
+// cache-backed path; off makes a big-storage account fold its whole storage fresh.
+func (sc *StreamingCommitter) SetNestedCache(on bool) { sc.nestedCacheOn = on }
+
+// shouldFoldNibble is the per-nibble analogue of shouldEagerFold: a cached
+// account's storage nibble is eligible for an eager re-fold once its touched-key
+// count has at least doubled since its last fold and cleared the floor.
+func (sc *StreamingCommitter) shouldFoldNibble(n *cacheNibble) bool {
+	return n.keyCount >= sc.eagerFloor && n.keyCount >= 2*n.lastFoldedSize
+}
+
 // StreamingCommitter overlaps commitment fold work with block execution. It owns
 // a persistent prefix trie of touched keys (Insert is order-independent) and,
 // per top-nibble split point, the state needed to (re-)fold that subtree.
@@ -92,6 +104,16 @@ type StreamingCommitter struct {
 	trie       *prefixTrie
 	splits     map[byte]*splitState
 	eagerFloor uint64
+
+	// Nested storage sub-cell cache (streaming-only). caches holds promoted
+	// big-storage accounts and survives endBlock for cross-block incremental
+	// re-folds; accTouch accumulates per-block storage stats for accounts not yet
+	// promoted. Both are guarded by trieMu. nestedCacheOn is the master switch;
+	// nestedCap bounds how many accounts are cached before the cache-free fallback.
+	caches        map[string]*accountStorageCache
+	accTouch      map[string]*accStorageTouch
+	nestedCacheOn bool
+	nestedCap     int
 
 	// trieMu serializes prefix-trie mutation (TouchKey's Insert) against the
 	// background scheduler's structural reads (snapshotting a split's keys).
@@ -148,6 +170,10 @@ func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, c
 		trie:           newPrefixTrie(),
 		splits:         make(map[byte]*splitState),
 		eagerFloor:     defaultEagerFold,
+		caches:         make(map[string]*accountStorageCache),
+		accTouch:       make(map[string]*accStorageTouch),
+		nestedCacheOn:  true,
+		nestedCap:      defaultNestedCap,
 	}
 	sc.resetPool()
 	return sc
@@ -204,6 +230,10 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 		sc.trieMu.Unlock()
 		return
 	}
+	if sc.nestedCacheOn && len(hashedKey) == storageKeyNibbles && sc.routeCachedStorage(hashedKey) {
+		sc.trieMu.Unlock()
+		return
+	}
 	nib := hashedKey[0]
 	s := sc.splits[nib]
 	if s == nil {
@@ -224,6 +254,44 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 	if enqueue {
 		sc.enqueue(nib)
 	}
+}
+
+// routeCachedStorage handles a storage-slot touch under the nested cache. For a
+// promoted account it marks the slot's first-storage-nibble dirty and reports
+// true so TouchKey skips the top-nibble split (the cache, not the split gate,
+// owns this account's storage). For an account not yet promoted it accumulates
+// the per-block stats and promotes once they cross the deep walk's condition
+// (and the cap allows it); until promotion it returns false so the slot still
+// streams through the split. Callers hold sc.trieMu.
+func (sc *StreamingCommitter) routeCachedStorage(hashedKey []byte) bool {
+	accPrefix := string(hashedKey[:accountKeyNibbles])
+	nib := hashedKey[accountKeyNibbles]
+	if c := sc.caches[accPrefix]; c != nil {
+		c.touchNibble(nib)
+		return true
+	}
+	t := sc.accTouch[accPrefix]
+	if t == nil {
+		t = &accStorageTouch{}
+		sc.accTouch[accPrefix] = t
+	}
+	if t.capped {
+		return false
+	}
+	t.slots++
+	t.nibbleMask |= uint16(1) << nib
+	if !t.qualifies() {
+		return false
+	}
+	if len(sc.caches) >= sc.nestedCap {
+		t.capped = true
+		return false
+	}
+	c := newPromotedCache(append([]byte(nil), hashedKey[:accountKeyNibbles]...), t.nibbleMask)
+	c.touchNibble(nib)
+	sc.caches[accPrefix] = c
+	delete(sc.accTouch, accPrefix)
+	return true
 }
 
 // Process folds every touched top-nibble split into a cell, stitches the cells
@@ -310,6 +378,7 @@ func (sc *StreamingCommitter) endBlock() {
 	}
 	sc.dropSplitDeferred()
 	clear(sc.splits)
+	clear(sc.accTouch)
 }
 
 // captureRoot snapshots the base trie's terminal root cell and flags (by value,
@@ -1075,6 +1144,8 @@ func (sc *StreamingCommitter) Reset() {
 	}
 	sc.dropSplitDeferred()
 	clear(sc.splits)
+	clear(sc.caches)
+	clear(sc.accTouch)
 	for _, upd := range sc.deferredForCaller {
 		putDeferredUpdate(upd)
 	}
@@ -1099,6 +1170,8 @@ func (sc *StreamingCommitter) Release() {
 	sc.dropSplitDeferred()
 	sc.trie = nil
 	sc.splits = nil
+	sc.caches = nil
+	sc.accTouch = nil
 	for _, upd := range sc.deferredForCaller {
 		putDeferredUpdate(upd)
 	}

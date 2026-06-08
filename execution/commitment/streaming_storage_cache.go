@@ -17,10 +17,23 @@
 package commitment
 
 import (
+	"math/bits"
 	"sync"
 
 	"github.com/erigontech/erigon/common/empty"
 )
+
+// storageKeyNibbles is the nibble length of a hashed storage key (32-byte account
+// hash + 32-byte slot hash); accountKeyNibbles is a hashed account key's length.
+const (
+	accountKeyNibbles = 64
+	storageKeyNibbles = 128
+)
+
+// defaultNestedCap bounds how many big-storage accounts are cached at once. Over
+// the cap a newly-qualifying account falls back to the full (cache-free) fold
+// rather than evicting an existing cache (no LRU).
+const defaultNestedCap = 1024
 
 // cacheNibble tracks one first-storage-nibble subtree of a cached big-storage
 // account: whether its cached child cell is stale and the size gate counters
@@ -41,6 +54,47 @@ type accountStorageCache struct {
 	present   uint16
 	perNibble [16]cacheNibble
 	mu        sync.Mutex
+}
+
+// accStorageTouch accumulates one account's storage-touch stats for the current
+// block before it is promoted to a cache: the touched-slot count and the set of
+// first-storage-nibbles they span, so promotion mirrors the deep walk's
+// (count>threshold && nibbleSpan>=2) condition. capped marks an account that
+// qualified but was denied a cache by the cap and is folded cache-free.
+type accStorageTouch struct {
+	slots      uint64
+	nibbleMask uint16
+	capped     bool
+}
+
+// qualifies reports whether the accumulated touches meet the deep walk's
+// big-storage condition: more than deepStorageThreshold slots spanning at least
+// two first-storage-nibbles.
+func (a *accStorageTouch) qualifies() bool {
+	return a.slots > deepStorageThreshold && bits.OnesCount16(a.nibbleMask) >= 2
+}
+
+// touchNibble routes one storage-slot touch of a cached account to its
+// first-storage-nibble: marks the nibble dirty and bumps its key count for the
+// per-nibble re-fold gate.
+func (c *accountStorageCache) touchNibble(nib byte) {
+	c.mu.Lock()
+	n := &c.perNibble[nib]
+	n.dirty = true
+	n.keyCount++
+	c.mu.Unlock()
+}
+
+// newPromotedCache builds a cache for a freshly promoted account, marking every
+// already-touched first-storage-nibble dirty so the first fold re-folds them.
+func newPromotedCache(prefix []byte, mask uint16) *accountStorageCache {
+	c := &accountStorageCache{prefix: prefix}
+	for x := range 16 {
+		if mask&(uint16(1)<<x) != 0 {
+			c.perNibble[x].dirty = true
+		}
+	}
+	return c
 }
 
 // storageWorkerFactory yields a fresh trie worker (clean grid, context bound)

@@ -196,12 +196,12 @@ construction; the meaningful guard is streaming-root-unchanged across this swap)
 - Modify: `execution/commitment/streaming_commitment.go`
 - Modify: `execution/commitment/streaming_commitment_test.go`
 
-- [ ] add `caches map[string]*accountStorageCache` (key `string(accHash[:64])`) + `nestedCacheOn bool` (default on) + `SetNestedCache(bool)` runtime seam (for the apples-to-apples bench) to `StreamingCommitter`
-- [ ] promote an account to a cache on the **same effective condition the deep walk uses** (touched storage > `deepStorageThreshold` AND its storage spans ≥2 first-storage-nibbles) so the cache and `dfsDeepLocal` agree on which accounts are "big"
-- [ ] `TouchKey`: a cached account's storage key marks `cache.perNibble[hk[64]]` dirty + keyCount++; it must **not** also bump the owning top-nibble split's keyCount/gen (avoid the split gate fighting the per-nibble gate / double counting). Non-cached accounts unchanged.
-- [ ] per-nibble doubling gate (reuse `defaultEagerFold`/`SetEagerFold`); count cap on cached accounts with **fall-back-to-full-fold** over cap (no LRU); `Reset` clears caches
-- [ ] write tests: storage touches route to the right nibble; promotion fires on the effective condition incl. the **10k-slots-in-one-nibble** case (promotes by count but single-nibble → must match the deep walk's behavior); cached storage touch does not re-trigger the split eager fold; Reset clears; over-cap falls back
-- [ ] run tests — must pass before next task
+- [x] add `caches map[string]*accountStorageCache` (key `string(accHash[:64])`) + `nestedCacheOn bool` (default on) + `SetNestedCache(bool)` runtime seam (for the apples-to-apples bench) to `StreamingCommitter`
+- [x] promote an account to a cache on the **same effective condition the deep walk uses** (touched storage > `deepStorageThreshold` AND its storage spans ≥2 first-storage-nibbles) so the cache and `dfsDeepLocal` agree on which accounts are "big"
+- [x] `TouchKey`: a cached account's storage key marks `cache.perNibble[hk[64]]` dirty + keyCount++; it must **not** also bump the owning top-nibble split's keyCount/gen (avoid the split gate fighting the per-nibble gate / double counting). Non-cached accounts unchanged.
+- [x] per-nibble doubling gate (reuse `defaultEagerFold`/`SetEagerFold`); count cap on cached accounts with **fall-back-to-full-fold** over cap (no LRU); `Reset` clears caches
+- [x] write tests: storage touches route to the right nibble; promotion fires on the effective condition incl. the **10k-slots-in-one-nibble** case (promotes by count but single-nibble → must match the deep walk's behavior); cached storage touch does not re-trigger the split eager fold; Reset clears; over-cap falls back
+- [x] run tests — must pass before next task
 
 ### Task 4: Wire the cache into the Process deep walk (`dfsDeepLocal`)
 

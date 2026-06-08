@@ -145,6 +145,205 @@ func accountRootViaStorageRoot(t testing.TB, ms *MockState, addr, accHash []byte
 	return r
 }
 
+// synthStorageTouches builds n distinct synthetic hashed storage keys for one
+// account (prefix = 64 copies of accNib) whose first-storage-nibble cycles
+// through nibs, so a caller controls the nibble span and slot count without
+// keccak. Task-3 routing only inspects nibbles; it never folds, so plainKey is a
+// dummy stable slice supplied by the caller.
+func synthStorageTouches(accNib byte, nibs []byte, n int) [][]byte {
+	out := make([][]byte, n)
+	for i := range n {
+		hk := make([]byte, storageKeyNibbles)
+		for j := range accountKeyNibbles {
+			hk[j] = accNib
+		}
+		hk[accountKeyNibbles] = nibs[i%len(nibs)]
+		v := uint64(i)
+		for j := accountKeyNibbles + 1; j < storageKeyNibbles; j++ {
+			hk[j] = byte(v & 0xf)
+			v >>= 4
+		}
+		out[i] = hk
+	}
+	return out
+}
+
+// accPrefixString is the caches/accTouch map key for an account whose hashed
+// prefix is 64 copies of accNib (the synthStorageTouches layout).
+func accPrefixString(accNib byte) string {
+	b := make([]byte, accountKeyNibbles)
+	for i := range b {
+		b[i] = accNib
+	}
+	return string(b)
+}
+
+func newCacheCommitter(t *testing.T) *StreamingCommitter {
+	t.Helper()
+	ms := NewMockState(t)
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	t.Cleanup(sc.Release)
+	return sc
+}
+
+func splitKeyCountGen(sc *StreamingCommitter, nib byte) (keyCount, gen uint64, ok bool) {
+	sc.trieMu.RLock()
+	defer sc.trieMu.RUnlock()
+	s := sc.splits[nib]
+	if s == nil {
+		return 0, 0, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.keyCount, s.gen, true
+}
+
+func cacheNibbleOf(sc *StreamingCommitter, prefix string, nib byte) (cacheNibble, bool) {
+	sc.trieMu.RLock()
+	defer sc.trieMu.RUnlock()
+	c := sc.caches[prefix]
+	if c == nil {
+		return cacheNibble{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.perNibble[nib], true
+}
+
+// TestNestedCache_PromotionAndRouting drives storage touches of one account past
+// the deep walk's promotion condition (>10k slots spanning ≥2 nibbles) and
+// asserts: the account is promoted to caches; post-promotion storage touches
+// route to the right per-nibble slot; and they no longer bump the owning
+// top-nibble split's keyCount/gen.
+func TestNestedCache_PromotionAndRouting(t *testing.T) {
+	sc := newCacheCommitter(t)
+	const accNib = byte(0x3)
+	prefix := accPrefixString(accNib)
+	pk := make([]byte, length.Addr+length.Hash)
+
+	keys := synthStorageTouches(accNib, []byte{1, 2, 4, 8}, deepStorageThreshold+1)
+	for _, hk := range keys {
+		sc.TouchKey(hk, pk, nil)
+	}
+
+	sc.trieMu.RLock()
+	_, promoted := sc.caches[prefix]
+	_, stillTracked := sc.accTouch[prefix]
+	sc.trieMu.RUnlock()
+	require.True(t, promoted, "account must promote once >10k slots span ≥2 nibbles")
+	require.False(t, stillTracked, "promotion must drop the pre-promotion tracker")
+
+	kc0, gen0, ok := splitKeyCountGen(sc, accNib)
+	require.True(t, ok, "pre-promotion touches must have bumped the split")
+
+	before, _ := cacheNibbleOf(sc, prefix, 5)
+	for _, hk := range synthStorageTouches(accNib, []byte{5}, 50) {
+		sc.TouchKey(hk, pk, nil)
+	}
+	after, ok := cacheNibbleOf(sc, prefix, 5)
+	require.True(t, ok)
+	require.True(t, after.dirty, "routed nibble must be marked dirty")
+	require.Equal(t, before.keyCount+50, after.keyCount, "all routed touches must land on nibble 5")
+
+	kc1, gen1, _ := splitKeyCountGen(sc, accNib)
+	require.Equal(t, kc0, kc1, "cached storage touch must not bump the split keyCount")
+	require.Equal(t, gen0, gen1, "cached storage touch must not bump the split gen")
+}
+
+// TestNestedCache_SingleNibbleNotPromoted asserts the 10k-slots-in-one-nibble
+// case mirrors the deep walk: count exceeds the threshold but the storage spans
+// only one first-storage-nibble, so the account is NOT promoted and keeps
+// streaming through its top-nibble split.
+func TestNestedCache_SingleNibbleNotPromoted(t *testing.T) {
+	sc := newCacheCommitter(t)
+	const accNib = byte(0x7)
+	prefix := accPrefixString(accNib)
+	pk := make([]byte, length.Addr+length.Hash)
+
+	const n = deepStorageThreshold + 1000
+	for _, hk := range synthStorageTouches(accNib, []byte{0xa}, n) {
+		sc.TouchKey(hk, pk, nil)
+	}
+
+	sc.trieMu.RLock()
+	_, promoted := sc.caches[prefix]
+	track := sc.accTouch[prefix]
+	sc.trieMu.RUnlock()
+	require.False(t, promoted, "single-nibble storage must not promote (deep walk would not deep-fold it)")
+	require.NotNil(t, track)
+	require.False(t, track.capped)
+
+	kc, _, ok := splitKeyCountGen(sc, accNib)
+	require.True(t, ok)
+	require.Equal(t, uint64(n), kc, "a non-cached account's storage must stream through its split")
+}
+
+// TestNestedCache_OverCapFallback asserts that once the cache cap is reached a
+// newly-qualifying account is denied a cache (no LRU eviction) and falls back to
+// streaming its storage through the split.
+func TestNestedCache_OverCapFallback(t *testing.T) {
+	sc := newCacheCommitter(t)
+	sc.nestedCap = 1
+	pk := make([]byte, length.Addr+length.Hash)
+
+	for _, hk := range synthStorageTouches(0x1, []byte{1, 2}, deepStorageThreshold+1) {
+		sc.TouchKey(hk, pk, nil)
+	}
+	prefixB := accPrefixString(0x2)
+	for _, hk := range synthStorageTouches(0x2, []byte{3, 4}, deepStorageThreshold+1) {
+		sc.TouchKey(hk, pk, nil)
+	}
+
+	sc.trieMu.RLock()
+	defer sc.trieMu.RUnlock()
+	require.Len(t, sc.caches, 1, "cap must hold the cached-account count at the limit")
+	require.Nil(t, sc.caches[prefixB], "over-cap account must not be cached")
+	require.True(t, sc.accTouch[prefixB].capped, "over-cap account must be marked capped (cache-free)")
+}
+
+// TestNestedCache_Lifecycle asserts endBlock clears the per-block tracker but
+// keeps promoted caches for cross-block reuse, while Reset clears both.
+func TestNestedCache_Lifecycle(t *testing.T) {
+	sc := newCacheCommitter(t)
+	const accNib = byte(0x9)
+	prefix := accPrefixString(accNib)
+	pk := make([]byte, length.Addr+length.Hash)
+
+	for _, hk := range synthStorageTouches(accNib, []byte{1, 2}, deepStorageThreshold+1) {
+		sc.TouchKey(hk, pk, nil)
+	}
+	// A second, sub-threshold account leaves a live tracker.
+	for _, hk := range synthStorageTouches(0xb, []byte{1, 2}, 100) {
+		sc.TouchKey(hk, pk, nil)
+	}
+
+	sc.endBlock()
+	sc.trieMu.RLock()
+	_, keptCache := sc.caches[prefix]
+	trackLen := len(sc.accTouch)
+	sc.trieMu.RUnlock()
+	require.True(t, keptCache, "endBlock must keep promoted caches for the next block")
+	require.Zero(t, trackLen, "endBlock must clear the per-block tracker")
+
+	sc.Reset()
+	sc.trieMu.RLock()
+	cacheLen := len(sc.caches)
+	sc.trieMu.RUnlock()
+	require.Zero(t, cacheLen, "Reset must clear caches")
+}
+
+// TestNestedCache_NibbleGate validates the per-nibble doubling gate: a nibble is
+// eligible only once its key count clears the floor and has at least doubled
+// since the last fold.
+func TestNestedCache_NibbleGate(t *testing.T) {
+	sc := newCacheCommitter(t)
+	sc.SetEagerFold(256)
+	require.False(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 100}), "below floor")
+	require.True(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 300}), "above floor, never folded")
+	require.False(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 300, lastFoldedSize: 200}), "not yet doubled")
+	require.True(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 500, lastFoldedSize: 200}), "doubled and above floor")
+}
+
 func bitsCount(b uint16) int {
 	n := 0
 	for b != 0 {
