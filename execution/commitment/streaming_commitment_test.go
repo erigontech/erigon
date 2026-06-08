@@ -262,28 +262,35 @@ func makeBranch(prefix []byte, afterMap uint16, touched []int, seed byte, prev [
 	return getDeferredUpdate(prefix, tm, tm, afterMap, &cells, prev)
 }
 
-// waitSplitsClean blocks until the background scheduler has folded every dirty
-// split (collapse-free corpora only — a self-flushed split stays dirty for
-// Process). Fails the test if they do not settle in time.
-func waitSplitsClean(t *testing.T, sc *StreamingCommitter) {
+// waitSchedulerIdle blocks until the background scheduler has drained its queue
+// (no split queued and dirtyCh empty, stable for a short window). Under the
+// re-fold coalescing gate a split can remain dirty between doublings, so "all
+// clean" is no longer the settle condition — the scheduler folds what the gate
+// allows and idles; Process folds the rest. Fails the test if it never idles.
+func waitSchedulerIdle(t *testing.T, sc *StreamingCommitter) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
+	stable := 0
 	for {
-		dirty := 0
+		queued := 0
 		sc.trieMu.RLock()
 		for _, s := range sc.splits {
 			s.mu.Lock()
-			if s.dirty {
-				dirty++
+			if s.queued {
+				queued++
 			}
 			s.mu.Unlock()
 		}
 		sc.trieMu.RUnlock()
-		if dirty == 0 {
-			return
+		if queued == 0 && len(sc.dirtyCh) == 0 {
+			if stable++; stable >= 5 {
+				return
+			}
+		} else {
+			stable = 0
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("background folds did not settle: %d splits still dirty", dirty)
+			t.Fatalf("scheduler did not go idle: queued=%d dirtyCh=%d", queued, len(sc.dirtyCh))
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -345,18 +352,19 @@ func TestStreaming_RetouchAfterFold(t *testing.T) {
 	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 	defer sc.Release()
 	sc.SetNumWorkers(4)
+	sc.SetEagerFold(1) // small corpus: fold below the production floor so the gate path is exercised
 	require.NoError(t, sc.StartScheduler(context.Background()))
 
 	const hold = 8
 	for i := 0; i < len(keys)-hold; i++ {
 		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 	}
-	waitSplitsClean(t, sc)
+	waitSchedulerIdle(t, sc)
 
 	for i := len(keys) - hold; i < len(keys); i++ {
 		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 	}
-	waitSplitsClean(t, sc)
+	waitSchedulerIdle(t, sc)
 
 	root, err := sc.Process(context.Background())
 	require.NoError(t, err)
@@ -393,6 +401,7 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 	defer sc.Release()
 	sc.SetNumWorkers(4)
+	sc.SetEagerFold(1) // small corpus: fold below the production floor so the target split folds (foldGate fires)
 
 	var once sync.Once
 	sc.SetFoldGate(func(nib byte) {
@@ -411,7 +420,7 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 		}
 		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
 	}
-	waitSplitsClean(t, sc)
+	waitSchedulerIdle(t, sc)
 
 	root, err := sc.Process(context.Background())
 	require.NoError(t, err)
@@ -607,6 +616,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
 		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		sc.SetNumWorkers(4)
+		sc.SetEagerFold(1) // exercise the eager path below the production floor
 		return sc, ms
 	}
 
@@ -630,7 +640,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 		for _, k := range keys {
 			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
 		}
-		waitSplitsClean(t, sc)
+		waitSchedulerIdle(t, sc)
 		require.Positive(t, foldedSplitCount(sc), "eager policy must fold splits in the background")
 		root, err := sc.Process(context.Background())
 		require.NoError(t, err)
@@ -856,19 +866,20 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 
 		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		sc.SetNumWorkers(w)
+		sc.SetEagerFold(1) // small per-nibble corpus: fold below the production floor
 		require.NoError(t, sc.StartScheduler(context.Background()))
 
 		for _, i := range early {
 			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 		}
-		waitSplitsClean(t, sc)
+		waitSchedulerIdle(t, sc)
 		require.Positive(t, foldedSplitCount(sc), "early splits must fold before the late ones appear")
 		earlyFolded := foldedSplitCount(sc)
 
 		for _, i := range late {
 			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 		}
-		waitSplitsClean(t, sc)
+		waitSchedulerIdle(t, sc)
 		require.Greater(t, foldedSplitCount(sc), earlyFolded, "late touches must create and fold new splits")
 
 		root, err := sc.Process(context.Background())

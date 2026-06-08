@@ -36,15 +36,17 @@ import (
 // dirty/gen/deferred/mu fields are populated by the touch path and consumed by
 // the background scheduler layered on top later.
 type splitState struct {
-	prefix   []byte
-	cell     cell
-	deferred []*DeferredBranchUpdate
-	gen      uint64
-	refolds  uint64
-	dirty    bool
-	folded   bool
-	queued   bool
-	mu       sync.Mutex
+	prefix         []byte
+	cell           cell
+	deferred       []*DeferredBranchUpdate
+	gen            uint64
+	refolds        uint64
+	keyCount       uint64 // touches routed to this split (size proxy for the coalescing gate)
+	lastFoldedSize uint64 // keyCount at the last (eager) fold; 0 until first fold
+	dirty          bool
+	folded         bool
+	queued         bool
+	mu             sync.Mutex
 }
 
 // reusable reports whether a background fold cached an authoritative cell that
@@ -52,16 +54,24 @@ type splitState struct {
 // instead of re-folding. Callers must hold s.mu.
 func (s *splitState) reusable() bool { return s.folded && !s.dirty }
 
-// foldTrigger decides whether a dirtied split should be enqueued for an eager
-// background fold. Callers hold s.mu.
-type foldTrigger func(s *splitState) bool
+// defaultEagerFold is the floor below which a split is not eagerly
+// background-folded; tiny splits just fold at Process, avoiding micro-fold overhead.
+const defaultEagerFold = 256
 
-// foldEager is the single shipped fold-trigger policy: fold-on-dirty. Every
-// dirtied split is eligible, so a touched split folds in the background as soon
-// as a worker is free; a split the scheduler never reaches (queue full or never
-// started) falls through to fold-at-Process. Alternative policies are deferred
-// until measurement shows re-fold waste worth a heuristic.
-func foldEager(*splitState) bool { return true }
+// shouldEagerFold is the re-fold coalescing gate. A dirtied split is eligible for
+// an eager background fold only once its touched-key count has at least doubled
+// since its last fold (and cleared the floor). This forces geometric growth in
+// fold sizes — ~log2(N) folds, O(N) total re-fold work — instead of the O(N^2)
+// thrash that fold-on-every-touch causes for whale accounts whose storage streams
+// in. Process always folds the final state regardless, so correctness is
+// unaffected; only wasted eager work changes. Callers hold s.mu.
+func (sc *StreamingCommitter) shouldEagerFold(s *splitState) bool {
+	return s.keyCount >= sc.eagerFloor && s.keyCount >= 2*s.lastFoldedSize
+}
+
+// SetEagerFold overrides the coalescing floor (default defaultEagerFold). Test
+// seam: a low floor makes small-corpus scheduler tests exercise eager folds.
+func (sc *StreamingCommitter) SetEagerFold(n uint64) { sc.eagerFloor = n }
 
 // StreamingCommitter overlaps commitment fold work with block execution. It owns
 // a persistent prefix trie of touched keys (Insert is order-independent) and,
@@ -81,7 +91,7 @@ type StreamingCommitter struct {
 	workerPool sync.Pool
 	trie       *prefixTrie
 	splits     map[byte]*splitState
-	foldPolicy foldTrigger
+	eagerFloor uint64
 
 	// pph is held only to reuse the proven deep storage fan-out
 	// (dfsSubtreeDeep / concurrentStorageRoot) for big-storage accounts; its
@@ -137,7 +147,7 @@ func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, c
 		numWorkers:     runtime.NumCPU(),
 		trie:           newPrefixTrie(),
 		splits:         make(map[byte]*splitState),
-		foldPolicy:     foldEager,
+		eagerFloor:     defaultEagerFold,
 		pph:            NewParallelPatriciaHashed(ctxFactory, accountKeyLen, cfg),
 	}
 	sc.resetPool()
@@ -207,7 +217,8 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 	s.mu.Lock()
 	s.dirty = true
 	s.gen++
-	enqueue := sc.started.Load() && !s.queued && sc.foldPolicy(s)
+	s.keyCount++
+	enqueue := sc.started.Load() && !s.queued && sc.shouldEagerFold(s)
 	if enqueue {
 		s.queued = true
 	}
@@ -526,6 +537,10 @@ func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 	keys := collectSplitKeys(child, nib)
 	s.mu.Lock()
 	genStart := s.gen
+	// Close the coalescing gate at fold START (snapshot size), not end: the fold
+	// can take long, and queued is cleared here, so a stale lastFoldedSize would
+	// keep the gate open for the whole fold and let every mid-fold touch re-enqueue.
+	s.lastFoldedSize = uint64(len(keys))
 	s.queued = false
 	s.mu.Unlock()
 	sc.trieMu.RUnlock()
@@ -543,7 +558,10 @@ func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 		}
 		s.refolds++
 		sc.refoldTotal.Add(1)
-		reEnqueue := s.gen != genStart
+		// Only re-fold a mid-fold-touched split if the coalescing gate still
+		// passes (it doubled again); otherwise leave it dirty for Process. This
+		// is what bounds a streaming whale to O(N) instead of O(N^2) re-folds.
+		reEnqueue := s.gen != genStart && sc.shouldEagerFold(s)
 		s.mu.Unlock()
 		if reEnqueue {
 			sc.markQueued(s, nib)
