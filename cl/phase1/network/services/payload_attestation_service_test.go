@@ -424,7 +424,13 @@ func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.LessOrEqual(t, service.pendingCount.Load(), int32(maxPendingAttestations))
+	require.Equal(t, int32(maxPendingAttestations), service.pendingCount.Load())
+	stored := 0
+	service.pendingAttestations.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Equal(t, 5, stored)
 }
 
 func TestPayloadAttestationServiceNames(t *testing.T) {

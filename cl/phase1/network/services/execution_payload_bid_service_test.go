@@ -614,7 +614,13 @@ func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.LessOrEqual(t, service.pendingCount.Load(), int32(maxPendingBids))
+	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
+	stored := 0
+	service.pendingBids.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Equal(t, 5, stored)
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {

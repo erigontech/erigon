@@ -77,6 +77,9 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 
 			dependentRoot, err = s.GetBlockRootAtSlot(dependentRootSlot)
 			if err != nil {
+				if dependentRootSlot == 0 {
+					return beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
+				}
 				dependentRootSlot--
 				continue
 			}
