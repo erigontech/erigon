@@ -28,7 +28,11 @@ import (
 // --prune.commitment-history.older value (in blocks; 0 = unlimited) is
 // compatible with what was previously persisted in kv.DatabaseInfo.
 //
-// Rules:
+// configured reports whether the operator passed the flag this run; when false
+// the persisted value is honored unchanged (the zero default is not an explicit
+// request to go unlimited).
+//
+// Rules (when configured):
 //   - First-time set: always allowed.
 //   - 0 (unlimited) -> N: allowed (we have everything, simply start filtering newer downloads).
 //   - N -> M where M <= N: allowed (shrinking the kept window is safe).
@@ -36,10 +40,18 @@ import (
 //
 // On allowed transitions the new value is persisted. The function returns the
 // effective value (whatever the caller should use afterwards).
-func EnsureCommitmentHistoryOlderCompatible(tx kv.GetPut, configuredBlocks uint64) (uint64, error) {
+func EnsureCommitmentHistoryOlderCompatible(tx kv.GetPut, configuredBlocks uint64, configured bool) (uint64, error) {
 	stored, ok, err := getCommitmentHistoryOlder(tx)
 	if err != nil {
 		return configuredBlocks, err
+	}
+	if !configured {
+		// Flag absent this run: honor whatever was persisted; never treat the
+		// zero default as an explicit request to go unlimited.
+		if ok {
+			return stored, nil
+		}
+		return 0, nil
 	}
 	if !ok {
 		if err := setCommitmentHistoryOlder(tx, configuredBlocks); err != nil {

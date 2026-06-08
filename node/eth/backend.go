@@ -316,7 +316,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 
-		config.CommitmentHistoryOlder, err = prune.EnsureCommitmentHistoryOlderCompatible(tx, config.CommitmentHistoryOlder)
+		config.CommitmentHistoryOlder, err = prune.EnsureCommitmentHistoryOlderCompatible(tx, config.CommitmentHistoryOlder, config.CommitmentHistoryOlderSet)
 		if err != nil {
 			return err
 		}

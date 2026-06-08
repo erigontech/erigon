@@ -28,57 +28,83 @@ import (
 func TestEnsureCommitmentHistoryOlderCompatible(t *testing.T) {
 	t.Run("first-set-unlimited", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 0)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 0, true)
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, got)
 	})
 
 	t.Run("first-set-bounded", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000, true)
 		require.NoError(t, err)
 		assert.EqualValues(t, 100_000, got)
 		// Re-running with the same value should be a no-op.
-		got2, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000)
+		got2, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000, true)
 		require.NoError(t, err)
 		assert.EqualValues(t, 100_000, got2)
 	})
 
 	t.Run("shrink-allowed", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 200_000)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 200_000, true)
 		require.NoError(t, err)
 
-		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000, true)
 		require.NoError(t, err)
 		assert.EqualValues(t, 50_000, got)
 	})
 
 	t.Run("expand-rejected", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000, true)
 		require.NoError(t, err)
 
-		_, err = EnsureCommitmentHistoryOlderCompatible(tx, 200_000)
+		_, err = EnsureCommitmentHistoryOlderCompatible(tx, 200_000, true)
 		require.Error(t, err)
 	})
 
 	t.Run("bounded-to-unlimited-rejected", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000, true)
 		require.NoError(t, err)
 
-		_, err = EnsureCommitmentHistoryOlderCompatible(tx, 0)
+		_, err = EnsureCommitmentHistoryOlderCompatible(tx, 0, true)
 		require.Error(t, err)
 	})
 
 	t.Run("unlimited-to-bounded-allowed", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 0)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 0, true)
 		require.NoError(t, err)
 
-		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000, true)
 		require.NoError(t, err)
 		assert.EqualValues(t, 100_000, got)
+	})
+
+	// Operator restarts without passing the flag: configuredBlocks defaults to
+	// 0 and configured=false. The persisted bound must stand instead of being
+	// read as an expand-to-unlimited request that rejects startup.
+	t.Run("unset-honors-stored", func(t *testing.T) {
+		_, tx := memdb.NewTestTx(t)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000, true)
+		require.NoError(t, err)
+
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 0, false)
+		require.NoError(t, err)
+		assert.EqualValues(t, 100_000, got)
+	})
+
+	// First run with the flag absent stays unlimited and persists nothing, so a
+	// later explicit bound is a clean first-set rather than a 0 -> N transition.
+	t.Run("unset-first-run-stays-unlimited", func(t *testing.T) {
+		_, tx := memdb.NewTestTx(t)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 0, false)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, got)
+
+		_, ok, err := getCommitmentHistoryOlder(tx)
+		require.NoError(t, err)
+		assert.False(t, ok)
 	})
 }
