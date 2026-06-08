@@ -7,7 +7,7 @@ name: Cache Warming — EEST fixtures
 #
 # Triggers:
 #   - push to a protected branch touching test-fixtures.json -> warm on a version bump
-#   - schedule (every 2 days)                                -> safety net if LRU-evicted
+#   - schedule (daily)                                       -> safety net if LRU-evicted
 #   - workflow_dispatch                                      -> manual (use once to bootstrap)
 #
 # The key matches test-eest-spec.yml exactly:
@@ -21,7 +21,7 @@ on:
     paths:
       - test-fixtures.json
   schedule:
-    - cron: '0 4 */2 * *'
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 defaults:
