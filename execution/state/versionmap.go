@@ -405,6 +405,20 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			} else {
 				valid = VersionInvalid
 			}
+		} else if readVal != nil && rr.Value() != nil {
+			// Value-aware validation: the read is valid iff the value it
+			// observed still matches the current value, regardless of which
+			// incarnation produced it. Keying on value rather than version
+			// makes a shared cell that many txs accrue into (the coinbase fee
+			// chain is the worst case) conflict-free under BAL pre-population —
+			// incarnation churn that preserves the value no longer forces
+			// re-execution — while still catching a same-version value change
+			// that the version-only check misses.
+			if valuesEqual(path, readVal, rr.Value()) {
+				valid = VersionValid
+			} else {
+				valid = VersionInvalid
+			}
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
