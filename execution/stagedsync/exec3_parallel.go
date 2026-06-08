@@ -1707,17 +1707,6 @@ func (result *execResult) calcFees(
 	// and normalizeWriteSet's sdSet filter drops them.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
-	// vsReader hides Estimate-flagged prior writes as "not found"; emptiness
-	// is indeterminate when any account-state path has an Estimate floor, so
-	// suppress the EIP-161 SD-emit path until re-execution sees a Done write.
-	if coinbaseEmptyPre {
-		for _, p := range [...]state.AccountPath{state.AddressPath, state.BalancePath, state.NoncePath, state.CodeHashPath} {
-			if vm.Read(result.Coinbase, p, accounts.NilKey, txIndex).Status() == state.MVReadResultDependency {
-				coinbaseEmptyPre = false
-				break
-			}
-		}
-	}
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
