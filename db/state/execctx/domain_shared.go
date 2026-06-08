@@ -36,11 +36,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 var (
@@ -160,18 +161,27 @@ type SharedDomains struct {
 	changesetMu sync.Mutex
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
-	tv := commitment.VariantHexPatriciaTrie
+// PickTrieVariant returns the commitment trie variant selected by the
+// process-wide statecfg.ExperimentalConcurrentCommitment flag. Callers that
+// build a commitment.TrieConfig inline (e.g. short-lived RPC/builder/integrity
+// SharedDomains) should use this so the flag is honored consistently across
+// entry points instead of leaving Variant unset and relying on an implicit
+// fallback inside the trie constructor.
+func PickTrieVariant() commitment.TrieVariant {
 	if statecfg.ExperimentalConcurrentCommitment {
-		tv = commitment.VariantConcurrentHexPatricia
+		return commitment.VariantConcurrentHexPatricia
 	}
-	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)
+	return commitment.VariantHexPatriciaTrie
 }
 
-// NewSharedDomainsWithTrieVariant is like NewSharedDomains but accepts an
-// explicit trie variant instead of reading the global statecfg flag. Use this
-// when the caller needs a specific variant without mutating process-wide state.
-func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logger log.Logger, tv commitment.TrieVariant) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
+	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
+	o.trieCfg.Variant = PickTrieVariant()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	trieCfg := o.trieCfg
+
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -180,7 +190,7 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -514,6 +524,7 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
+func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before
@@ -525,6 +536,12 @@ func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
 // as a kv.RwTx to route rawdb writes through the overlay instead of a real RwTx.
 // Returns nil if no overlay has been initialized via InitBlockOverlay.
 func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay.Load() }
+
+func (sd *SharedDomains) CloseBlockOverlay() {
+	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
+		overlay.Close()
+	}
+}
 
 // BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
 // This allows consumers (RPC, shutter) to read uncommitted block data with
@@ -636,9 +653,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.mem.Close()
 
-	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
-		overlay.Close()
-	}
+	sd.CloseBlockOverlay()
 
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
@@ -1027,14 +1042,14 @@ func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 
+func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.EnableParaTrieDB(db)
+}
+
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // It requires a DB to be enabled via EnableParaTrieDB.
 func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 	sd.sdCtx.EnableTrieWarmup(trieWarmup)
-}
-
-func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.EnableParaTrieDB(db)
 }
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {

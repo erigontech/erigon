@@ -119,12 +119,7 @@ func (dt *DomainRoTx) substituteFile(fi *FilesItem) error {
 		src:        fi,
 	}
 	dt.files = newFiles
-
-	// beginFilesRo pinned `replaced` with a refcount increment; this tx no
-	// longer references it (Close decrements the cloned slice, which holds
-	// the substitute instead). Release `replaced` now to keep the books
-	// balanced.
-	visibleFiles{{src: replaced}}.refcntDecrement(dt.d.FilenameBase, dt.d.logger)
+	_ = replaced // refcount lives on aggregatorVisible; per-file refcount is gone post-merge
 	return nil
 }
 

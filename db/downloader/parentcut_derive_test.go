@@ -18,7 +18,7 @@ package downloader
 
 import (
 	"encoding/hex"
-	"math/big"
+	"github.com/holiman/uint256"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,7 +44,7 @@ func parentConfigForDerive() *chain.Config {
 	amsterdam := uint64(9_999_999_999) // far future — must be dropped on a cut at Prague era
 	return &chain.Config{
 		ChainName:             "mainnet",
-		ChainID:               big.NewInt(1),
+		ChainID:               uint256.NewInt(1),
 		HomesteadBlock:        &homestead,
 		TangerineWhistleBlock: &tangerine,
 		SpuriousDragonBlock:   &spurious,

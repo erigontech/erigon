@@ -17,7 +17,7 @@
 package storage
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 	"sync"
 	"testing"
 
@@ -62,7 +62,7 @@ func TestEmitForkBootstrap_NoOpForRootChain(t *testing.T) {
 		logger:   log.New(),
 		ChainConfig: &chain.Config{
 			ChainName: "mainnet",
-			ChainID:   big.NewInt(1),
+			ChainID:   uint256.NewInt(1),
 			// Parent == "" → not a fork; EmitForkBootstrap must not publish.
 		},
 	}
@@ -90,7 +90,7 @@ func TestEmitForkBootstrap_PublishesForForkConfig(t *testing.T) {
 		logger:   log.New(),
 		ChainConfig: &chain.Config{
 			ChainName:          "mainnet-fork-20000000",
-			ChainID:            big.NewInt(1),
+			ChainID:            uint256.NewInt(1),
 			Parent:             "mainnet",
 			CutBlock:           20_000_000,
 			ParentManifestHash: hash,

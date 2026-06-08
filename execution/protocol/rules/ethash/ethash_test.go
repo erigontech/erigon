@@ -20,6 +20,9 @@
 package ethash
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -114,5 +117,35 @@ func TestClosedRemoteSealer(t *testing.T) {
 
 	if res := api.SubmitHashRate(hexutil.Uint64(100), common.HexToHash("a")); res {
 		t.Error("expect to return false when submit hashrate to a stopped ethash")
+	}
+}
+
+func TestMemoryMapAndGenerateCleansTempFileOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+
+	// Force rename failure by making the destination path a directory.
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("failed to create destination directory: %v", err)
+	}
+
+	_, _, _, err := memoryMapAndGenerate(path, 1024, false, func(buffer []uint32) {})
+	if err == nil {
+		t.Fatal("expected rename failure, got nil")
+	}
+	// Pin the failure to os.Rename so the test fails loudly if a future change
+	// shifts the failure to an earlier step (Create/Truncate/mmap) — the cleanup
+	// path under test is the post-rename one.
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) || linkErr.Op != "rename" {
+		t.Fatalf("expected *os.LinkError with Op=rename, got: %v", err)
+	}
+
+	temps, globErr := filepath.Glob(path + ".*")
+	if globErr != nil {
+		t.Fatalf("glob failed: %v", globErr)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("temporary files were not cleaned up: %v", temps)
 	}
 }

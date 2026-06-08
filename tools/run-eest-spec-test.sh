@@ -7,18 +7,18 @@
 #
 #   statetests-stable                          state tests vs. eest_stable
 #   statetests-devnet                          state tests vs. eest_devnet
-#   blocktests-stable                          blockchain tests vs. eest_stable
+#   blocktests-stable-sequential               blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
-#   enginextests-stable                        engine-x tests vs. eest_stable
-#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}
+#   enginextests-stable-sequential             engine-x tests vs. eest_stable
+#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
 #                                              race-detector variant of
-#                                              blocktests-stable, split by
+#                                              blocktests-stable-sequential, split by
 #                                              fork via the --run regex so
 #                                              each sub-shard fits under ~30
 #                                              min. Caller (Makefile / CI) must
@@ -27,9 +27,20 @@
 #                                              detection doesn't fire.
 #   blocktests-devnet-race-amsterdam           race-detector variant filtered
 #                                              to the Amsterdam fork only.
+#   zkevm-witness                              zkevm execution-witness conformance
+#                                              (eest_zkevm corpus) via the zkevmtest
+#                                              runner; compares debug_executionWitness
+#                                              (canonical) per block.
+#   zkevm-witness-race                         race-detector variant of the above over
+#                                              the whole corpus (run via evm.race).
 #   *-parallel                                  any of the above with "-parallel"
-#                                              appended sets ERIGON_EXEC3_PARALLEL=true
-#                                              from the manifest entry.
+#                                              appended runs with
+#                                              ERIGON_EXEC3_PARALLEL=true. Every
+#                                              other shard runs with
+#                                              ERIGON_EXEC3_PARALLEL=false so
+#                                              the runtime default in
+#                                              dbg.Exec3Parallel can flip without
+#                                              redefining the shards.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -54,6 +65,7 @@ shard="$1"
 # Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
 # inherit from the parent shard (stable/devnet).
 case "$shard" in
+	*zkevm*)      base=test-fixtures-cache/eest_zkevm/fixtures ;;
 	*-stable*)    base=test-fixtures-cache/eest_stable/fixtures ;;
 	*-devnet*)    base=test-fixtures-cache/eest_devnet/fixtures ;;
 	*-benchmark*) base=test-fixtures-cache/eest_benchmark/fixtures ;;
@@ -62,23 +74,26 @@ esac
 
 # Resolve workers + failure budget + exec3-parallel flag from the single-source
 # manifest. Both this script and the test-eest-spec.yml load-matrix job read
-# tools/eest-spec-shards.json, so adding a shard / tweaking a budget is a
-# one-file edit.
-manifest=tools/eest-spec-shards.json
-budget_row=$(jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"' "$manifest")
+# tools/eest-spec-shards.yml, so adding a shard / tweaking a budget is a
+# one-file edit. yq converts YAML→JSON so the jq query stays identical.
+manifest=tools/eest-spec-shards.yml
+budget_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"')
 if [[ -z "$budget_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
 IFS=$'\t' read -r default_workers default_max exec3_parallel <<<"$budget_row"
-if [[ "$exec3_parallel" == "true" ]]; then
-	export ERIGON_EXEC3_PARALLEL=true
-fi
+# Always set ERIGON_EXEC3_PARALLEL explicitly (true or false) so the shard's
+# behaviour is pinned to the manifest, independent of whatever dbg.Exec3Parallel
+# defaults to at runtime. If the default flips, the shards still run the mode
+# they were defined for.
+export ERIGON_EXEC3_PARALLEL="$exec3_parallel"
 
-# Strip "-parallel" suffix for case-arm routing — the parallel variant has the
-# same fixture path / regex as the non-parallel parent shard; only the
+# Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
+# share the same fixture path / regex as the parent shard; only the
 # ERIGON_EXEC3_PARALLEL env var differs.
 shard_route="${shard%-parallel}"
+shard_route="${shard_route%-sequential}"
 
 # Per-shard structural config (cmd / fixture path / extra CLI flags). Match
 # against shard_route so "-parallel" variants reuse the same arm as their
@@ -112,6 +127,10 @@ case "$shard_route" in
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
+	zkevm-witness*)
+		# Whole eest_zkevm blockchain_tests corpus; the "-race" variant differs
+		# only in the binary (evm.race, picked by the Makefile), not the fixtures.
+		cmd=zkevmtest;   path="$base/blockchain_tests" ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac
 
@@ -124,7 +143,9 @@ if [[ ! -x "$evm_bin" ]]; then
 	exit 2
 fi
 if [[ ! -d "$path" ]]; then
-	echo "fixture path $path does not exist; run 'make test-fixtures-eest' first" >&2
+	fixtures_target=test-fixtures-eest
+	case "$shard" in *zkevm*) fixtures_target=test-fixtures-zkevm ;; esac
+	echo "fixture path $path does not exist; run 'make $fixtures_target' first" >&2
 	exit 2
 fi
 
@@ -157,13 +178,22 @@ echo "running: $evm_bin $cmd ${extra[*]:-} --workers $workers --jsonout $path"
 echo "tmpdir:  $TMPDIR"
 echo "max-allowed-failures: $max"
 
-# Don't fail on non-zero — the runners report all results via JSON regardless,
-# and we want to inspect the JSON to drive the pass/fail decision. The grep
-# filter strips any init-time log lines (e.g. dbg.envLookup's "[WARN] [env]"
-# message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm sets the log
-# handler, and the default log handler writes to stdout) so jq sees only JSON.
+# Don't fail on most non-zero exits — the runners report all results via JSON
+# regardless, and we want to inspect the JSON to drive the pass/fail decision
+# (crashes surface as missing/truncated JSON below). The one exception is exit
+# code 66: the Go race runtime's "data race detected" signal, emitted even when
+# the run completes and the JSON parses clean, so it must be checked explicitly.
+# The grep filter strips any init-time log lines (e.g. dbg.envLookup's
+# "[WARN] [env]" message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm
+# sets the log handler, and the default log handler writes to stdout) so jq
+# sees only JSON.
 raw_file=$(mktemp)
-"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || true
+rc=0
+"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || rc=$?
+if (( rc == 66 )); then
+	echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
+	exit 1
+fi
 grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$result_file"
 rm -f "$raw_file"
 
@@ -177,7 +207,10 @@ if (( total == 0 )); then
 fi
 if (( failed > max )); then
 	echo "ERROR: $failed failures exceed max-allowed $max" >&2
-	jq -r '.[] | select(.pass == false) | "  FAIL " + .name' "$result_file" >&2
+	# Emit the cmd/evm `error` field per failing test, not just the name,
+	# so transient CI flakes are diagnosable from the job log alone (the
+	# raw JSON output is dropped after this script exits).
+	jq -r '.[] | select(.pass == false) | "  FAIL " + .name + "\n        error: " + (.error // "<no error message>")' "$result_file" >&2
 	exit 1
 fi
 exit 0

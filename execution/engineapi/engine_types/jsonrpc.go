@@ -70,6 +70,7 @@ type PayloadAttributes struct {
 	Withdrawals           []*types.Withdrawal   `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
 	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
+	TargetGasLimit        *hexutil.Uint64       `json:"targetGasLimit"`
 	SSZVersion            clparams.StateVersion `json:"-"`
 }
 

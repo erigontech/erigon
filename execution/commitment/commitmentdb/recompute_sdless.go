@@ -144,7 +144,7 @@ func RecomputeAtTxNumWithoutSD(
 	}()
 
 	trieCtx := NewTrieContextWithBranchCollector(stateReader, stepSize, branches)
-	trie := commitment.NewHexPatriciaHashed(length.Addr, trieCtx)
+	trie := commitment.NewHexPatriciaHashed(length.Addr, trieCtx, commitment.DefaultTrieConfig())
 	defer trie.Release()
 
 	updates := commitment.NewUpdates(commitment.ModeDirect, tmpDir, commitment.KeyToHexNibbleHash)

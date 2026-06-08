@@ -153,8 +153,15 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		if pruneMode.History.Enabled() && isCLData(p.Name) {
 			continue
 		}
-		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, pruneMode, p) {
-			continue
+		// Pre-merge transactions filter (former isTransactionsSegmentExpired).
+		// Inlined post-#21342: only Blocks == KeepPostMergeBlocksPruneMode with a
+		// chain MergeHeight set triggers chain-history-expiry on tx segments.
+		if strings.Contains(p.Name, "transactions") &&
+			pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode &&
+			cc != nil && cc.MergeHeight != nil {
+			if info, _, ok := snaptype.ParseFileName("", p.Name); ok && cc.IsPreMerge(info.From) {
+				continue
+			}
 		}
 		// Bug Z: block bodies + transactions below prune horizon are
 		// dropped. Headers stay (small, needed for chain continuity

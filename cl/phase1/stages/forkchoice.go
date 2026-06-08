@@ -72,8 +72,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
 			err = fmt.Errorf("failed to run forkchoice: %w", err)
@@ -107,16 +107,10 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
 
-	oldCanonical := common.Hash{}
-	// Guard against uint64 underflow: currentSlot=0 → currentSlot-1 = MaxUint64 → infinite loop.
-	for i := currentSlot; i > 1; i-- {
-		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i-1)
-		if err != nil {
-			return fmt.Errorf("failed to read canonical block root: %w", err)
-		}
-		if oldCanonical != (common.Hash{}) {
-			break
-		}
+	// Capture the actual old canonical tip before any mutations.
+	oldHeadSlot, oldHeadRoot, err := beacon_indicies.ReadCanonicalHead(tx)
+	if err != nil {
+		return fmt.Errorf("failed to read canonical head: %w", err)
 	}
 
 	// List of new canonical chain entries
@@ -168,16 +162,13 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
-	// check reorg
-	parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, headRoot)
-	if err != nil {
-		return fmt.Errorf("failed to read parent block root: %w", err)
-	}
-	if parentRoot != oldCanonical {
-		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
-		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
+	// A reorg occurred if the fork point (currentSlot) is strictly below the
+	// old canonical tip. Normal chain extension lands exactly at oldHeadSlot.
+	if oldHeadRoot != (common.Hash{}) && currentSlot < oldHeadSlot {
+		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_head", oldHeadRoot, "new_canonical", headRoot)
+		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldHeadRoot)
 		if err != nil {
-			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
+			log.Warn("failed to read state root by block root", "err", err, "block_root", oldHeadRoot)
 			return nil
 		}
 		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, headRoot)
@@ -186,18 +177,22 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 			return nil
 		}
 		reorgDepth := uint64(0)
-		if headSlot > currentSlot {
-			reorgDepth = headSlot - currentSlot
+		if oldHeadSlot > currentSlot {
+			reorgDepth = oldHeadSlot - currentSlot
+		}
+		executionOptimistic := false
+		if cfg.forkChoice != nil {
+			executionOptimistic = cfg.forkChoice.IsRootOptimistic(headRoot)
 		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
 			Depth:               reorgDepth,
-			OldHeadBlock:        oldCanonical,
+			OldHeadBlock:        oldHeadRoot,
 			NewHeadBlock:        headRoot,
 			OldHeadState:        oldStateRoot,
 			NewHeadState:        newStateRoot,
 			Epoch:               headSlot / cfg.beaconCfg.SlotsPerEpoch,
-			ExecutionOptimistic: cfg.forkChoice.IsRootOptimistic(headRoot),
+			ExecutionOptimistic: executionOptimistic,
 		}
 		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
@@ -274,6 +269,8 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	if cfg.beaconCfg.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.GloasVersion) {
 		sn := hexutil.Uint64(nextSlot)
 		payloadAttributes.SlotNumber = &sn
+		tgl := hexutil.Uint64(cfg.beaconCfg.DefaultBuilderGasLimit)
+		payloadAttributes.TargetGasLimit = &tgl
 	}
 	e := &beaconevents.PayloadAttributesData{
 		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),

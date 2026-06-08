@@ -203,8 +203,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !bytes.Equal(rh, header.Root.Bytes()) {
-				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+			if !bytes.Equal(rh, header.Root[:]) {
+				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root[:], header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
@@ -258,7 +258,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"commitment", times.ComputeCommitment,
 			)
 			stateCache.PrintStatsAndReset()
-			if isBatchFull {
+			if isBatchFull && blockNum != maxBlockNum {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
 		}
@@ -288,11 +288,9 @@ func (se *serialExecutor) LogExecution() {
 	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	se.committedGas.Add(int64(committedGas))
-	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+func (se *serialExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
@@ -463,7 +461,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					if err != nil {
 						return err
 					}
-					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
+					receipt, err = result.CreateReceipt(txTask.TxIndex, cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err
 					}
@@ -496,9 +494,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
-			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
-				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
-			}
 			if se.cfg.badBlockHalt {
 				return false, err
 			}

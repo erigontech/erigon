@@ -274,7 +274,7 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root and gas used.
-func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
+func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
@@ -300,20 +300,22 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
-	// Pre-state root, computed once over the just-flushed pre-allocation.
-	// We return it for any early-return path so the test framework's
-	// `post.Root` check still has a real root to compare against when the tx
-	// was rejected before / during apply (the fixture's post.Root for those
-	// cases equals the pre-state root).
-	preRootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
-	if err != nil {
-		return nil, common.Hash{}, 0, fmt.Errorf("pre-state ComputeCommitment: %w", err)
-	}
-	preRoot := common.BytesToHash(preRootBytes)
+	defer func() {
+		rootBytes, rootBytesErr := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+		if rootBytesErr != nil {
+			if err != nil {
+				err = fmt.Errorf("ComputeCommitment: %w: %w", rootBytesErr, err)
+			} else {
+				err = fmt.Errorf("ComputeCommitment: %w", rootBytesErr)
+			}
+			return
+		}
+		root = common.BytesToHash(rootBytes)
+	}()
 
 	r := rpchelper.NewLatestStateReader(tx)
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb := state.New(r)
+	statedb = state.New(r)
 
 	var baseFee *uint256.Int
 	if config.IsLondon(0) {
@@ -363,16 +365,16 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		signer.SetMalleable(true) // allow Frontier/Homestead malleable signatures
 		decodedTx, err := types.DecodeTransaction(post.Tx)
 		if err != nil {
-			return statedb, preRoot, 0, err
+			return statedb, root, 0, err
 		}
 		msg, err = decodedTx.AsMessage(*signer, baseFee, chainRules)
 		if err != nil {
-			return statedb, preRoot, 0, err
+			return statedb, root, 0, err
 		}
 	} else {
 		msg, err = toMessage(t.Json.Tx, post, baseFee)
 		if err != nil {
-			return statedb, preRoot, 0, err
+			return statedb, root, 0, err
 		}
 	}
 
@@ -388,7 +390,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	gaspool := new(protocol.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
-	gasUsed := uint64(0)
 	if res != nil {
 		gasUsed = res.ReceiptGasUsed
 	}
@@ -400,7 +401,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
 	}
 	if err != nil {
-		return statedb, preRoot, gasUsed, err
+		return statedb, root, gasUsed, err
 	}
 
 	// Add 0-value mining reward. This only makes a difference in the cases
@@ -410,17 +411,13 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
+		return nil, root, gasUsed, err
 	}
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
+		return nil, root, gasUsed, err
 	}
 
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
-	if err != nil {
-		return statedb, common.Hash{}, gasUsed, fmt.Errorf("ComputeCommitment: %w", err)
-	}
-	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
+	return statedb, root, gasUsed, nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
@@ -429,16 +426,16 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code)
-		statedb.SetNonce(address, a.Nonce)
+		statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis)
+		statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis)
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(address, balance, tracing.BalanceChangeUnspecified)
+		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v[:])
 			statedb.SetState(address, key, *val)
 		}
 
@@ -580,6 +577,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	}
 	if gasPrice == nil {
 		return nil, errors.New("no gas price provided")
+	}
+	if baseFee == nil {
+		feeCap = big.Int(*gasPrice)
+		tipCap = big.Int(*gasPrice)
 	}
 
 	gpi := big.Int(*gasPrice)

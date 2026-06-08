@@ -8,17 +8,27 @@ package graph
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strconv"
+	"strings"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 // Storage is the resolver for the storage field.
 func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
-	panic("not implemented: Storage - storage")
+	if !common.IsHexAddress(obj.Address) {
+		return "", fmt.Errorf("invalid account address: %s", obj.Address)
+	}
+	if len(slot) != 66 || slot[:2] != "0x" {
+		return "", fmt.Errorf("slot must be a 0x-prefixed 32-byte hex string, got %q", slot)
+	}
+	addr := common.HexToAddress(obj.Address)
+	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, rpc.BlockNumber(obj.BlockNum))
 }
 
 // TransactionAt is the resolver for the transactionAt field.
@@ -31,7 +41,20 @@ func (r *blockResolver) TransactionAt(ctx context.Context, obj *model.Block, ind
 
 // Logs is the resolver for the logs field.
 func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
-	panic("not implemented: Logs - logs")
+	blockHash := common.HexToHash(obj.Hash)
+	crit := filters.FilterCriteria{BlockHash: &blockHash}
+	var err error
+	if crit.Addresses, err = addressesFromModel(filter.Addresses); err != nil {
+		return nil, err
+	}
+	if crit.Topics, err = topicsFromModel(filter.Topics); err != nil {
+		return nil, err
+	}
+	logs, err := r.GraphQLAPI.GetLogs(ctx, crit)
+	if err != nil {
+		return nil, err
+	}
+	return rpcLogsToModel(logs), nil
 }
 
 // Account is the resolver for the account field.
@@ -44,17 +67,87 @@ func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address s
 
 // Call is the resolver for the call field.
 func (r *blockResolver) Call(ctx context.Context, obj *model.Block, data model.CallData) (*model.CallResult, error) {
-	panic("not implemented: Call - call")
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.GraphQLAPI.Call(ctx, rpc.BlockNumber(obj.Number), args)
+	if err != nil {
+		return nil, err
+	}
+	return &model.CallResult{
+		Data:    hexutil.Encode(res.Data),
+		GasUsed: res.GasUsed,
+		Status:  res.Status,
+	}, nil
 }
 
 // EstimateGas is the resolver for the estimateGas field.
 func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error) {
-	panic("not implemented: EstimateGas - estimateGas")
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return 0, err
+	}
+	return r.GraphQLAPI.EstimateGas(ctx, rpc.BlockNumber(obj.Number), args)
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
 func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) (string, error) {
-	panic("not implemented: SendRawTransaction - sendRawTransaction")
+	encodedTx, err := hexutil.Decode(data)
+	if err != nil {
+		return "", fmt.Errorf("invalid transaction data: %w", err)
+	}
+	hash, err := r.GraphQLAPI.SendRawTransaction(ctx, hexutil.Bytes(encodedTx))
+	if err != nil {
+		return "", err
+	}
+	return hash.Hex(), nil
+}
+
+// Account is the resolver for the account field.
+func (r *pendingResolver) Account(ctx context.Context, obj *model.Pending, address string) (*model.Account, error) {
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+	addr := common.HexToAddress(address)
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, rpc.PendingBlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	pendingBlockNum := rpc.PendingBlockNumber
+	return &model.Account{
+		Address:          strings.ToLower(address),
+		Balance:          balance,
+		TransactionCount: nonce,
+		Code:             code,
+		BlockNum:         uint64(pendingBlockNum),
+	}, nil
+}
+
+// Call is the resolver for the call field.
+func (r *pendingResolver) Call(ctx context.Context, obj *model.Pending, data model.CallData) (*model.CallResult, error) {
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.GraphQLAPI.Call(ctx, rpc.PendingBlockNumber, args)
+	if err != nil {
+		return nil, err
+	}
+	return &model.CallResult{
+		Data:    hexutil.Encode(res.Data),
+		GasUsed: res.GasUsed,
+		Status:  res.Status,
+	}, nil
+}
+
+// EstimateGas is the resolver for the estimateGas field.
+func (r *pendingResolver) EstimateGas(ctx context.Context, obj *model.Pending, data model.CallData) (uint64, error) {
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return 0, err
+	}
+	return r.GraphQLAPI.EstimateGas(ctx, rpc.PendingBlockNumber, args)
 }
 
 // Block is the resolver for the block field.
@@ -145,7 +238,22 @@ func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]
 
 // Pending is the resolver for the pending field.
 func (r *queryResolver) Pending(ctx context.Context) (*model.Pending, error) {
-	panic("not implemented: Pending - pending")
+	txns, err := r.GraphQLAPI.GetPendingTransactions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	transactions := make([]*model.Transaction, 0, len(txns))
+	for _, txn := range txns {
+		transactions = append(transactions, &model.Transaction{
+			Nonce: hexutil.EncodeUint64(txn.GetNonce()),
+			Gas:   txn.GetGasLimit(),
+			Hash:  txn.Hash().Hex(),
+		})
+	}
+	return &model.Pending{
+		TransactionCount: uint64(len(txns)),
+		Transactions:     transactions,
+	}, nil
 }
 
 // Transaction is the resolver for the transaction field.
@@ -184,12 +292,30 @@ func (r *queryResolver) Transaction(ctx context.Context, hash string) (*model.Tr
 
 // Logs is the resolver for the logs field.
 func (r *queryResolver) Logs(ctx context.Context, filter model.FilterCriteria) ([]*model.Log, error) {
-	panic("not implemented: Logs - logs")
+	var crit filters.FilterCriteria
+	var err error
+	if filter.FromBlock != nil {
+		crit.FromBlock = new(big.Int).SetUint64(*filter.FromBlock)
+	}
+	if filter.ToBlock != nil {
+		crit.ToBlock = new(big.Int).SetUint64(*filter.ToBlock)
+	}
+	if crit.Addresses, err = addressesFromModel(filter.Addresses); err != nil {
+		return nil, err
+	}
+	if crit.Topics, err = topicsFromModel(filter.Topics); err != nil {
+		return nil, err
+	}
+	logs, err := r.GraphQLAPI.GetLogs(ctx, crit)
+	if err != nil {
+		return nil, err
+	}
+	return rpcLogsToModel(logs), nil
 }
 
 // GasPrice is the resolver for the gasPrice field.
 func (r *queryResolver) GasPrice(ctx context.Context) (string, error) {
-	panic("not implemented: GasPrice - gasPrice")
+	return r.GraphQLAPI.GasPrice(ctx)
 }
 
 // MaxPriorityFeePerGas is the resolver for the maxPriorityFeePerGas field.
@@ -234,6 +360,9 @@ func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
+// Pending returns PendingResolver implementation.
+func (r *Resolver) Pending() PendingResolver { return &pendingResolver{r} }
+
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
@@ -243,5 +372,7 @@ func (r *Resolver) Transaction() TransactionResolver { return &transactionResolv
 type accountResolver struct{ *Resolver }
 type blockResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
+type pendingResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type transactionResolver struct{ *Resolver }
+

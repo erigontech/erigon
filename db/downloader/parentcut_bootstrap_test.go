@@ -17,7 +17,7 @@
 package downloader
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -47,7 +47,7 @@ func TestBuildForkBootstrapPlan_PopulatesFromForkConfig(t *testing.T) {
 	hash := [20]byte{0x20, 0x00, 0x4f, 0xef, 0x6f, 0x6b, 0x65, 0x2b, 0xde, 0x5f, 0x7c, 0x20, 0xe6, 0x7e, 0x33, 0xcb, 0xc3, 0xe0, 0x59, 0xd3}
 	cfg := &chain.Config{
 		ChainName:          "mainnet-fork-20000000",
-		ChainID:            big.NewInt(1),
+		ChainID:            uint256.NewInt(1),
 		Parent:             "mainnet",
 		CutBlock:           20_000_000,
 		ParentManifestHash: hash,

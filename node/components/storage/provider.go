@@ -1282,7 +1282,7 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 		}
 	}
 
-	if err := p.BlockReader.Snapshots().OpenSegments([]snaptypelib.Type{snaptype2.Headers}, true, false); err != nil {
+	if err := p.BlockReader.Snapshots().OpenSegments([]snaptypelib.Type{snaptype2.Headers}, true); err != nil {
 		p.logger.Warn("[storage] OpenSegments(Headers, alignMin=false) failed — will retry on next inventory ChangeSet",
 			"file", tipHeader.Name, "err", err)
 		return false

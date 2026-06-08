@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -63,7 +65,7 @@ func TestCallMany(t *testing.T) {
 			},
 			GasLimit: 10000000,
 		}
-		chainID = big.NewInt(1337)
+		chainID = uint256.NewInt(1337)
 		ctx     = context.Background()
 
 		addr1BalanceCheck = "70a08231" + "000000000000000000000000" + address1.Hex()[2:]

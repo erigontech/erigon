@@ -26,7 +26,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -107,7 +106,7 @@ type Index struct {
 	existenceV1        *fusefilter.Reader
 	existenceV2        *fusefilter.ReaderSharded
 
-	readers         *sync.Pool
+	sharedReader    *IndexReader // IndexReader is stateless, so one instance serves all goroutines
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
@@ -119,9 +118,9 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (idx *Index, err error) {
+func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	_, fName := filepath.Split(indexFilePath)
-	idx = &Index{
+	idx := &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
@@ -130,6 +129,11 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			idx.Close()
+		}
+	}()
 	var stat os.FileInfo
 	if stat, err = idx.f.Stat(); err != nil {
 		return nil, err
@@ -141,7 +145,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err := idx.init(); err != nil {
+	if err = idx.init(); err != nil {
 		return nil, err
 	}
 
@@ -158,11 +162,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	//	//}
 	//}
 
-	idx.readers = &sync.Pool{
-		New: func() any {
-			return NewIndexReader(idx)
-		},
-	}
+	idx.sharedReader = NewIndexReader(idx)
 	return idx, nil
 }
 
@@ -301,15 +301,43 @@ func (idx *Index) init() (err error) {
 	validationPassed = true
 	return nil
 }
+func (idx *Index) ForceExistenceFilterWillNeed() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvWillNeed()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvWillNeed()
+	}
+}
 
+func (idx *Index) ForceExistenceFilterNormal() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvNormal()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvNormal()
+	}
+}
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.lessFalsePositives && idx.keyCount > 0 {
-		switch idx.dataStructureVersion {
-		case 1:
-			return idx.existenceV1.ForceInMem()
-		case 2:
-			return idx.existenceV2.ForceInMem()
-		}
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return 0
+	}
+	if idx.dataStructureVersion == 1 {
+		return idx.existenceV1.ForceInMem()
+	}
+	if idx.dataStructureVersion >= 2 {
+		return idx.existenceV2.ForceInMem()
 	}
 	return 0
 }
@@ -383,7 +411,7 @@ func (idx *Index) KeyCount() uint64 { return idx.keyCount }
 func (idx *Index) LeafSize() uint16 { return idx.leafSize }
 func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
-// Lookup is not thread-safe because it used id.hasher
+// Lookup is safe for concurrent use: it only reads the index's immutable state
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
@@ -571,6 +599,6 @@ func (idx *Index) MadvWillNeed() *Index {
 	return idx
 }
 
-func (idx *Index) GetReaderFromPool() *IndexReader {
-	return idx.readers.Get().(*IndexReader)
+func (idx *Index) Reader() *IndexReader {
+	return idx.sharedReader
 }

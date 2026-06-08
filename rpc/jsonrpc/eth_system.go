@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 
 	"github.com/holiman/uint256"
@@ -26,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -39,6 +42,154 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+// deleteStrategyWindow is the only currently defined deleteStrategy type in the
+// execution-apis spec: a sliding window of RetentionBlocks blocks.
+const deleteStrategyWindow = "window"
+
+// DeleteStrategy describes how a node removes old data for a category.
+// Currently only the "window" type is defined: the node keeps a sliding
+// window of RetentionBlocks blocks and discards everything older.
+// The field is omitted when data is kept indefinitely (archive nodes, or
+// KeepPostMergeBlocksPruneMode which uses chain-specific history expiry).
+type DeleteStrategy struct {
+	Type            string         `json:"type"`
+	RetentionBlocks hexutil.Uint64 `json:"retentionBlocks"`
+}
+
+// CapabilityField describes availability of a data category: when Disabled is true the node
+// does not hold that data at all; otherwise OldestBlock is the lowest block number available.
+// DeleteStrategy is set when the node uses a finite retention window.
+type CapabilityField struct {
+	Disabled       bool            `json:"disabled"`
+	OldestBlock    *hexutil.Uint64 `json:"oldestBlock,omitempty"`
+	DeleteStrategy *DeleteStrategy `json:"deleteStrategy,omitempty"`
+}
+
+// CapabilityHead identifies the canonical chain tip at the moment eth_capabilities was called.
+type CapabilityHead struct {
+	Number hexutil.Uint64 `json:"number"`
+	Hash   common.Hash    `json:"hash"`
+}
+
+// CapabilitiesResult is the response type of eth_capabilities.
+type CapabilitiesResult struct {
+	Head        CapabilityHead  `json:"head"`
+	State       CapabilityField `json:"state"`
+	Tx          CapabilityField `json:"tx"`
+	Logs        CapabilityField `json:"logs"`
+	Receipts    CapabilityField `json:"receipts"`
+	Blocks      CapabilityField `json:"blocks"`
+	StateProofs CapabilityField `json:"stateproofs"`
+}
+
+// Capabilities implements eth_capabilities.
+// stateproofs is only available when --prune.include-commitment-history was set at node startup;
+// otherwise it is disabled regardless of prune mode.
+func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	pruneMode, err := api.pruneMode(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	keepExecutionProofs, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	overlayTx := api.filters.WithOverlay(tx)
+	headBlock, err := rpchelper.GetLatestBlockNumber(overlayTx)
+	if err != nil {
+		return nil, err
+	}
+	headHash, ok, err := api._blockReader.CanonicalHash(ctx, overlayTx, headBlock)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("canonical hash not found %d", headBlock)
+	}
+
+	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
+		o := hexutil.Uint64(oldest)
+		f := CapabilityField{OldestBlock: &o}
+		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
+			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: hexutil.Uint64(d)}
+		}
+		return f
+	}
+
+	// PruneTo returns 0 for both KeepAllBlocksPruneMode (MaxUint64-1, keep all) and
+	// KeepPostMergeBlocksPruneMode (MaxUint64, chain-specific history expiry) because their
+	// distances exceed headBlock. For KeepPostMergeBlocksPruneMode the true oldest is then
+	// adjusted below using MergeHeight where applicable.
+	stateOldest := pruneMode.History.PruneTo(headBlock)
+	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
+	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains that have
+	// MergeHeight set (mainnet, sepolia, gnosis…), pre-merge blocks/tx segments are
+	// never downloaded, so the oldest available block is the merge point, not 0.
+	if pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && chainConfig.MergeHeight != nil {
+		blocksOldest = *chainConfig.MergeHeight
+	}
+
+	var stateproofs CapabilityField
+	if keepExecutionProofs {
+		stateproofs = avail(stateOldest, pruneMode.History)
+	} else {
+		stateproofs = CapabilityField{Disabled: true}
+	}
+
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	stateField := avail(stateOldest, pruneMode.History)
+	blocksField := avail(blocksOldest, pruneMode.Blocks)
+
+	var receiptsField CapabilityField
+	if persistReceipts {
+		// --persist.receipts widens past state-history pruning (receipts are written to
+		// RCacheDomain at execution time, not re-derived from state). The remaining bound
+		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
+		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
+		// isReceiptsSegmentPruned in db/snapshotsync). So receipts/logs fall back to
+		// blocksOldest with the same DeleteStrategy as blocks.
+		receiptsField = avail(blocksOldest, pruneMode.Blocks)
+	} else {
+		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
+		// history and the block body. Use the more restrictive of the two oldest-block bounds.
+		if blocksOldest > stateOldest {
+			receiptsField = avail(blocksOldest, pruneMode.Blocks)
+		} else {
+			receiptsField = stateField
+		}
+	}
+	// getLogsV3 uses log indexes scoped to prune.Blocks; matches in pruned blocks are silently
+	// dropped, so the effective oldest for logs equals receipts in both branches.
+	logsField := receiptsField
+
+	return &CapabilitiesResult{
+		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
+		State:       stateField,
+		Tx:          blocksField, // tx-by-hash goes through block bodies; no independent tx-index pruning
+		Logs:        logsField,
+		Receipts:    receiptsField,
+		Blocks:      blocksField,
+		StateProofs: stateproofs,
+	}, nil
+}
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {

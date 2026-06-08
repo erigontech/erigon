@@ -292,7 +292,7 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 	for n := seedFrom; n <= seedTo; n++ {
 		key := make([]byte, 8+32)
 		binary.BigEndian.PutUint64(key[:8], n)
-		copy(key[8:], hashAt(n).Bytes())
+		copy(key[8:], func() []byte { h := hashAt(n); return h[:] }())
 		got, err := rwTx.GetOne(kv.Headers, key)
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "seeded block %d must have kv.Headers entry", n)
@@ -300,14 +300,17 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 	// Spot-check below the seed range: nothing seeded.
 	belowKey := make([]byte, 8+32)
 	binary.BigEndian.PutUint64(belowKey[:8], fromBlock)
-	copy(belowKey[8:], hashAt(fromBlock).Bytes())
+	{
+		h := hashAt(fromBlock)
+		copy(belowKey[8:], h[:])
+	}
 	got, err := rwTx.GetOne(kv.Headers, belowKey)
 	require.NoError(t, err)
 	require.Empty(t, got, "block %d (below seedFrom) must NOT be seeded", fromBlock)
 
 	// kv.HeaderNumber populated (WriteHeaderRaw with skipIndexing=false).
 	for n := seedFrom; n <= seedTo; n++ {
-		got, err := rwTx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		got, err := rwTx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "seeded block %d must have kv.HeaderNumber entry (hash → num)", n)
 	}
@@ -316,7 +319,7 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 	for n := seedFrom; n <= seedTo; n++ {
 		key := make([]byte, 8+32)
 		binary.BigEndian.PutUint64(key[:8], n)
-		copy(key[8:], hashAt(n).Bytes())
+		copy(key[8:], func() []byte { h := hashAt(n); return h[:] }())
 		got, err := rwTx.GetOne(kv.BlockBody, key)
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "seeded block %d must have kv.BlockBody entry", n)
@@ -357,7 +360,7 @@ func TestSeedLeftoverBlocks_WritesHeadersBodiesTxsSenders(t *testing.T) {
 	for n := seedFrom; n <= seedTo; n++ {
 		key := make([]byte, 8+32)
 		binary.BigEndian.PutUint64(key[:8], n)
-		copy(key[8:], hashAt(n).Bytes())
+		copy(key[8:], func() []byte { h := hashAt(n); return h[:] }())
 		got, err := rwTx.GetOne(kv.Senders, key)
 		require.NoError(t, err)
 		require.Equal(t, 40, len(got), "block %d senders entry must be 40 bytes (2 txs × 20 sender bytes)", n)

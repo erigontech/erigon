@@ -19,7 +19,7 @@ package storage
 import (
 	"context"
 	"encoding/binary"
-	"math/big"
+	"github.com/holiman/uint256"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,7 +48,7 @@ func seedHeaderAt(t *testing.T, tx kv.RwTx, blockNum uint64, hash common.Hash) {
 		BaseTxnID: types.BaseTxnID(blockNum * 8),
 		TxCount:   1,
 	}))
-	require.NoError(t, rawdb.WriteTd(tx, hash, blockNum, big.NewInt(int64(blockNum*10))))
+	require.NoError(t, rawdb.WriteTd(tx, hash, blockNum, *uint256.NewInt(blockNum * 10)))
 	// Write into kv.Headers directly: TruncateBlocks iterates kv.Headers
 	// by composite key (block_num_u64 || hash); the row value is the
 	// header RLP but TruncateBlocks doesn't inspect it.
@@ -91,7 +91,7 @@ func TestDeleteHeaderNumbersPastBlock_WipesOrphans(t *testing.T) {
 	}
 
 	for n := uint64(95); n <= 105; n++ {
-		got, err := tx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		got, err := tx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "fixture: HeaderNumber should be seeded for block %d", n)
 	}
@@ -99,12 +99,12 @@ func TestDeleteHeaderNumbersPastBlock_WipesOrphans(t *testing.T) {
 	require.NoError(t, deleteHeaderNumbersPastBlock(tx, toBlock))
 
 	for n := uint64(95); n <= 100; n++ {
-		got, err := tx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		got, err := tx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "HeaderNumber at block %d (≤ toBlock) must survive the sweep", n)
 	}
 	for n := uint64(101); n <= 105; n++ {
-		got, err := tx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		got, err := tx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.Empty(t, got, "HeaderNumber at block %d (> toBlock) must be deleted", n)
 	}
@@ -148,7 +148,7 @@ func TestUnwindDBPastBlock_PreservesHeadersForBlocksUpToTarget(t *testing.T) {
 	for n := uint64(0); n <= toBlock; n++ {
 		hk := make([]byte, 8+32)
 		binary.BigEndian.PutUint64(hk[:8], n)
-		copy(hk[8:], hashAt(n).Bytes())
+		copy(hk[8:], func() []byte { h := hashAt(n); return h[:] }())
 		got, err := tx.GetOne(kv.Headers, hk)
 		require.NoError(t, err)
 		require.NotEmpty(t, got,
@@ -216,13 +216,13 @@ func TestUnwindDBPastBlock_CoreTablesAreEmptyPastTarget(t *testing.T) {
 
 	// HeaderNumber orphans: hash-keyed, so verify directly via lookup.
 	for n := uint64(101); n <= 105; n++ {
-		got, err := tx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		got, err := tx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.Empty(t, got, "HeaderNumber at block %d must be empty after the wipe", n)
 	}
 
 	for n := uint64(0); n <= toBlock; n++ {
-		got, err := tx.GetOne(kv.HeaderNumber, hashAt(n).Bytes())
+		got, err := tx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "HeaderNumber at block %d (≤ toBlock) must survive", n)
 	}

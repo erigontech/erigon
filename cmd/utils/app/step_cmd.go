@@ -41,6 +41,10 @@ func stepRebase(cliCtx *cli.Context) error {
 		logger.Crit("Invalid step size", "new-step-size", newStepSize)
 		return fmt.Errorf("new step size must be greater than 0")
 	}
+	if currentStepSize == 0 {
+		logger.Crit("Invalid current step size", "current-step-size", currentStepSize)
+		return fmt.Errorf("current step size must be greater than 0")
+	}
 
 	if newStepSize == currentStepSize {
 		logger.Info("Step size is already at the desired value; exiting", "new-step-size", newStepSize)

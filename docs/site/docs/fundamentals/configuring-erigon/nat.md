@@ -74,12 +74,12 @@ Benefits:
 
 * enables inbound peer connections
 * improves transaction gossip freshness
-* leads to healthier txpool "pending" state
+* leads to healthier TxPool "pending" state
 * strongly recommended for validators
 
 Example:
 
-```
+```yaml
 nat: "extip:203.0.113.114"
 ```
 
@@ -110,7 +110,7 @@ If you are running Erigon with the embedded Caplin consensus layer, configure NA
 
 This flag sets the external address advertised in the **discv5 ENR** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
 
-| Value | Behaviour |
+| Value | Behavior |
 |-------|-----------|
 | `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
 | `extip:1.2.3.4` | Advertise a fixed public IP — recommended for VPS / datacenters |
@@ -121,7 +121,7 @@ This flag sets the external address advertised in the **discv5 ENR** and **libp2
 :::tip For validators running behind NAT or inside Docker
 Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your execution-layer peers and consensus-layer peers will see different (or no) reachable addresses.
 
-```
+```bash
 --nat extip:203.0.113.114 --caplin.nat extip:203.0.113.114
 ```
 :::

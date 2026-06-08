@@ -109,6 +109,18 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 	}
 }
 
+// elBackfillFinished reports whether the EL history backfill reached its floor:
+// the beacon slot, or for a snapshot gap the EL block number (compared to elBlock).
+func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64) bool {
+	if destinationSlot != math.MaxUint64 && slot <= destinationSlot {
+		return true
+	}
+	if destinationBlock != math.MaxUint64 && elBlock != 0 && elBlock <= destinationBlock {
+		return true
+	}
+	return false
+}
+
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
@@ -155,6 +167,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				"block_tip", tip, "source", "canonical-chain.toml")
 		}
 	}
+	// EL block-number floor for snapshot-gap backfill, kept separate from the
+	// beacon-slot destinationSlotForEL since the units must not be mixed.
+	destinationBlockForEL := uint64(math.MaxUint64)
 	// Set up onNewBlock callback
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
@@ -301,7 +316,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				isInElSnapshots = true
 			}
 			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
-				destinationSlotForEL = frozenBlocksInEL - 1
+				destinationBlockForEL = frozenBlocksInEL - 1
 			}
 		}
 
@@ -310,7 +325,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		return hasDownloadEnoughForImmediateBlobsBackfilling &&
 				(!cfg.caplinConfig.ArchiveBlocks || slot <= cfg.sn.SegmentsMax()) &&
-				((destinationSlotForEL != math.MaxUint64 && slot <= destinationSlotForEL) || isInElSnapshots),
+				(elBackfillFinished(slot, uint64(currEth1Progress.Load()), destinationSlotForEL, destinationBlockForEL) || isInElSnapshots),
 			tx.Commit()
 	})
 

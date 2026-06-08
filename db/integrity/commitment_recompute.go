@@ -128,7 +128,7 @@ func RecomputeCommitmentAtBlock(
 		commitmentAsOf = toTxNum
 	}
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */))
-	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
+	sd.GetCommitmentContext().SetDeferCommitmentUpdates(false)
 
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {

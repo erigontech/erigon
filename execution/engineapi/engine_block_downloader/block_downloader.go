@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
@@ -46,6 +47,11 @@ const (
 	Synced
 )
 
+type BadHeaderEntry struct {
+	LastValidAncestor common.Hash
+	ValidationErr     string
+}
+
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
 	backgroundCtx context.Context
@@ -57,7 +63,7 @@ type EngineBlockDownloader struct {
 	lock          sync.Mutex
 	logger        log.Logger
 	bbd           *p2p.BackwardBlockDownloader
-	badHeaders    *lru.Cache[common.Hash, common.Hash]
+	badHeaders    *lru.Cache[common.Hash, BadHeaderEntry]
 }
 
 func NewEngineBlockDownloader(
@@ -72,7 +78,7 @@ func NewEngineBlockDownloader(
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
-	badHeaders, err := lru.New[common.Hash, common.Hash](10_000) // 640kb
+	badHeaders, err := lru.New[common.Hash, BadHeaderEntry](96)
 	if err != nil {
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
@@ -91,13 +97,16 @@ func NewEngineBlockDownloader(
 	}
 }
 
-func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
-	e.badHeaders.Add(badHeader, lastValidAncestor)
+func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash, validationErr string) {
+	e.badHeaders.Add(badHeader, BadHeaderEntry{LastValidAncestor: lastValidAncestor, ValidationErr: validationErr})
 }
 
-func (e *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash) {
-	lastValidAncestor, bad = e.badHeaders.Get(h)
-	return bad, lastValidAncestor
+func (e *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash, validationErr string) {
+	entry, ok := e.badHeaders.Get(h)
+	if !ok {
+		return false, common.Hash{}, ""
+	}
+	return true, entry.LastValidAncestor, entry.ValidationErr
 }
 
 func (e *EngineBlockDownloader) Status() Status {
@@ -127,12 +136,22 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 	err := e.processReq(ctx, req)
 	if err != nil {
 		args := append(req.LogArgs(), "err", err)
-		e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
+		if errors.Is(err, p2p.ErrChainLengthExceedsLimit) {
+			// Expected: gap is unbridgeable by a chain-length-limited download; the EL relies on FCU or staged sync.
+			e.logger.Info("[EngineBlockDownloader] backward download skipped — gap exceeds limit, awaiting FCU/staged sync", args...)
+		} else {
+			e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
+		}
 		e.status.Store(Idle)
 		return
 	}
 	e.logger.Info("[EngineBlockDownloader] backward download request successfully processed", req.LogArgs()...)
 	e.status.Store(Synced)
+}
+
+// newPayloadGapExceedsLimit reports whether the head-to-parent gap exceeds maxReorgDepth in either direction.
+func newPayloadGapExceedsLimit(currentHeadNum, missingBlockNum, maxReorgDepth uint64) bool {
+	return math.AbsoluteDifference(currentHeadNum, missingBlockNum) > maxReorgDepth
 }
 
 func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDownloadRequest) error {
@@ -149,7 +168,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 	if err != nil {
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
-	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
@@ -158,7 +177,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		e.ReportBadHeader(tip.Hash(), latestValidHash)
+		e.ReportBadHeader(tip.Hash(), latestValidHash, common.Deref(validationErr))
 		return errors.New("block segments downloaded are invalid")
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
@@ -166,7 +185,6 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 }
 
 func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
-	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
 	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
 	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
 	if req.Trigger == NewPayloadTrigger {
@@ -189,10 +207,20 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		currentHeader := e.chainRW.CurrentHeader(ctx)
 		isCatchUp := currentHeader != nil && req.ValidateChainTip != nil &&
 			req.ValidateChainTip.NumberU64() > currentHeader.Number.Uint64()
+		if currentHeader != nil {
+			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
+		}
 		if !isCatchUp {
 			opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
-			if currentHeader != nil {
-				opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
+			if currentHeader != nil && req.ValidateChainTip != nil &&
+				newPayloadGapExceedsLimit(currentHeader.Number.Uint64(), req.ValidateChainTip.NumberU64()-1, e.syncCfg.MaxReorgDepth) {
+				return fmt.Errorf(
+					"%w: currentHead=%d, parent=%d, limit=%d",
+					p2p.ErrChainLengthExceedsLimit,
+					currentHeader.Number.Uint64(),
+					req.ValidateChainTip.NumberU64()-1,
+					e.syncCfg.MaxReorgDepth,
+				)
 			}
 		} else {
 			e.logger.Info("[EngineBlockDownloader] catch-up download (no reorg-depth cap)",
@@ -204,6 +232,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	if req.Trigger == SegmentRecoveryTrigger {
 		opts = append(opts, p2p.WithChainLengthLimit(uint64(e.syncCfg.LoopBlockLimit)))
 	}
+	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
@@ -218,6 +247,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 
 	var blocks []*types.Block
 	var insertedBlocksWithoutExec int
+	var lastTip *types.Block
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
 		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
@@ -236,32 +266,45 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 			return err
 		}
 		insertedBlocksWithoutExec += len(blocks)
+		lastTip = blocks[len(blocks)-1]
 		if req.Trigger == FcuTrigger && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
-			tip := blocks[len(blocks)-1]
 			e.logger.Info(
 				"[EngineBlockDownloader] executing downloaded batch as it reached sync loop block limit",
-				"to", tip.NumberU64(),
-				"toHash", tip.Hash(),
+				"to", lastTip.NumberU64(),
+				"toHash", lastTip.Hash(),
 			)
-			err = e.execDownloadedBatch(ctx, tip, req.MissingHash)
+			err = e.execDownloadedBatch(ctx, lastTip, req.MissingHash)
 			if err != nil {
 				return err
 			}
 			insertedBlocksWithoutExec = 0
 		}
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if req.Trigger == FcuTrigger && insertedBlocksWithoutExec > 0 && lastTip != nil {
+		e.logger.Info(
+			"[EngineBlockDownloader] executing final downloaded batch",
+			"to", lastTip.NumberU64(),
+			"toHash", lastTip.Hash(),
+			"blocks", insertedBlocksWithoutExec,
+		)
+		return e.execDownloadedBatch(ctx, lastTip, req.MissingHash)
+	}
+	return nil
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
-	status, _, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
 	if err != nil {
 		return err
 	}
 	switch status {
 	case execmodule.ExecutionStatusBadBlock:
-		e.ReportBadHeader(block.Hash(), lastValidHash)
-		e.ReportBadHeader(requested, lastValidHash)
+		ve := common.Deref(validationErr)
+		e.ReportBadHeader(block.Hash(), lastValidHash, ve)
+		e.ReportBadHeader(requested, lastValidHash, ve)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
 	case execmodule.ExecutionStatusTooFarAway:
 		e.logger.Debug(

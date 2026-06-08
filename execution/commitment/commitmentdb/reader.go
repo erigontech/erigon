@@ -161,7 +161,18 @@ type SplitStateReader struct {
 	withHistory      bool
 }
 
-var _ StateReader = (*SplitStateReader)(nil)
+var _ StateReader = (*SplitStateReader)(nil) // compile-time type assertion
+
+// A history reader that reads:
+//   - commitment data as-of txnum commitmentAsOf
+//   - account/storage/code data as-of txnum dataAsOf
+func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, dataAsOf uint64, withHistory bool) *SplitStateReader {
+	return &SplitStateReader{
+		commitmentReader: NewHistoryStateReader(tx, commitmentAsOf),
+		plainStateReader: NewHistoryStateReader(tx, dataAsOf),
+		withHistory:      withHistory,
+	}
+}
 
 func (r *SplitStateReader) WithHistory() bool {
 	return r.withHistory
@@ -259,15 +270,4 @@ func (r *RebuildStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 
 func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewRebuildStateReader(tx, r.sd, r.plainStateAsOf)
-}
-
-// A history reader that reads:
-//   - commitment data as-of  commitmentAsOf txnum
-//   - account/storage/code data as-of plainsStateAsOf txnum
-func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64, withHistory bool) *SplitStateReader {
-	return &SplitStateReader{
-		commitmentReader: NewHistoryStateReader(tx, commitmentAsOf),
-		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
-		withHistory:      withHistory,
-	}
 }

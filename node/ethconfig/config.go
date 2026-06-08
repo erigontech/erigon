@@ -115,6 +115,7 @@ var Defaults = Config{
 	FcuBackgroundPrune:  true,
 	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
 	ExperimentalBAL:     false,
+	WarmupKzgCtxOnInit:  true,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -154,6 +155,10 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
+	// the preverified chain.toml with a direct HTTP GET to this URL. Local
+	// preverified.toml in the datadir still takes precedence.
+	ChainTomlURL string
 	// ManifestReady is closed when P2P manifest discovery completes.
 	// Set by the backend when P2PManifest is enabled. Nil otherwise.
 	ManifestReady <-chan struct{}
@@ -379,6 +384,12 @@ type Config struct {
 	// config3.UnboundedDomainMerge disables the cap; any other positive value is used
 	// directly as the cap in steps.
 	ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
+
+	// WarmupKzgCtxOnInit, when true, eagerly initialises the KZG trusted setup
+	// in the background on startup so the first block doesn't pay the ~2s init
+	// cost. Tests that don't need the trusted setup loaded leave this false
+	// to avoid the extra work.
+	WarmupKzgCtxOnInit bool
 }
 
 type Sync struct {

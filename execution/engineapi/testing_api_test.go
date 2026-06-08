@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"math/big"
 	"testing"
 	"time"
 
@@ -134,7 +133,7 @@ func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash comm
 	}
 	return nil, nil
 }
-func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*big.Int, error) {
+func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
@@ -151,7 +150,7 @@ func (s *stubExecutionModule) IsAdminUnwindInProgress() bool { return s.adminUnw
 // Prague, Osaka, Amsterdam) are activated at timestamp 0.
 func allForksChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
 		SpuriousDragonBlock:           common.NewUint64(0),
@@ -164,7 +163,7 @@ func allForksChainConfig() *chain.Config {
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
@@ -257,6 +256,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 		false, // proposing
 		true,  // consuming
 		nil,   // txPool
+		nil,   // blobGetter
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
@@ -925,6 +925,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			false,
 			true,
 			nil,
+			nil,
 			0,
 			0,
 		)
@@ -963,6 +964,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			false,
 			false,
 			true,
+			nil,
 			nil,
 			0,
 			0,
@@ -1125,6 +1127,7 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 		false,
 		true,
 		nil,
+		nil,
 		0,
 		0,
 	)
@@ -1170,6 +1173,7 @@ func TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing(t *testing.T) 
 		false,
 		false,
 		true,
+		nil,
 		nil,
 		0,
 		0,
@@ -1217,6 +1221,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 		false,
 		false,
 		true,
+		nil,
 		nil,
 		0,
 		0,

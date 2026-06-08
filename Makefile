@@ -189,7 +189,6 @@ COMMANDS += txpool
 COMMANDS += evm
 COMMANDS += caplin
 COMMANDS += snapshots
-COMMANDS += diag
 COMMANDS += mcp
 
 # build each command using %.cmd rule
@@ -257,17 +256,26 @@ test-fixtures-cl:
 test-fixtures-eest:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
 
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
+## test-fixtures-zkevm:                download & extract only the zkevm execution-witness tarball (eest_zkevm)
+.PHONY: test-fixtures-zkevm
+test-fixtures-zkevm:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm
+
+# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
 # against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.json (single source of truth shared with
+# tools/eest-spec-shards.yml (single source of truth shared with
 # .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
-# "-race-" dispatch through the race-instrumented evm.race binary so race
-# coverage works without polluting the non-race shards.
-EEST_SPEC_RACE_SHARDS := $(shell jq -r '.[].shard | select(test("-race-"))' tools/eest-spec-shards.json)
-EEST_SPEC_SHARDS      := $(shell jq -r '.[].shard | select(test("-race-") | not)' tools/eest-spec-shards.json)
+# "-race" dispatch through the race-instrumented evm.race binary so race
+# coverage works without polluting the non-race shards. zkevm-* shards provision
+# the eest_zkevm corpus (test-fixtures-zkevm); all others provision the
+# eest_{stable,devnet,benchmark} corpora (test-fixtures-eest).
+EEST_SPEC_RACE_SHARDS       := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race")) | select(test("^zkevm") | not)')
+EEST_SPEC_SHARDS            := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race") | not) | select(test("^zkevm") | not)')
+EEST_SPEC_ZKEVM_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race"))')
+EEST_SPEC_ZKEVM_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race") | not)')
 
-.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_RACE_SHARDS)) evm.race
 
 evm.race:
 	$(GO_BUILD_ENV) $(GO) build -race $(GO_FLAGS) -tags $(BUILD_TAGS) -o $(GOBIN)/evm.race ./cmd/evm
@@ -276,6 +284,12 @@ $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
 	@bash tools/run-eest-spec-test.sh "$*"
 
 $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
+	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
+
+$(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_SHARDS)): eest-spec-%: test-fixtures-zkevm evm
+	@bash tools/run-eest-spec-test.sh "$*"
+
+$(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_RACE_SHARDS)): eest-spec-%: test-fixtures-zkevm evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 
 ## test-bench:                         check the benchmarks compile and run
@@ -463,7 +477,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protoc-33.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.0/protoc-35.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"

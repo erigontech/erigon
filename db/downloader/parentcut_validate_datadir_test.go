@@ -17,7 +17,7 @@
 package downloader
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,7 +32,7 @@ func forkChainConfigForValidate(t *testing.T, cutBlock, mergeHeight uint64) *cha
 	mh := mergeHeight
 	return &chain.Config{
 		ChainName:   "mainnet-fork-20000000",
-		ChainID:     big.NewInt(1),
+		ChainID:     uint256.NewInt(1),
 		Parent:      "mainnet",
 		CutBlock:    cutBlock,
 		MergeHeight: &mh,
@@ -42,7 +42,7 @@ func forkChainConfigForValidate(t *testing.T, cutBlock, mergeHeight uint64) *cha
 func TestValidateForkDatadir_RootChainConfigIsNoOp(t *testing.T) {
 	cfg := &chain.Config{
 		ChainName: "mainnet",
-		ChainID:   big.NewInt(1),
+		ChainID:   uint256.NewInt(1),
 		// Parent == "" → not a fork; no validation required.
 	}
 	require.NoError(t, ValidateForkDatadir(cfg, t.TempDir()))

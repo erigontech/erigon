@@ -653,7 +653,7 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode)
+		state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified)
 	}
 }
 

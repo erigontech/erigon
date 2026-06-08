@@ -599,7 +599,6 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageM
 			MaxPendingPeers: 5,
 			NoDiscovery:     true,
 			ListenAddr:      "127.0.0.1:0",
-			AllowedPorts:    []uint{0}, // ephemeral
 			ProtocolVersion: []uint{direct.ETH68},
 			NodeDatabase:    t.TempDir(),
 			DiscoveryV4:     false,
