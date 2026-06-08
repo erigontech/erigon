@@ -164,12 +164,12 @@ Key decisions / rationale:
   `concurrentStorageRoot`/`dfsSubtreeDeep`.
 - Create: `execution/commitment/streaming_storage_cache_test.go`
 
-- [ ] define `accountStorageCache{prefix, children [16]cell, present uint16, perNibble [16]struct{dirty bool; keyCount,lastFoldedSize uint64}, mu}`
-- [ ] streaming-local per-nibble fold (production copy of `foldChildAt`) + assembler (production copy of `assembleAccountFromChildren`) — `parallel_mount.go` unchanged
-- [ ] `foldStorageRootCached(cache, accNib, groups)`: re-fold only dirty nibbles, reuse cached clean cells, aggregate → storageRoot cell; clear dirty + set lastFoldedSize
-- [ ] write parity test: cached re-fold (after dirtying one nibble + adding slots) account root **== the sequential `HexPatriciaHashed.Process` account root** (not the promoted test helpers — use the real engine as oracle, like `TestDeepConcurrent_WhaleParity`)
-- [ ] write fold-count test: only dirty nibbles' per-nibble fold runs (instrument a counter)
-- [ ] run tests — must pass before next task
+- [x] define `accountStorageCache{prefix, children [16]cell, present uint16, perNibble [16]struct{dirty bool; keyCount,lastFoldedSize uint64}, mu}`
+- [x] streaming-local per-nibble fold (production copy of `foldChildAt`) + assembler (production copy of `assembleAccountFromChildren`) — `parallel_mount.go` unchanged
+- [x] `foldStorageRootCached(cache, accNib, groups)`: re-fold only dirty nibbles, reuse cached clean cells, aggregate → storageRoot cell; clear dirty + set lastFoldedSize
+- [x] write parity test: cached re-fold (after dirtying one nibble + adding slots) account root **== the sequential `HexPatriciaHashed.Process` account root** (not the promoted test helpers — use the real engine as oracle, like `TestDeepConcurrent_WhaleParity`)
+- [x] write fold-count test: only dirty nibbles' per-nibble fold runs (instrument a counter)
+- [x] run tests — must pass before next task
 
 ### Task 2: Extract a streaming-local deep walk (cache-FREE) — isolate from the parallel path
 
