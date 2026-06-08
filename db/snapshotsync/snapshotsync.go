@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"strconv"
 	"strings"
 	"time"
@@ -378,7 +379,14 @@ func blocksToStepDistance(olderBlocks, maxStateStep, maxBlock uint64) uint64 {
 	if olderBlocks == 0 || maxStateStep == 0 || maxBlock == 0 {
 		return 0
 	}
-	return olderBlocks * maxStateStep / maxBlock
+	hi, lo := bits.Mul64(olderBlocks, maxStateStep)
+	if hi != 0 {
+		// Overflow: the window already spans the whole chain, so return the
+		// full range and let commitmentHistoryMinStep disable filtering rather
+		// than wrapping to a bogus (smaller) distance.
+		return maxStateStep
+	}
+	return lo / maxBlock
 }
 
 // shouldSkipCommitmentHistorySegment reports whether the given preverified file

@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -260,6 +261,10 @@ func TestBlocksToStepDistance(t *testing.T) {
 		{"young-chain-blocks-exceed-maxBlock", 100_000, 5, 50_000, 10},
 		// 50k * 100 / 1M = 5 steps
 		{"half-window", 50_000, 100, 1_000_000, 5},
+		// olderBlocks*maxStateStep overflows uint64; rather than silently
+		// wrapping to a small (wrong) distance, return >= maxStateStep so
+		// commitmentHistoryMinStep disables filtering.
+		{"overflow-disables-filter", 2, math.MaxUint64, 3, math.MaxUint64},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
