@@ -111,6 +111,17 @@ type StreamingCommitter struct {
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
 
+	// rootCell + flags snapshot the base trie's terminal root after a successful
+	// fold so the owning ParallelPatriciaHashed can promote them into its
+	// persistence template (RootTrie) for EncodeCurrentState/SetState. rootValid
+	// gates promotion: it is cleared each Process and set only on the folded
+	// path, so the no-touch path leaves the template's prior root untouched.
+	rootCell    cell
+	rootChecked bool
+	rootTouched bool
+	rootPresent bool
+	rootValid   bool
+
 	trace bool
 }
 
@@ -220,6 +231,7 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	}
 
 	sc.Stop()
+	sc.rootValid = false
 
 	base, cleanup, root, err := sc.processBase(ctx)
 	if err != nil {
@@ -273,7 +285,34 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	} else if err := sc.applyDeferred(deferred); err != nil {
 		return nil, err
 	}
+	sc.captureRoot(base)
 	return base.RootHash()
+}
+
+// captureRoot snapshots the base trie's terminal root cell and flags (by value,
+// so the snapshot survives the base being released) for promotion into the
+// owning ParallelPatriciaHashed's persistence template.
+func (sc *StreamingCommitter) captureRoot(base *HexPatriciaHashed) {
+	sc.rootCell = base.root
+	sc.rootChecked = base.rootChecked
+	sc.rootTouched = base.rootTouched
+	sc.rootPresent = base.rootPresent
+	sc.rootValid = true
+}
+
+// PromoteRootInto copies the most recently folded root cell and flags into tmpl
+// so RootTrie().EncodeCurrentState serializes a root SetState can restore. It
+// reports whether a fold result was promoted; the no-touch path returns false
+// and leaves the template's prior root in place.
+func (sc *StreamingCommitter) PromoteRootInto(tmpl *HexPatriciaHashed) bool {
+	if !sc.rootValid || tmpl == nil {
+		return false
+	}
+	tmpl.root = sc.rootCell
+	tmpl.rootChecked = sc.rootChecked
+	tmpl.rootTouched = sc.rootTouched
+	tmpl.rootPresent = sc.rootPresent
+	return true
 }
 
 // newProcessBase builds the per-Process base trie: a fresh deferring

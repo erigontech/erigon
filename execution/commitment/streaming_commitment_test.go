@@ -837,3 +837,67 @@ func TestStreaming_MultiBlockResetWithScheduler(t *testing.T) {
 	require.Equal(t, seqRoot2, root2, "block-2 streaming root after reset != sequential")
 	requireBranchParity(t, seqMs, ms)
 }
+
+// TestStreamingCommitterStateRoundTrip drives the streaming variant through the
+// public Trie.Process path, encodes the resulting trie state via the persistence
+// template, restores it into a fresh streaming instance, and asserts the
+// restored RootHash matches the originally published value. This is the
+// commitmentdb persistence path (encodeCommitmentState -> restorePatriciaState)
+// taken on a process restart; without promoting the committer's folded root into
+// the template, EncodeCurrentState would serialize a stale/empty root.
+func TestStreamingCommitterStateRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 42).
+		Balance("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", 7).
+		Balance("ffeeddccbbaa00112233445566778899aabbccdd", 99).
+		Build()
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantStreamingHexPatricia
+	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	defer ut.Close()
+	defer trie.Release()
+
+	pt := trie.(*ParallelPatriciaHashed)
+	pt.SetNumWorkers(1)
+	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
+	pt.ResetContext(ms)
+
+	for _, key := range plainKeys {
+		ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
+	}
+	published, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, published)
+
+	// The template's root flags must mirror the committer's terminal state; they
+	// are serialized below and any drift surfaces as a restore-then-continue bug.
+	tmpl := pt.RootTrie()
+	require.True(t, tmpl.rootChecked, "streaming template.rootChecked must be promoted from the committer")
+	require.True(t, tmpl.rootTouched, "streaming template.rootTouched must be promoted from the committer")
+	require.True(t, tmpl.rootPresent, "streaming template.rootPresent must be promoted from the committer")
+
+	encoded, err := tmpl.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, encoded, "EncodeCurrentState must capture template state mirrored from the committer")
+
+	// Restore into a fresh streaming instance, simulating a process restart.
+	trie2, ut2 := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	defer ut2.Close()
+	defer trie2.Release()
+	pt2 := trie2.(*ParallelPatriciaHashed)
+	pt2.SetTrieContextFactory(mockTrieCtxFactory(ms))
+	pt2.ResetContext(ms)
+	require.NoError(t, pt2.RootTrie().SetState(encoded))
+
+	restored, err := pt2.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, published, restored,
+		"RootHash after SetState must reproduce the published streaming root")
+}

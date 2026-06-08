@@ -306,6 +306,10 @@ func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, 
 	if p.leaveDeferredForCaller {
 		p.deferredForCaller = p.streaming.TakeDeferredUpdates()
 	}
+	// Promote the committer's terminal root into the persistence template so
+	// RootTrie().EncodeCurrentState serializes a root SetState can restore;
+	// mirrors the pendingRoot promotion in Process for the parallel path.
+	p.streaming.PromoteRootInto(p.template)
 	out := make([]byte, len(rh))
 	copy(out, rh)
 	p.rootHash.Store(&out)
