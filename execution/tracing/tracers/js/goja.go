@@ -148,10 +148,10 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 		ctx = new(tracers.Context)
 	}
 	if ctx.BlockHash != (common.Hash{}) {
-		t.ctx["blockHash"] = vm.ToValue(ctx.BlockHash.Bytes())
+		t.ctx["blockHash"] = vm.ToValue(ctx.BlockHash[:])
 		if ctx.TxHash != (common.Hash{}) {
 			t.ctx["txIndex"] = vm.ToValue(ctx.TxIndex)
-			t.ctx["txHash"] = vm.ToValue(ctx.TxHash.Bytes())
+			t.ctx["txHash"] = vm.ToValue(ctx.TxHash[:])
 		}
 	}
 
@@ -449,7 +449,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		b = common.BytesToHash(b).Bytes()
+		word := common.BytesToHash(b)
+		b = word[:]
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -463,7 +464,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		a = common.BytesToAddress(a).Bytes()
+		addr := common.BytesToAddress(a)
+		a = addr[:]
 		res, err := t.toBuf(vm, a)
 		if err != nil {
 			vm.Interrupt(err)
@@ -478,7 +480,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		addr := common.BytesToAddress(a)
-		b := types.CreateAddress(addr, uint64(nonce)).Bytes()
+		contractAddr := types.CreateAddress(addr, uint64(nonce))
+		b := contractAddr[:]
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -500,7 +503,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		code = common.Copy(code)
 		codeHash := accounts.InternCodeHash(crypto.HashData(code))
-		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
+		contractAddr := types.CreateAddress2(addr, common.HexToHash(salt), codeHash)
+		b := contractAddr[:]
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)

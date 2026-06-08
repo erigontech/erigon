@@ -41,7 +41,7 @@ type ProposerPreferences struct {
 	ProposalSlot   uint64         `json:"proposal_slot,string"`
 	ValidatorIndex uint64         `json:"validator_index,string"`
 	FeeRecipient   common.Address `json:"fee_recipient"`
-	GasLimit       uint64         `json:"gas_limit,string"`
+	TargetGasLimit uint64         `json:"target_gas_limit,string"`
 }
 
 func (p *ProposerPreferences) HashSSZ() ([32]byte, error) {
@@ -50,7 +50,7 @@ func (p *ProposerPreferences) HashSSZ() ([32]byte, error) {
 		p.ProposalSlot,
 		p.ValidatorIndex,
 		p.FeeRecipient[:],
-		p.GasLimit,
+		p.TargetGasLimit,
 	)
 }
 
@@ -63,11 +63,11 @@ func (p *ProposerPreferences) Static() bool {
 }
 
 func (p *ProposerPreferences) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.DependentRoot[:], p.ProposalSlot, p.ValidatorIndex, p.FeeRecipient[:], p.GasLimit)
+	return ssz2.MarshalSSZ(buf, p.DependentRoot[:], p.ProposalSlot, p.ValidatorIndex, p.FeeRecipient[:], p.TargetGasLimit)
 }
 
 func (p *ProposerPreferences) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, p.DependentRoot[:], &p.ProposalSlot, &p.ValidatorIndex, p.FeeRecipient[:], &p.GasLimit)
+	return ssz2.UnmarshalSSZ(buf, version, p.DependentRoot[:], &p.ProposalSlot, &p.ValidatorIndex, p.FeeRecipient[:], &p.TargetGasLimit)
 }
 
 func (p *ProposerPreferences) Clone() clonable.Clonable {
@@ -76,7 +76,7 @@ func (p *ProposerPreferences) Clone() clonable.Clonable {
 		ProposalSlot:   p.ProposalSlot,
 		ValidatorIndex: p.ValidatorIndex,
 		FeeRecipient:   p.FeeRecipient,
-		GasLimit:       p.GasLimit,
+		TargetGasLimit: p.TargetGasLimit,
 	}
 }
 

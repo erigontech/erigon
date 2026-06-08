@@ -16,7 +16,6 @@
 */**/*dapps*
 build/_vendor/pkg
 /*.a
-docs/readthedocs/build
 /.VSCodeCounter
 #*
 .#*
@@ -138,3 +137,4 @@ agentspecs/
 .gomodcache
 _artifacts
 gocache
+.claude/scheduled_tasks.lock

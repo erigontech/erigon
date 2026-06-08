@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -62,7 +63,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
@@ -222,11 +223,6 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 	if err != nil {
 		return err
 	}
-	// Reuse the cached tester for the (fork, preAllocHash) group but reset the
-	// aggregator-scope branchCache so commitment-trie entries from the prior
-	// test don't leak into this test's genesis→block-1 boundary. Cheaper than
-	// evicting the whole tester (which would rebuild the genesis + node).
-	tester.ResetBranchCache()
 	return extr.execute(ctx, tester, test)
 }
 
@@ -301,7 +297,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
-	err := copier.Copy(&forkConfigCopy, forkConfig)
+	err := copier.CopyWithOption(&forkConfigCopy, forkConfig, copier.Option{DeepCopy: true})
 	if err != nil {
 		return testerEntry{}, err
 	}

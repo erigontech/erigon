@@ -311,12 +311,11 @@ func TestLvlFilterHandler(t *testing.T) {
 }
 
 func TestNetHandler(t *testing.T) {
-	t.Skip()
 	t.Parallel()
 
 	l, err := net.Listen("tcp", "localhost:0") //nolint:noctx
 	if err != nil {
-		t.Fatalf("Failed to listen: %v", l)
+		t.Fatalf("Failed to listen: %v", err)
 	}
 
 	errs := make(chan error)
@@ -551,7 +550,6 @@ func TestCallerFuncHandler(t *testing.T) {
 
 // https://github.com/inconshreveable/log15/issues/27
 func TestCallerStackHandler(t *testing.T) {
-	t.Skip("fix me")
 	t.Parallel()
 
 	l := New()

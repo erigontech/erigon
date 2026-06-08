@@ -29,6 +29,8 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
@@ -40,6 +42,7 @@ var _ txnprovider.TxnProvider = (*Pool)(nil)
 type Pool struct {
 	logger                  log.Logger
 	config                  shuttercfg.Config
+	chainConfig             *chain.Config
 	baseTxnProvider         txnprovider.TxnProvider
 	blockListener           *BlockListener
 	blockTracker            *BlockTracker
@@ -55,6 +58,7 @@ type Pool struct {
 func NewPool(
 	logger log.Logger,
 	config shuttercfg.Config,
+	chainConfig *chain.Config,
 	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
@@ -100,6 +104,7 @@ func NewPool(
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
+		chainConfig:             chainConfig,
 		blockListener:           blockListener,
 		blockTracker:            blockTracker,
 		eonTracker:              eonTracker,
@@ -280,12 +285,9 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
-	// TODO(yperbasis): revisit Shutter gas filtering for EIP-8037.
-	// The shutter pool lacks chain config to compute intrinsic state gas,
-	// so txn.GetGasLimit() is used as a conservative proxy for both
-	// dimensions. State gas enforcement ultimately relies on best() in
-	// the base txpool (for additional public txns) and applyTransaction
-	// (for all txns).
+	isAmsterdam := p.chainConfig.IsAmsterdam(blockTime)
+	isEIP3860 := p.chainConfig.IsShanghai(blockTime)
+	isEIP7623 := p.chainConfig.IsPrague(blockTime)
 	availableGas := provideOpts.GasTarget
 	txnsIdFilter := provideOpts.TxnIdsFilter
 	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
@@ -294,15 +296,77 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
-		gasLimit := txn.GetGasLimit()
-		blobGas := txn.GetBlobGas()
-		if gasLimit > availableGas.Regular || gasLimit > availableGas.State || blobGas > availableGas.Blob {
+		accessList := txn.GetAccessList()
+		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+			Data:               txn.GetData(),
+			AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
+			AccessListLen:      uint64(len(accessList)),
+			StorageKeysLen:     uint64(accessList.StorageKeys()),
+			IsContractCreation: txn.IsContractDeploy(),
+			IsEIP2:             true,
+			IsEIP2028:          true,
+			IsEIP3860:          isEIP3860,
+			IsEIP7623:          isEIP7623,
+			IsEIP7976:          isAmsterdam,
+			IsEIP7981:          isAmsterdam,
+			IsEIP8037:          isAmsterdam,
+			IsAATxn:            txn.Type() == types.AccountAbstractionTxType,
+		})
+		if overflow {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn with intrinsic gas overflow",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+			)
 			continue
 		}
-		availableGas.Regular -= gasLimit
-		availableGas.State -= gasLimit
+		intrinsicRegularGas := intrinsicGasResult.RegularGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicRegularGas {
+			intrinsicRegularGas = intrinsicGasResult.FloorGasCost
+		}
+		blobGas := txn.GetBlobGas()
+		if intrinsicRegularGas > availableGas.Regular {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient regular gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"intrinsicRegularGas", intrinsicRegularGas,
+				"availableRegular", availableGas.Regular,
+			)
+			continue
+		}
+		if intrinsicGasResult.StateGas > availableGas.State {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient state gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"intrinsicStateGas", intrinsicGasResult.StateGas,
+				"availableState", availableGas.State,
+			)
+			continue
+		}
+		if blobGas > availableGas.Blob {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient blob gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"blobGas", blobGas,
+				"availableBlob", availableGas.Blob,
+			)
+			continue
+		}
+		availableGas.Regular -= intrinsicRegularGas
+		availableGas.State -= intrinsicGasResult.StateGas
 		availableGas.Blob -= blobGas
-		decryptedTxnsGas += gasLimit
+		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {
 			txnsIdFilter.Add(txn.Hash())

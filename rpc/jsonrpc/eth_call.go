@@ -460,12 +460,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}
 	sdCtx := domains.GetCommitmentContext()
-	sdCtx.SetDeferBranchUpdates(false)
 
 	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
@@ -494,7 +493,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// touch account
-	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
+	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
 	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof")
@@ -516,14 +515,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// get account proof
-	accountProof, err := proofTrie.Prove(crypto.Keccak256(address.Bytes()), 0, false)
+	accountProof, err := proofTrie.Prove(crypto.Keccak256(address[:]), 0, false)
 	if err != nil {
 		return nil, err
 	}
 	proof.AccountProof = *(*[]hexutil.Bytes)(unsafe.Pointer(&accountProof))
 
 	// get account data from the trie
-	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address.Bytes()))
+	acc, _ := proofTrie.GetAccount(crypto.Keccak256(address[:]))
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
@@ -545,7 +544,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
+	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.Hash.String()[2:])), nil)
@@ -575,15 +574,15 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 		proof.StorageProof[i].Key = getKey(storageKey)
 		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
+		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		addrHash := crypto.HashData(address.Bytes())
-		keyHash := crypto.HashData(storageKey.Hash.Bytes())
+		addrHash := crypto.HashData(address[:])
+		keyHash := crypto.HashData(storageKey.Hash[:])
 		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, addrHash[:]...)
 		fullKey = append(fullKey, keyHash[:]...)
@@ -711,7 +710,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer txBatch2.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New(), execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}
@@ -798,8 +797,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
-		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
+	blockRoot := block.Root()
+	if !bytes.Equal(newStateRoot[:], blockRoot[:]) {
+		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot[:], blockRoot[:])
 	}
 	witnessBufBytes := witnessBuffer.Bytes()
 	witnessBufBytesCopy := common.Copy(witnessBufBytes)

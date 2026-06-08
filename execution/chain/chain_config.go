@@ -40,7 +40,9 @@ import (
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
 //
-// Config must be copied only with jinzhu/copier since it contains a sync.Once.
+// Config must be copied only with jinzhu/copier (it contains a sync.Once), and
+// only via copier.CopyWithOption(..., DeepCopy: true) — a shallow copy leaves
+// pointer/map fields (ChainID, *Time, BlobSchedule, etc.) shared with the source.
 type Config struct {
 	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection

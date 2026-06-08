@@ -244,14 +244,32 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 					h := common.Hash(root)
 					result.Root = &h
 					if emitStateRoot {
-						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h.Bytes()); printErr != nil {
+						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
 							log.Warn("Failed to write to stderr", "err", printErr)
 						}
 					}
 				}
 				if bench {
+					// Run the benchmark on a fresh tx + SD so the timed work
+					// starts from the same pre-state every iteration; the
+					// preceding test.Run mutated sd in place (pre-state +
+					// tx execution + commitment), which would otherwise
+					// skew the gas/throughput numbers.
+					benchTx, err := db.BeginTemporalRw(context.Background())
+					if err != nil {
+						result.Pass, result.Error = false, err.Error()
+						return
+					}
+					defer benchTx.Rollback()
+					benchSD, err := execctx.NewSharedDomains(context.Background(), benchTx, log.New())
+					if err != nil {
+						result.Pass, result.Error = false, err.Error()
+						return
+					}
+					defer benchSD.Close()
+
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
+						_, _, gasUsed, _ := test.RunNoVerify(nil, benchSD, benchTx, st, cfg, dirs)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats

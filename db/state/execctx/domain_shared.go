@@ -182,18 +182,27 @@ type SharedDomains struct {
 	adaptivePinController *commitment.AdaptivePinController
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
-	tv := commitment.VariantHexPatriciaTrie
+// PickTrieVariant returns the commitment trie variant selected by the
+// process-wide statecfg.ExperimentalConcurrentCommitment flag. Callers that
+// build a commitment.TrieConfig inline (e.g. short-lived RPC/builder/integrity
+// SharedDomains) should use this so the flag is honored consistently across
+// entry points instead of leaving Variant unset and relying on an implicit
+// fallback inside the trie constructor.
+func PickTrieVariant() commitment.TrieVariant {
 	if statecfg.ExperimentalConcurrentCommitment {
-		tv = commitment.VariantConcurrentHexPatricia
+		return commitment.VariantConcurrentHexPatricia
 	}
-	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)
+	return commitment.VariantHexPatriciaTrie
 }
 
-// NewSharedDomainsWithTrieVariant is like NewSharedDomains but accepts an
-// explicit trie variant instead of reading the global statecfg flag. Use this
-// when the caller needs a specific variant without mutating process-wide state.
-func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logger log.Logger, tv commitment.TrieVariant) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
+	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
+	o.trieCfg.Variant = PickTrieVariant()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	trieCfg := o.trieCfg
+
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -202,7 +211,6 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-
 	// Fetch the aggregator-scope branch cache (lives on the commitment
 	// Domain, shared across all SharedDomains derived from this
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
@@ -213,7 +221,7 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 		branchCache = p.BranchCache()
 	}
 	sd.branchCache = branchCache
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg, branchCache)
 
 	// Construct the adaptive pin controller alongside the cache. The
 	// controller observes per-contract miss pressure and decides
@@ -1036,6 +1044,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
+	// MeteredGetterWithTxN exposes the txN of the read so the
+	// BranchCache entry can be tagged; falls back to MeteredGetter
+	// when only the legacy interface is implemented (test stubs).
+	type MeteredGetterWithTxN interface {
+		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
+	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
@@ -1579,36 +1593,25 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sd.sdCtx.EnableParaTrieDB(db)
 
-	// Stage-init is the right firing point for both the env-driven
-	// forced preload AND the adaptive controller's bind:
-	//  (a) we have a kv.TemporalRoDB to spawn an own-tx preload goroutine
-	//      with — avoids the cgo-pointer panic that the earlier shared-tx
-	//      attempt produced.
-	//  (b) we run from the stage-init path, not an engine request handler,
-	//      so we don't block engine HTTP responses during the 3-4s preload
-	//      window — the synchronous-from-NewSharedDomains shape caused the
-	//      bench's first NewPayload to be dropped, breaking block validation.
-	// TryClaimPreload guards fire-once-per-BranchCache-lifetime.
-	if sd.branchCache == nil || !sd.branchCache.TryClaimPreload() {
+	if sd.branchCache == nil {
 		return
 	}
 
-	// Operator-override path: PIN_CONTRACT_TRUNKS forces specific
-	// contracts to be pinned regardless of adaptive policy. Runs
-	// first so its pin set is in place before the controller binds.
-	if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
-		triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
+	// PIN_CONTRACT_TRUNKS preload is fire-once-per-BranchCache-lifetime:
+	// the cache is aggregator-scope and the preload's IO cost is paid up
+	// front; subsequent SDs reuse the already-populated pins.
+	if sd.branchCache.TryClaimPreload() {
+		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
+			triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
+		}
 	}
 
-	// Bind the adaptive controller to the cache so it starts
-	// observing miss pressure for un-forced contracts. The reader
-	// for promote/extend preloads is constructed per-call from the
-	// in-flight Flush tx (see SD.Flush).
+	// Bind the adaptive controller on every SD: the controller is
+	// per-SD and Bind installs the cache's onMiss callback. Without
+	// this, SDs created after the first have inert controllers and
+	// the cache's onMiss may point at a closed predecessor.
 	if sd.adaptivePinController != nil {
 		sd.adaptivePinController.Bind()
-		sd.logger.Info("[adaptive-pin] enabled",
-			"max_promoted", commitment.DefaultAdaptivePinControllerConfig().MaxPromotedContracts,
-			"per_contract_max_mb", commitment.DefaultAdaptivePinControllerConfig().PerContractMaxBudgetBytes/(1<<20))
 	}
 }
 

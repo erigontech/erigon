@@ -1261,6 +1261,13 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	for segtype, delSegments := range toClose {
 		dirtyFiles := s.dirty[segtype]
 		for _, delSeg := range delSegments {
+			if delSeg.refcount.Load() > 0 {
+				// A live reader (View/RoTx) still holds this segment. Closing it
+				// now would nil its decompressor out from under that reader and
+				// turn the reader's later closeAndRemoveFiles into a crash. Leave
+				// it; it is reaped on a later pass once the reader releases it.
+				continue
+			}
 			delSeg.close()
 			dirtyFiles.Delete(delSeg)
 		}
