@@ -730,3 +730,110 @@ func TestStreaming_PublicProcessParity(t *testing.T) {
 		requireBranchParity(t, seqMs, ms)
 	}
 }
+
+// requireResetClean asserts Reset wiped every per-block field so the committer
+// can be reused with no carry-over.
+func requireResetClean(t *testing.T, sc *StreamingCommitter) {
+	t.Helper()
+	require.Empty(t, sc.splits, "Reset left stale split state")
+	require.Nil(t, sc.deferredForCaller, "Reset left staged deferred updates")
+	require.Nil(t, sc.base, "Reset left the scheduler base alive")
+	require.False(t, sc.started.Load(), "Reset left the scheduler running")
+	require.NotNil(t, sc.trie, "Reset must keep a usable prefix trie")
+	require.Zero(t, sc.trie.root.subtreeCount, "Reset left prefix-trie entries")
+}
+
+// TestStreaming_NewSplitMidBlock is the scheduler-specific new-split case: with
+// the background pool running, all keys in the lower top-nibble half are touched
+// and their folds drained first, then keys in the upper half create brand-new
+// top-nibble splits that did not exist when the earlier ones folded. Each new
+// split is its own per-nibble state, independent of any in-flight fold, so the
+// drained Process root + branches match sequential.
+func TestStreaming_NewSplitMidBlock(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(91, 4000)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	var early, late []int
+	for i, k := range keys {
+		if KeyToHexNibbleHash(k)[0] < 8 {
+			early = append(early, i)
+		} else {
+			late = append(late, i)
+		}
+	}
+	require.NotEmpty(t, early, "corpus must populate the lower top-nibble half")
+	require.NotEmpty(t, late, "corpus must populate the upper top-nibble half")
+
+	for _, w := range []int{1, 4, 8} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc.SetNumWorkers(w)
+		require.NoError(t, sc.StartScheduler(context.Background()))
+
+		for _, i := range early {
+			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+		}
+		waitSplitsClean(t, sc)
+		require.Positive(t, foldedSplitCount(sc), "early splits must fold before the late ones appear")
+		earlyFolded := foldedSplitCount(sc)
+
+		for _, i := range late {
+			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+		}
+		waitSplitsClean(t, sc)
+		require.Greater(t, foldedSplitCount(sc), earlyFolded, "late touches must create and fold new splits")
+
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equalf(t, seqRoot, root, "new-split-mid-block(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+		sc.Release()
+	}
+}
+
+// TestStreaming_MultiBlockResetWithScheduler reuses one committer across two
+// blocks with Reset between, the scheduler running each block. Block 1 commits a
+// from-scratch corpus; Reset must wipe all per-block state; block 2 (a
+// delete/collapse batch over block 1's DB branches) must match the sequential
+// incremental root and branches — proving Reset leaves no stale split state.
+func TestStreaming_MultiBlockResetWithScheduler(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	k1, u1 := genRandomAccountsStorage(400)
+	k2, u2 := sparseBatch2(k1, 3, true)
+
+	seqRoot1, _ := sequentialRoot(t, k1, u1)
+	seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	require.NoError(t, sc.StartScheduler(ctx))
+	for _, k := range k1 {
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+	root1, err := sc.Process(ctx)
+	require.NoError(t, err)
+	require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
+
+	sc.Reset()
+	requireResetClean(t, sc)
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	require.NoError(t, sc.StartScheduler(ctx))
+	for _, k := range k2 {
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+	root2, err := sc.Process(ctx)
+	require.NoError(t, err)
+	require.Equal(t, seqRoot2, root2, "block-2 streaming root after reset != sequential")
+	requireBranchParity(t, seqMs, ms)
+}

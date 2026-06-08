@@ -319,11 +319,11 @@ if the flag turns out to fork behavior in more than one switch.
 - Modify: `execution/commitment/streaming_commitment.go`
 - Modify: `execution/commitment/streaming_commitment_test.go`
 
-- [ ] handle a touch that creates a split point that didn't exist mid-stream (new top-nibble/subtree); this is the genuinely scheduler-specific case (a fold may already be in flight when the split set changes)
-- [ ] verify `Reset()` between blocks leaves no stale split state/branches
-- [ ] write test: corpus where new splits appear after earlier ones folded (with the Task-4 scheduler running) → parity
-- [ ] multi-block end-to-end + deletes are **inherited from the Task-1 `streaming` arm** matrix (`*Incremental`, `*StorageIncrementalDeletes`); confirm they pass with the scheduler enabled — no bespoke copies
-- [ ] run tests (`-race`) — must pass before next task
+- [x] handle a touch that creates a split point that didn't exist mid-stream (new top-nibble/subtree); this is the genuinely scheduler-specific case (a fold may already be in flight when the split set changes) — no code change needed: the design is per-top-nibble isolated. `TouchKey` creates a fresh `splitState` for an unseen nibble under `trieMu.Lock` (the prefix-trie root always branches per top nibble; `root.ext` stays empty), and `foldPresentSplits` reads the current `root.bitmap` at Process time, so new splits are picked up. A new nibble's split is independent of any in-flight fold of a different nibble. Verified by `TestStreaming_NewSplitMidBlock` (lower-half nibbles drained, then upper-half nibbles create new splits; asserts new splits actually fold + parity)
+- [x] verify `Reset()` between blocks leaves no stale split state/branches — `requireResetClean` asserts splits/deferredForCaller/base cleared, scheduler stopped, prefix-trie root empty after Reset; covered by `TestStreaming_MultiBlockResetWithScheduler`
+- [x] write test: corpus where new splits appear after earlier ones folded (with the Task-4 scheduler running) → parity — `TestStreaming_NewSplitMidBlock` (workers 1/4/8)
+- [x] multi-block end-to-end + deletes are **inherited from the Task-1 `streaming` arm** matrix (`*Incremental`, `*StorageIncrementalDeletes`); confirm they pass with the scheduler enabled — no bespoke copies — added `modeStreamingScheduled` arm to `runIncremental`/`requireIncrementalEquiv`, so every `TestVerifyParallel_*Incremental` + `TestVerifyParallel_StorageIncrementalDeletes` now exercises the scheduler over incremental + delete/collapse batches for free; plus `TestStreaming_MultiBlockResetWithScheduler` reuses one committer across a block boundary with Reset
+- [x] run tests (`-race`) — pass (`-race -count=10` on the two new tests; full `TestStreaming|TestVerifyParallel` suite `-race` green); `make lint` clean
 
 ### Task 9: Measurement — simulated-execution overlap + re-fold metric
 

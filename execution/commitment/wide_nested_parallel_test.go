@@ -190,6 +190,7 @@ const (
 	modeSeq runMode = iota
 	modeParallel
 	modeStreaming
+	modeStreamingScheduled
 )
 
 // runIncremental applies two batches to one MockState (batch-1 branches become
@@ -233,6 +234,17 @@ func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []U
 			r, err := sc.Process(ctx)
 			require.NoError(t, err)
 			return r
+		case modeStreamingScheduled:
+			sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			defer sc.Release()
+			sc.SetNumWorkers(workers)
+			require.NoError(t, sc.StartScheduler(ctx))
+			for _, k := range keys {
+				sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+			}
+			r, err := sc.Process(ctx)
+			require.NoError(t, err)
+			return r
 		default:
 			tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 			defer tr.Release()
@@ -265,6 +277,12 @@ func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 		branchDiff(t, seqMs, strMs)
 	}
 	require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) vs sequential root mismatch", workers)
+
+	schRoot, schMs := runIncremental(t, modeStreamingScheduled, workers, k1, u1, k2, u2)
+	if !bytes.Equal(seqRoot, schRoot) {
+		branchDiff(t, seqMs, schMs)
+	}
+	require.Equalf(t, seqRoot, schRoot, "streaming-scheduled(workers=%d) vs sequential root mismatch", workers)
 }
 
 // branchDiff logs every stored branch prefix whose encoding differs between the
