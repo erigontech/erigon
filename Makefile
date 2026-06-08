@@ -30,17 +30,8 @@ DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= erigontech/erigon:latest
 
-# Tool dependency guards: fail with a clear message instead of a raw
-# "command not found". require_tools -> tool runs inside a recipe;
-# check_tools -> tool runs at parse time while building a := variable.
-
-# require_tools: recipe-time guard. Use as the first TAB-indented line of a
-# recipe; aborts if any space-separated tool in $(1) is missing.
-define require_tools
-@for t in $(1); do command -v "$$t" >/dev/null 2>&1 || { echo "$@: required tool '$$t' not found in PATH" >&2; exit 1; }; done
-endef
-
-# check_tools: parse-time guard for tools used in $(shell ...) := variables.
+# check_tools: parse-time guard for tools used in $(shell ...) := variables;
+# fails with a clear message instead of a raw "command not found".
 # $(1) = space-separated tool names, $(2) = feature name shown in the error.
 check_tools = $(foreach t,$(1),$(if $(shell command -v $(t) 2>/dev/null),,$(error $(2): required tool '$(t)' not found in PATH)))
 
