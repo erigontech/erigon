@@ -2105,7 +2105,6 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	}
 
 	to := int64(-1)
-	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
 			checkLastFileTo: to,
@@ -2114,14 +2113,9 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if err != nil {
 			return err
 		}
-		somethingPresent = somethingPresent || !empty
-		somethingEmpty = somethingEmpty || empty
-
-		to = int64(uto)
-	}
-
-	if somethingEmpty && somethingPresent {
-		return fmt.Errorf("some state snapshot files are empty while others are present")
+		if !empty {
+			to = int64(uto)
+		}
 	}
 
 	return nil
