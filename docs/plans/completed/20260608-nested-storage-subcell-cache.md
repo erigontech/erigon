@@ -280,8 +280,8 @@ sibling cells be reused. **Do NOT edit `parallel_mount.go`.**
 - [x] `make lint` clean (repeat; non-deterministic); `make erigon integration` builds
 
 ### Task 9: [Final] Docs
-- [ ] update `/Users/awskii/org/wrk/HANDOFF-parallel-storage-fold.md` with the cache design + bulk results
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `/Users/awskii/org/wrk/HANDOFF-parallel-storage-fold.md` with the cache design + bulk results
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Manual / external — no checkboxes.*
