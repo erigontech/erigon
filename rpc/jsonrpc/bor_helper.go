@@ -66,7 +66,8 @@ func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error
 	signature := header.Extra[len(header.Extra)-extraSeal:]
 
 	// Recover the public key and the Ethereum address
-	pubkey, err := crypto.Ecrecover(bor.SealHash(header, c).Bytes(), signature)
+	sealHash := bor.SealHash(header, c)
+	pubkey, err := crypto.Ecrecover(sealHash[:], signature)
 	if err != nil {
 		return common.Address{}, err
 	}

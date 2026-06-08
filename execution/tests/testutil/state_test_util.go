@@ -435,7 +435,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v[:])
 			statedb.SetState(address, key, *val)
 		}
 
@@ -577,6 +577,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	}
 	if gasPrice == nil {
 		return nil, errors.New("no gas price provided")
+	}
+	if baseFee == nil {
+		feeCap = big.Int(*gasPrice)
+		tipCap = big.Int(*gasPrice)
 	}
 
 	gpi := big.Int(*gasPrice)

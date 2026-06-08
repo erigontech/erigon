@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
@@ -105,17 +106,48 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 
 // Account is the resolver for the account field.
 func (r *pendingResolver) Account(ctx context.Context, obj *model.Pending, address string) (*model.Account, error) {
-	panic("not implemented: Account - account")
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+	addr := common.HexToAddress(address)
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, rpc.PendingBlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	pendingBlockNum := rpc.PendingBlockNumber
+	return &model.Account{
+		Address:          strings.ToLower(address),
+		Balance:          balance,
+		TransactionCount: nonce,
+		Code:             code,
+		BlockNum:         uint64(pendingBlockNum),
+	}, nil
 }
 
 // Call is the resolver for the call field.
 func (r *pendingResolver) Call(ctx context.Context, obj *model.Pending, data model.CallData) (*model.CallResult, error) {
-	panic("not implemented: Call - call")
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.GraphQLAPI.Call(ctx, rpc.PendingBlockNumber, args)
+	if err != nil {
+		return nil, err
+	}
+	return &model.CallResult{
+		Data:    hexutil.Encode(res.Data),
+		GasUsed: res.GasUsed,
+		Status:  res.Status,
+	}, nil
 }
 
 // EstimateGas is the resolver for the estimateGas field.
 func (r *pendingResolver) EstimateGas(ctx context.Context, obj *model.Pending, data model.CallData) (uint64, error) {
-	panic("not implemented: EstimateGas - estimateGas")
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return 0, err
+	}
+	return r.GraphQLAPI.EstimateGas(ctx, rpc.PendingBlockNumber, args)
 }
 
 // Block is the resolver for the block field.
@@ -206,7 +238,22 @@ func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]
 
 // Pending is the resolver for the pending field.
 func (r *queryResolver) Pending(ctx context.Context) (*model.Pending, error) {
-	panic("not implemented: Pending - pending")
+	txns, err := r.GraphQLAPI.GetPendingTransactions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	transactions := make([]*model.Transaction, 0, len(txns))
+	for _, txn := range txns {
+		transactions = append(transactions, &model.Transaction{
+			Nonce: hexutil.EncodeUint64(txn.GetNonce()),
+			Gas:   txn.GetGasLimit(),
+			Hash:  txn.Hash().Hex(),
+		})
+	}
+	return &model.Pending{
+		TransactionCount: uint64(len(txns)),
+		Transactions:     transactions,
+	}, nil
 }
 
 // Transaction is the resolver for the transaction field.

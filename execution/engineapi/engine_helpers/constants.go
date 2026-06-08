@@ -25,15 +25,3 @@ var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid 
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
 var TooLargeRequestErr = rpc.CustomError{Code: -38004, Message: "Too large request"}
 var ReorgTooDeepErr = rpc.CustomError{Code: -38006, Message: "Too deep reorg"}
-
-const PectraBanner = `
-'########::'########::'######::'########:'########:::::'###::::
- ##.... ##: ##.....::'##... ##:... ##..:: ##.... ##:::'## ##:::
- ##:::: ##: ##::::::: ##:::..::::: ##:::: ##:::: ##::'##:. ##::
- ########:: ######::: ##:::::::::: ##:::: ########::'##:::. ##:
- ##.....::: ##...:::: ##:::::::::: ##:::: ##.. ##::: #########:
- ##:::::::: ##::::::: ##::: ##:::: ##:::: ##::. ##:: ##.... ##:
- ##:::::::: ########:. ######::::: ##:::: ##:::. ##: ##:::: ##:
-..:::::::::........:::......::::::..:::::..:::::..::..:::::..::
-====================== PECTRA ACTIVATED ======================
-`

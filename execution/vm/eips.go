@@ -273,7 +273,7 @@ func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 		hash := evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash.Bytes())
+		idx.SetBytes(hash[:])
 	} else {
 		idx.Clear()
 	}

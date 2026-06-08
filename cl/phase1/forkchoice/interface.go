@@ -43,6 +43,8 @@ type ForkChoiceStorageReader interface {
 	FinalizedSlot() uint64
 	LowestAvailableSlot() uint64
 	GetEth1Hash(eth2Root common.Hash) common.Hash
+	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
+	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
@@ -73,8 +75,11 @@ type ForkChoiceStorageReader interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] IsPayloadVerified checks whether the execution payload was accepted by the EL.
+	IsPayloadVerified(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool)
 	// [New in Gloas:EIP7732] IsBlobDataAvailable returns the local node's assessment of whether
 	// blob data is available for the given block. Used by the payload_attestation_data API so PTC
 	// validators can set the blob_data_available flag independently of payload_present.
@@ -88,6 +93,9 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
 	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
 	ShouldExtendPayload(root common.Hash) bool
+	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
+	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
+	ShouldBuildOnFull(head ForkChoiceNode) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
@@ -109,6 +117,10 @@ type ForkChoiceStorageReader interface {
 	// validated execution payload by its execution block hash. Used for parent payload validation in gossip.
 	// Note: This is an LRU cache lookup; older payloads may not be found.
 	GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool)
+	// [New in Gloas:EIP7732] GetExecutionPayloadGasLimit returns the gas_limit of a recently validated
+	// execution payload by its execution block hash. Used by the bid service to perform the
+	// is_gas_limit_target_compatible IGNORE check (consensus-specs PR #5236).
+	GetExecutionPayloadGasLimit(executionBlockHash common.Hash) (uint64, bool)
 }
 
 type ForkChoiceStorageWriter interface {

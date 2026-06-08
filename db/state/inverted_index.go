@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -484,8 +484,6 @@ type InvertedIndexRoTx struct {
 
 // hashKey - change of salt will require re-gen of indices
 func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
-	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
-	// because `hasher` object is interface and need call many methods on it
 	return murmur3.Sum128WithSeed(k, *iit.salt)
 }
 
@@ -507,7 +505,7 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	}
 	r := iit.readers[i]
 	if r == nil {
-		r = iit.files[i].src.index.GetReaderFromPool()
+		r = iit.files[i].src.index.Reader()
 		iit.readers[i] = r
 	}
 	return r
@@ -686,7 +684,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 			}
 			it.stack = append(it.stack, iit.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
-			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
+			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.Reader()
 			it.hasNext = true
 		}
 	} else {
@@ -707,7 +705,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 			}
 			it.stack = append(it.stack, iit.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
-			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
+			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.Reader()
 			it.hasNext = true
 		}
 	}
@@ -801,7 +799,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 	if txTo == MaxUint64 {
 		return iit.hashSeekingPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
 	}
-	return iit.tableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
+	return iit.tableScanningPrune(ctx, tx, txFrom, txTo, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
 }
 
 func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
@@ -854,7 +852,7 @@ func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx
 	}, nil
 }
 
-func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
@@ -905,7 +903,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	prs.TxFrom = txFrom
 	prs.TxTo = txTo
 
-	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
+	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
 	if err != nil {
 		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)

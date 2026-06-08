@@ -30,7 +30,6 @@ runs:
       with:
         path: |
           .git/modules
-          .git/lfs
         key: ${{ env.ERIGON_CI_GITOBJECTS_CACHE_KEY }}
 
     - name: Report uncached test packages

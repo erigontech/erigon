@@ -29,7 +29,11 @@ jobs:
     needs: load-matrix
     name: eest-spec-${{ matrix.shard }}
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         include: ${{ fromJson(needs.load-matrix.outputs.matrix) }}
     runs-on: ubuntu-24.04
@@ -50,22 +54,26 @@ jobs:
         id: erigon
         with:
           submodules: false
-          lfs: false
           cleanup-space: true
           ramdisk: true
           build-cache-extra-key: eest-spec-${{ matrix.shard }}
 
-      - name: Cache EEST tarballs
-        uses: actions/cache@v5
+      # Restore-only: PR / merge_group runs never SAVE, so they don't mint a
+      # per-ref ~1.6GB duplicate every run. The base-branch (main) entry is
+      # populated by cache-warming-eest-fixtures.yml; default-branch caches are
+      # readable from every PR. A miss here self-heals (tools/test-fixtures.sh
+      # re-downloads), and the warmer repopulates main.
+      - name: Restore EEST tarballs
+        uses: actions/cache/restore@v5
         with:
-          # Only cache the .tar.gz files; extracted dirs are recreated by
-          # tools/test-fixtures.sh on each run from the cached tarballs.
-          # Dedicated EEST cache so this workflow doesn't compete with
-          # test-integration-caplin.yml's cl_mainnet cache under one key.
+          # Only the .tar.gz files are cached; tools/test-fixtures.sh re-extracts
+          # them each run. cl_mainnet is intentionally excluded (owned by
+          # test-integration-caplin.yml's separate cache).
           path: |
             test-fixtures-cache/eest_stable.tar.gz
             test-fixtures-cache/eest_devnet.tar.gz
             test-fixtures-cache/eest_benchmark.tar.gz
+            test-fixtures-cache/eest_zkevm.tar.gz
           key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
