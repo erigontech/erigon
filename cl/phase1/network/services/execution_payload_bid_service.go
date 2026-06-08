@@ -350,7 +350,9 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 	}); loaded {
 		s.pendingCount.Add(-1)
 	} else {
+		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
+		s.pendingCond.L.Unlock()
 	}
 }
 

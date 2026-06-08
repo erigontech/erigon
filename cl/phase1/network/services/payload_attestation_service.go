@@ -212,7 +212,9 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 	}); loaded {
 		s.pendingCount.Add(-1)
 	} else {
+		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
+		s.pendingCond.L.Unlock()
 	}
 }
 

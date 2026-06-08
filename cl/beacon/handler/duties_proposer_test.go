@@ -282,6 +282,39 @@ func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "overflows")
 }
 
+func TestDependentRootSlotNoUnderflow(t *testing.T) {
+	slotsPerEpoch := uint64(32)
+	tests := []struct {
+		name     string
+		epoch    uint64
+		attester bool
+		wantSlot uint64
+	}{
+		{"proposer_epoch0", 0, false, 0},
+		{"attester_epoch0", 0, true, 0},
+		{"attester_epoch1", 1, true, 0},
+		{"proposer_epoch1", 1, false, 31},
+		{"attester_epoch2", 2, true, 31},
+		{"proposer_epoch2", 2, false, 63},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var slot uint64
+			switch {
+			case tc.epoch == 0:
+				slot = 0
+			case tc.attester && tc.epoch <= 1:
+				slot = 0
+			case tc.attester:
+				slot = (tc.epoch-1)*slotsPerEpoch - 1
+			default:
+				slot = tc.epoch*slotsPerEpoch - 1
+			}
+			require.Equal(t, tc.wantSlot, slot)
+		})
+	}
+}
+
 func TestGetAttesterDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
