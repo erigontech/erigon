@@ -30,42 +30,19 @@ DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= erigontech/erigon:latest
 
-# ---------------------------------------------------------------------------
-# Tool dependency guards
-#
-# Make a target fail with a clear "tool X not found" message instead of a
-# confusing "command not found". Choose the helper by WHEN the tool runs:
-#
-#   require_tools  -> tool runs INSIDE a recipe (the usual case)
-#   check_tools    -> tool runs while make READS the file (building a variable)
-# ---------------------------------------------------------------------------
+# Tool dependency guards: fail with a clear message instead of a raw
+# "command not found". require_tools -> tool runs inside a recipe;
+# check_tools -> tool runs at parse time while building a := variable.
 
-# require_tools: put it as the FIRST line of a recipe (the TAB-indented lines
-# under a target). It aborts the recipe early if any listed tool is missing.
-# Args: $(1) = space-separated tool names (one or more). Example below lists
-# TWO required tools, yq and jq (space-separated, NOT comma-separated):
-#
-#   my-target:
-#       $(call require_tools,yq jq)      # <- TAB-indented; requires yq AND jq
-#       @yq -o=json '.' f.yml | jq .
-#
+# require_tools: recipe-time guard. Use as the first TAB-indented line of a
+# recipe; aborts if any space-separated tool in $(1) is missing.
 define require_tools
 @for t in $(1); do command -v "$$t" >/dev/null 2>&1 || { echo "$@: required tool '$$t' not found in PATH" >&2; exit 1; }; done
 endef
 
-# check_tools: use when a tool is needed while make PARSES the file, e.g. a
-# variable set with `:=` from `$(shell ...)`. A recipe-line check is too late
-# then. Guard the whole block with the goal that needs it (so unrelated builds
-# like `make erigon` don't require the tool) and call check_tools inside.
-# Args: $(1) = space-separated tool names, $(2) = feature name shown in the
-# error. Example below requires TWO tools, yq and jq (space-separated):
-#
-#   ifneq ($(filter my-goal-%,$(MAKECMDGOALS)),)   # only for `make my-goal-...`
-#   $(call check_tools,yq jq,my-goal targets)
-#   MY_VAR := $(shell yq -o=json '.' f.yml | jq -r '.[]')
-#   endif
-#
-check_tools = $(foreach t,$(1),$(if $(shell command -v $(t) 2>/dev/null),,$(error $(2) require '$(t)', not found in PATH)))
+# check_tools: parse-time guard for tools used in $(shell ...) := variables.
+# $(1) = space-separated tool names, $(2) = feature name shown in the error.
+check_tools = $(foreach t,$(1),$(if $(shell command -v $(t) 2>/dev/null),,$(error $(2): required tool '$(t)' not found in PATH)))
 
 # Variables below for building on host OS, and are ignored for docker
 #
