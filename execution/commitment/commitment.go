@@ -1436,6 +1436,14 @@ const (
 	ModeParallel Mode = 3
 )
 
+// streamingSink receives touched keys when an Updates buffer runs in streaming
+// mode, driving a StreamingCommitter's (re-)fold of the owning split. The
+// hashedKey backing need not be stable; plainKey/update must stay valid until
+// the committer's Process (the ModeParallel intern/copy guarantees this).
+type streamingSink interface {
+	TouchKey(hashedKey, plainKey []byte, update *Update)
+}
+
 func (m Mode) String() string {
 	switch m {
 	case ModeDisabled:
@@ -1474,6 +1482,13 @@ type Updates struct {
 	// trie of touched hashed keys and serves as the freeze-time source for
 	// split-point emission. Nil in any other mode.
 	parallel *parallelUpdate
+
+	// streaming, when true (ModeParallel only), forwards every touched key to
+	// streamer so a StreamingCommitter can (re-)fold the owning split under
+	// execution. The ModeParallel intern/copy machinery is reused verbatim, so
+	// the forwarded plainKey/update reference the stable per-batch arena.
+	streaming bool
+	streamer  streamingSink
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
 	byteArena []byte      // grow-only byte arena for HashSort key copies
@@ -1604,6 +1619,19 @@ func (t *Updates) initCollector() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
+// SetStreamingCommitter routes every ModeParallel touch to sink (a
+// StreamingCommitter) in addition to the prefix trie, so the owning split can be
+// (re-)folded under execution. Passing nil disables streaming. Requires
+// ModeParallel — the intern/copy that keeps the forwarded key/update stable
+// lives only in that branch.
+func (t *Updates) SetStreamingCommitter(sink streamingSink) {
+	t.streamer = sink
+	t.streaming = sink != nil
+}
+
+// Streaming reports whether touches are being forwarded to a StreamingCommitter.
+func (t *Updates) Streaming() bool { return t.streaming }
+
 // PlainKeys returns a copy of the set of plain keys that have been touched.
 // Meaningful in ModeDirect and ModeParallel (both populate t.keys); returns
 // nil otherwise.
@@ -1666,7 +1694,11 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
-			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes), nil)
+			ik := t.parallel.internKey(keyBytes)
+			t.parallel.Insert(hashedKey, ik, nil)
+			if t.streaming && t.streamer != nil {
+				t.streamer.TouchKey(hashedKey, ik, nil)
+			}
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1743,7 +1775,11 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			// re-reading account/storage from ctx (which lags cc.state).
 			u := new(Update)
 			*u = *update
-			t.parallel.Insert(hashedKey, t.parallel.internKey(keyBytes), u)
+			ik := t.parallel.internKey(keyBytes)
+			t.parallel.Insert(hashedKey, ik, u)
+			if t.streaming && t.streamer != nil {
+				t.streamer.TouchKey(hashedKey, ik, u)
+			}
 			t.keys[key] = struct{}{}
 		}
 	default:

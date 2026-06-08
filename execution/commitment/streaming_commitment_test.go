@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -565,4 +566,99 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 		require.Equal(t, seqRoot, root, "eager partial fall-through root != sequential")
 		requireBranchParity(t, seqMs, ms)
 	})
+}
+
+// streamingViaUpdatesRoot drives a StreamingCommitter through the production
+// funnel: an Updates buffer in ModeParallel with SetStreamingCommitter, fed via
+// the same TouchPlainKey/TouchPlainKeyDirect entry points sdctx.TouchKey and the
+// commitment calculator use. carried=true exercises the carried-*Update path
+// (TouchPlainKeyDirect); carried=false the nil/ctx-read path (TouchPlainKey).
+func streamingViaUpdatesRoot(t *testing.T, workers int, keys [][]byte, upds []Update, carried bool) ([]byte, *MockState) {
+	t.Helper()
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(workers)
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	ut.SetStreamingCommitter(sc)
+	require.True(t, ut.Streaming())
+
+	for i, key := range keys {
+		if carried {
+			ut.TouchPlainKeyDirect(string(key), &upds[i])
+		} else {
+			ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
+		}
+	}
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	return root, ms
+}
+
+// TestStreaming_UpdatesFunnelParity drives the committer through the public
+// Updates.TouchPlainKey* funnel (ModeParallel + SetStreamingCommitter) and
+// asserts both the carried-*Update path and the nil/ctx-read path produce
+// root + every stored branch == sequential.
+func TestStreaming_UpdatesFunnelParity(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(7, 6000)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	for _, carried := range []bool{false, true} {
+		for _, w := range []int{1, 4, 8} {
+			root, ms := streamingViaUpdatesRoot(t, w, keys, upds, carried)
+			require.Equalf(t, seqRoot, root, "funnel(carried=%v,workers=%d) root != sequential", carried, w)
+			requireBranchParity(t, seqMs, ms)
+		}
+	}
+}
+
+// TestStreaming_UpdatesLifetimeRegression proves the ModeParallel streaming
+// branch copies both the key bytes and the *Update into the stable arena: every
+// caller-owned key buffer and Update is clobbered immediately after Touch
+// returns, yet the root matches a run that never mutated its inputs.
+func TestStreaming_UpdatesLifetimeRegression(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(31, 4000)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	ut.SetStreamingCommitter(sc)
+
+	var held []*Update
+	for i, key := range keys {
+		kb := append([]byte(nil), key...)
+		ub := upds[i]
+		ut.TouchPlainKeyDirect(common.ToStringZeroCopy(kb), &ub)
+		// Corrupt the caller's key backing right after Touch returns; a
+		// non-copying intern would carry the corruption into the fold.
+		for j := range kb {
+			kb[j] ^= 0xFF
+		}
+		held = append(held, &ub)
+	}
+	// Clobber every caller-owned Update before folding; a non-copying branch
+	// would fold these DeleteUpdates instead of the real state.
+	for _, u := range held {
+		*u = Update{Flags: DeleteUpdate}
+	}
+
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, seqRoot, root, "mutating caller buffers after Touch changed the root")
+	requireBranchParity(t, seqMs, ms)
 }

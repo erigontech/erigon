@@ -288,14 +288,14 @@ if the flag turns out to fork behavior in more than one switch.
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/commitment_test.go` (or nearest)
 
-- [ ] add `streaming` flag on `Updates` (or a `ModeStreaming` enum only if a flag proves insufficient); route Touch* to the ModeParallel `Insert(hashedKey, internKey, value)` path
-- [ ] lifetime: **mirror the existing ModeParallel branch verbatim** — `u := new(Update); *u = *update` + `internKey(keyBytes)` already copy both the value and the key into the stable arena (commitment.go:1744-1746). No new design decision; just reuse.
-- [ ] support nil update (ctx-read at fold) AND carried update, exactly as the prefix trie already does (`update==nil` → re-read from ctx)
-- [ ] wire `Updates` to notify the `StreamingCommitter` of dirtied splits on insert (single funnel — both `sdctx.TouchKey` and `WrapKeyUpdates`/MockState reach it)
-- [ ] confirm inline-touch (`SetDisableInlineTouchKey(false)`) routes touches through this path during execution; note the batched-vs-inline implication for overlap
-- [ ] write one lifetime-regression test (mutate caller's `*Update`/key buffer after Touch returns → root unaffected)
-- [ ] write test: carried-update parity AND nil/ctx-read parity, driven through the same `Updates.TouchPlainKey` funnel MockState uses (faithful to `sdctx.TouchKey`)
-- [ ] run tests — must pass before next task
+- [x] add `streaming` flag on `Updates` (chose the flag over a `ModeStreaming` enum, per the task preamble — `streaming bool` + `streamer streamingSink` on `Updates`, set via `SetStreamingCommitter`); route Touch* through the existing ModeParallel `Insert(hashedKey, internKey, value)` path, then forward the interned key/update to the sink
+- [x] lifetime: **mirror the existing ModeParallel branch verbatim** — `u := new(Update); *u = *update` + `internKey(keyBytes)` already copy both the value and the key into the stable arena; the streamer is handed that same interned key / copied update, no new arena
+- [x] support nil update (ctx-read at fold) AND carried update — `TouchPlainKey` forwards `nil`, `TouchPlainKeyDirect` forwards the copied `*Update`; the committer's prefix trie already treats `nil` as ctx-read
+- [x] wire `Updates` to notify the `StreamingCommitter` of dirtied splits on insert — `t.streamer.TouchKey(...)` in both ModeParallel branches; single funnel covers `sdctx.TouchKey`→`TouchPlainKey` and the calculator→`TouchPlainKeyDirect`
+- [x] confirm inline-touch routes through this path — `sdctx.TouchKey` calls `updates.TouchPlainKey`/`TouchPlainKeyDirect` unconditionally, so both inline (`SetDisableInlineTouchKey(false)`, touches arrive during execution → overlap source) and batched (commit-time) arrivals hit the streamer with no extra hook
+- [x] lifetime-regression test — `TestStreaming_UpdatesLifetimeRegression`: clobber every caller key buffer (right after Touch) and `*Update` (before Process) → root + branches unchanged
+- [x] carried-update AND nil/ctx-read parity through the `Updates.TouchPlainKey*` funnel — `TestStreaming_UpdatesFunnelParity` (carried×nil, workers 1/4/8) == sequential root + branches
+- [x] run tests — pass (incl. `-race`); `make lint` clean; `make erigon` builds
 
 ### Task 7: `--experimental.streaming-commitment` flag + variant wiring
 
