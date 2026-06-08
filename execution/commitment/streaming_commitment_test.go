@@ -310,7 +310,7 @@ func waitSchedulerIdle(t *testing.T, sc *StreamingCommitter) {
 			s.mu.Unlock()
 		}
 		sc.trieMu.RUnlock()
-		if queued == 0 && len(sc.dirtyCh) == 0 {
+		if queued == 0 && len(sc.dirtyCh) == 0 && sc.inFlight.Load() == 0 {
 			if stable++; stable >= 5 {
 				return
 			}
@@ -626,6 +626,13 @@ func foldedSplitCount(sc *StreamingCommitter) int {
 	return n
 }
 
+func splitCount(sc *StreamingCommitter) int {
+	sc.trieMu.RLock()
+	n := len(sc.splits)
+	sc.trieMu.RUnlock()
+	return n
+}
+
 // TestStreaming_FoldEagerPolicy exercises the single shipped fold trigger
 // (foldEager, fold-on-dirty) across both regimes it governs: the eager path,
 // where every touched split is background-folded before Process (drained), and
@@ -867,10 +874,12 @@ func requireResetClean(t *testing.T, sc *StreamingCommitter) {
 
 // TestStreaming_NewSplitMidBlock is the scheduler-specific new-split case: with
 // the background pool running, all keys in the lower top-nibble half are touched
-// and their folds drained first, then keys in the upper half create brand-new
-// top-nibble splits that did not exist when the earlier ones folded. Each new
-// split is its own per-nibble state, independent of any in-flight fold, so the
-// drained Process root + branches match sequential.
+// and their folds scheduled first, then keys in the upper half create brand-new
+// top-nibble splits that did not exist when the earlier ones were scheduled. Each
+// new split is its own per-nibble state, independent of any in-flight fold, so the
+// drained Process root + branches match sequential. Background folding is
+// best-effort (the coalescing gate may defer a settled split to Process), so the
+// scenario is asserted via deterministic split creation, not fold timing.
 func TestStreaming_NewSplitMidBlock(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(91, 4000)
@@ -901,14 +910,14 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 		}
 		waitSchedulerIdle(t, sc)
-		require.Positive(t, foldedSplitCount(sc), "early splits must fold before the late ones appear")
-		earlyFolded := foldedSplitCount(sc)
+		earlySplits := splitCount(sc)
+		require.Positive(t, earlySplits, "early touches must create the lower-half splits")
 
 		for _, i := range late {
 			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 		}
 		waitSchedulerIdle(t, sc)
-		require.Greater(t, foldedSplitCount(sc), earlyFolded, "late touches must create and fold new splits")
+		require.Greater(t, splitCount(sc), earlySplits, "late touches must create brand-new top-nibble splits")
 
 		root, err := sc.Process(context.Background())
 		require.NoError(t, err)

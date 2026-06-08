@@ -79,7 +79,7 @@ func TestNestedCache_CachedRefoldParity(t *testing.T) {
 	tg := touchedGroups(&groups)
 
 	// Initial fold: fresh cache, every present nibble folds once.
-	_, folded0, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+	_, folded0, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, bitsCount(cache.present), folded0, "initial fold must fold every present nibble")
 
@@ -97,7 +97,7 @@ func TestNestedCache_CachedRefoldParity(t *testing.T) {
 	tg = touchedGroups(&groups)
 	cache.perNibble[tx].dirty = true
 
-	sr, folded1, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+	sr, folded1, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, folded1, "incremental fold must re-fold only the dirtied nibble")
 
@@ -496,6 +496,60 @@ func TestNestedCache_IncrementalBlockParity(t *testing.T) {
 	require.Equal(t, uint64(2), sc.NibbleFolds()-before, "batch 2 must re-fold exactly the two touched nibbles")
 }
 
+// TestNestedCache_SingleNibbleCompressedParity regresses the compressed deep-walk
+// path: a cached whale whose block-2 touch is a single slot in a single
+// first-storage-nibble compresses the storage prefix trie past depth 64, so
+// dfsDeepLocal enters at a storage leaf with path>64. The cache must supply the
+// storageRoot without the leaf-follow leaking a stray storage cell into the
+// account-level worker, so the incremental root matches the sequential oracle.
+func TestNestedCache_SingleNibbleCompressedParity(t *testing.T) {
+	ctx := context.Background()
+	addr, _, _, _, pk1, upds1, _ := whaleByNibble(15_000)
+
+	var pk2 [][]byte
+	var upds2 []Update
+	for _, e := range extraSlotsInNibble(addr, 0x7, 1, 99) {
+		pk2 = append(pk2, e.pk)
+		upds2 = append(upds2, e.upd)
+	}
+
+	seqMs := NewMockState(t)
+	require.NoError(t, seqMs.applyPlainUpdates(pk1, upds1))
+	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
+	defer seq.Release()
+	u1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk1, upds1)
+	_, err := seq.Process(ctx, u1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u1.Close()
+	require.NoError(t, seqMs.applyPlainUpdates(pk2, upds2))
+	u2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk2, upds2)
+	seqRoot, err := seq.Process(ctx, u2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u2.Close()
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	require.NoError(t, ms.applyPlainUpdates(pk1, upds1))
+	for i := range pk1 {
+		sc.TouchKey(KeyToHexNibbleHash(pk1[i]), pk1[i], nil)
+	}
+	_, err = sc.Process(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, ms.applyPlainUpdates(pk2, upds2))
+	for i := range pk2 {
+		sc.TouchKey(KeyToHexNibbleHash(pk2[i]), pk2[i], nil)
+	}
+	root2, err := sc.Process(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, root2, "single-nibble compressed cached-whale root != sequential")
+}
+
 // TestNestedCache_WhaleNibbleCollapse builds a >10k-storage whale (batch 1) so its
 // storage caches, then batch 2 deletes every slot in one first-storage-nibble,
 // collapsing that nibble's subtree. The cache must drop the emptied nibble from
@@ -583,12 +637,12 @@ func TestNestedCache_OnlyDirtyNibblesRefold(t *testing.T) {
 	factory := newWhaleWorker(ms)
 	tg := touchedGroups(&groups)
 
-	_, folded0, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+	_, folded0, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 	require.NoError(t, err)
 	require.Greater(t, folded0, 1, "whale storage must span more than one nibble")
 
 	// No nibble dirtied: a second fold reuses every cached cell.
-	_, foldedNoop, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+	_, foldedNoop, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, foldedNoop, "clean re-fold must reuse all cached cells")
 
@@ -600,7 +654,7 @@ func TestNestedCache_OnlyDirtyNibblesRefold(t *testing.T) {
 			dirtied++
 		}
 	}
-	_, folded2, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+	_, folded2, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 2, folded2, "only the two dirtied nibbles must re-fold")
 	_ = addr

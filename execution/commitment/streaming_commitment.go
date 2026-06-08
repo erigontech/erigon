@@ -123,6 +123,7 @@ type StreamingCommitter struct {
 	base        *HexPatriciaHashed
 	baseCleanup func()
 	refoldTotal atomic.Uint64
+	inFlight    atomic.Int64
 
 	// foldGate, when set, is invoked by a background fold right before it folds
 	// a snapshotted split — a test seam to inject a mid-fold touch deterministically.
@@ -608,7 +609,9 @@ func (sc *StreamingCommitter) scheduleWorker() {
 		case <-sc.quit:
 			return
 		case nib := <-sc.dirtyCh:
+			sc.inFlight.Add(1)
 			sc.foldSplitBg(nib)
+			sc.inFlight.Add(-1)
 		}
 	}
 }
@@ -797,15 +800,39 @@ func (sc *StreamingCommitter) foldSplitBgCached(nib byte, s *splitState, child *
 		s.mu.Unlock()
 		return
 	}
-	for _, upd := range s.deferred {
-		putDeferredUpdate(upd)
-	}
-	s.deferred = deferred
+	s.deferred = mergeDeferredByPrefix(s.deferred, deferred)
 	s.cell = c
 	s.folded = true
 	s.dirty = false
 	s.mu.Unlock()
 	sc.bgDeepFolds.Add(1)
+}
+
+// mergeDeferredByPrefix folds newer deferred branch updates over older staged
+// ones keyed by prefix: a prefix in newer supersedes (and recycles) the older
+// entry, older entries for prefixes absent from newer are retained. The cache's
+// incremental fold emits only its re-folded nibbles, so a cached split folded
+// more than once per block must accumulate the clean nibbles' branches it skipped
+// instead of dropping them. A branch prefix only vanishes on a collapse, which
+// invalidates the cache and forces a full replacing fold, so merging never keeps
+// a stale branch.
+func mergeDeferredByPrefix(older, newer []*DeferredBranchUpdate) []*DeferredBranchUpdate {
+	if len(older) == 0 {
+		return newer
+	}
+	inNewer := make(map[string]struct{}, len(newer))
+	for _, u := range newer {
+		inNewer[string(u.prefix)] = struct{}{}
+	}
+	out := newer
+	for _, u := range older {
+		if _, ok := inNewer[string(u.prefix)]; ok {
+			putDeferredUpdate(u)
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 // foldKeysDeep is the cache-aware analogue of foldKeys for a split that owns a
@@ -1046,10 +1073,14 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	sc.workerPool.Put(w)
 
 	s.mu.Lock()
-	for _, upd := range s.deferred {
-		putDeferredUpdate(upd)
+	if sc.splitHasCache(ni) {
+		s.deferred = mergeDeferredByPrefix(s.deferred, newDeferred)
+	} else {
+		for _, upd := range s.deferred {
+			putDeferredUpdate(upd)
+		}
+		s.deferred = newDeferred
 	}
-	s.deferred = newDeferred
 	s.cell = c
 	s.dirty = false
 	s.mu.Unlock()
@@ -1076,20 +1107,15 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 	if node == nil {
 		return nil
 	}
-	if node.plainKey != nil {
-		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
-			return err
-		}
-	} else if node.bitmap == 0 {
-		return errors.New("StreamingCommitter: trie leaf without a plainKey")
-	}
-
 	// A cached account whose storage was touched in a single first-storage-nibble
 	// has no node at depth 64 — trie compression merges the account pass-through
 	// into the storage subtree's extension, so dfsDeepLocal enters with path
 	// already past 64. Route it through the cache (the account leaf is reloaded
 	// from ctx) rather than folding the storage inline against the deep-written
-	// on-disk subtree, which is not byte-compatible with a sequential fold.
+	// on-disk subtree, which is not byte-compatible with a sequential fold. This
+	// must run before the leaf-follow below: node is a storage cell here, and
+	// following it into the account-level worker would leave a stray cell that
+	// corrupts foldMounted.
 	if len(path) > accountKeyNibbles {
 		if cache := sc.cacheFor(path[:accountKeyNibbles]); cache != nil {
 			accPath := path[:accountKeyNibbles]
@@ -1104,6 +1130,14 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 			sc.deepLocalFolds.Add(1)
 			return nil
 		}
+	}
+
+	if node.plainKey != nil {
+		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
+			return err
+		}
+	} else if node.bitmap == 0 {
+		return errors.New("StreamingCommitter: trie leaf without a plainKey")
 	}
 
 	if len(path) == 64 {
@@ -1209,7 +1243,7 @@ func (sc *StreamingCommitter) foldCachedStorageRoot(pu *parallelUpdate, cache *a
 	for x := range 16 {
 		groups[x] = cache.sortedKeys(x)
 	}
-	sr, folded, flushed, err := foldStorageRootCached(sc.newIsolatedStorageWorker, cache, accNib, &groups, pu.appendDeferred)
+	sr, folded, flushed, err := foldStorageRootCached(sc.newIsolatedStorageWorker, cache, accNib, &groups, pu.appendDeferred, sc.numWorkers)
 	if err != nil {
 		return common.Hash{}, err
 	}

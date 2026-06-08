@@ -22,6 +22,8 @@ import (
 	"sort"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/empty"
 )
 
@@ -226,9 +228,11 @@ func assembleAccountRoot(w *HexPatriciaHashed, addr, accHash []byte, accNib int,
 // aggregates them into the storageRoot cell, and clears the per-nibble dirty
 // flags. It returns the storageRoot cell and the number of nibbles re-folded
 // (so callers/tests can assert only the changed nibbles paid the cost). groups
-// holds the current touched keys per first-storage-nibble. onDeferred, when
-// non-nil, receives the deferred branch updates each re-folded nibble and the
-// aggregation emit so the Process path can stage them for the caller.
+// holds the current touched keys per first-storage-nibble. Dirty nibbles fold
+// concurrently bounded by limit (<=0 = one goroutine per dirty nibble); the
+// storageRoot aggregation stays sequential. onDeferred, when non-nil, receives
+// the deferred branch updates each re-folded nibble and the aggregation emit so
+// the Process path can stage them for the caller.
 //
 // A re-folded nibble that empties (all its slots deleted) is dropped from the
 // storage branch (present bit cleared) so the aggregate root reflects the
@@ -236,41 +240,70 @@ func assembleAccountRoot(w *HexPatriciaHashed, addr, accHash []byte, accNib int,
 // a collapse against an isolating overlay: its cell stays self-consistent (the
 // root is correct) but the cache should be invalidated so a structurally changed
 // account re-promotes fresh rather than reusing cells folded across the collapse.
-func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorageCache, accNib int, groups *[16][]touchedKey, onDeferred func([]*DeferredBranchUpdate)) (cell, int, bool, error) {
-	folded := 0
-	flushed := false
+func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorageCache, accNib int, groups *[16][]touchedKey, onDeferred func([]*DeferredBranchUpdate), limit int) (cell, int, bool, error) {
+	type nibbleResult struct {
+		folded   bool
+		flushed  bool
+		c        cell
+		deferred []*DeferredBranchUpdate
+	}
+	var results [16]nibbleResult
+
+	var g errgroup.Group
+	if limit > 0 {
+		g.SetLimit(limit)
+	}
 	for x := range 16 {
 		bit := uint16(1) << x
-		n := &cache.perNibble[x]
 		if len(groups[x]) == 0 {
 			continue
 		}
-		if cache.present&bit != 0 && !n.dirty {
+		if cache.present&bit != 0 && !cache.perNibble[x].dirty {
 			continue
 		}
-		w, release, flushedFn := newWorker()
-		c, err := foldStorageChildCell(w, accNib, groups[x])
-		if err == nil && onDeferred != nil {
-			if d := w.TakeDeferredUpdates(); len(d) > 0 {
-				onDeferred(d)
+		g.Go(func() error {
+			w, release, flushedFn := newWorker()
+			c, err := foldStorageChildCell(w, accNib, groups[x])
+			r := &results[x]
+			if err == nil {
+				r.c = c
+				if onDeferred != nil {
+					r.deferred = w.TakeDeferredUpdates()
+				}
+				r.folded = true
 			}
+			r.flushed = flushedFn != nil && flushedFn()
+			if release != nil {
+				release()
+			}
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return cell{}, 0, false, err
+	}
+
+	folded := 0
+	flushed := false
+	for x := range 16 {
+		r := &results[x]
+		if !r.folded {
+			continue
 		}
-		if flushedFn != nil && flushedFn() {
+		bit := uint16(1) << x
+		if r.flushed {
 			flushed = true
 		}
-		if release != nil {
-			release()
+		if onDeferred != nil && len(r.deferred) > 0 {
+			onDeferred(r.deferred)
 		}
-		if err != nil {
-			return cell{}, folded, flushed, err
-		}
-		cache.children[x] = c
-		if c.IsEmpty() {
+		cache.children[x] = r.c
+		if r.c.IsEmpty() {
 			cache.present &^= bit
 		} else {
 			cache.present |= bit
 		}
-		n.dirty = false
+		cache.perNibble[x].dirty = false
 		folded++
 	}
 

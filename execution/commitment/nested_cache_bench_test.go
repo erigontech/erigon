@@ -85,7 +85,7 @@ func Benchmark_NestedCacheWhaleRefold(b *testing.B) {
 			b.StopTimer()
 			cache := &accountStorageCache{prefix: append([]byte(nil), accHash[:64]...)}
 			b.StartTimer()
-			_, folded, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+			_, folded, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 			require.NoError(b, err)
 			require.Equal(b, bitsCount(cache.present), folded)
 		}
@@ -94,13 +94,13 @@ func Benchmark_NestedCacheWhaleRefold(b *testing.B) {
 	b.Run("NestedCache-incremental", func(b *testing.B) {
 		b.ReportAllocs()
 		cache := &accountStorageCache{prefix: append([]byte(nil), accHash[:64]...)}
-		_, _, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+		_, _, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 		require.NoError(b, err)
 		for b.Loop() {
 			b.StopTimer()
 			cache.perNibble[tx].dirty = true
 			b.StartTimer()
-			_, folded, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
+			_, folded, _, err := foldStorageRootCached(factory, cache, accNib, tg, nil, 0)
 			require.NoError(b, err)
 			require.Equal(b, 1, folded)
 		}
