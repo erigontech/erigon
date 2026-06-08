@@ -231,11 +231,11 @@ must compose without torn reads. (Defer the "route storage out of the split stre
 refactor — that's a perf refinement, not correctness; minimal correct version: both
 paths read the cache as the single storageRoot source.)
 
-- [ ] make the background fold consult the cache for a cached account's storageRoot (don't re-stream its storage); the cache is the single source of truth for both paths
-- [ ] define the ordering of the account-cache per-nibble gen/dirty vs the split-level gen/CAS (`foldSplitBg`) so a touch landing between snapshot and CAS cannot install a stale cell
-- [ ] write fold-mechanism-parity test: a nibble's background-folded cached cell == its Process-folded cell (byte-identical)
-- [ ] write `-race` test: scheduler + multi-goroutine TouchKey over a cached whale → root + branches == sequential
-- [ ] run tests (`-race`, `-count=5`) — must pass before next task
+- [x] make the background fold consult the cache for a cached account's storageRoot (don't re-stream its storage); the cache is the single source of truth for both paths — `foldSplitBg` routes a cache-containing split to `foldSplitBgCached`→`foldKeysDeep`, which runs the shared `dfsDeepLocal` against an isolating overlay so a cached account's storageRoot comes from the cache
+- [x] define the ordering of the account-cache per-nibble gen/dirty vs the split-level gen/CAS (`foldSplitBg`) so a touch landing between snapshot and CAS cannot install a stale cell — the cache-aware background fold holds `trieMu.RLock` from key snapshot through the install CAS, so a touch (which needs `trieMu.Lock`) is strictly ordered before/after the whole fold; promotion bumps the split gen (`dirtyPromotedSplit`) to discard an in-flight pre-promotion flat fold, and each later cached-storage touch clears the split's reusable flag (`invalidateSplitReuse`) so Process re-folds through the cache
+- [x] write fold-mechanism-parity test: a nibble's background-folded cached cell == its Process-folded cell (byte-identical) — `TestNestedCache_BgDeepFoldParity` (background-driven block 2 root + branches == sequential, `BgDeepFolds` > 0)
+- [x] write `-race` test: scheduler + multi-goroutine TouchKey over a cached whale → root + branches == sequential — `TestNestedCache_SchedulerWhaleParity`
+- [x] run tests (`-race`, `-count=5`) — must pass before next task
 
 ### Task 6: Collapse/delete invalidation on the Process deep path
 

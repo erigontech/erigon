@@ -18,6 +18,8 @@ package commitment
 
 import (
 	"context"
+	"encoding/hex"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -473,4 +475,111 @@ func TestNestedCache_OnlyDirtyNibblesRefold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, folded2, "only the two dirtied nibbles must re-fold")
 	_ = addr
+}
+
+// TestNestedCache_SchedulerWhaleParity runs the background scheduler while many
+// goroutines concurrently touch a whale-bearing corpus, then asserts the drained
+// Process root + every stored branch match sequential. The whale promotes a cache
+// mid-block, so the background fold of its split must route through the cache-aware
+// deep walk rather than re-streaming the storage. Run under -race.
+func TestNestedCache_SchedulerWhaleParity(t *testing.T) {
+	t.Parallel()
+	pk, upds := buildBigAccountCorpus(15_000)
+	seqRoot, seqMs := sequentialRoot(t, pk, upds)
+
+	for _, w := range []int{4, 8} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(pk, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc.SetNumWorkers(w)
+		sc.SetEagerFold(1) // fold below the production floor so the whale's split eagerly background-folds
+		require.NoError(t, sc.StartScheduler(context.Background()))
+
+		const goroutines = 4
+		var wg sync.WaitGroup
+		for g := range goroutines {
+			wg.Add(1)
+			go func(start int) {
+				defer wg.Done()
+				for i := start; i < len(pk); i += goroutines {
+					sc.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
+				}
+			}(g)
+		}
+		wg.Wait()
+
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equalf(t, seqRoot, root, "scheduler whale(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+		sc.Release()
+	}
+}
+
+// TestNestedCache_BgDeepFoldParity establishes a whale cache in block 1, then in
+// block 2 (scheduler running) touches the whale's account leaf — forcing its split
+// to background-fold through the cache-aware deep walk while the cache exists —
+// plus a sparse storage subset. The final root + branches must match the
+// sequential two-block run, and the background deep fold must actually fire,
+// proving the background and Process paths share the cache as the single
+// storageRoot source.
+func TestNestedCache_BgDeepFoldParity(t *testing.T) {
+	ctx := context.Background()
+	addr, _, _, _, pk1, upds1, _ := whaleByNibble(15_000)
+	a := hex.EncodeToString(addr)
+
+	ub := NewUpdateBuilder()
+	ub.Balance(a, 99_999)
+	apk, aupd := ub.Build()
+	pk2 := [][]byte{apk[0]}
+	upds2 := []Update{aupd[0]}
+	for _, nib := range []byte{0x3, 0xc} {
+		for _, e := range extraSlotsInNibble(addr, nib, 40, int64(nib)+1) {
+			pk2 = append(pk2, e.pk)
+			upds2 = append(upds2, e.upd)
+		}
+	}
+
+	seqMs := NewMockState(t)
+	require.NoError(t, seqMs.applyPlainUpdates(pk1, upds1))
+	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
+	defer seq.Release()
+	u1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk1, upds1)
+	_, err := seq.Process(ctx, u1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u1.Close()
+	require.NoError(t, seqMs.applyPlainUpdates(pk2, upds2))
+	u2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk2, upds2)
+	seqRoot, err := seq.Process(ctx, u2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u2.Close()
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	require.NoError(t, ms.applyPlainUpdates(pk1, upds1))
+	for i := range pk1 {
+		sc.TouchKey(KeyToHexNibbleHash(pk1[i]), pk1[i], nil)
+	}
+	_, err = sc.Process(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, ms.applyPlainUpdates(pk2, upds2))
+	sc.SetEagerFold(1)
+	require.NoError(t, sc.StartScheduler(ctx))
+	for i := range pk2 {
+		sc.TouchKey(KeyToHexNibbleHash(pk2[i]), pk2[i], nil)
+	}
+	waitSchedulerIdle(t, sc)
+	root2, err := sc.Process(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, root2, "background cached-whale root != sequential")
+	requireBranchParity(t, seqMs, ms)
+	require.Positive(t, sc.BgDeepFolds(), "the whale split must background-fold through the cache")
 }
