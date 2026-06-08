@@ -1196,9 +1196,9 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 }
 
 // applyLoopFlushAsComplete returns the `complete` flag for
-// versionMap.FlushVersionedWrites. cntInvalid counts only prior
-// VersionTooEarly txs in the current iteration — not the current tx's own
-// VersionInvalid verdict — so the `valid` term is required to prevent an
+// versionMap.FlushVersionedWrites. cntInvalid counts prior VersionTooEarly
+// and VersionInvalid txs seen earlier in this iteration but excludes the
+// current tx's own verdict, so the `valid` term is required to prevent an
 // invalidated tx's writes being flushed as Done and read as committed by
 // downstream OCC consumers.
 func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
