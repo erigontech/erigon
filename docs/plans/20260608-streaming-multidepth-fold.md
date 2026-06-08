@@ -170,29 +170,32 @@ pending writes or the not-yet-applied deferred batch. Deferred updates merge by 
 - Delete: `execution/commitment/nested_cache_bench_test.go`
 - Delete: `execution/commitment/nested_storage_prototype_test.go` (orphaned cache prototype/benchmark)
 
-- [ ] grep-confirm callers first: `foldStorageChildCell` + `aggregateStorageRoot` are used by
+- [x] grep-confirm callers first: `foldStorageChildCell` + `aggregateStorageRoot` are used by
       the kept `storageRootLocal` (streaming_commitment.go:1286,1306) → **move** these two into
       `streaming_deep_fold.go`. `assembleAccountRoot` (only caller is the deleted cache test)
       and the `storageWorkerFactory` type (only used by the removed `foldStorageRootCached`)
       become dead → **delete** them, not move (re-grep to confirm zero surviving callers)
-- [ ] delete `streaming_storage_cache.go`, `streaming_storage_cache_test.go`,
+- [x] delete `streaming_storage_cache.go`, `streaming_storage_cache_test.go`,
       `nested_cache_bench_test.go`, and `nested_storage_prototype_test.go` (the last benchmarks
       the removed cache concept; confirm it doesn't supply a helper any kept test needs —
       `whaleByNibble`/`storKV`/`foldChildAt` live in the kept `deep_storage_concurrent_bench_test.go`)
-- [ ] strip `StreamingCommitter` cache fields: `caches`, `accTouch`, `nestedCacheOn`,
+- [x] strip `StreamingCommitter` cache fields: `caches`, `accTouch`, `nestedCacheOn`,
       `nestedCap`, `nibbleFolds`, `bgDeepFolds` (and their init in `NewStreamingCommitter`,
       cleanup in `endBlock`/`Reset`/`InvalidateCaches`/`Release`)
-- [ ] remove cache methods: `SetNestedCache`, `routeCachedStorage`, `splitHasCache`,
+- [x] remove cache methods: `SetNestedCache`, `routeCachedStorage`, `splitHasCache`,
       `foldSplitBgCached`, `cacheFor`, `storageRootCached`, `storageRootCachedNibble`,
       `foldCachedStorageRoot`, `newIsolatedStorageWorker`, `NibbleFolds`, `BgDeepFolds`
-- [ ] remove the `TouchKey` nested-cache branch and the two `dfsDeepLocal` cache branches
+      (also removed the now-dead `mergeDeferredByPrefix`, `accountKeyOf`, `foldKeysDeep`,
+      and the `InvalidateCaches`/`InvalidateStreamingCaches` chain + its commitmentdb caller —
+      streaming holds no cross-block state to invalidate; Task 4 re-adds `mergeDeferredByPrefix`)
+- [x] remove the `TouchKey` nested-cache branch and the two `dfsDeepLocal` cache branches
       (the `len(path) > accountKeyNibbles` cacheFor route and the `len(path) == 64` cacheFor
       route); KEEP the `storageRootLocal` branch, `storageRootLocal`, `newStorageWorker`,
       `collectStorageNibbleKeys`, `deepStorageThreshold`, `setAccountStorageRoot`,
       `deepLocalFolds`/`DeepLocalFolds`
-- [ ] grep the whole package for any remaining cache references (`accountStorageCache`,
+- [x] grep the whole package for any remaining cache references (`accountStorageCache`,
       `cacheFor`, `nestedCache`, `NibbleFolds`, …) including test files; fix fallout
-- [ ] (pure refactor — no new tests; existing non-cache parity tests are the safety net)
+- [x] (pure refactor — no new tests; existing non-cache parity tests are the safety net)
       run `make lint` (until clean) + `make erigon integration`; run the streaming parity
       suite — must pass before Task 2
 

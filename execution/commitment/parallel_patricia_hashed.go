@@ -229,16 +229,6 @@ func (p *ParallelPatriciaHashed) SetStreamingCommitter(sc *StreamingCommitter) {
 	}
 }
 
-// InvalidateStreamingCaches drops the StreamingCommitter's cross-block nested
-// storage caches. Required after a state restore (SetState / SeekCommitment /
-// unwind), which can move the root to an older block whose storage the cached
-// subcells no longer match. A no-op outside the streaming path.
-func (p *ParallelPatriciaHashed) InvalidateStreamingCaches() {
-	if p.streaming != nil {
-		p.streaming.InvalidateCaches()
-	}
-}
-
 func (p *ParallelPatriciaHashed) SetTrace(b bool) {
 	if p.template != nil {
 		p.template.SetTrace(b)

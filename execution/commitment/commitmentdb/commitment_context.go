@@ -816,9 +816,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	if err := hext.SetState(cs.trieState); err != nil {
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
-	if ppht != nil {
-		ppht.InvalidateStreamingCaches()
-	}
 	sdc.justRestored.Store(true) // to prevent double reset
 	if sdc.trace {
 		rootHash, err := hext.RootHash()
