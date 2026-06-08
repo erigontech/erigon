@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -63,6 +64,7 @@ type PrivateDebugAPI interface {
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetRawBlockAccessList(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
@@ -669,6 +671,31 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, nil
 	}
 	return rlp.EncodeToBytes(block)
+}
+
+// GetRawBlockAccessList implements debug_getRawBlockAccessList — returns the
+// raw RLP-encoded BlockAccessList bytes (EIP-7928) that this node has stored
+// for the given block. Returns nil if no BAL is recorded (pre-Amsterdam, or
+// post-Amsterdam but not yet downloaded). The bytes returned are exactly what
+// the server-side eth/71 GetBlockAccessLists handler would send to a peer.
+func (api *DebugAPIImpl) GetRawBlockAccessList(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	bal, err := balcache.BlockAccessListBytes(ctx, h, n)
+	if err != nil {
+		return nil, fmt.Errorf("read block access list: %w", err)
+	}
+	return bal, nil
 }
 
 // GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block

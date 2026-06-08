@@ -336,7 +336,7 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockAccessListsQuery(tx, query.GetBlockAccessListsPacket, cs.blockReader)
+	response := eth.AnswerGetBlockAccessListsQuery(ctx, tx, query.GetBlockAccessListsPacket, cs.blockReader)
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
 		RequestId:              query.RequestId,

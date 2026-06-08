@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -302,12 +303,13 @@ func canonicalHashAt(t *testing.T, db kv.TemporalRoDB, blockNum uint64) common.H
 	return hash
 }
 
-func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash common.Hash, blockNum uint64, balBytes []byte) {
+func writeBlockAccessListBytes(t *testing.T, _ kv.TemporalRwDB, blockHash common.Hash, _ uint64, balBytes []byte) {
 	t.Helper()
-	err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteBlockAccessListBytes(tx, blockHash, blockNum, balBytes)
-	})
-	require.NoError(t, err)
+	// BALs are cache-only — the lookup path consults
+	// balcache.BlockAccessListBytes which checks the cache first, then the
+	// regenerator. Writing directly to the cache makes the test see exactly
+	// these bytes without re-executing.
+	balcache.CacheBlockAccessList(blockHash, balBytes)
 }
 
 func TestGetPayloadBodiesByHashV2(t *testing.T) {

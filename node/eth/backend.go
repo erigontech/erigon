@@ -71,6 +71,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -694,9 +695,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if chainConfig.AmsterdamTime != nil {
 		// Always-on once gated, negotiation-driven: if no peer advertises eth/71
 		// this is a silent no-op per scan pass. When eth/71 peers connect, the
-		// downloader backfills missing BALs into rawdb so subsequent stage_exec
-		// runs can skip local BAL regeneration.
-		go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
+		// downloader backfills missing BALs into the in-memory cache so
+		// subsequent serving (eth/71, RPC) can avoid local BAL regeneration.
+		balDownloader := sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger)
+		// Expose the on-demand FetchBALs entry point to sync hooks
+		// (engine_block_downloader after a batch, engine_newPayload when
+		// the CL payload doesn't carry a BAL).
+		balcache.SetBALSyncFetcher(balDownloader)
+		go balDownloader.Run(backend.sentryCtx)
 	}
 
 	var txnProvider txnprovider.TxnProvider
@@ -985,6 +991,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.stopNode,
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
+
+	// Install the BAL regenerator so eth/71 GetBlockAccessLists serving can
+	// fall back to re-executing the block when nothing is cached. BAL bytes
+	// are no longer persisted to MDBX (see db/rawdb/balcache.go), so older
+	// blocks needed by peers or RPC must be reconstructed on demand.
+	balcache.SetBALRegenerator(execmodule.NewBALRegenerator(execmodule.BALRegeneratorDeps{
+		DB:           backend.chainDB,
+		ChainConfig:  chainConfig,
+		Engine:       backend.engine,
+		BlockReader:  blockReader,
+		TxNumsReader: blockReader.TxnumReader(),
+		Logger:       logger,
+	}))
 
 	var executionEngine executionclient.ExecutionEngine
 

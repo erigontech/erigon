@@ -51,8 +51,6 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 	seeds := []seedRow{
 		{kv.ChangeSets3, "k1", "v1"},
 		{kv.ChangeSets3, "k2", "v2"},
-		{kv.BlockAccessList, "b1", "ba1"},
-		{kv.BlockAccessList, "b2", "ba2"},
 		{kv.TxLookup, "t1", "tl1"},
 		{kv.BorWitnesses, "w1", "wit1"},
 	}
@@ -70,7 +68,7 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		}
 		return n
 	}
-	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup, kv.BorWitnesses}
+	tracked := []string{kv.ChangeSets3, kv.TxLookup, kv.BorWitnesses}
 	pre := map[string]int{}
 	for _, table := range tracked {
 		pre[table] = countRows(t, table)
