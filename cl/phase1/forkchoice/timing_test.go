@@ -8,6 +8,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -340,9 +341,13 @@ func TestGetProposerHeadReorgsGloasLatePayload(t *testing.T) {
 
 	parentRoot := common.Hash{0x10}
 	headRoot := common.Hash{0x11}
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	verifiedExecutionPayload.Add(headRoot, struct{}{})
 	f := &ForkChoiceStore{
-		genesisTime: 0,
-		beaconCfg:   &cfg,
+		genesisTime:              0,
+		beaconCfg:                &cfg,
+		verifiedExecutionPayload: verifiedExecutionPayload,
 		forkGraph: ptcVoteForkGraph{
 			envelopes: map[common.Hash]bool{headRoot: true},
 			blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
