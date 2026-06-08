@@ -804,7 +804,7 @@ func TestSetHead_E2E_ModeB_WipesOrphanRowsPastTarget(t *testing.T) {
 				BaseTxnID: types.BaseTxnID(n * 16),
 				TxCount:   1,
 			}))
-			require.NoError(t, rawdb.WriteTd(rwTx, hash, n, big.NewInt(int64(n*10))))
+			require.NoError(t, rawdb.WriteTd(rwTx, hash, n, *uint256.NewInt(n * 10)))
 			// Use the standard composite key (num || hash) for Headers / Senders.
 			headerKey := make([]byte, 8+len(hash))
 			binary.BigEndian.PutUint64(headerKey[:8], n)

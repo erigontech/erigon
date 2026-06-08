@@ -18,9 +18,9 @@ package chain
 
 import (
 	"encoding/json"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,7 +54,7 @@ func TestConfig_ValidParentTrustRoots_JSONRoundTrip(t *testing.T) {
 	// roots round-trips through JSON exactly.
 	original := &Config{
 		ChainName:          "mainnet-fork-20000000",
-		ChainID:            big.NewInt(1),
+		ChainID:            uint256.NewInt(1),
 		Parent:             "mainnet",
 		CutBlock:           20_000_000,
 		ParentManifestHash: [20]byte{0xab, 0xcd, 0xef},
@@ -84,7 +84,7 @@ func TestConfig_ValidParentTrustRoots_OmittedOnRootChain(t *testing.T) {
 	// regenerated.
 	root := &Config{
 		ChainName: "mainnet",
-		ChainID:   big.NewInt(1),
+		ChainID:   uint256.NewInt(1),
 		// ValidParentTrustRoots: nil — root chain
 	}
 	data, err := json.Marshal(root)

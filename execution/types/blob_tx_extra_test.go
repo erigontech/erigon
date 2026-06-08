@@ -50,7 +50,7 @@ func TestBlobTx_SignRecoverAsMessage(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	signer := LatestSignerForChainID(uint256.NewInt(1).ToBig())
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 
 	signed, err := SignTx(sampleBlobTx(), *signer, key)
 	require.NoError(t, err)
@@ -67,7 +67,7 @@ func TestBlobTx_SignRecoverAsMessage(t *testing.T) {
 
 func TestBlobTx_AsMessage_Errors(t *testing.T) {
 	t.Parallel()
-	signer := LatestSignerForChainID(uint256.NewInt(1).ToBig())
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 
 	// Pre-Cancun.
 	_, err := sampleBlobTx().AsMessage(*signer, nil, &chain.Rules{})

@@ -18,7 +18,6 @@ package types
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -100,7 +99,7 @@ func TestTransactions_LenEncodeIndex(t *testing.T) {
 	t.Parallel()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	signer := LatestSignerForChainID(big.NewInt(1))
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 	to := common.HexToAddress("0x0000000000000000000000000000000000000002")
 	signed, err := SignTx(NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), *signer, key)
 	require.NoError(t, err)

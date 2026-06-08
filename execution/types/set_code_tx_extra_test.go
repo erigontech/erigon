@@ -19,7 +19,6 @@ package types
 import (
 	"bytes"
 	"io"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -104,7 +103,7 @@ func TestSetCodeTx_HashAndSigningHash(t *testing.T) {
 	require.NotEqual(t, common.Hash{}, h)
 	require.Equal(t, h, tx.Hash()) // cached
 
-	require.NotEqual(t, common.Hash{}, tx.SigningHash(big.NewInt(1)))
+	require.NotEqual(t, common.Hash{}, tx.SigningHash(uint256.NewInt(1)))
 }
 
 func TestSetCodeTx_MarshalDecodeRoundTrip(t *testing.T) {

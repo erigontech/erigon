@@ -94,7 +94,7 @@ func TestStoreBlockHashesEip2935(t *testing.T) {
 	slot := accounts.InternKey(common.BytesToHash(uint256.NewInt((10 - 1) % params.BlockHashHistoryServeWindow).Bytes()))
 	got, err := ibs.GetState(params.HistoryStorageAddress, slot)
 	require.NoError(t, err)
-	want := uint256.NewInt(0).SetBytes32(header.ParentHash.Bytes())
+	want := uint256.NewInt(0).SetBytes32(header.ParentHash[:])
 	require.Equal(t, want.Hex(), got.Hex())
 }
 

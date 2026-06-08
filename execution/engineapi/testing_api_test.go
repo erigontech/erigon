@@ -1017,7 +1017,7 @@ func TestEngineServer_PostUnwindForkChoiceReturnsInvalid(t *testing.T) {
 			}
 			// W3.12a's recovery lookup of the EL head by number
 			if num != nil && *num == elHeadNumber {
-				h := &types.Header{Extra: elHeadHash.Bytes()}
+				h := &types.Header{Extra: elHeadHash[:]}
 				h.Number.SetUint64(elHeadNumber)
 				return h, nil
 			}
@@ -1031,7 +1031,7 @@ func TestEngineServer_PostUnwindForkChoiceReturnsInvalid(t *testing.T) {
 	}
 
 	cfg := allForksChainConfig()
-	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, 0, 0)
+	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, nil, 0, 0)
 	srv.test = true
 
 	ps, err := srv.HandleForkChoice(context.Background(), "test",
@@ -1065,7 +1065,7 @@ func TestEngineServer_AdminUnwindShortCircuitsToSyncing(t *testing.T) {
 	t.Run("forkchoiceUpdated returns SYNCING when admin unwind is in progress", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{adminUnwindInProgress: true}
-		srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, 0, 0)
+		srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, nil, 0, 0)
 		srv.test = true
 		resp, err := srv.forkchoiceUpdated(context.Background(),
 			&engine_types.ForkChoiceState{
@@ -1084,7 +1084,7 @@ func TestEngineServer_AdminUnwindShortCircuitsToSyncing(t *testing.T) {
 	t.Run("HandleNewPayload returns SYNCING when admin unwind is in progress", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{adminUnwindInProgress: true}
-		srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, 0, 0)
+		srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, nil, 0, 0)
 		srv.test = true
 		header := &types.Header{}
 		header.Number.SetUint64(42)

@@ -17,7 +17,6 @@
 package types
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -49,12 +48,12 @@ func TestMakeSigner_PerFork(t *testing.T) {
 
 func TestSigner_StringEqualMalleable(t *testing.T) {
 	t.Parallel()
-	s := *LatestSignerForChainID(big.NewInt(1))
+	s := *LatestSignerForChainID(uint256.NewInt(1))
 	require.Contains(t, s.String(), "Signer[chainId=")
 	require.True(t, s.Equal(s)) //nolint:gocritic // intentional self-comparison
-	require.False(t, s.Equal(*LatestSignerForChainID(big.NewInt(2))))
+	require.False(t, s.Equal(*LatestSignerForChainID(uint256.NewInt(2))))
 
-	sp := LatestSignerForChainID(big.NewInt(1))
+	sp := LatestSignerForChainID(uint256.NewInt(1))
 	sp.SetMalleable(true)
 	require.True(t, sp.malleable)
 	require.False(t, sp.Equal(s))
@@ -65,7 +64,7 @@ func TestSignTx_RecoverSender_Legacy(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	signer := LatestSignerForChainID(big.NewInt(1))
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 
 	to := common.HexToAddress("0x0000000000000000000000000000000000000002")
 	signed, err := SignTx(NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), *signer, key)
@@ -90,7 +89,7 @@ func TestSignTx_RecoverSender_DynamicFee(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	signer := LatestSignerForChainID(big.NewInt(1))
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 
 	to := common.HexToAddress("0x0000000000000000000000000000000000000002")
 	tx := NewEIP1559Transaction(*uint256.NewInt(1), 0, to, uint256.NewInt(1), 21_000,
@@ -112,7 +111,7 @@ func TestSignTx_RecoverSender_SetCode(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	signer := LatestSignerForChainID(big.NewInt(1))
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 
 	signed, err := SignTx(sampleSetCodeTx(), *signer, key)
 	require.NoError(t, err)
@@ -130,7 +129,7 @@ func TestMustSignNewTx_And_SetSender(t *testing.T) {
 	t.Parallel()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	signer := LatestSignerForChainID(big.NewInt(1))
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 	to := common.HexToAddress("0x0000000000000000000000000000000000000002")
 
 	var signed Transaction

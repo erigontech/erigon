@@ -66,7 +66,7 @@ func TestAccessListTx_SignRecoverAsMessage(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	signer := LatestSignerForChainID(uint256.NewInt(1).ToBig())
+	signer := LatestSignerForChainID(uint256.NewInt(1))
 
 	signed, err := SignTx(sampleAccessListTx(), *signer, key)
 	require.NoError(t, err)
