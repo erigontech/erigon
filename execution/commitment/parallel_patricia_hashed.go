@@ -68,6 +68,12 @@ type ParallelPatriciaHashed struct {
 	// instead — the deferred-commitment (fork validation / parallel apply) path.
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
+
+	// streaming, when non-nil (the VariantStreamingHexPatricia path), makes
+	// Process delegate to the StreamingCommitter, which folds touched splits
+	// (overlapping with execution) and merges at Process. The Updates buffer
+	// forwards touches to the same committer.
+	streaming *StreamingCommitter
 }
 
 // publishedRoot bundles the candidate root hash with the worker's final root
@@ -118,6 +124,9 @@ func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 		n = runtime.NumCPU()
 	}
 	p.numWorkers = n
+	if p.streaming != nil {
+		p.streaming.SetNumWorkers(n)
+	}
 }
 
 // SetMinSplitKeys overrides the per-batch split-point threshold. Workers below
@@ -135,6 +144,9 @@ func (p *ParallelPatriciaHashed) SetMinSplitKeys(n uint32) {
 // parallel apply) path.
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	p.leaveDeferredForCaller = leave
+	if p.streaming != nil {
+		p.streaming.SetLeaveDeferredForCaller(leave)
+	}
 }
 
 // HasPendingDeferredUpdates reports whether Process left deferred branch updates
@@ -168,6 +180,9 @@ func (p *ParallelPatriciaHashed) Reset() {
 	p.rootHash.Store(nil)
 	p.pendingRoot.Store(nil)
 	p.resetPool()
+	if p.streaming != nil {
+		p.streaming.Reset()
+	}
 }
 
 // Release returns the template to its pool, drops the worker pool, and clears
@@ -181,6 +196,10 @@ func (p *ParallelPatriciaHashed) Release() {
 	p.rootHash.Store(nil)
 	p.pendingRoot.Store(nil)
 	p.resetPool()
+	if p.streaming != nil {
+		p.streaming.Release()
+		p.streaming = nil
+	}
 }
 
 // ResetContext propagates a new PatriciaContext to the template. Per-worker
@@ -195,11 +214,27 @@ func (p *ParallelPatriciaHashed) ResetContext(ctx PatriciaContext) {
 // tests that swap in a mock factory.
 func (p *ParallelPatriciaHashed) SetTrieContextFactory(f TrieContextFactory) {
 	p.trieCtxFactory = f
+	if p.streaming != nil {
+		p.streaming.SetTrieContextFactory(f)
+	}
+}
+
+// SetStreamingCommitter attaches a StreamingCommitter, switching Process to the
+// streaming path. The same committer must be wired to the Updates buffer so
+// touches are forwarded to it.
+func (p *ParallelPatriciaHashed) SetStreamingCommitter(sc *StreamingCommitter) {
+	p.streaming = sc
+	if sc != nil && p.trieCtxFactory != nil {
+		sc.SetTrieContextFactory(p.trieCtxFactory)
+	}
 }
 
 func (p *ParallelPatriciaHashed) SetTrace(b bool) {
 	if p.template != nil {
 		p.template.SetTrace(b)
+	}
+	if p.streaming != nil {
+		p.streaming.SetTrace(b)
 	}
 }
 
@@ -234,7 +269,12 @@ func (p *ParallelPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) Variant() TrieVariant { return VariantParallelHexPatricia }
+func (p *ParallelPatriciaHashed) Variant() TrieVariant {
+	if p.streaming != nil {
+		return VariantStreamingHexPatricia
+	}
+	return VariantParallelHexPatricia
+}
 
 // RootHash returns the root hash published by Process. If Process has not
 // completed (or no updates were applied), it falls back to the template's
@@ -250,6 +290,26 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 		return nil, nil
 	}
 	return p.template.RootHash()
+}
+
+// processStreaming delegates Process to the attached StreamingCommitter, which
+// folded the touched splits (overlapping with execution when the scheduler ran)
+// and merges them here. The committer owns its own prefix trie populated by the
+// forwarded touches, so updates.parallel is unused on this path. The factory and
+// leave-deferred flag are kept in sync via SetTrieContextFactory /
+// SetLeaveDeferredForCaller, so this only runs the fold and republishes the root.
+func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
+	rh, err := p.streaming.Process(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if p.leaveDeferredForCaller {
+		p.deferredForCaller = p.streaming.TakeDeferredUpdates()
+	}
+	out := make([]byte, len(rh))
+	copy(out, rh)
+	p.rootHash.Store(&out)
+	return out, nil
 }
 
 // Process is the entry point for parallel commitment computation. It expects
@@ -280,6 +340,10 @@ func (p *ParallelPatriciaHashed) Process(
 
 	p.rootHash.Store(nil)
 	p.pendingRoot.Store(nil)
+
+	if p.streaming != nil {
+		return p.processStreaming(ctx)
+	}
 
 	pu := updates.parallel
 	// Empty update set: no touches occurred. Fall back to the template's

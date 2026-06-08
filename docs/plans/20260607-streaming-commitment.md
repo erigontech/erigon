@@ -307,11 +307,11 @@ if the flag turns out to fork behavior in more than one switch.
 - Modify: `execution/commitment/parallel_patricia_hashed.go` (route to streaming)
 - Create: tests near the variant selection
 
-- [ ] add `ExperimentalStreamingCommitmentFlag` + `statecfg.ExperimentalStreamingCommitment`
-- [ ] add `VariantStreamingHexPatricia` (or parallel variant + streaming mode); select in `domain_shared.go`
-- [ ] route `ParallelPatriciaHashed.Process` to the streaming committer when the mode/flag is set (keep `ERIGON_CMT_MOUNT`/`ERIGON_CMT_DEEP` layering)
-- [ ] write test: flag → correct variant; integration parity via the public `Process` path (big-storage corpus, workers 1/4/8)
-- [ ] run tests — must pass before next task
+- [x] add `ExperimentalStreamingCommitmentFlag` + `statecfg.ExperimentalStreamingCommitment` — flag in `cmd/utils/flags.go` (applied to `cfg.ExperimentalStreamingCommitment`), config field in `node/ethconfig/config.go`, copied to the statecfg global in `node/eth/backend.go`, registered in `node/cli/default_flags.go`, bound in `cmd/integration/commands/flags.go` (`withConcurrentCommitment`)
+- [x] add `VariantStreamingHexPatricia`; select in `domain_shared.go` — new TrieVariant const + `InitializeTrieAndUpdates` case (ModeParallel Updates + attached `StreamingCommitter`, wired to both the trie shell and the Updates buffer); `PickTrieVariant` returns it streaming-first; `squeeze.go` variant selection mirrors the precedence
+- [x] route `ParallelPatriciaHashed.Process` to the streaming committer when set — `streaming *StreamingCommitter` field on the shell; `Process` delegates to `processStreaming` (factory / leave-deferred / numWorkers / trace / Reset / Release all propagate); `Variant()` reports streaming when attached; the state-store guards in `commitment_context.go` (LatestCommitmentState, SetState restore) accept the streaming variant. Streaming is its own path (no mount/deep env layering); the `ERIGON_CMT_MOUNT`/`ERIGON_CMT_DEEP` gates remain on the non-streaming `ParallelPatriciaHashed.Process`
+- [x] write test: flag → correct variant; integration parity via the public `Process` path (big-storage corpus, workers 1/4/8) — `TestPickTrieVariant_StreamingFlag` + `TestSharedDomains_StreamingFlagOn_UsesStreamingTrie` + `TestSharedDomains_StreamingFlag_RootEquivalence` (db/state/execctx); `TestInitializeTrieAndUpdates_StreamingVariant` + `TestStreaming_PublicProcessParity` (drives the streaming variant through the public `Trie.Process` path on `buildBigAccountCorpus`, workers 1/4/8 == sequential root+branches)
+- [x] run tests — pass (incl. `-race` on the public-Process + scheduler concurrency tests); `make lint` clean; `make erigon integration` builds
 
 ### Task 8: New-split-mid-block + multi-block lifecycle
 

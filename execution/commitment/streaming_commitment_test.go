@@ -662,3 +662,71 @@ func TestStreaming_UpdatesLifetimeRegression(t *testing.T) {
 	require.Equal(t, seqRoot, root, "mutating caller buffers after Touch changed the root")
 	requireBranchParity(t, seqMs, ms)
 }
+
+// TestInitializeTrieAndUpdates_StreamingVariant asserts the streaming variant
+// builds a *ParallelPatriciaHashed shell with a streaming committer attached and
+// a ModeParallel Updates buffer wired to forward touches to that same committer.
+func TestInitializeTrieAndUpdates_StreamingVariant(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantStreamingHexPatricia
+	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	defer upd.Close()
+	defer trie.Release()
+
+	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
+	require.Equal(t, VariantStreamingHexPatricia, trie.Variant())
+	pt := trie.(*ParallelPatriciaHashed)
+	require.NotNil(t, pt.streaming, "streaming variant must attach a StreamingCommitter")
+	// The streaming committer reuses ModeParallel's intern/prefix-trie machinery.
+	require.Equal(t, ModeParallel, upd.Mode())
+	require.NotNil(t, upd.parallel)
+	require.True(t, upd.Streaming(), "Updates must forward touches to the committer")
+}
+
+// streamingViaPublicProcessRoot drives the streaming committer through the
+// public Trie.Process path: InitializeTrieAndUpdates builds the shell + wires the
+// committer to the Updates buffer, touches flow through TouchPlainKey, and
+// trie.Process delegates to processStreaming. This is the production entry point
+// (the Trie interface), unlike streamingViaUpdatesRoot which calls sc.Process.
+func streamingViaPublicProcessRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
+	t.Helper()
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantStreamingHexPatricia
+	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	defer ut.Close()
+	defer trie.Release()
+
+	pt := trie.(*ParallelPatriciaHashed)
+	pt.SetNumWorkers(workers)
+	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
+	pt.ResetContext(ms)
+
+	for _, key := range keys {
+		ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
+	}
+	root, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	return root, ms
+}
+
+// TestStreaming_PublicProcessParity is the Task-7 integration check: the
+// streaming variant, selected by InitializeTrieAndUpdates and driven through the
+// public Trie.Process path, yields root + every stored branch == sequential on
+// the big-storage corpus across worker counts.
+func TestStreaming_PublicProcessParity(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildBigAccountCorpus(15_000)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	for _, w := range []int{1, 4, 8} {
+		root, ms := streamingViaPublicProcessRoot(t, w, keys, upds)
+		require.Equalf(t, seqRoot, root, "public Process(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+	}
+}

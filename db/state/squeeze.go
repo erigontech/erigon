@@ -961,10 +961,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
+		streaming := statecfg.ExperimentalStreamingCommitment
 		parallel := statecfg.ExperimentalParallelCommitment
 		concurrent := statecfg.ExperimentalConcurrentCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
 		switch {
+		case streaming:
+			trieVariant = commitment.VariantStreamingHexPatricia
 		case parallel:
 			trieVariant = commitment.VariantParallelHexPatricia
 		case concurrent:

@@ -1110,6 +1110,14 @@ var (
 		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed). Takes precedence over --experimental.concurrent-commitment if both are set.",
 		Value: false,
 	}
+	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
+	// overlaps commitment fold work with block execution. Default off; takes
+	// precedence over the parallel/concurrent flags when set.
+	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.streaming-commitment",
+		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment and --experimental.concurrent-commitment if set.",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1977,6 +1985,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
 		cfg.ExperimentalParallelCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
+		cfg.ExperimentalStreamingCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

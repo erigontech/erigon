@@ -149,6 +149,7 @@ const (
 	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
+	VariantStreamingHexPatricia  TrieVariant = "hex-streaming-patricia-hashed"
 )
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
@@ -166,6 +167,17 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// the parallel trie with ModeDirect/ModeUpdate.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
+		return trie, tree
+	case VariantStreamingHexPatricia:
+		// Streaming reuses ModeParallel's intern/copy/prefix-trie machinery; the
+		// touches are forwarded to the StreamingCommitter, which folds the owning
+		// split (overlapping with execution) and merges at Process. The trie is a
+		// ParallelPatriciaHashed shell that delegates Process to the committer.
+		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
+		sc := NewStreamingCommitter(nil, length.Addr, cfg)
+		trie.SetStreamingCommitter(sc)
+		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
+		tree.SetStreamingCommitter(sc)
 		return trie, tree
 	case VariantBinPatriciaTrie:
 		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)

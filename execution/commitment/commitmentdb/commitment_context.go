@@ -632,7 +632,7 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantConcurrentHexPatricia && tv != commitment.VariantParallelHexPatricia {
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantConcurrentHexPatricia && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -800,7 +800,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		hext = phext.RootTrie()
 	}
-	if tv == commitment.VariantParallelHexPatricia {
+	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
 		ppht, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
 		if !ok {
 			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
