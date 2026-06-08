@@ -211,22 +211,29 @@ fold (`storageRootLocal` → `foldStorageChildCell` + `aggregateStorageRoot`) al
 depth 64 by hand; the arbitrary-depth primitive generalizes THAT, leaving the PoC path and
 `parallel_mount.go` untouched.
 
-- [ ] write a FAILING regression test first: spawn many concurrent per-nibble folds (to
-      pollute `hphPool`), then call the aggregation path, asserting the storageRoot equals
-      the sequential oracle; run under `-race -count>=20`; confirm it fails red for the
-      right reason (residual stale-`grid` state, NOT a setup error)
-- [ ] fix root cause: ensure the aggregation/fold-to-depth helper fully initializes every
-      worker cell/state it reads — `aggregateStorageRoot` must set `grid[0][accNib]` (today it
-      does not) and/or `resetForReuse` must clear `grid` on pool return; choose the minimal
-      correct fix and document the invariant in one line
-- [ ] generalize the deep-fold mount (the hand-rolled `currentKey`/`depths` setup in
-      `foldStorageChildCell`/`aggregateStorageRoot`) to mount at an arbitrary prefix `P` and
-      fold to a cell at depth `len(P)`. Do NOT modify `foldMounted`/`mountTo`/`parallel_mount.go`.
-- [ ] verify `parallel_mount.go`, `hex_concurrent_patricia_hashed.go`, and
-      `prepare_on_touch_test.go` compile with NO edits (the PoC mount path is untouched)
-- [ ] write tests for the primitive at depths mid-account, 64/65, and a mid-extension
-      (path-compressed) prefix (parity vs the existing `storageRootLocal` path)
-- [ ] run `-race -count>=20` regression + unit tests, `make lint`, `make erigon integration` — must pass before Task 3
+- [x] write a FAILING regression test first: `TestAggregateStorageRoot_ResetsDestinationCell`
+      builds a whale's storage children through the production deep-fold helper, then folds the
+      storage root on a pooled worker whose destination grid cell still carries stale account
+      fields, asserting the folded cell (consumed via `computeCellHash`) matches the
+      reset-clean baseline; confirmed it fails red for the right reason (stale `stateHash`
+      leaked through the depth-64 `foldBranch`, which does not clear `accountAddrLen`)
+- [x] fix root cause: `foldChildSubtree` and `aggregateSubtreeRoot` `reset()` the destination
+      `grid[0][col]` before folding, so no stale pooled-grid field survives a single-child
+      `foldPropagate` or a depth >= 64 `foldBranch`. Minimal fix — `resetForReuse`/`grid` left
+      untouched (clearing the whole 128×16 grid each reuse is the perf cost it deliberately avoids)
+- [x] generalize the deep-fold mount: `aggregateSubtreeRoot(prefix, children, present)` mounts
+      the hand-rolled `currentKey`/`depths` at an arbitrary prefix `P` and folds to a cell at
+      depth `len(P)`; `aggregateStorageRoot` is now a wrapper for `P = accHash[:64]`. (Storage
+      child subtrees always collapse to the depth-64 account anchor structurally, so the
+      generalized mount lives in the aggregate; `foldChildSubtree` reads the anchor cell.)
+      `foldMounted`/`mountTo`/`parallel_mount.go` untouched.
+- [x] verified `parallel_mount.go`, `hex_concurrent_patricia_hashed.go`, and
+      `prepare_on_touch_test.go` are unmodified (not in the diff) and the package builds
+- [x] `TestAggregateSubtreeRoot_DepthGeneralization` folds an identical hash-only child set at
+      depths 60 (mid-account), 64 (boundary), and 70 (storage-interior/mid-extension) to the
+      same branch hash; `TestDeepFold_StorageRootParity` checks the depth-64 path against the
+      sequential ModeDirect oracle
+- [x] ran `-race -count>=20` regression + unit tests, `make lint` (0 issues), `make erigon integration` — all pass
 
 ### Task 3: Multi-depth split-points + parallel post-order schedule
 

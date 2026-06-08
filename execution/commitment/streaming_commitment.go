@@ -928,7 +928,7 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 	}
 
 	w, release := sc.newStorageWorker()
-	sr, err := aggregateStorageRoot(w, path, accNib, &children, present)
+	sr, err := aggregateStorageRoot(w, path, &children, present)
 	if err != nil {
 		release()
 		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
