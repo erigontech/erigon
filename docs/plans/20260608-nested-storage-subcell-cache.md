@@ -274,10 +274,10 @@ sibling cells be reused. **Do NOT edit `parallel_mount.go`.**
   Incremental vs cold full-fold = **13.4×** (653.8/48.7), matching the prototype's ~656 ms→~49 ms. The incremental re-fold also beats the parallel full-fold baseline (~1.8× faster, ~16× fewer allocs / less memory). Metric is the **whale storage re-fold**, not steady-state commitment.
 
 ### Task 8: Verify acceptance criteria
-- [ ] streaming root + branches == sequential across all corpora (mixed, big-account, whale, random, nested-storage, deletes), caching on
-- [ ] no regression: `go test -run TestVerifyParallel -count=1` on `default`, `ERIGON_CMT_MOUNT=1`, `ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1`, and the full `Streaming` suite
-- [ ] `-race` clean on the cache concurrency tests
-- [ ] `make lint` clean (repeat; non-deterministic); `make erigon integration` builds
+- [x] streaming root + branches == sequential across all corpora (mixed, big-account, whale, random, nested-storage, deletes), caching on
+- [x] no regression: `go test -run TestVerifyParallel -count=1` on `default`, `ERIGON_CMT_MOUNT=1`, `ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1`, and the full `Streaming` suite
+- [x] `-race` clean on the cache concurrency tests
+- [x] `make lint` clean (repeat; non-deterministic); `make erigon integration` builds
 
 ### Task 9: [Final] Docs
 - [ ] update `/Users/awskii/org/wrk/HANDOFF-parallel-storage-fold.md` with the cache design + bulk results
