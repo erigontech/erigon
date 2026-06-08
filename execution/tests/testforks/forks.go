@@ -237,7 +237,9 @@ func init() {
 
 func configCopy(c *chain.Config) *chain.Config {
 	cpy := new(chain.Config)
-	copier.Copy(cpy, c)
+	if err := copier.CopyWithOption(cpy, c, copier.Option{DeepCopy: true}); err != nil {
+		panic(fmt.Sprintf("testforks: failed to deep-copy chain.Config: %s", err))
+	}
 	return cpy
 }
 

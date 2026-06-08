@@ -12,38 +12,25 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// Prometheus metrics for the storage-trunk pin layer. Per-contract
-// labels intentionally omitted — cardinality risk is real (mainnet
-// could see hundreds of promoted contracts over a process lifetime)
-// and the structured [adaptive-pin] log line gives per-contract
-// detail when needed for debugging.
+// Per-contract labels omitted to keep cardinality bounded; per-contract
+// detail is in the [adaptive-pin] structured log line.
 
 var (
-	// BranchCache pinned-tier counters. Surface the existing
-	// PinnedStats hits/misses/entries so dashboards can reason about
-	// pin effectiveness without scraping logs.
 	mxPinnedHits    = metrics.GetOrCreateCounter("commitment_branchcache_pinned_hits_total")
 	mxPinnedMisses  = metrics.GetOrCreateCounter("commitment_branchcache_pinned_misses_total")
 	mxPinnedEntries = metrics.GetOrCreateGauge("commitment_branchcache_pinned_entries")
 
-	// AdaptivePinController lifecycle counters.
 	mxAdaptivePromoted = metrics.GetOrCreateCounter("commitment_adaptive_pin_promoted_total")
 	mxAdaptiveExtended = metrics.GetOrCreateCounter("commitment_adaptive_pin_extended_total")
 	mxAdaptiveDemoted  = metrics.GetOrCreateCounter("commitment_adaptive_pin_demoted_total")
 	mxAdaptiveActive   = metrics.GetOrCreateGauge("commitment_adaptive_pin_active_contracts")
 
-	// Preload-side counters for diagnostics. Per-contract preload
-	// duration is too high-cardinality for a histogram label; total
-	// duration spent in preload is the aggregate proxy.
 	mxPreloadDurationSecondsTotal = metrics.GetOrCreateCounter("commitment_trunk_preload_duration_seconds_total")
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
 )
 
-// PublishMetrics snapshots the cache's current counters into the
-// Prometheus registry. Counters are monotonic-add so the cache tracks
-// last-published values internally and emits deltas. Gauges Set
-// absolute. Call periodically from the host (e.g. once per SD.Flush);
-// the once-per-batch cadence avoids hot-path cost.
+// PublishMetrics emits counter deltas (last-published tracked internally) and
+// sets gauges absolute. Call once per SD.Flush — once-per-batch avoids hot-path cost.
 func (c *BranchCache) PublishMetrics() {
 	hits := c.pinnedHits.Load()
 	misses := c.pinnedMisses.Load()

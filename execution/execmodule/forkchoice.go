@@ -114,16 +114,15 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
-	// done is closed when the goroutine fully returns — after all defers
-	// (shared-state cleanup, semaphore release) have run. When we receive
-	// a non-Busy result, we wait on done so the caller can safely acquire
-	// the semaphore for a follow-up operation like AssembleBlock.
-	done := make(chan struct{})
 
 	// Spawn the actual forkchoice work using the module's background context so
-	// it is not cancelled when the caller's context times out.
+	// it is not cancelled when the caller's context times out. We return as soon
+	// as the result lands on outcomeCh — for a merge-extending fork at tip the
+	// result is sent before flush/commit, so the consensus client is not blocked
+	// on the EL commit. The forkchoice goroutine releases the semaphore only after
+	// all cleanup defers have run, so any follow-up op (AssembleBlock, next FCU)
+	// that acquires the semaphore observes fully-settled state.
 	go func() {
-		defer close(done)
 		if err := e.updateForkChoice(e.bacgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
@@ -131,7 +130,6 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 
 	select {
 	case outcome := <-outcomeCh:
-		<-done
 		return outcome.result, outcome.err
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
@@ -403,29 +401,46 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		unwindTarget := currentParentNumber
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if unwindTarget < minUnwindableBlock {
-			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				LatestValidHash: common.Hash{},
-				Status:          ExecutionStatusReorgTooDeep,
-			}, false)
+
+		// Determine current canonical tip from TxNums. If unwindTarget is at or
+		// above the canonical tip, there's nothing above to roll back — skip the
+		// unwind path entirely and proceed straight to forward-filling new
+		// canonicals. This is the recovery path when chaindata canonical lags
+		// state's commitBlock (e.g. after a snapshot/state misalignment), where
+		// the conservative minUnwindable check would otherwise reject the FCU
+		// as ReorgTooDeep even though no state actually needs unwinding.
+		lastCanonicalBlock, _, errLast := rawdbv3.TxNums.Last(tx)
+		if errLast != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errLast, false)
 		}
 
-		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if unwindTarget < lastCanonicalBlock {
+			minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if unwindTarget < minUnwindableBlock {
+				e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusReorgTooDeep,
+				}, false)
+			}
+
+			if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			// Run the unwind
+			if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
+				err = fmt.Errorf("updateForkChoice: %w", err)
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
 		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		// Run the unwind
-		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
+		// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
+		// the unwound txNum, so no whole-cache clear is needed here.
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
@@ -866,35 +881,6 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	}
 	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 
-	// Track the highest fully-flushed commitment txNum so the aggregator's
-	// collation safety cap (aggregator.go: stepFullyCommitted gate) advances
-	// during normal FCU operation. Without this update, the cap stays at its
-	// initial-cycle value forever and `lastFlushedCommitmentTxNum > 0` guard
-	// at aggregator.go:2140 stops capping correctly — the calculator-port
-	// flushes through commitment domain into MDBX every commit but the
-	// aggregator never learns about it. Mirrors stageloop.go:266.
-	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			if verifyTx, verifyErr := e.db.BeginTemporalRo(e.bacgroundCtx); verifyErr == nil { //nolint:gocritic // Rollback below; defer would shadow named-tx scope
-				defer verifyTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
-				v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
-				if getErr != nil {
-					// Log but do not fail FCU — aggregator stays at its prior watermark; the
-					// next commit's GetLatest will retry. Silent failure here is what motivated
-					// this fix in the first place: a stale watermark caused the aggregator to
-					// never learn about flushes and broke collation capping.
-					e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: GetLatest failed; aggregator watermark unchanged", "err", getErr)
-				} else if len(v) >= 16 {
-					committedTxNum, _ := commitmentdb.DecodeTxBlockNums(v)
-					agg.SetLastFlushedCommitmentTxNum(committedTxNum)
-				}
-				verifyTx.Rollback()
-			} else {
-				e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
-			}
-		}
-	}
-
 	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {
 		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
@@ -923,7 +909,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	// keeps writing to MDBX above the file boundary, but no new file is
 	// built so the data above never becomes prunable. Result: MDBX grows
 	// unbounded (commitment domain especially) until the next initial-cycle
-	// trip through StageLoopIteration. CollateAndPruneIfNeeded internally
+	// trip through StageLoopIteration. CollateAndPrune internally
 	// opens its own RW tx and calls the pruneFn callback inside it.
 	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
@@ -935,7 +921,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			if pruneTimeout > maxTimeout {
 				pruneTimeout = maxTimeout
 			}
-			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+			if err := agg.CollateAndPrune(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
 				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
 			}, e.logger); err != nil {
 				return nil, err
@@ -978,13 +964,14 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		const blockRange = 30 // ~1 hour
 		const alpha = 2.0 / (blockRange + 1)
 
-		if e.avgMgasSec == 0 || e.avgMgasSec == math.Inf(1) {
-			e.avgMgasSec = mgasPerSec
-		}
-		e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-		// if mgasPerSec or avgMgasPerSec are 0, Inf or -Inf, do not log it but dont return either
-		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && e.avgMgasSec > 0 && e.avgMgasSec != math.Inf(1) {
-			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
+		// Gas-weighted EWMA: accumulate gas and time separately.
+		// Near-empty blocks contribute tiny values to both, so they barely move the ratio.
+		e.accumGasMgas = alpha*gasUsedMgas + (1-alpha)*e.accumGasMgas
+		e.accumTimeSec = alpha*totalTime.Seconds() + (1-alpha)*e.accumTimeSec
+		avgMgasSec := e.accumGasMgas / e.accumTimeSec
+		// if mgasPerSec or avgMgasSec are 0, Inf or -Inf, do not log it but dont return either
+		if mgasPerSec > 0 && mgasPerSec != math.Inf(1) && avgMgasSec > 0 && avgMgasSec != math.Inf(1) {
+			logArgs = append(logArgs, "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "avg mgas/s", fmt.Sprintf("%.2f", avgMgasSec))
 		}
 	}
 

@@ -42,7 +42,7 @@ func ApplyBeaconRootEip4788(
 		defer tracer.OnSystemCallEnd()
 	}
 
-	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot.Bytes())
+	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot[:])
 	if err != nil {
 		log.Warn("Failed to call beacon roots contract", "err", err)
 	}

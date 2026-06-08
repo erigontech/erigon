@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -136,18 +137,9 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		// Cap collation to the max txNum covered by block files.
-		// Without this, collation creates domain files past the block
-		// file boundary, causing "behind commitment" errors.
-		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
-			agg.SetMaxCollationTxNum(maxTxNum)
-		}
-		// Background collation removed from exec code — collation is now managed
-		// by CollateAndPruneIfNeeded in the FCU/stage loop (forkchoice.go).
-		// This avoids background collation db.View() txs overlapping with
-		// commit+prune, which prevented MDBX GC page reclamation.
-	}
+	// Background collation removed from exec code — collation is now managed
+	// by CollateAndPrune in the FCU/stage loop (forkchoice.go).
+	// Block-snapshot boundary gating happens inside readyForCollation.
 
 	var (
 		inputTxNum               uint64
@@ -205,14 +197,6 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// DO NOT re-introduce a warmup-cache disable here without working through
-	// the unwind caching scenarios. main carried a short-term workaround
-	// (`doms.EnableWarmupCache(!isApplyingBlocks && !parallel)`) that disabled
-	// the trie warmuper's value cache on the parallel path to dodge a
-	// stale-cache wrong-root. THIS PR is the proper fix for that wrong-root:
-	// caching stays enabled, the BranchCache + SD chain handle multi-block
-	// uncommitted batches and fork validation correctly. The re-org tests are
-	// the gate that confirms this.
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
@@ -323,7 +307,7 @@ func ExecV3(ctx context.Context,
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
-						lastHeader.Number.Uint64(), lastHeader.Hash(), lastHeader.ParentHash, applyTx, cfg, execStage, logger, u)
+						lastHeader.Number.Uint64(), lastHeader.Hash(), applyTx, cfg, execStage, logger, u)
 				default:
 					return execErr
 				}
@@ -360,8 +344,7 @@ func ExecV3(ctx context.Context,
 		// is to freeze process state at the bad block. Returning would run deferred
 		// rollback/commit/flush paths and overwrite the very state we want to
 		// inspect. Mirrors the design documented in PR #19803. Applies to both
-		// serial and parallel paths uniformly — pe.exec / se.executeBlock already
-		// call ReportBadHeaderPoS internally before returning ErrInvalidBlock.
+		// serial and parallel paths uniformly.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
 			os.Exit(1)
@@ -600,13 +583,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			// Bug 2 fix from commit 43a64a0b66 (parallel executor: fix two cache bugs):
-			// validate stateCache entries against this block's parent hash so stale
-			// values from a prior fork-validation are cleared before reads.
-			if stateCache := te.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-			}
-
 			var dbBAL types.BlockAccessList
 			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
 			// a separate db.View() as it can deadlock with the stageloop's
@@ -705,12 +681,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	return nil
 }
 
-func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
+func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
-	}
-	if cfg.hd != nil && cfg.hd.POSSync() {
-		cfg.hd.ReportBadHeaderPoS(blockHash, parentHash)
 	}
 	minBlockNum := s.BlockNumber
 	if blockNumber <= minBlockNum {
@@ -790,9 +763,9 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
-		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
-		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
+	if !bytes.Equal(computedRootHash, header.Root[:]) {
+		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root[:], header.Hash()))
+		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), applyTx, cfg, e, logger, u)
 		return false, times, err
 	}
 	return true, times, nil
@@ -848,4 +821,23 @@ func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64)
 	// Generate changesets for blocks within the reorg window of the batch end,
 	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
+}
+
+// changesetWindowStart returns the first block in [startBlockNum, maxBlockNum]
+// for which shouldGenerateChangeSets is true, or math.MaxUint64 when there is
+// none. Parallel exec gates per-block changeset capture and the commitment
+// calculator's per-block mode on this boundary.
+func changesetWindowStart(alwaysGenerateChangesets bool, maxReorgDepth uint64, frozenBlocks uint64, startBlockNum uint64, maxBlockNum uint64) uint64 {
+	if alwaysGenerateChangesets {
+		return startBlockNum
+	}
+	windowStart := startBlockNum
+	if maxBlockNum > maxReorgDepth {
+		windowStart = max(windowStart, maxBlockNum-maxReorgDepth)
+	}
+	windowStart = max(windowStart, frozenBlocks)
+	if windowStart > maxBlockNum {
+		return math.MaxUint64
+	}
+	return windowStart
 }

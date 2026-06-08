@@ -1,6 +1,7 @@
 package commitmentdb
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 
@@ -54,6 +55,8 @@ func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte
 }
 
 func (r *testStateReader) Clone(kv.TemporalTx) StateReader { return r }
+
+func (r *testStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
 
 func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	t.Parallel()
