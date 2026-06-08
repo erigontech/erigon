@@ -575,6 +575,26 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 	require.Equal(t, msg, stored)
 }
 
+func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+
+	// Fill the queue to the cap
+	service.pendingCount.Store(maxPendingBids)
+
+	msg := newTestSignedExecutionPayloadBid(100, 999, 1000)
+
+	service.queuePendingBid(msg)
+
+	// Should still be at cap — new item was rejected
+	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
+	key := pendingBidKey{builderIndex: 999, slot: 100}
+	_, exists := service.pendingBids.Load(key)
+	require.False(t, exists)
+}
+
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

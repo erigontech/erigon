@@ -382,6 +382,27 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 2}))
 }
 
+func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+
+	// Fill the queue to the cap
+	service.pendingCount.Store(maxPendingAttestations)
+
+	blockRoot := common.HexToHash("0xffff")
+	msg := newTestPayloadAttestationMessage(100, 999, blockRoot)
+
+	service.queuePendingAttestation(blockRoot, msg)
+
+	// Should still be at cap — new item was rejected
+	require.Equal(t, int32(maxPendingAttestations), service.pendingCount.Load())
+	key := pendingPayloadAttestationKey{blockRoot: blockRoot, validatorIndex: 999}
+	_, exists := service.pendingAttestations.Load(key)
+	require.False(t, exists)
+}
+
 func TestPayloadAttestationServiceNames(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

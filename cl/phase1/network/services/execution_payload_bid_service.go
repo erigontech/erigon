@@ -67,6 +67,7 @@ const (
 	seenBidCacheSize        = 512
 	pendingBidExpiry        = 12 * time.Second // 1 slot
 	pendingBidCheckInterval = 100 * time.Millisecond
+	maxPendingBids          = 1024
 )
 
 type executionPayloadBidService struct {
@@ -333,6 +334,10 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 
 // queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
+	if s.pendingCount.Load() >= maxPendingBids {
+		return
+	}
+
 	key := pendingBidKey{
 		builderIndex: msg.Message.BuilderIndex,
 		slot:         msg.Message.Slot,

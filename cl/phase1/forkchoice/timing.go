@@ -411,6 +411,9 @@ func (f *ForkChoiceStore) reorgLatePayload(head ForkChoiceNode) bool {
 // head is late and weak while its parent is strong. In GLOAS, a previous-slot
 // FULL payload that should not be built on also triggers the same reorg path.
 func (f *ForkChoiceStore) GetProposerHead(headRoot common.Hash, slot uint64) common.Hash {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	headBlock, ok := f.forkGraph.GetBlock(headRoot)
 	if !ok || headBlock == nil {
 		return headRoot
@@ -427,9 +430,13 @@ func (f *ForkChoiceStore) GetProposerHead(headRoot common.Hash, slot uint64) com
 		return headRoot
 	}
 
-	head := ForkChoiceNode{Root: headRoot, PayloadStatus: f.GetHeadPayloadStatus()}
-	if f.reorgLatePayload(head) && f.isShufflingStable(slot) {
-		return parentRoot
+	// Only use cached payload status when headRoot matches the cached head;
+	// otherwise the status belongs to a different block.
+	if f.headHash == headRoot {
+		head := ForkChoiceNode{Root: headRoot, PayloadStatus: f.headPayloadStatus}
+		if f.reorgLatePayload(head) && f.isShufflingStable(slot) {
+			return parentRoot
+		}
 	}
 	if f.isHeadLate(headRoot) && f.isHeadWeak(headRoot) && f.isParentStrong(headRoot) && f.isShufflingStable(slot) {
 		return parentRoot

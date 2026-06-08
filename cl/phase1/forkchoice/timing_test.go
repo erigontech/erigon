@@ -362,8 +362,52 @@ func TestGetProposerHeadReorgsGloasLatePayload(t *testing.T) {
 		},
 	}
 	f.time.Store(2 * cfg.SecondsPerSlot)
+	f.headHash = headRoot
 	f.headPayloadStatus = cltypes.PayloadStatusFull
 	f.payloadTimelinessVote.Store(headRoot, ptcVotes(0, ptcVoteThreshold()+1))
 
 	require.Equal(t, parentRoot, f.GetProposerHead(headRoot, 2))
+}
+
+func TestGetProposerHeadSkipsPayloadReorgOnRootMismatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+
+	parentRoot := common.Hash{0x10}
+	headRoot := common.Hash{0x11}
+	otherRoot := common.Hash{0x99}
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	verifiedExecutionPayload.Add(headRoot, struct{}{})
+	f := &ForkChoiceStore{
+		genesisTime:              0,
+		beaconCfg:                &cfg,
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		forkGraph: ptcVoteForkGraph{
+			envelopes: map[common.Hash]bool{headRoot: true},
+			blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+				parentRoot: {Block: &cltypes.BeaconBlock{Slot: 0}},
+				headRoot: {
+					Block: &cltypes.BeaconBlock{
+						Slot:       1,
+						ParentRoot: parentRoot,
+					},
+				},
+			},
+		},
+	}
+	f.time.Store(2 * cfg.SecondsPerSlot)
+	// Cached head points to a different root — payload status must not be used.
+	f.headHash = otherRoot
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	f.payloadTimelinessVote.Store(headRoot, ptcVotes(0, ptcVoteThreshold()+1))
+	// Mark head block as timely so the fallthrough path (isHeadLate) returns
+	// false and we don't need the full justified-checkpoint setup.
+	var timely [clparams.NumBlockTimelinessDeadlines]bool
+	timely[clparams.AttestationTimelinessIndex] = true
+	f.blockTimeliness.Store(headRoot, timely)
+
+	// Without the root match guard, this would reorg to parentRoot.
+	// With the guard, it falls through and returns headRoot.
+	require.Equal(t, headRoot, f.GetProposerHead(headRoot, 2))
 }

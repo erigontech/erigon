@@ -62,6 +62,7 @@ const (
 	seenPayloadAttestationCacheSize        = 2048
 	pendingPayloadAttestationExpiry        = 30 * time.Second
 	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
+	maxPendingAttestations                 = 2048
 )
 
 type payloadAttestationService struct {
@@ -195,6 +196,10 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
+	if s.pendingCount.Load() >= maxPendingAttestations {
+		return
+	}
+
 	key := pendingPayloadAttestationKey{
 		blockRoot:      blockRoot,
 		validatorIndex: msg.ValidatorIndex,
