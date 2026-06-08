@@ -59,6 +59,12 @@ func (c ChainReaderWriterEth1) Config() *chain.Config {
 	return c.cfg
 }
 
+func (c ChainReaderWriterEth1) SetKnownTipHint(blockNum uint64) {
+	if receiver, ok := c.executionModule.(execmodule.ExecKnownTipHintReceiver); ok {
+		receiver.SetKnownTipHint(blockNum)
+	}
+}
+
 func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header {
 	h, err := c.executionModule.CurrentHeader(ctx)
 	if err != nil {

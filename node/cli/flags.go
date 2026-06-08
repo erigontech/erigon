@@ -119,6 +119,12 @@ var (
 		Value: 5_000,
 	}
 
+	SyncInitialCycleBlockTTLFlag = cli.Uint64Flag{
+		Name:  "sync.initial-cycle-block-ttl",
+		Usage: "Block window for treating a recently synced node as past the initial sync cycle. Default 1024 (~3h on mainnet) balances not reusing stale fast-pipeline mode after long downtime against not penalizing brief restarts; lower it (e.g. 1) to always furious-prune",
+		Value: ethconfig.Defaults.Sync.InitialCycleBlockTTL,
+	}
+
 	SyncParallelStateFlushing = cli.BoolFlag{
 		Name:  "sync.parallel-state-flushing",
 		Usage: "Enables parallel state flushing",
@@ -294,6 +300,7 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	cfg.Sync.InitialCycleBlockTTL = ctx.Uint64(SyncInitialCycleBlockTTLFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 
 	if ctx.String(BadBlockFlag.Name) != "" {

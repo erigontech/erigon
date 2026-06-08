@@ -147,3 +147,50 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+// TestResetClearsTipReachedMarker verifies that resetting the Finish stage via
+// the generic Reset also drops the persisted tip-reached marker, so a re-sync
+// does not start out believing it is already at tip.
+func TestResetClearsTipReachedMarker(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteTipReached(tx, 1000)
+	}))
+
+	require.NoError(t, rawdbreset.Reset(ctx, db, stages.Finish))
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		_, ok, errRead := rawdb.ReadLastTipReachedBlock(tx)
+		require.NoError(t, errRead)
+		require.False(t, ok, "tip-reached marker must be cleared when Finish is reset")
+		return nil
+	}))
+}
+
+// TestResetWithoutFinishKeepsTipReachedMarker verifies the marker survives a
+// reset that does not touch Finish: the marker is tied to Finish progress, so
+// clearing it for unrelated stages would be spurious.
+func TestResetWithoutFinishKeepsTipReachedMarker(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteTipReached(tx, 1000)
+	}))
+
+	require.NoError(t, rawdbreset.Reset(ctx, db, stages.TxLookup))
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		block, ok, errRead := rawdb.ReadLastTipReachedBlock(tx)
+		require.NoError(t, errRead)
+		require.True(t, ok, "tip-reached marker must survive a reset that does not touch Finish")
+		require.Equal(t, uint64(1000), block)
+		return nil
+	}))
+}

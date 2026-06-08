@@ -3430,6 +3430,8 @@ These flags control the block synchronization and data downloading process, incl
 * `--sync.loop.throttle value`: Sets the minimum time between sync loop starts.
 * `--sync.loop.block.limit value`: Sets the maximum number of blocks to process per loop iteration.
   * Default: `5000`
+* `--sync.initial-cycle-block-ttl value`: Block window for treating a recently synced node as past the initial sync cycle. A larger value keeps a brief restart in the fast (no-downtime) pipeline mode; a node that has been off long enough to fall more than this many blocks behind re-enters the initial cycle. Set to `1` to always furious-prune (useful for bloatnet).
+  * Default: `1024` (~3h on mainnet)
 * `--sync.loop.break.after value`: Sets the last stage of the sync loop to run.
 * `--bad.block value`: Marks a block as bad and forces a reorg.
 * `--webseed value`: Comma-separated URLs for network support infrastructure.

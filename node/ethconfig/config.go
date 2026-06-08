@@ -87,6 +87,7 @@ var Defaults = Config{
 		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
+		InitialCycleBlockTTL:       1024,
 		//LoopBlockLimit:             100_000,
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
@@ -297,6 +298,7 @@ type Sync struct {
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
 	BreakAfterStage            string
 	LoopBlockLimit             uint
+	InitialCycleBlockTTL       uint64
 	ParallelStateFlushing      bool
 
 	ChaosMonkey                      bool

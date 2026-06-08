@@ -76,6 +76,37 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	assert.Equal(t, expectedRoot, actualRoot)
 }
 
+func TestRemoteCheckpointSyncHeadExecutionBlockNumber(t *testing.T) {
+	const blockNumber = uint64(20922936)
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/eth/v2/beacon/blocks/head", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, err := fmt.Fprintf(w, `{"data":{"message":{"body":{"execution_payload":{"block_number":"%d"}}}}}`, blockNumber)
+		require.NoError(t, err)
+	}))
+	defer mockServer.Close()
+
+	prevURLs := clparams.ConfigurableCheckpointsURLs
+	t.Cleanup(func() { clparams.ConfigurableCheckpointsURLs = prevURLs })
+	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL + "/eth/v2/debug/beacon/states/finalized"}
+
+	syncer := &RemoteCheckpointSync{
+		beaconConfig: &clparams.MainnetBeaconConfig,
+		net:          chainspec.MainnetChainID,
+		timeout:      time.Second,
+	}
+	actualBlockNumber, ok, err := syncer.GetHeadExecutionBlockNumber(context.Background())
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, blockNumber, actualBlockNumber)
+}
+
+func TestHeadBlockURI(t *testing.T) {
+	actual, err := headBlockURI("https://checkpoint.example.com/prefix/eth/v2/debug/beacon/states/finalized?ignored=true")
+	require.NoError(t, err)
+	require.Equal(t, "https://checkpoint.example.com/prefix/eth/v2/beacon/blocks/head", actual)
+}
+
 func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 	// Create a mock for very slow HTTP server
 	ctx, cancel := context.WithCancel(context.Background())

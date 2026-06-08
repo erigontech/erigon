@@ -172,7 +172,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		start := time.Now()
-		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
+		continueLoop, err := se.executeBlock(ctx, txTasks, false)
 
 		if took := time.Since(start); took > 50*time.Millisecond { // prevent logs spamming
 			log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, took))
@@ -327,7 +327,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 	return nil
 }
 
-func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, profile bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 
@@ -424,7 +424,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if startTxIndex == 0 && !isInitialCycle {
+				if startTxIndex == 0 && se.accumulator != nil {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts

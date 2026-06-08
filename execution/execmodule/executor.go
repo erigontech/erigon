@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -50,6 +51,7 @@ type PipelineExecutor struct {
 	validationNotifications *shards.Notifications
 	dispatcher              *Dispatcher
 	logger                  log.Logger
+	knownTipHint            atomic.Uint64
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -100,6 +102,30 @@ func (pe *PipelineExecutor) Sync() *stagedsync.Sync {
 	return pe.sync
 }
 
+// SetKnownTipHint records an external hint about where the chain head currently
+// is. The single in-process caller is Caplin at startup, propagating either
+// the latest beacon-state execution payload block number or a remote checkpoint
+// sync head. The value is monotonic (max wins). Consumers (e.g. PruneInitialCycleFn)
+// read it asynchronously each iteration — there is no blocking wait.
+func (pe *PipelineExecutor) SetKnownTipHint(blockNum uint64) {
+	if blockNum == 0 {
+		return
+	}
+	for {
+		cur := pe.knownTipHint.Load()
+		if blockNum <= cur {
+			return
+		}
+		if pe.knownTipHint.CompareAndSwap(cur, blockNum) {
+			return
+		}
+	}
+}
+
+func (pe *PipelineExecutor) KnownTipHint() uint64 {
+	return pe.knownTipHint.Load()
+}
+
 // UnwindTo sets the unwind point on the main pipeline.
 func (pe *PipelineExecutor) UnwindTo(unwindPoint uint64, reason stagedsync.UnwindReason, tx kv.Tx) error {
 	return pe.sync.UnwindTo(unwindPoint, reason, tx)
@@ -131,13 +157,37 @@ type PruneFn func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, 
 // ShouldBreakFn is an optional callback to stop the loop early (return true).
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
 
+// PruneInitialCycleFn computes the initial-cycle flag passed to sync.RunPrune
+// on each iteration. It is independent from RunLoopConfig.InitialCycle (which
+// drives sync.Run / forward stages): forward keeps the original "true at startup,
+// false after the first fast iteration" semantics, while prune uses the
+// DB-backed lifecycle marker + --sync.initial-cycle-block-ttl. Returning true
+// asks RunPrune to use the long-prune timeouts and unbounded limits.
+type PruneInitialCycleFn func(tx kv.TemporalRwTx) (bool, error)
+
+// AfterPruneFn is called after a successful RunPrune, before any commit.
+// initialCycle is the value that was passed to RunPrune (the prune flag, not
+// the forward flag).
+type AfterPruneFn func(tx kv.TemporalRwTx, initialCycle bool) error
+
+// BeforeIterationFn is called before each pipeline Run (e.g. to set state cache).
+type BeforeIterationFn func(sd *execctx.SharedDomains)
+
 // RunLoopConfig configures a single RunLoop invocation.
 type RunLoopConfig struct {
+	// InitialCycle drives forward stages (sync.Run): true at startup, set to
+	// false by the caller after the first fast iteration. See StageLoop.
 	InitialCycle bool
 	FirstCycle   bool
-	CommitCycle  CommitCycleFn
-	PruneFn      PruneFn
-	ShouldBreak  ShouldBreakFn // optional
+	PruneTimeout time.Duration
+	CommitCycle  CommitCycleFn // required when hasMore
+	PruneFn      PruneFn       // required
+	ShouldBreak  ShouldBreakFn // optional early exit
+	// PruneInitialCycleFn picks the initial-cycle flag for sync.RunPrune. If
+	// nil, PruneFn is called with InitialCycle (legacy behaviour).
+	PruneInitialCycleFn PruneInitialCycleFn
+	AfterPrune          AfterPruneFn      // optional post-prune hook
+	BeforeIteration     BeforeIterationFn // optional per-iteration setup
 }
 
 // RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
@@ -151,8 +201,22 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			return tx, err
 		}
 
-		if err := cfg.PruneFn(ctx, cfg.InitialCycle, tx, sd); err != nil {
+		pruneInitialCycle := cfg.InitialCycle
+		if cfg.PruneInitialCycleFn != nil {
+			pruneInitialCycle, err = cfg.PruneInitialCycleFn(tx)
+			if err != nil {
+				return tx, err
+			}
+		}
+
+		if err := cfg.PruneFn(ctx, pruneInitialCycle, tx, sd); err != nil {
 			return tx, err
+		}
+
+		if cfg.AfterPrune != nil {
+			if err := cfg.AfterPrune(tx, pruneInitialCycle); err != nil {
+				return tx, err
+			}
 		}
 
 		if cfg.ShouldBreak != nil {
@@ -196,6 +260,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
+		if err := stagedsync.UpdateTipReached(tx, pe.blockReader.FrozenBlocks(), pe.KnownTipHint()); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
@@ -218,9 +285,18 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
+		// Forward stages: this is the snapshot-fill startup phase, always treat as initial.
 		InitialCycle: true,
-		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
+		FirstCycle:   false,
+		PruneTimeout: 0,
+		PruneFn: func(ctx context.Context, pruneInitialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			return pe.sync.RunPrune(ctx, rwtx, pruneInitialCycle, 0)
+		},
+		PruneInitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
+			return stagedsync.IsInitialCycle(curTx, pe.sync.Cfg(), pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
+		},
+		AfterPrune: func(curTx kv.TemporalRwTx, _ bool) error {
+			return stagedsync.UpdateTipReached(curTx, pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			if err := sd.Flush(ctx, tx); err != nil {

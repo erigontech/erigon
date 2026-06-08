@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -42,6 +43,9 @@ import (
 )
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdb.DeleteTipReached(tx) }); err != nil {
+		return err
+	}
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err
@@ -109,6 +113,10 @@ func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwD
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+	if err := rawdb.DeleteTipReached(tx); err != nil {
+		return err
+	}
+
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -174,6 +182,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := rawdb.DeleteTipReached(tx); err != nil {
+			return err
+		}
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
@@ -249,6 +260,11 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		if slices.Contains(stagesList, stages.Finish) {
+			if err := rawdb.DeleteTipReached(tx); err != nil {
+				return err
+			}
+		}
 		for _, st := range stagesList {
 			if err := backup.ClearTables(ctx, tx, Tables[st]...); err != nil {
 				return err

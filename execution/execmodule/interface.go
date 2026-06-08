@@ -101,6 +101,14 @@ type AssembledBlockResult struct {
 	BlockValue *uint256.Int
 }
 
+// ExecKnownTipHintReceiver is an optional capability of an ExecutionModule. The
+// hint is propagated by Caplin at startup via SetKnownTipHint and used to
+// decide IsInitialCycle before the staged sync pipeline has had a chance to
+// advance Headers progress.
+type ExecKnownTipHintReceiver interface {
+	SetKnownTipHint(blockNum uint64)
+}
+
 // PayloadBody is a block body in engine-API format.
 // Unlike types.RawBody it contains no uncle headers and includes the encoded
 // block access list (for Amsterdam+ chains).

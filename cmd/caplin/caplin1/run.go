@@ -281,6 +281,20 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err != nil {
 		return err
 	}
+	if tipHintReceiver, ok := engine.(execution_client.KnownTipHintReceiver); ok {
+		var knownTipHint uint64
+		if latestExecutionPayloadHeader := state.LatestExecutionPayloadHeader(); latestExecutionPayloadHeader != nil && !latestExecutionPayloadHeader.IsZero() {
+			knownTipHint = latestExecutionPayloadHeader.BlockNumber
+		}
+		if headExecutionBlockNumber, ok, err := checkpoint_sync.ReadRemoteHeadExecutionBlockNumber(ctx, beaconConfig, config); err != nil {
+			log.Debug("[Checkpoint Sync] Could not fetch head execution block hint", "err", err)
+		} else if ok {
+			knownTipHint = max(knownTipHint, headExecutionBlockNumber)
+		}
+		if knownTipHint > 0 {
+			tipHintReceiver.SetKnownTipHint(knownTipHint)
+		}
+	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
 	pruneBlobDistance := uint64(128600)

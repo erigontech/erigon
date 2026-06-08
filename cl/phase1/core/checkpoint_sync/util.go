@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 )
+
+const HeadExecutionBlockHintTimeout = 500 * time.Millisecond
 
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
 // If remote checkpoint sync fails, it falls back to the local head state on disk.
@@ -55,6 +58,18 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 	}
 	syncer = NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
 	return syncer.GetLatestBeaconState(ctx)
+}
+
+func ReadRemoteHeadExecutionBlockNumber(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) (uint64, bool, error) {
+	if caplinConfig.DisabledCheckpointSync || caplinConfig.IsDevnet() {
+		return 0, false, nil
+	}
+	syncer := &RemoteCheckpointSync{
+		beaconConfig: beaconCfg,
+		net:          caplinConfig.NetworkId,
+		timeout:      HeadExecutionBlockHintTimeout,
+	}
+	return syncer.GetHeadExecutionBlockNumber(ctx)
 }
 
 // ReadLocalHeadState reads the head state directly from disk without falling back to genesis.

@@ -581,7 +581,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						blockValidatorWaiter = newBlockValidator(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
-						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+						if !applyResult.isPartial && pe.accumulator != nil {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}

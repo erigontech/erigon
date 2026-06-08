@@ -666,6 +666,10 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 }
 
+func (e *ExecModule) SetKnownTipHint(blockNum uint64) {
+	e.pipelineExecutor.SetKnownTipHint(blockNum)
+}
+
 func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 	// setup a timeout for the context to avoid waiting indefinitely
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
