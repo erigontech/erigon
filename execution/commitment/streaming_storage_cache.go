@@ -17,7 +17,9 @@
 package commitment
 
 import (
+	"bytes"
 	"math/bits"
+	"sort"
 	"sync"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -36,12 +38,17 @@ const (
 const defaultNestedCap = 1024
 
 // cacheNibble tracks one first-storage-nibble subtree of a cached big-storage
-// account: whether its cached child cell is stale and the size gate counters
-// (mirrors splitState's keyCount/lastFoldedSize doubling gate, per nibble).
+// account: whether its cached child cell is stale, the size gate counters
+// (mirrors splitState's keyCount/lastFoldedSize doubling gate, per nibble), and
+// the accumulated slot set. keys is the side structure that lets a dirty nibble
+// re-fold from its FULL slot set across blocks — the deep fan-out rebuilds a
+// nibble purely from the touched keys (it does not read the on-disk subtree), so
+// the cache must remember every slot ever touched, keyed by hashed key.
 type cacheNibble struct {
 	dirty          bool
 	keyCount       uint64
 	lastFoldedSize uint64
+	keys           map[string]touchedKey
 }
 
 // accountStorageCache caches the 16 depth-65 storage-child cells of one
@@ -49,11 +56,13 @@ type cacheNibble struct {
 // slots changed and reuses the cached cells for the rest. Streaming-only; it
 // reuses the proven storage-fold primitives but never touches parallel_mount.go.
 type accountStorageCache struct {
-	prefix    []byte // accHash[:64]
-	children  [16]cell
-	present   uint16
-	perNibble [16]cacheNibble
-	mu        sync.Mutex
+	prefix      []byte // accHash[:64]
+	accPlainKey []byte // un-hashed account key, to re-load the leaf from ctx when storage changes but the account itself is untouched
+	children    [16]cell
+	present     uint16
+	perNibble   [16]cacheNibble
+	invalid     bool // structural bypass detected; drop the cache at endBlock
+	mu          sync.Mutex
 }
 
 // accStorageTouch accumulates one account's storage-touch stats for the current
@@ -85,10 +94,41 @@ func (c *accountStorageCache) touchNibble(nib byte) {
 	c.mu.Unlock()
 }
 
+// retain folds one touched slot into the nibble's accumulated slot set, copying
+// the hashed and plain keys (and the update, when carried) so the entry survives
+// the per-block prefix-trie reset for a later cross-block re-fold.
+func (c *accountStorageCache) retain(nib int, tk touchedKey) {
+	n := &c.perNibble[nib]
+	if n.keys == nil {
+		n.keys = make(map[string]touchedKey)
+	}
+	e := touchedKey{hk: append([]byte(nil), tk.hk...), pk: append([]byte(nil), tk.pk...)}
+	if tk.upd != nil {
+		u := *tk.upd
+		e.upd = &u
+	}
+	n.keys[string(e.hk)] = e
+}
+
+// sortedKeys returns the nibble's accumulated slot set in ascending hashed-key
+// order — the order foldStorageChildCell replays them in.
+func (c *accountStorageCache) sortedKeys(nib int) []touchedKey {
+	n := &c.perNibble[nib]
+	if len(n.keys) == 0 {
+		return nil
+	}
+	out := make([]touchedKey, 0, len(n.keys))
+	for _, tk := range n.keys {
+		out = append(out, tk)
+	}
+	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].hk, out[j].hk) < 0 })
+	return out
+}
+
 // newPromotedCache builds a cache for a freshly promoted account, marking every
 // already-touched first-storage-nibble dirty so the first fold re-folds them.
-func newPromotedCache(prefix []byte, mask uint16) *accountStorageCache {
-	c := &accountStorageCache{prefix: prefix}
+func newPromotedCache(prefix, accPlainKey []byte, mask uint16) *accountStorageCache {
+	c := &accountStorageCache{prefix: prefix, accPlainKey: accPlainKey}
 	for x := range 16 {
 		if mask&(uint16(1)<<x) != 0 {
 			c.perNibble[x].dirty = true
@@ -190,8 +230,10 @@ func assembleAccountRoot(w *HexPatriciaHashed, addr, accHash []byte, accNib int,
 // aggregates them into the storageRoot cell, and clears the per-nibble dirty
 // flags. It returns the storageRoot cell and the number of nibbles re-folded
 // (so callers/tests can assert only the changed nibbles paid the cost). groups
-// holds the current touched keys per first-storage-nibble.
-func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorageCache, accNib int, groups *[16][]touchedKey) (cell, int, error) {
+// holds the current touched keys per first-storage-nibble. onDeferred, when
+// non-nil, receives the deferred branch updates each re-folded nibble and the
+// aggregation emit so the Process path can stage them for the caller.
+func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorageCache, accNib int, groups *[16][]touchedKey, onDeferred func([]*DeferredBranchUpdate)) (cell, int, error) {
 	folded := 0
 	for x := range 16 {
 		bit := uint16(1) << x
@@ -204,6 +246,11 @@ func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorage
 		}
 		w, release := newWorker()
 		c, err := foldStorageChildCell(w, accNib, groups[x])
+		if err == nil && onDeferred != nil {
+			if d := w.TakeDeferredUpdates(); len(d) > 0 {
+				onDeferred(d)
+			}
+		}
 		if release != nil {
 			release()
 		}
@@ -219,6 +266,11 @@ func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorage
 
 	w, release := newWorker()
 	sr, err := aggregateStorageRoot(w, cache.prefix, accNib, &cache.children, cache.present)
+	if err == nil && onDeferred != nil {
+		if d := w.TakeDeferredUpdates(); len(d) > 0 {
+			onDeferred(d)
+		}
+	}
 	if release != nil {
 		release()
 	}

@@ -77,7 +77,7 @@ func TestNestedCache_CachedRefoldParity(t *testing.T) {
 	tg := touchedGroups(&groups)
 
 	// Initial fold: fresh cache, every present nibble folds once.
-	_, folded0, err := foldStorageRootCached(factory, cache, accNib, tg)
+	_, folded0, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
 	require.NoError(t, err)
 	require.Equal(t, bitsCount(cache.present), folded0, "initial fold must fold every present nibble")
 
@@ -95,7 +95,7 @@ func TestNestedCache_CachedRefoldParity(t *testing.T) {
 	tg = touchedGroups(&groups)
 	cache.perNibble[tx].dirty = true
 
-	sr, folded1, err := foldStorageRootCached(factory, cache, accNib, tg)
+	sr, folded1, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, folded1, "incremental fold must re-fold only the dirtied nibble")
 
@@ -353,6 +353,93 @@ func bitsCount(b uint16) int {
 	return n
 }
 
+// TestNestedCache_ProcessWhaleParity drives a >10k-storage whale through the
+// streaming committer's Process and asserts the cached deep fold reproduces the
+// sequential root + every stored branch, and that the whale actually folded
+// through the nested cache.
+func TestNestedCache_ProcessWhaleParity(t *testing.T) {
+	t.Parallel()
+	_, _, _, _, pk, upds, _ := whaleByNibble(15_000)
+
+	seqRoot, seqMs := sequentialRoot(t, pk, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+	for i := range pk {
+		sc.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
+	}
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, root, "cached-whale streaming root != sequential")
+	requireBranchParity(t, seqMs, ms)
+	require.NotZero(t, sc.DeepLocalFolds(), "the whale must fold through the deep walk")
+	require.NotZero(t, sc.NibbleFolds(), "the whale storage must fold through the nested cache")
+}
+
+// TestNestedCache_IncrementalBlockParity mass-writes a whale (batch 1), then a
+// second block touches a sparse subset of its storage in two first-storage
+// nibbles (batch 2) — the account itself untouched. Reusing the same committer
+// (the cache survives endBlock) the final root + every branch must match the
+// sequential two-batch run, and batch 2 must re-fold exactly the two changed
+// nibbles.
+func TestNestedCache_IncrementalBlockParity(t *testing.T) {
+	ctx := context.Background()
+	addr, _, _, _, pk1, upds1, _ := whaleByNibble(15_000)
+
+	var pk2 [][]byte
+	var upds2 []Update
+	for _, nib := range []byte{0x3, 0xc} {
+		for _, e := range extraSlotsInNibble(addr, nib, 40, int64(nib)+1) {
+			pk2 = append(pk2, e.pk)
+			upds2 = append(upds2, e.upd)
+		}
+	}
+
+	seqMs := NewMockState(t)
+	require.NoError(t, seqMs.applyPlainUpdates(pk1, upds1))
+	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
+	defer seq.Release()
+	u1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk1, upds1)
+	_, err := seq.Process(ctx, u1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u1.Close()
+	require.NoError(t, seqMs.applyPlainUpdates(pk2, upds2))
+	u2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk2, upds2)
+	seqRoot, err := seq.Process(ctx, u2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u2.Close()
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	require.NoError(t, ms.applyPlainUpdates(pk1, upds1))
+	for i := range pk1 {
+		sc.TouchKey(KeyToHexNibbleHash(pk1[i]), pk1[i], nil)
+	}
+	_, err = sc.Process(ctx)
+	require.NoError(t, err)
+
+	before := sc.NibbleFolds()
+	require.NoError(t, ms.applyPlainUpdates(pk2, upds2))
+	for i := range pk2 {
+		sc.TouchKey(KeyToHexNibbleHash(pk2[i]), pk2[i], nil)
+	}
+	root2, err := sc.Process(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, root2, "incremental cached-whale root != sequential")
+	requireBranchParity(t, seqMs, ms)
+	require.Equal(t, uint64(2), sc.NibbleFolds()-before, "batch 2 must re-fold exactly the two touched nibbles")
+}
+
 // TestNestedCache_OnlyDirtyNibblesRefold asserts the per-nibble fold count: after
 // the initial fold, touching a single nibble re-folds exactly that nibble and
 // reuses the cached cells for the rest.
@@ -365,12 +452,12 @@ func TestNestedCache_OnlyDirtyNibblesRefold(t *testing.T) {
 	factory := newWhaleWorker(ms)
 	tg := touchedGroups(&groups)
 
-	_, folded0, err := foldStorageRootCached(factory, cache, accNib, tg)
+	_, folded0, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
 	require.NoError(t, err)
 	require.Greater(t, folded0, 1, "whale storage must span more than one nibble")
 
 	// No nibble dirtied: a second fold reuses every cached cell.
-	_, foldedNoop, err := foldStorageRootCached(factory, cache, accNib, tg)
+	_, foldedNoop, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, foldedNoop, "clean re-fold must reuse all cached cells")
 
@@ -382,7 +469,7 @@ func TestNestedCache_OnlyDirtyNibblesRefold(t *testing.T) {
 			dirtied++
 		}
 	}
-	_, folded2, err := foldStorageRootCached(factory, cache, accNib, tg)
+	_, folded2, err := foldStorageRootCached(factory, cache, accNib, tg, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, folded2, "only the two dirtied nibbles must re-fold")
 	_ = addr

@@ -214,10 +214,10 @@ Note: the existing `streaming`-arm matrix does NOT exercise the cache (its corpo
 `deepStorageThreshold`), so it only proves *no regression for non-cached accounts*.
 The cache itself is covered solely by the new cached-whale tests below.
 
-- [ ] `dfsDeepLocal`: for a cached big account take the storageRoot from `foldStorageRootCached` (incremental) instead of a fresh full fold; inject via `setAccountStorageRoot`
-- [ ] write cached-whale Process parity: big-account corpus (>10k storage) via the committer → root + branches == sequential
-- [ ] write incremental-block parity: batch-1 mass-writes a whale, batch-2 touches a sparse subset of its storage → root + branches == sequential AND only the touched nibbles re-folded (fold-count)
-- [ ] run tests — must pass before next task
+- [x] `dfsDeepLocal`: for a cached big account take the storageRoot from `foldStorageRootCached` (incremental) instead of a fresh full fold; inject via `setAccountStorageRoot` — a cached account always routes through the cache (regardless of this block's touch count); when only its storage changed the leaf is reloaded from ctx via `cache.accPlainKey`; a structural bypass (storage compressed past depth 64) invalidates the cache (swept at endBlock)
+- [x] write cached-whale Process parity: big-account corpus (>10k storage) via the committer → root + branches == sequential (`TestNestedCache_ProcessWhaleParity`)
+- [x] write incremental-block parity: batch-1 mass-writes a whale, batch-2 touches a sparse subset of its storage → root + branches == sequential AND only the touched nibbles re-folded (fold-count) (`TestNestedCache_IncrementalBlockParity`). NOTE: the deep fan-out rebuilds each nibble from keys alone (it does not read the on-disk subtree — verified: the ModeParallel deep baseline fails cross-block identically), so the cache retains each nibble's full slot set (`cacheNibble.keys`) and a dirty nibble re-folds from that accumulated set; clean nibbles reuse their cached cell.
+- [x] run tests — must pass before next task
 
 ### Task 5: Background path (`foldKeys`) shares the cache — single source of truth
 

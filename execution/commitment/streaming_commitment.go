@@ -143,6 +143,10 @@ type StreamingCommitter struct {
 	// streaming path no longer routes through parallel_mount.go's deep fan-out.
 	deepLocalFolds atomic.Uint64
 
+	// nibbleFolds counts per-nibble storage re-folds the nested cache performed —
+	// a test seam proving an incremental block re-folds only the changed nibbles.
+	nibbleFolds atomic.Uint64
+
 	// rootCell + flags snapshot the base trie's terminal root after a successful
 	// fold so the owning ParallelPatriciaHashed can promote them into its
 	// persistence template (RootTrie) for EncodeCurrentState/SetState. rootValid
@@ -230,7 +234,7 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 		sc.trieMu.Unlock()
 		return
 	}
-	if sc.nestedCacheOn && len(hashedKey) == storageKeyNibbles && sc.routeCachedStorage(hashedKey) {
+	if sc.nestedCacheOn && len(hashedKey) == storageKeyNibbles && sc.routeCachedStorage(hashedKey, plainKey) {
 		sc.trieMu.Unlock()
 		return
 	}
@@ -262,8 +266,11 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 // owns this account's storage). For an account not yet promoted it accumulates
 // the per-block stats and promotes once they cross the deep walk's condition
 // (and the cap allows it); until promotion it returns false so the slot still
-// streams through the split. Callers hold sc.trieMu.
-func (sc *StreamingCommitter) routeCachedStorage(hashedKey []byte) bool {
+// streams through the split. plainKey is the storage slot's un-hashed key
+// (account address + location); its leading accountKeyLen bytes are the account
+// key the cache keeps to re-load the leaf from ctx when only storage changes.
+// Callers hold sc.trieMu.
+func (sc *StreamingCommitter) routeCachedStorage(hashedKey, plainKey []byte) bool {
 	accPrefix := string(hashedKey[:accountKeyNibbles])
 	nib := hashedKey[accountKeyNibbles]
 	if c := sc.caches[accPrefix]; c != nil {
@@ -287,11 +294,20 @@ func (sc *StreamingCommitter) routeCachedStorage(hashedKey []byte) bool {
 		t.capped = true
 		return false
 	}
-	c := newPromotedCache(append([]byte(nil), hashedKey[:accountKeyNibbles]...), t.nibbleMask)
+	c := newPromotedCache(append([]byte(nil), hashedKey[:accountKeyNibbles]...), accountKeyOf(plainKey, sc.accountKeyLen), t.nibbleMask)
 	c.touchNibble(nib)
 	sc.caches[accPrefix] = c
 	delete(sc.accTouch, accPrefix)
 	return true
+}
+
+// accountKeyOf returns a stable copy of the account key embedded in a storage
+// plain key (its leading accountKeyLen bytes), or nil if plainKey is too short.
+func accountKeyOf(plainKey []byte, accountKeyLen int16) []byte {
+	if int16(len(plainKey)) < accountKeyLen {
+		return nil
+	}
+	return append([]byte(nil), plainKey[:accountKeyLen]...)
 }
 
 // Process folds every touched top-nibble split into a cell, stitches the cells
@@ -379,6 +395,11 @@ func (sc *StreamingCommitter) endBlock() {
 	sc.dropSplitDeferred()
 	clear(sc.splits)
 	clear(sc.accTouch)
+	for k, c := range sc.caches {
+		if c.invalid {
+			delete(sc.caches, k)
+		}
+	}
 }
 
 // captureRoot snapshots the base trie's terminal root cell and flags (by value,
@@ -901,13 +922,18 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 // walk folded — a test seam proving the deep path no longer calls parallel_mount.
 func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds.Load() }
 
+// NibbleFolds reports how many per-nibble storage re-folds the nested cache ran
+// — a test seam proving an incremental block re-folds only its changed nibbles.
+func (sc *StreamingCommitter) NibbleFolds() uint64 { return sc.nibbleFolds.Load() }
+
 // dfsDeepLocal is the streaming-local copy of ParallelPatriciaHashed.dfsSubtreeDeep:
-// it walks a mount worker's subtree and, at an account whose touched storage
-// exceeds deepStorageThreshold, folds that account's storage concurrently via the
-// streaming-local primitives (storageRootLocal), injects the storageRoot into the
-// account leaf, and skips the storage stream. Cache-free: it re-folds the whole
-// storage every call, byte-identical to dfsSubtreeDeep, so a later cache failure
-// localizes to the cache, not this extraction. parallel_mount.go is untouched.
+// it walks a mount worker's subtree and, at a big-storage account, folds that
+// account's storage and injects the resulting storageRoot into the account leaf
+// rather than streaming the storage. A promoted (cached) account always folds
+// through the nested cache (foldStorageRootCached re-folds only its dirty
+// nibbles); an uncached account whose touched storage crosses deepStorageThreshold
+// folds the whole storage fresh via storageRootLocal. parallel_mount.go is
+// untouched.
 func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHashed, pu *parallelUpdate, node *prefixNode, path []byte) error {
 	if node == nil {
 		return nil
@@ -920,15 +946,31 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 		return errors.New("StreamingCommitter: trie leaf without a plainKey")
 	}
 
-	if node.plainKey != nil && len(path) == 64 && bits.OnesCount16(node.bitmap) >= 2 &&
-		node.subtreeCount > deepStorageThreshold {
-		sr, err := sc.storageRootLocal(pu, node, path)
-		if err != nil {
-			return fmt.Errorf("storageRootLocal: %w", err)
+	if len(path) == 64 {
+		if cache := sc.cacheFor(path); cache != nil {
+			if node.plainKey == nil {
+				if err := w.followAndUpdate(path, cache.accPlainKey, nil); err != nil {
+					return err
+				}
+			}
+			sr, err := sc.storageRootCached(pu, cache, node, path)
+			if err != nil {
+				return fmt.Errorf("storageRootCached: %w", err)
+			}
+			setAccountStorageRoot(w, path, sr)
+			sc.deepLocalFolds.Add(1)
+			return nil
 		}
-		setAccountStorageRoot(w, path, sr)
-		sc.deepLocalFolds.Add(1)
-		return nil
+		if node.plainKey != nil && bits.OnesCount16(node.bitmap) >= 2 &&
+			node.subtreeCount > deepStorageThreshold {
+			sr, err := sc.storageRootLocal(pu, node, path)
+			if err != nil {
+				return fmt.Errorf("storageRootLocal: %w", err)
+			}
+			setAccountStorageRoot(w, path, sr)
+			sc.deepLocalFolds.Add(1)
+			return nil
+		}
 	}
 
 	childIdx := 0
@@ -938,6 +980,13 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 		base := len(path)
 		path = append(path, nib)
 		path = append(path, child.ext...)
+		// A cached account whose storage compressed past depth 64 (account
+		// untouched, a single first-storage-nibble changed) bypasses the cache
+		// route above; its cached cells can no longer be trusted, so invalidate
+		// the cache (swept at endBlock) and fold the storage inline this block.
+		if base < accountKeyNibbles && len(path) > accountKeyNibbles {
+			sc.invalidateCache(path[:accountKeyNibbles])
+		}
 		if err := sc.dfsDeepLocal(ctx, w, pu, child, path); err != nil {
 			return err
 		}
@@ -946,6 +995,62 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 		bm &^= uint16(1) << nib
 	}
 	return nil
+}
+
+// cacheFor returns the nested storage cache for the account at accHash (a
+// 64-nibble path), or nil if the account is not cached or caching is off.
+func (sc *StreamingCommitter) cacheFor(accHash []byte) *accountStorageCache {
+	if !sc.nestedCacheOn {
+		return nil
+	}
+	c := sc.caches[string(accHash)]
+	if c == nil || c.invalid {
+		return nil
+	}
+	return c
+}
+
+// invalidateCache marks the account's cache for drop at endBlock; a no-op if the
+// account is not cached. Reused cells would be stale after a structural bypass.
+func (sc *StreamingCommitter) invalidateCache(accHash []byte) {
+	if c := sc.caches[string(accHash)]; c != nil {
+		c.invalid = true
+	}
+}
+
+// storageRootCached re-folds the cached account's dirty storage nibbles (reusing
+// its clean cached cells), aggregates them into the storage branch, and returns
+// the account's storageRoot. It first folds the current block's touched slots
+// (which the trie carries) into the cache's accumulated per-nibble slot set, so a
+// dirty nibble re-folds from its FULL slot set — the deep fan-out rebuilds a
+// nibble from keys alone and cannot read the on-disk subtree, so the cache is the
+// authoritative key source across blocks. Deferred branch updates land in pu.
+func (sc *StreamingCommitter) storageRootCached(pu *parallelUpdate, cache *accountStorageCache, node *prefixNode, path []byte) (common.Hash, error) {
+	accNib := int(path[63])
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := int(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		cpath := make([]byte, len(path), len(path)+1+len(child.ext))
+		copy(cpath, path)
+		cpath = append(cpath, byte(nib))
+		cpath = append(cpath, child.ext...)
+		for _, tk := range collectStorageNibbleKeys(child, cpath) {
+			cache.retain(nib, tk)
+		}
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	var groups [16][]touchedKey
+	for x := range 16 {
+		groups[x] = cache.sortedKeys(x)
+	}
+	sr, folded, err := foldStorageRootCached(sc.newStorageWorker, cache, accNib, &groups, pu.appendDeferred)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	sc.nibbleFolds.Add(uint64(folded))
+	return sr.hash, nil
 }
 
 // storageRootLocal folds each first-storage-nibble subtree of one account in its
