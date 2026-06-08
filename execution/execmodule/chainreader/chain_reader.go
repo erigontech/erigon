@@ -212,9 +212,6 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-// InsertBlocksAndWait inserts blocks and waits for confirmation. bals holds the
-// RLP-encoded block access list bytes positionally aligned with blocks; a nil
-// entry (or a nil slice) means the block has no BAL.
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	rawBlocks := blocksToRaw(blocks, bals)
 	for {
@@ -237,9 +234,6 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 	}
 }
 
-// InsertBlocks inserts blocks without waiting for confirmation. bals holds the
-// RLP-encoded block access list bytes positionally aligned with blocks; a nil
-// entry (or a nil slice) means the block has no BAL.
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	rawBlocks := blocksToRaw(blocks, bals)
 	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
