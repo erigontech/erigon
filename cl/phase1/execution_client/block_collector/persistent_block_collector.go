@@ -425,16 +425,16 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 		"from", blocksBatch[0].NumberU64(),
 		"to", blocksBatch[len(blocksBatch)-1].NumberU64())
 
-	bals := make([][]byte, len(blocksBatch))
-	haveBAL := false
+	var bals [][]byte
 	for i, b := range blocksBatch {
-		if bal, ok := balByHash[b.Hash()]; ok {
-			bals[i] = bal
-			haveBAL = true
+		bal, ok := balByHash[b.Hash()]
+		if !ok {
+			continue
 		}
-	}
-	if !haveBAL {
-		bals = nil
+		if bals == nil {
+			bals = make([][]byte, len(blocksBatch))
+		}
+		bals[i] = bal
 	}
 
 	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals, true); err != nil {

@@ -602,24 +602,20 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	blocks := make([]*types.Block, 0, len(headers))
-	bals := make([][]byte, 0, len(headers))
-	haveBAL := false
+	var bals [][]byte
 	for batchIndex, blocksBatch := range blockBatches {
 		balMap := balBatches[batchIndex]
 		for _, block := range blocksBatch {
 			blocks = append(blocks, block)
-			var bal []byte
-			if balMap != nil {
-				if v, ok := balMap[block.Hash()]; ok {
-					bal = v
-					haveBAL = true
-				}
+			bal, ok := balMap[block.Hash()]
+			if !ok {
+				continue
 			}
-			bals = append(bals, bal)
+			if bals == nil {
+				bals = make([][]byte, len(headers))
+			}
+			bals[len(blocks)-1] = bal
 		}
-	}
-	if !haveBAL {
-		bals = nil
 	}
 
 	err = feed.consumeData(ctx, blocks, bals)
