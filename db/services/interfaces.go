@@ -136,7 +136,7 @@ type DBEventNotifier interface {
 type BlockSnapshots interface {
 	LogStat(label string)
 	OpenFolder() error
-	OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error
+	OpenSegments(types []snaptype.Type, alignMin bool) error
 	SegmentsMax() uint64
 	Delete(fileNames ...string) error
 	Types() []snaptype.Type

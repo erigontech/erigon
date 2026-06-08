@@ -136,7 +136,7 @@ func (br *BlockRetire) MergeBorBlocks(
 	}
 
 	{
-		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), heimdall.SnapshotTypes(), false)
+		files, err := snapshotsync.AllTypedSegments(br.borSnapshots().Dir(), heimdall.SnapshotTypes())
 		if err != nil {
 			return true, err
 		}
