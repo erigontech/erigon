@@ -1451,6 +1451,18 @@ func (sc *StreamingCommitter) Reset() {
 	sc.resetPool()
 }
 
+// InvalidateCaches drops the cross-block nested storage caches and pending
+// promotion counters. The clean-cell reuse is sound only while the on-disk
+// pre-image a cached nibble represents is stable; a state restore (SetState /
+// SeekCommitment / unwind) can move the trie to a different block, so the
+// cached subcells must be dropped or a later re-fold would reuse stale cells.
+func (sc *StreamingCommitter) InvalidateCaches() {
+	sc.trieMu.Lock()
+	clear(sc.caches)
+	clear(sc.accTouch)
+	sc.trieMu.Unlock()
+}
+
 // releaseBase drops the scheduler's persistent base and its context.
 func (sc *StreamingCommitter) releaseBase() {
 	if sc.baseCleanup != nil {

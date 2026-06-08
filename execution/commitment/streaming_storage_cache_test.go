@@ -336,6 +336,37 @@ func TestNestedCache_Lifecycle(t *testing.T) {
 	require.Zero(t, cacheLen, "Reset must clear caches")
 }
 
+// TestNestedCache_InvalidateOnRestore asserts a state restore drops the
+// cross-block nested caches: clean cached subcells reflect the pre-restore
+// block, so reusing them after the root is moved to a different block would
+// re-fold from stale cells and compute a wrong root.
+func TestNestedCache_InvalidateOnRestore(t *testing.T) {
+	sc := newCacheCommitter(t)
+	const accNib = byte(0x9)
+	prefix := accPrefixString(accNib)
+	pk := make([]byte, length.Addr+length.Hash)
+
+	for _, hk := range synthStorageTouches(accNib, []byte{1, 2}, deepStorageThreshold+1) {
+		sc.TouchKey(hk, pk, nil)
+	}
+	sc.endBlock() // promoted cache survives the block boundary
+
+	sc.trieMu.RLock()
+	_, cached := sc.caches[prefix]
+	sc.trieMu.RUnlock()
+	require.True(t, cached, "whale must be cached before the restore")
+
+	sc.InvalidateCaches()
+
+	sc.trieMu.RLock()
+	cacheLen := len(sc.caches)
+	trackLen := len(sc.accTouch)
+	sc.trieMu.RUnlock()
+	require.Zero(t, cacheLen, "restore must drop the cross-block caches")
+	require.Zero(t, trackLen, "restore must drop the promotion trackers")
+	require.Nil(t, sc.cacheFor([]byte(prefix)), "cacheFor must miss after a restore")
+}
+
 func bitsCount(b uint16) int {
 	n := 0
 	for b != 0 {

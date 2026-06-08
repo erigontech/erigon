@@ -786,6 +786,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	tv := sdc.patriciaTrie.Variant()
 
 	var hext *commitment.HexPatriciaHashed
+	var ppht *commitment.ParallelPatriciaHashed
 	if tv == commitment.VariantHexPatriciaTrie {
 		var ok bool
 		hext, ok = sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
@@ -801,7 +802,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		hext = phext.RootTrie()
 	}
 	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
-		ppht, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
+		var ok bool
+		ppht, ok = sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
 		if !ok {
 			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
@@ -813,6 +815,9 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 
 	if err := hext.SetState(cs.trieState); err != nil {
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	}
+	if ppht != nil {
+		ppht.InvalidateStreamingCaches()
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
 	if sdc.trace {
