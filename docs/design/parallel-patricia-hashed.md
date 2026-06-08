@@ -261,6 +261,8 @@ runtime by the block-root check (`ErrWrongTrieRoot`).
 | parameter | default | effect |
 | --- | --- | --- |
 | `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia`; takes precedence over `--experimental.concurrent-commitment` (`execctx.PickTrieVariant`) |
+| `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over both `--experimental.parallel-commitment` and `--experimental.concurrent-commitment` |
+| `ERIGON_WARMUP_PARALLEL_PROCESS` | off (env) | opt-in branch-cache prefetch inside the parallel/streaming `Process`; intended for measurement |
 | `MinSplitKeys` | 64 | minimum subtree size for a fork to become a split-point; raised adaptively per batch (§4.1) |
 | `numWorkers` | `runtime.NumCPU()` | worker-pool size and errgroup limit; override via `SetNumWorkers` |
 
@@ -305,16 +307,27 @@ collectors; ModeParallel does not allocate them.
 
 A fourth variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
 `VariantStreamingHexPatricia`), layers on this one rather than replacing it: it
-reuses the same prefix trie, mount/fold engine, and `concurrentStorageRoot`, and
-upholds R1 identically. It differs only in *when* the fold runs — touched keys are
-re-folded per top-nibble split in a background worker pool overlapping execution,
-so `Process` collapses to a merge of already-folded split cells. Folds are
-stateless (re-folded from the prefix-trie key set, never a persistent per-split hph
-mutated by touches — that would break the monotonic `followAndUpdate` contract). It
-uses the `streaming` flag on `Updates` (not a new `Mode`) and is not layered with
-the `ERIGON_CMT_MOUNT`/`ERIGON_CMT_DEEP` env gates. Its only real win is on a live
-node (hiding unfold DB-read latency under execution); the in-memory benchmark cannot
-show it. See `execution/commitment/streaming_commitment.go`.
+reuses the same prefix trie and fold engine and upholds R1 identically. It differs
+only in *when* the fold runs — touched keys are re-folded per top-nibble split in a
+background worker pool overlapping execution, so `Process` collapses to a merge of
+already-folded split cells. Folds are stateless (re-folded from the prefix-trie key
+set, never a persistent per-split hph mutated by touches — that would break the
+monotonic `followAndUpdate` contract). It uses the `streaming` flag on `Updates`
+(not a new `Mode`) and is not layered with the `ERIGON_CMT_MOUNT`/`ERIGON_CMT_DEEP`
+env gates.
+
+Big-storage accounts run a streaming-local deep walk (`dfsDeepLocal`) instead of
+calling the parallel path's `concurrentStorageRoot` — `parallel_mount.go` is left
+untouched for isolation. On top of that, the **nested storage sub-cell cache**
+(`streaming_storage_cache.go`) caches the 16 depth-65 storage-child cells of a
+promoted big-storage account (the same `count > deepStorageThreshold && nibbleSpan
+≥ 2` condition the deep walk uses) and re-folds only the storage nibbles whose
+slots changed, reusing the cached cells for the rest. A self-flush/collapse against
+the isolating overlay invalidates the cache so a structurally changed account
+re-promotes fresh; `Process` always re-aggregates, so a cache miss degrades to a
+full fold, never a wrong root. This adds a measurable bulk win (~13× incremental
+whale re-fold) on top of streaming's live-node latency hiding. See
+`execution/commitment/streaming_commitment.go` and `streaming_storage_cache.go`.
 
 ## 11. Performance characteristics *(informative)*
 

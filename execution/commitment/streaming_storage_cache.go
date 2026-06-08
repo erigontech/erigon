@@ -38,17 +38,14 @@ const (
 const defaultNestedCap = 1024
 
 // cacheNibble tracks one first-storage-nibble subtree of a cached big-storage
-// account: whether its cached child cell is stale, the size gate counters
-// (mirrors splitState's keyCount/lastFoldedSize doubling gate, per nibble), and
-// the accumulated slot set. keys is the side structure that lets a dirty nibble
-// re-fold from its FULL slot set across blocks — the deep fan-out rebuilds a
-// nibble purely from the touched keys (it does not read the on-disk subtree), so
-// the cache must remember every slot ever touched, keyed by hashed key.
+// account: whether its cached child cell is stale and the accumulated slot set.
+// keys is the side structure that lets a dirty nibble re-fold from its FULL slot
+// set across blocks — the deep fan-out rebuilds a nibble purely from the touched
+// keys (it does not read the on-disk subtree), so the cache must remember every
+// slot ever touched, keyed by hashed key.
 type cacheNibble struct {
-	dirty          bool
-	keyCount       uint64
-	lastFoldedSize uint64
-	keys           map[string]touchedKey
+	dirty bool
+	keys  map[string]touchedKey
 }
 
 // accountStorageCache caches the 16 depth-65 storage-child cells of one
@@ -84,13 +81,10 @@ func (a *accStorageTouch) qualifies() bool {
 }
 
 // touchNibble routes one storage-slot touch of a cached account to its
-// first-storage-nibble: marks the nibble dirty and bumps its key count for the
-// per-nibble re-fold gate.
+// first-storage-nibble, marking it dirty so the next fold re-folds it.
 func (c *accountStorageCache) touchNibble(nib byte) {
 	c.mu.Lock()
-	n := &c.perNibble[nib]
-	n.dirty = true
-	n.keyCount++
+	c.perNibble[nib].dirty = true
 	c.mu.Unlock()
 }
 
@@ -277,7 +271,6 @@ func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorage
 			cache.present |= bit
 		}
 		n.dirty = false
-		n.lastFoldedSize = uint64(len(groups[x]))
 		folded++
 	}
 

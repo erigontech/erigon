@@ -78,13 +78,6 @@ func (sc *StreamingCommitter) SetEagerFold(n uint64) { sc.eagerFloor = n }
 // cache-backed path; off makes a big-storage account fold its whole storage fresh.
 func (sc *StreamingCommitter) SetNestedCache(on bool) { sc.nestedCacheOn = on }
 
-// shouldFoldNibble is the per-nibble analogue of shouldEagerFold: a cached
-// account's storage nibble is eligible for an eager re-fold once its touched-key
-// count has at least doubled since its last fold and cleared the floor.
-func (sc *StreamingCommitter) shouldFoldNibble(n *cacheNibble) bool {
-	return n.keyCount >= sc.eagerFloor && n.keyCount >= 2*n.lastFoldedSize
-}
-
 // StreamingCommitter overlaps commitment fold work with block execution. It owns
 // a persistent prefix trie of touched keys (Insert is order-independent) and,
 // per top-nibble split point, the state needed to (re-)fold that subtree.

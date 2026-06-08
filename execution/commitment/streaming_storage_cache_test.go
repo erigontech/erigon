@@ -239,13 +239,15 @@ func TestNestedCache_PromotionAndRouting(t *testing.T) {
 	require.True(t, ok, "pre-promotion touches must have bumped the split")
 
 	before, _ := cacheNibbleOf(sc, prefix, 5)
+	require.False(t, before.dirty, "nibble 5 is untouched before routing")
 	for _, hk := range synthStorageTouches(accNib, []byte{5}, 50) {
 		sc.TouchKey(hk, pk, nil)
 	}
 	after, ok := cacheNibbleOf(sc, prefix, 5)
 	require.True(t, ok)
 	require.True(t, after.dirty, "routed nibble must be marked dirty")
-	require.Equal(t, before.keyCount+50, after.keyCount, "all routed touches must land on nibble 5")
+	untouched, _ := cacheNibbleOf(sc, prefix, 6)
+	require.False(t, untouched.dirty, "an unrelated nibble must stay clean")
 
 	kc1, gen1, _ := splitKeyCountGen(sc, accNib)
 	require.Equal(t, kc0, kc1, "cached storage touch must not bump the split keyCount")
@@ -334,18 +336,6 @@ func TestNestedCache_Lifecycle(t *testing.T) {
 	require.Zero(t, cacheLen, "Reset must clear caches")
 }
 
-// TestNestedCache_NibbleGate validates the per-nibble doubling gate: a nibble is
-// eligible only once its key count clears the floor and has at least doubled
-// since the last fold.
-func TestNestedCache_NibbleGate(t *testing.T) {
-	sc := newCacheCommitter(t)
-	sc.SetEagerFold(256)
-	require.False(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 100}), "below floor")
-	require.True(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 300}), "above floor, never folded")
-	require.False(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 300, lastFoldedSize: 200}), "not yet doubled")
-	require.True(t, sc.shouldFoldNibble(&cacheNibble{keyCount: 500, lastFoldedSize: 200}), "doubled and above floor")
-}
-
 func bitsCount(b uint16) int {
 	n := 0
 	for b != 0 {
@@ -381,6 +371,39 @@ func TestNestedCache_ProcessWhaleParity(t *testing.T) {
 	requireBranchParity(t, seqMs, ms)
 	require.NotZero(t, sc.DeepLocalFolds(), "the whale must fold through the deep walk")
 	require.NotZero(t, sc.NibbleFolds(), "the whale storage must fold through the nested cache")
+}
+
+// TestNestedCache_DisabledWhaleParity is the kill-switch baseline the apples-to-
+// apples bench relies on: with the nested cache off, the same whale still folds
+// to the correct root through the cache-free deep walk, and the cache machinery
+// (promotion, per-nibble re-fold) stays entirely dormant.
+func TestNestedCache_DisabledWhaleParity(t *testing.T) {
+	t.Parallel()
+	_, _, _, _, pk, upds, _ := whaleByNibble(15_000)
+
+	seqRoot, seqMs := sequentialRoot(t, pk, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+	sc.SetNestedCache(false)
+	for i := range pk {
+		sc.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
+	}
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, root, "cache-off streaming root != sequential")
+	requireBranchParity(t, seqMs, ms)
+	require.NotZero(t, sc.DeepLocalFolds(), "the whale must still fold through the deep walk")
+	require.Zero(t, sc.NibbleFolds(), "no per-nibble cache re-fold may run with the cache off")
+	sc.trieMu.RLock()
+	cacheLen := len(sc.caches)
+	sc.trieMu.RUnlock()
+	require.Zero(t, cacheLen, "no account may be promoted with the cache off")
 }
 
 // TestNestedCache_IncrementalBlockParity mass-writes a whale (batch 1), then a
