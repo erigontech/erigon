@@ -595,6 +595,28 @@ func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+
+	service.pendingCount.Store(maxPendingBids - 5)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			msg := newTestSignedExecutionPayloadBid(uint64(10000+idx), uint64(idx), 1000)
+			service.queuePendingBid(msg)
+		}(i)
+	}
+	wg.Wait()
+
+	require.LessOrEqual(t, service.pendingCount.Load(), int32(maxPendingBids))
+}
+
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

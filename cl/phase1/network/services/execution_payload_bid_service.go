@@ -334,7 +334,8 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 
 // queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
-	if s.pendingCount.Load() >= maxPendingBids {
+	if s.pendingCount.Add(1) > maxPendingBids {
+		s.pendingCount.Add(-1)
 		return
 	}
 
@@ -346,8 +347,9 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 	if _, loaded := s.pendingBids.LoadOrStore(key, &pendingBidJob{
 		msg:          msg,
 		creationTime: time.Now(),
-	}); !loaded {
-		s.pendingCount.Add(1)
+	}); loaded {
+		s.pendingCount.Add(-1)
+	} else {
 		s.pendingCond.Signal()
 	}
 }

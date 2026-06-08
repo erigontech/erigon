@@ -403,6 +403,30 @@ func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+
+	// Start near cap so only a few slots remain
+	service.pendingCount.Store(maxPendingAttestations - 5)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			blockRoot := common.Hash{byte(idx), byte(idx >> 8)}
+			msg := newTestPayloadAttestationMessage(100, uint64(10000+idx), blockRoot)
+			service.queuePendingAttestation(blockRoot, msg)
+		}(i)
+	}
+	wg.Wait()
+
+	require.LessOrEqual(t, service.pendingCount.Load(), int32(maxPendingAttestations))
+}
+
 func TestPayloadAttestationServiceNames(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

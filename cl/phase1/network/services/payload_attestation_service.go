@@ -196,7 +196,8 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	if s.pendingCount.Load() >= maxPendingAttestations {
+	if s.pendingCount.Add(1) > maxPendingAttestations {
+		s.pendingCount.Add(-1)
 		return
 	}
 
@@ -205,12 +206,12 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 		validatorIndex: msg.ValidatorIndex,
 	}
 
-	// Only add if not already present
 	if _, loaded := s.pendingAttestations.LoadOrStore(key, &pendingPayloadAttestationJob{
 		msg:          msg,
 		creationTime: time.Now(),
-	}); !loaded {
-		s.pendingCount.Add(1)
+	}); loaded {
+		s.pendingCount.Add(-1)
+	} else {
 		s.pendingCond.Signal()
 	}
 }

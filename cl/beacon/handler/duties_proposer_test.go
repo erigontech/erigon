@@ -19,9 +19,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -258,6 +260,38 @@ type proposerDutiesResponse struct {
 	Finalized     bool             `json:"finalized"`
 	DependentRoot string           `json:"dependent_root"`
 	Version       string           `json:"version"`
+}
+
+func TestEpochSlotOverflows(t *testing.T) {
+	require.False(t, epochSlotOverflows(0, 32))
+	require.False(t, epochSlotOverflows(1000, 32))
+	require.False(t, epochSlotOverflows(math.MaxUint64/32-1, 32))
+	require.True(t, epochSlotOverflows(math.MaxUint64/32, 32))
+	require.True(t, epochSlotOverflows(math.MaxUint64, 32))
+	require.False(t, epochSlotOverflows(0, 0))
+}
+
+func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	epoch := uint64(math.MaxUint64)
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), nil)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "overflows")
+}
+
+func TestGetAttesterDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	epoch := uint64(math.MaxUint64)
+	body := strings.NewReader(`["0"]`)
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(epoch, 10), body)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "overflows")
 }
 
 func getProposerDutiesForEpoch(t *testing.T, handler *ApiHandler, epoch uint64) proposerDutiesResponse {
