@@ -25,6 +25,8 @@ import (
 	"sync"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // splitState holds the per-split-point state owned by a StreamingCommitter.
@@ -159,59 +161,18 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		return nil, errors.New("StreamingCommitter.Process called after Release")
 	}
 
-	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
-	defer base.Release()
-	bctx, bclean := sc.trieCtxFactory()
-	if bclean != nil {
-		defer bclean()
+	base, cleanup, root, err := sc.newProcessBase(ctx)
+	if err != nil {
+		return nil, err
 	}
-	base.ResetContext(bctx)
-	base.SetTrace(sc.trace)
-	base.branchEncoder.setDeferUpdates(true)
-	base.SetLeaveDeferredForCaller(true)
+	defer cleanup()
 
-	root := sc.trie.root
 	if root == nil || root.subtreeCount == 0 {
 		return base.RootHash()
 	}
-	if len(root.ext) != 0 {
-		return nil, fmt.Errorf("StreamingCommitter: root.ext len %d not yet supported", len(root.ext))
-	}
 
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := base.unfold(zero, u); err != nil {
-			return nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
-		}
-	}
-
-	sc.pph.SetNumWorkers(sc.numWorkers)
-	sc.pph.SetTrieContextFactory(sc.trieCtxFactory)
-
-	var present [16]bool
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(sc.numWorkers)
-
-	childIdx := 0
-	for bm := root.bitmap; bm != 0; {
-		nib := bits.TrailingZeros16(bm)
-		child := root.children[childIdx]
-		ni := byte(nib)
-		s := sc.splits[ni]
-		if s == nil {
-			s = &splitState{prefix: []byte{ni}}
-			sc.splits[ni] = s
-		}
-		present[nib] = true
-		ch := child
-		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-	if err := g.Wait(); err != nil {
+	present, err := sc.foldPresentSplits(ctx, base, root)
+	if err != nil {
 		sc.dropSplitDeferred()
 		return nil, err
 	}
@@ -253,6 +214,105 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	return base.RootHash()
+}
+
+// newProcessBase builds the per-Process base trie: a fresh deferring
+// HexPatriciaHashed unfolded one level at the root so its row 0 carries every
+// on-disk top-nibble sibling the split cells stitch into. The returned cleanup
+// releases the base and the context. root may be nil/empty (no touches).
+func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaHashed, func(), *prefixNode, error) {
+	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
+	bctx, bclean := sc.trieCtxFactory()
+	cleanup := func() {
+		base.Release()
+		if bclean != nil {
+			bclean()
+		}
+	}
+	base.ResetContext(bctx)
+	base.SetTrace(sc.trace)
+	base.branchEncoder.setDeferUpdates(true)
+	base.SetLeaveDeferredForCaller(true)
+
+	root := sc.trie.root
+	if root == nil || root.subtreeCount == 0 {
+		return base, cleanup, root, nil
+	}
+	if len(root.ext) != 0 {
+		cleanup()
+		return nil, nil, nil, fmt.Errorf("StreamingCommitter: root.ext len %d not yet supported", len(root.ext))
+	}
+
+	zero := []byte{0}
+	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
+		if err := ctx.Err(); err != nil {
+			cleanup()
+			return nil, nil, nil, err
+		}
+		if err := base.unfold(zero, u); err != nil {
+			cleanup()
+			return nil, nil, nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
+		}
+	}
+	return base, cleanup, root, nil
+}
+
+// foldPresentSplits re-folds every touched top-nibble split concurrently onto
+// the base, recording which slots were folded. It never applies or merges; the
+// folded cell and the fold's deferred branch updates land in each splitState.
+func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
+	sc.pph.SetNumWorkers(sc.numWorkers)
+	sc.pph.SetTrieContextFactory(sc.trieCtxFactory)
+
+	var present [16]bool
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(sc.numWorkers)
+
+	childIdx := 0
+	for bm := root.bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		child := root.children[childIdx]
+		ni := byte(nib)
+		s := sc.splits[ni]
+		if s == nil {
+			s = &splitState{prefix: []byte{ni}}
+			sc.splits[ni] = s
+		}
+		present[nib] = true
+		ch := child
+		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	if err := g.Wait(); err != nil {
+		return present, err
+	}
+	return present, nil
+}
+
+// foldDirtySplits re-folds every touched split once, replacing each split's cell
+// and deferred set, without the committer merging to the root or applying
+// anything to the store. Repeated calls are re-fold-invariant ONLY while no
+// touched branch collapses: the engine self-flushes a pending prefix to ctx when
+// it re-reads it mid-fold (readBranchAndCheckForFlushing), which a delete-driven
+// collapse triggers, so a second fold would read that mutated branch as prev and
+// double-apply. The Task-4 scheduler must isolate or gate such re-folds; until
+// then this exists so tests can exercise the invariant in the collapse-free
+// regime, where mid-block folds never write.
+func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
+	if sc.trieCtxFactory == nil {
+		return errors.New("StreamingCommitter.foldDirtySplits requires a TrieContextFactory")
+	}
+	base, cleanup, root, err := sc.newProcessBase(ctx)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if root == nil || root.subtreeCount == 0 {
+		return nil
+	}
+	_, err = sc.foldPresentSplits(ctx, base, root)
+	return err
 }
 
 // stitchSplitCells drops each folded split cell back into the base row at its
@@ -367,10 +427,55 @@ func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) er
 	if applyCtx == nil {
 		return errors.New("StreamingCommitter: trieCtxFactory returned nil context for deferred apply")
 	}
-	if _, err := ApplyDeferredBranchUpdates(deferred, sc.numWorkers, applyCtx.PutBranch); err != nil {
+	if err := applyDeferredGuarded(applyCtx, deferred, sc.numWorkers); err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}
 	return nil
+}
+
+// applyDeferredGuarded applies deferred branch updates with a duplicate-prefix
+// flush guard mirroring BranchEncoder.CollectDeferredUpdate: the combined slice
+// concatenates the per-split sets and then the merge set, whose split-boundary
+// prefix can collide with the merge's bottom row. Bare ApplyDeferredBranchUpdates
+// does not dedup across the slice, so a colliding prefix's second update would
+// merge against the stale pre-image and clobber the first. Here, whenever a
+// prefix already staged in the pending batch reappears the batch is flushed, and
+// prev is re-read from ctx for every update, so a prefix written by an earlier
+// flush merges against the just-written value — last-writer-wins is cumulative,
+// matching the sequential single-write.
+func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate, numWorkers int) error {
+	pending := make([]*DeferredBranchUpdate, 0, len(deferred))
+	seen := make(map[string]struct{}, len(deferred))
+	flush := func() error {
+		if len(pending) == 0 {
+			return nil
+		}
+		if _, err := ApplyDeferredBranchUpdates(pending, numWorkers, ctx.PutBranch); err != nil {
+			return err
+		}
+		pending = pending[:0]
+		clear(seen)
+		return nil
+	}
+	for _, upd := range deferred {
+		if upd == nil {
+			continue
+		}
+		key := string(upd.prefix)
+		if _, dup := seen[key]; dup {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		prev, _, err := ctx.Branch(upd.prefix)
+		if err != nil {
+			return err
+		}
+		upd.prev = common.Copy(prev)
+		pending = append(pending, upd)
+		seen[key] = struct{}{}
+	}
+	return flush()
 }
 
 // Reset clears per-split state, the prefix trie, and any staged deferred updates

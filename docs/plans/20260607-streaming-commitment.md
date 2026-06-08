@@ -237,12 +237,12 @@ constraint 1) instead of 16 persistent hphs.
 - Modify: `execution/commitment/streaming_commitment.go`
 - Modify: `execution/commitment/streaming_commitment_test.go`
 
-- [ ] `Process()` flush = apply split sets, THEN the merge set, through a **duplicate-prefix-flush guard** (as `CollectDeferredUpdate` does, commitment.go:644) so the split-boundary prefix that can collide with the merge's bottom row is written once, last-writer-wins. Do NOT use bare `ApplyDeferredBranchUpdates` (commitment.go:462) — it does not dedup across the slice.
-- [ ] ensure mid-block folds never apply to the store (deferred only) — this is what keeps each re-fold's `prev` pre-image invariant
-- [ ] write **non-empty-`prev`** test (the novel claim): block-1 batch-commit a split into MockState, then in "block 2" re-fold that same split N times before Process → `branchDiff` clean. From-scratch re-fold cannot falsify this — non-empty `prev` is mandatory here, not deferred to Task 8.
-- [ ] write **split∪merge collision** test: a corpus where a split boundary prefix coincides with a merge-emitted prefix → assert no prefix written twice, final bytes == sequential
-- [ ] re-fold-after-branch-collapse (delete) is covered by the `streaming` arm's deletes matrix; add only a focused assertion that a re-fold AFTER a collapse, over non-empty `prev`, stays parity-clean (the prev-invariant test above already exercises the re-fold path)
-- [ ] run tests — must pass before next task
+- [x] `Process()` flush = apply split sets, THEN the merge set, through a **duplicate-prefix-flush guard** (`applyDeferredGuarded`, mirrors `CollectDeferredUpdate` commitment.go:644) so a colliding prefix re-reads the just-written value as `prev` and the merger accumulates instead of clobbering — last-writer-wins is cumulative. Bare `ApplyDeferredBranchUpdates` (commitment.go:462) no longer used by the committer's apply path.
+- [x] mid-block folds defer only — the committer applies solely at `Process`. ⚠️ **Discovered exception**: the engine's `readBranchAndCheckForFlushing` (hex_patricia_hashed.go:1718) self-flushes a *pending* prefix to ctx when it re-reads it mid-fold, which a **delete-driven branch collapse** triggers. So the strict "nothing written mid-block" invariant holds only in the **collapse-free** regime; re-folding a *collapsed* split is unsound (the second fold reads the mutated branch as `prev` and double-applies — empirically corrupts the root). The lazy path folds each split **once** at Process, so it stays correct; the re-fold safety (isolate/gate self-flush) is a **Task-4** scheduler concern. Documented on `foldDirtySplits`.
+- [x] **non-empty-`prev`** test (the novel claim): `TestStreaming_NonEmptyPrevRefold` — block-1 streaming commit, then block-2 re-fold (`foldDirtySplits`) N=4× before Process; after each re-fold the store equals the post-block-1 snapshot (deferred-only), final root+branches == sequential. Collapse-free corpus, the regime where the invariant holds.
+- [x] **split∪merge collision** test: `TestStreaming_SplitMergeCollisionDedup` — two updates for one prefix over a non-empty pre-image, each supplying a different half of the full child set. Guard preserves both halves; bare apply silently clobbers the first (branch merger treats `branch2.afterMap` as authoritative). Asserts per-nibble cell source, not just afterMap.
+- [x] re-fold-after-collapse: `TestStreaming_RefoldAfterCollapse` — focused assertion that a streaming **single fold at Process** over a delete/collapse batch on non-empty `prev` stays root+branch parity-clean (workers 1/4). Multi-re-fold of a collapsed split intentionally NOT asserted (Task-4, per the discovered exception above).
+- [x] run tests — pass (incl. `-race`); `make lint` clean
 
 ### Task 4: Background fold scheduler + dirty/gen CAS (concurrency)
 
@@ -254,6 +254,7 @@ constraint 1) instead of 16 persistent hphs.
 - [ ] `foldSplit` stores `{cell,deferred}` only if `gen` unchanged since fold start; else leave dirty (CAS)
 - [ ] **storageRoot cross-dependency** (constraint 2): a storage-slot touch must bump the OWNING ACCOUNT split's `gen` (the account leaf embeds storageRoot), even mid big-storage fan-out. Define how a storage touch maps to its account split and bumps it.
 - [ ] per-split `mu`; ensure deep fan-out (`concurrentStorageRoot`) uses a separate errgroup (no shared SetLimit) — no deadlock/starvation
+- [ ] ➕ (from Task 3) re-fold safety vs engine self-flush: `readBranchAndCheckForFlushing` writes a pending prefix to ctx mid-fold on collapse re-read, so re-folding a *collapsed* split double-applies and corrupts. The scheduler MUST isolate fold writes (per-fold overlay ctx discarded unless committed) or skip re-folding splits that self-flushed. Repro: `foldDirtySplits` N× over a `sparseBatch2(..., deletes=true)` corpus diverges from sequential.
 - [ ] add a **re-fold counter** (per split + total) to quantify wasted work (the only instrument we keep from the old Task 5)
 - [ ] `Process()` drains: waits for in-flight, folds remaining dirty, then merges
 - [ ] write concurrency test (`-race`): interleave `TouchKey` from multiple goroutines with background folds → root+branches == sequential
