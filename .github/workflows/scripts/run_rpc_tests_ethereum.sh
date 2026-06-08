@@ -17,8 +17,6 @@ DISABLED_TEST_LIST=(
   # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
   # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
   net_listening/test_1.json
-  # Temporary disable required block 24298763
-  debug_traceBlockByNumber/test_51.json
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
@@ -30,12 +28,8 @@ DISABLED_TEST_LIST=(
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
-  # Temporarily disabled: test is flaky and fails non-deterministically; needs investigation
-  eth_simulateV1/test_201.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
-  # Temporary disable required block 23917742
-  debug_traceTransaction/test_149.json
   eth_getWork/test_01.json
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
@@ -47,8 +41,14 @@ DISABLED_TEST_LIST=(
   web3_clientVersion/test_1.json
   # Temporarily disabled: the following tests hang (possible regression in Erigon).
   # For debug_traceTransaction, the issue is under analysis.
-  eth_createAccessList/test_15.json
   debug_traceTransaction/test_12.json
+  # Temportary disable waiting merge PR #21418
+  eth_simulateV1/test_131.json
+  eth_simulateV1/test_143.json
+  eth_simulateV1/test_169.json
+  eth_simulateV1/test_175.json
+  eth_simulateV1/test_179.json
+  eth_simulateV1/test_196.json
 )
 
 # Transform the array into a comma-separated string

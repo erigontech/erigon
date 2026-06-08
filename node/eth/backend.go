@@ -109,7 +109,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -190,8 +189,6 @@ type Ethereum struct {
 
 	unsubscribeEthstat func()
 
-	waitForStageLoopStop chan struct{}
-
 	txPool                    *txpool.TxPool
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
@@ -254,26 +251,19 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	return nil
 }
 
-// sentryMcDisableBlockDownload suppresses the MultiClient's internal header +
-// body downloaders. Blocks are fetched via the staged-sync download path
-// (engine API + snapshot-sync) instead. Also guards the mined-block
-// add-to-prefetch goroutine below.
-const sentryMcDisableBlockDownload = true
-
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
-	// warmup kzg init so first block doesn't suffer. kzgWarmupDone is closed
-	// when the goroutine finishes; Stop waits on it so the trailing log can
-	// never fire after the owning scope (e.g. a test) has torn down — a log
-	// from a goroutine after a test completes panics the test runner.
-	kzgWarmupDone := make(chan struct{})
-	go func() {
-		defer close(kzgWarmupDone)
-		t := time.Now()
-		kzg.InitKZGCtx()
-		logger.Info("KZG crypto context ready", "took", time.Since(t))
-	}()
+	var kzgWarmupDone chan struct{}
+	if config.WarmupKzgCtxOnInit {
+		kzgWarmupDone = make(chan struct{})
+		go func() {
+			defer close(kzgWarmupDone)
+			t := time.Now()
+			kzg.InitKZGCtx()
+			logger.Info("KZG crypto context ready", "took", time.Since(t))
+		}()
+	}
 
 	dirs := stack.Config().Dirs
 
@@ -340,7 +330,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config:                    config,
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Builder.Etherbase,
-		waitForStageLoopStop:      make(chan struct{}),
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
 		miningSealingQuit:         make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
@@ -667,37 +656,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionFetcher = execp2p.NewTrackingFetcher(executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker)
 	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir)
 
-	// limit "new block" broadcasts to at most 10 random peers at time
-	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
-
-	// unlimited "new block" broadcasts to all peers for blocks announced by Bor validators
-	if borEngine, ok := backend.engine.(*bor.Bor); ok {
-		defaultValue := maxBlockBroadcastPeers(nil)
-		maxBlockBroadcastPeers = func(header *types.Header) uint {
-			isValidator, err := borEngine.IsValidator(header)
-			if err != nil {
-				logger.Warn("maxBlockBroadcastPeers: borEngine.IsValidator has failed", "err", err)
-				return defaultValue
-			}
-			if isValidator {
-				// 0 means send to all
-				return 0
-			}
-			return defaultValue
-		}
-	}
-
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
-	// the consensus engine and the per-chain max-peers callback which are
-	// only available after polygon + engine construction above.
+	// the consensus engine which is only available after polygon + engine
+	// construction above.
 	if err := backend.sentryProvider.BuildMultiClient(sentrycomp.MultiClientDeps{
-		Dirs:                   stack.Config().Dirs,
-		Engine:                 backend.engine,
-		SyncCfg:                config.Sync,
-		BlockBufferSize:        sentry_multi_client.DefaultBlockBufferSize,
-		LogPeerInfo:            stack.Config().SentryLogPeerInfo,
-		MaxBlockBroadcastPeers: maxBlockBroadcastPeers,
-		DisableBlockDownload:   sentryMcDisableBlockDownload,
+		Dirs:        stack.Config().Dirs,
+		Engine:      backend.engine,
+		LogPeerInfo: stack.Config().SentryLogPeerInfo,
 	}); err != nil {
 		return nil, err
 	}
@@ -735,6 +700,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var txnProvider txnprovider.TxnProvider
+	var blobGetter txpool.BlobGetter
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
@@ -761,6 +727,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		txnProvider = backend.txPool
+		blobGetter = backend.txPool
 	}
 
 	execmoduleCache := &execmodule.Cache{}
@@ -853,6 +820,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
+			backend.chainConfig,
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
@@ -880,7 +848,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			false, /*badBlockHalt*/
 			dirs,
 			blockReader,
-			backend.sentryProvider.Client.Hd,
 			config.Genesis,
 			config.Sync,
 			config.ExperimentalBAL,
@@ -935,17 +902,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				logger.Debug("[mined blocks listener] ctx done")
 				return
 			case b := <-backend.minedBlocks:
-				if !sentryMcDisableBlockDownload {
-					// Add mined header and block body before broadcast. This is because the broadcast call
-					// will trigger the staged sync which will require headers and blocks to be available
-					// in their respective cache in the download stage. If not found, it would cause a
-					// liveness issue for the chain.
-					if err := backend.sentryProvider.Client.Hd.AddMinedHeader(b.Header()); err != nil {
-						logger.Error("add mined block to header downloader", "err", err)
-					}
-					backend.sentryProvider.Client.Bd.AddToPrefetch(b.Header(), b.RawBody())
-				}
-
 				backend.minedBlockObservers.Notify(b)
 
 				//p2p
@@ -959,8 +915,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				if err := backend.miningRPC.BroadcastPendingBlock(b); err != nil {
 					logger.Error("txpool rpc pending block broadcast", "err", err)
 				}
-			case <-backend.sentryProvider.Client.Hd.QuitPoWMining:
-				return
 			}
 		}
 	}()
@@ -986,7 +940,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
+	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
@@ -1058,6 +1012,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Builder.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
+		blobGetter,
 		config.FcuTimeout,
 		config.MaxReorgDepth,
 	)
@@ -1275,19 +1230,36 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
-	if limit == 0 || limit > len(s.sentryProvider.Client.Sentries()) {
-		limit = len(s.sentryProvider.Client.Sentries())
+	sentries := s.sentryProvider.Client.Sentries()
+	if limit == 0 || limit > len(sentries) {
+		limit = len(sentries)
 	}
 
+	// Sentries that share a single p2p.Server return identical NodeInfo
+	// (same Node ID, same enode). Dedup by Enode so admin_nodeInfo doesn't
+	// list the same node N times. `limit` caps the number of *unique* nodes
+	// returned — keep scanning the rest of the sentry list past duplicates
+	// so a hybrid setup with both shared-Server and external sentries can
+	// still fill the cap.
+	seenEnodes := make(map[string]struct{}, limit)
 	nodes := make([]*typesproto.NodeInfoReply, 0, limit)
-	for i := 0; i < limit; i++ {
-		sc := s.sentryProvider.Client.Sentries()[i]
+	for _, sc := range sentries {
+		if len(nodes) >= limit {
+			break
+		}
 
 		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
 			s.logger.Error("sentry nodeInfo", "err", err)
 			continue
 		}
+		if nodeInfo == nil || nodeInfo.Enode == "" {
+			continue
+		}
+		if _, dup := seenEnodes[nodeInfo.Enode]; dup {
+			continue
+		}
+		seenEnodes[nodeInfo.Enode] = struct{}{}
 
 		nodes = append(nodes, nodeInfo)
 	}
@@ -1339,7 +1311,6 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-	agg.SetFrozenBlocksProvider(blockReader)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
@@ -1456,11 +1427,9 @@ func (s *Ethereum) Start() error {
 
 	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
-		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.execModule.Start(s.sentryCtx, hook)
 	} else if s.chainConfig.Bor != nil {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
-		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
 			s.execModule.Start(s.sentryCtx, hook)
@@ -1482,9 +1451,6 @@ func (s *Ethereum) Start() error {
 			}()
 			return err
 		})
-	} else {
-		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
-		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryProvider.Client.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
 	if s.txPool != nil {
@@ -1539,11 +1505,7 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
-	common.SafeClose(s.sentryProvider.Client.Hd.QuitPoWMining)
 	_ = s.engine.Close()
-	if s.waitForStageLoopStop != nil {
-		<-s.waitForStageLoopStop
-	}
 	if err := s.sentryProvider.Close(); err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Error("sentry component close", "err", err)
 	}

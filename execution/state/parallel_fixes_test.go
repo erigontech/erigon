@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -168,6 +169,26 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 
 	// Address should be cold after reset
 	assert.False(t, ibs.AddressInAccessList(testAddr), "Address should be cold after Reset")
+}
+
+// TestAddressAccessResetInIBSReset verifies that IBS.Reset() clears BAL
+// address-access recording. An aborted incarnation never harvests
+// AccessedAddresses, and only regular txs call Prepare (which re-inits
+// recording) — a worker next assigned a system block-start/block-end
+// transaction never calls Prepare, so it would harvest the leftovers into
+// its own block's access list as phantom entries.
+func TestAddressAccessResetInIBSReset(t *testing.T) {
+	ibs := New(nil)
+	sender := accounts.InternAddress([20]byte{0x01})
+	coinbase := accounts.InternAddress([20]byte{0x02})
+	leaked := accounts.InternAddress([20]byte{0x42})
+	// Prepare enables access recording at tx start.
+	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.MarkAddressAccess(leaked, false)
+	// Tx aborts: AccessedAddresses is never harvested. The worker resets
+	// the shared IBS before the next task.
+	ibs.Reset()
+	assert.Empty(t, ibs.AccessedAddresses(), "no recorded accesses should survive Reset")
 }
 
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears

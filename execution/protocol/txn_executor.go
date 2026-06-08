@@ -73,6 +73,17 @@ func (e ErrExecAbortError) Error() string {
 	}
 }
 
+// IsError reports whether the abort carries a genuine, non-dependency
+// execution error. A dependency abort (DependencyTxIndex >= 0, raised by the
+// ErrDependency panic when a versioned read observes an unsettled predecessor)
+// carries no OriginError and is resolved by re-execution. An IsError abort, by
+// contrast, must be validated before it can be attributed to genuinely invalid
+// block data rather than stale speculative input — the two are mutually
+// exclusive, since Execute's recover sets OriginError only when DepTxIndex < 0.
+func (e ErrExecAbortError) IsError() bool {
+	return e.OriginError != nil
+}
+
 type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
@@ -680,7 +691,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
-		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.txnGasUsed)
+		fmt.Printf("%d (%d.%d) Fees %x: tipped: %s, burnt: %s, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount.String(), burnAmount.String(), st.gasPrice, st.txnGasUsed)
 	}
 
 	result = &evmtypes.ExecutionResult{
@@ -819,7 +830,7 @@ func (st *TxnExecutor) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := u256.Mul(u256.U64(st.msg.Gas()-st.txnGasUsed), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
-		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
+		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 }

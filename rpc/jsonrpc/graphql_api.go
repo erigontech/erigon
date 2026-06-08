@@ -32,11 +32,13 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type GraphQLCallResult struct {
@@ -55,22 +57,27 @@ type GraphQLAPI interface {
 	GetBlockNumberForTx(ctx context.Context, hash common.Hash) (blockNum uint64, ok bool, err error)
 	SendRawTransaction(ctx context.Context, data hexutil.Bytes) (common.Hash, error)
 	Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error)
+	EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error)
+	GasPrice(ctx context.Context) (string, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetPendingTransactions(ctx context.Context) ([]types.Transaction, error)
 }
 
 type GraphQLAPIImpl struct {
 	*BaseAPI
 	db              kv.TemporalRoDB
 	eth             EthAPI
+	txPool          txpoolproto.TxpoolClient
 	gasCap          uint64
 	returnDataLimit int
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, gasCap uint64, returnDataLimit int) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, txPool txpoolproto.TxpoolClient, gasCap uint64, returnDataLimit int) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
 		BaseAPI:         base,
 		db:              db,
 		eth:             eth,
+		txPool:          txPool,
 		gasCap:          gasCap,
 		returnDataLimit: returnDataLimit,
 	}
@@ -435,6 +442,45 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 	return &GraphQLCallResult{Data: result.Return(), GasUsed: result.ReceiptGasUsed, Status: 1}, nil
 }
 
+func (api *GraphQLAPIImpl) EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	gas, err := api.eth.EstimateGas(ctx, &args, &blockNrOrHash, nil, nil)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(gas), nil
+}
+
+func (api *GraphQLAPIImpl) GasPrice(ctx context.Context) (string, error) {
+	price, err := api.eth.GasPrice(ctx)
+	if err != nil {
+		return "", err
+	}
+	if price == nil {
+		return "0x0", nil
+	}
+	return price.String(), nil
+}
+
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	return api.eth.GetLogs(ctx, crit)
+}
+
+func (api *GraphQLAPIImpl) GetPendingTransactions(ctx context.Context) ([]types.Transaction, error) {
+	if api.txPool == nil {
+		return nil, nil
+	}
+	reply, err := api.txPool.Pending(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]types.Transaction, 0, len(reply.Txs))
+	for _, txInfo := range reply.Txs {
+		txn, decErr := types.DecodeWrappedTransaction(txInfo.RlpTx)
+		if decErr != nil {
+			return nil, fmt.Errorf("decoding pending transaction: %w", decErr)
+		}
+		result = append(result, txn)
+	}
+	return result, nil
 }

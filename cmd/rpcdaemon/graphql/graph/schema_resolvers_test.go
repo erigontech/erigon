@@ -243,9 +243,20 @@ type mockGraphQLAPI struct {
 	callResult   *jsonrpc.GraphQLCallResult
 	callErr      error
 
+	estimateGasBlockNum rpc.BlockNumber
+	estimateGasArgs     ethapi.CallArgs
+	estimateGasResult   uint64
+	estimateGasErr      error
+
+	gasPriceResult string
+	gasPriceErr    error
+
 	sendRawTx     hexutil.Bytes
 	sendRawResult common.Hash
 	sendRawErr    error
+
+	pendingTxns []types.Transaction
+	pendingErr  error
 }
 
 func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
@@ -274,9 +285,20 @@ func (m *mockGraphQLAPI) Call(_ context.Context, blockNumber rpc.BlockNumber, ar
 	m.callArgs = args
 	return m.callResult, m.callErr
 }
+func (m *mockGraphQLAPI) EstimateGas(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
+	m.estimateGasBlockNum = blockNumber
+	m.estimateGasArgs = args
+	return m.estimateGasResult, m.estimateGasErr
+}
+func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
+	return m.gasPriceResult, m.gasPriceErr
+}
 func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	m.getLogsCrit = crit
 	return m.getLogsResult, m.getLogsErr
+}
+func (m *mockGraphQLAPI) GetPendingTransactions(_ context.Context) ([]types.Transaction, error) {
+	return m.pendingTxns, m.pendingErr
 }
 
 func TestBlockResolver_Logs(t *testing.T) {
@@ -515,6 +537,124 @@ func TestMutationResolver_SendRawTransaction(t *testing.T) {
 	})
 }
 
+func TestBlockResolver_EstimateGas(t *testing.T) {
+	toAddr := "0x1234567890123456789012345678901234567890"
+
+	t.Run("success — block number and args forwarded", func(t *testing.T) {
+		mock := &mockGraphQLAPI{estimateGasResult: 42000}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.EstimateGas(context.Background(), &model.Block{Number: 7}, model.CallData{To: &toAddr})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != 42000 {
+			t.Errorf("gas: want 42000, got %d", got)
+		}
+		if mock.estimateGasBlockNum != 7 {
+			t.Errorf("block number not forwarded: got %d", mock.estimateGasBlockNum)
+		}
+		if mock.estimateGasArgs.To == nil || *mock.estimateGasArgs.To != common.HexToAddress(toAddr) {
+			t.Errorf("To address not forwarded: %v", mock.estimateGasArgs.To)
+		}
+	})
+
+	t.Run("error from EstimateGas propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{estimateGasErr: errors.New("out of gas")}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.EstimateGas(context.Background(), &model.Block{Number: 1}, model.CallData{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid calldata returns error before API call", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		bad := "not-an-address"
+		_, err := r.EstimateGas(context.Background(), &model.Block{Number: 1}, model.CallData{To: &bad})
+		if err == nil {
+			t.Fatal("expected error for invalid to address, got nil")
+		}
+		if mock.estimateGasBlockNum != 0 {
+			t.Error("API should not be called when calldata is invalid")
+		}
+	})
+}
+
+func TestQueryResolver_GasPrice(t *testing.T) {
+	t.Run("success — returns price string", func(t *testing.T) {
+		mock := &mockGraphQLAPI{gasPriceResult: "0x3b9aca00"}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.GasPrice(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "0x3b9aca00" {
+			t.Errorf("gasPrice: want %q, got %q", "0x3b9aca00", got)
+		}
+	})
+
+	t.Run("error from GasPrice propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{gasPriceErr: errors.New("node not ready")}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.GasPrice(context.Background())
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestAccountResolver_Storage(t *testing.T) {
+	validAddr := "0x1234567890123456789012345678901234567890"
+	validSlot := "0x" + strings.Repeat("ab", 32)
+
+	t.Run("success", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &accountResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Storage(context.Background(), &model.Account{Address: validAddr}, validSlot)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	invalidAddrs := []struct {
+		name string
+		addr string
+	}{
+		{"empty", ""},
+		{"not hex", "not-an-address"},
+		{"too short", "0x1234"},
+	}
+	for _, tt := range invalidAddrs {
+		t.Run("invalid address — "+tt.name, func(t *testing.T) {
+			r := &accountResolver{&Resolver{}}
+			_, err := r.Storage(context.Background(), &model.Account{Address: tt.addr}, validSlot)
+			if err == nil {
+				t.Fatalf("address %q: expected error, got nil", tt.addr)
+			}
+		})
+	}
+
+	invalidSlots := []struct {
+		name string
+		slot string
+	}{
+		{"no 0x prefix", strings.Repeat("ab", 32)},
+		{"too short", "0xabcd"},
+		{"too long", "0x" + strings.Repeat("ab", 33)},
+		{"decimal string", "12345"},
+	}
+	for _, tt := range invalidSlots {
+		t.Run("invalid slot — "+tt.name, func(t *testing.T) {
+			r := &accountResolver{&Resolver{}}
+			_, err := r.Storage(context.Background(), &model.Account{Address: validAddr}, tt.slot)
+			if err == nil {
+				t.Fatalf("slot %q: expected error, got nil", tt.slot)
+			}
+		})
+	}
+}
+
 func TestQueryResolver_Transaction_InvalidHash(t *testing.T) {
 	r := &queryResolver{&Resolver{}} // GraphQLAPI is nil; error fires before it is called
 
@@ -533,5 +673,91 @@ func TestQueryResolver_Transaction_InvalidHash(t *testing.T) {
 				t.Errorf("hash %q: expected error, got nil", tt.hash)
 			}
 		})
+	}
+}
+
+func TestQueryResolver_Pending(t *testing.T) {
+	t.Run("empty pool — zero count and empty slice", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Pending(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil Pending")
+		}
+		if got.TransactionCount != 0 {
+			t.Errorf("TransactionCount: want 0, got %d", got.TransactionCount)
+		}
+		if len(got.Transactions) != 0 {
+			t.Errorf("Transactions: want empty, got %d", len(got.Transactions))
+		}
+	})
+
+	t.Run("one pending tx — count and nonce/gas populated", func(t *testing.T) {
+		tx := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 50, GasLimit: 1048575}}
+		mock := &mockGraphQLAPI{pendingTxns: []types.Transaction{tx}}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Pending(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.TransactionCount != 1 {
+			t.Errorf("TransactionCount: want 1, got %d", got.TransactionCount)
+		}
+		if len(got.Transactions) != 1 {
+			t.Fatalf("Transactions: want 1 entry, got %d", len(got.Transactions))
+		}
+		if got.Transactions[0].Nonce != "0x32" {
+			t.Errorf("Nonce: want 0x32, got %q", got.Transactions[0].Nonce)
+		}
+		if got.Transactions[0].Gas != 1048575 {
+			t.Errorf("Gas: want 1048575, got %d", got.Transactions[0].Gas)
+		}
+	})
+
+	t.Run("error from GetPendingTransactions propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{pendingErr: errors.New("pool unavailable")}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Pending(context.Background())
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestPendingResolver_Account_InvalidAddress(t *testing.T) {
+	r := &pendingResolver{&Resolver{}}
+	_, err := r.Account(context.Background(), &model.Pending{}, "not-an-address")
+	if err == nil {
+		t.Fatal("expected error for invalid address, got nil")
+	}
+}
+
+func TestPendingResolver_Call_ForwardsPendingBlockNumber(t *testing.T) {
+	mock := &mockGraphQLAPI{callResult: &jsonrpc.GraphQLCallResult{Status: 1}}
+	r := &pendingResolver{&Resolver{GraphQLAPI: mock}}
+	_, err := r.Call(context.Background(), &model.Pending{}, model.CallData{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.callBlockNum != rpc.PendingBlockNumber {
+		t.Errorf("expected PendingBlockNumber, got %d", mock.callBlockNum)
+	}
+}
+
+func TestPendingResolver_EstimateGas_ForwardsPendingBlockNumber(t *testing.T) {
+	mock := &mockGraphQLAPI{estimateGasResult: 21000}
+	r := &pendingResolver{&Resolver{GraphQLAPI: mock}}
+	got, err := r.EstimateGas(context.Background(), &model.Pending{}, model.CallData{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 21000 {
+		t.Errorf("gas: want 21000, got %d", got)
+	}
+	if mock.estimateGasBlockNum != rpc.PendingBlockNumber {
+		t.Errorf("expected PendingBlockNumber, got %d", mock.estimateGasBlockNum)
 	}
 }

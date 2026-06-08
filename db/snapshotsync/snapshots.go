@@ -346,6 +346,9 @@ func (s *DirtySegment) IsIndexed() bool {
 }
 
 func (s *DirtySegment) FileName() string {
+	if s.Decompressor != nil {
+		return s.Decompressor.FileName()
+	}
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
@@ -414,15 +417,13 @@ func (s *DirtySegment) close() {
 
 func (s *DirtySegment) closeAndRemoveFiles() {
 	if s != nil {
-		f := s.FilePath()
-		s.closeIdx()
-		s.closeSeg()
-		toRemove := make([]string, 0, 2)
-		toRemove = append(toRemove, f)
+		toRemove := make([]string, 0, 1+len(s.indexes))
+		toRemove = append(toRemove, s.FilePath())
 		for _, index := range s.indexes {
 			toRemove = append(toRemove, index.FilePath())
 		}
-
+		s.closeIdx()
+		s.closeSeg()
 		removeOldFiles(toRemove)
 	}
 }
@@ -791,6 +792,26 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 				continue
 			}
 
+			if len(newVisibleSegments) > 0 {
+				last := newVisibleSegments[len(newVisibleSegments)-1].src
+				// Same [from,to) range but different version: keep the newer one.
+				// Both pass the isSubSetOf check (equal ranges are not subsets), so without
+				// this guard both would be appended, causing the gap detector to truncate
+				// everything after the duplicate start.
+				if last.from == sn.from && last.to == sn.to {
+					if last.version.Less(sn.version) {
+						newVisibleSegments[len(newVisibleSegments)-1].src = sn
+					}
+					continue
+				}
+				// if this indexed segment is fully covered by the last visible
+				// segment, skip it. The backward-removal loop below handles the general case,
+				// but this avoids unnecessary list mutations for the common subsegment order.
+				if sn.isSubSetOf(last) {
+					continue
+				}
+			}
+
 			//protect from overlaps
 			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
@@ -1063,6 +1084,25 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 	return res, missingSnapshots, nil
 }
 
+// AllTypedSegments returns the raw, unfiltered list of segment files on disk
+// that match the given types. No overlap or gap removal is applied.
+func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInfo, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, segType := range types {
+		for _, f := range list {
+			if f.Type.Enum() != segType.Enum() {
+				continue
+			}
+			res = append(res, f)
+		}
+	}
+	return res, nil
+}
+
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
@@ -1172,7 +1212,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		files, _, err := TypedSegments(s.dir, s.Types(), false)
+		files, err := AllTypedSegments(s.dir, s.Types())
 		if err != nil {
 			return err
 		}
@@ -1198,13 +1238,13 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	files, _, err := TypedSegments(s.dir, types, allowGaps)
+	files, err := AllTypedSegments(s.dir, types)
 
 	if err != nil {
 		return err
@@ -1215,6 +1255,9 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bo
 		list = append(list, fName)
 	}
 
+	// Do not call closeWhatNotInList(list) here. list only contains segments of the
+	// requested types; calling it would close all other types (e.g. Transactions) from dirty.
+	// Stale entries for the requested types are cleaned by the next OpenFolder call.
 	if err := s.openSegments(list, true, false); err != nil {
 		return err
 	}
@@ -1245,7 +1288,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 				if _, ok := protectFiles[seg.FileName()]; ok {
 					continue
 				}
-				if _, ok := toClose[seg.segType.Enum()]; !ok {
+				if _, ok := toClose[t]; !ok {
 					toClose[t] = make([]*DirtySegment, 0)
 				}
 				toClose[t] = append(toClose[t], seg)
@@ -1258,6 +1301,13 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	for segtype, delSegments := range toClose {
 		dirtyFiles := s.dirty[segtype]
 		for _, delSeg := range delSegments {
+			if delSeg.refcount.Load() > 0 {
+				// A live reader (View/RoTx) still holds this segment. Closing it
+				// now would nil its decompressor out from under that reader and
+				// turn the reader's later closeAndRemoveFiles into a crash. Leave
+				// it; it is reaped on a later pass once the reader releases it.
+				continue
+			}
 			delSeg.close()
 			dirtyFiles.Delete(delSeg)
 		}
@@ -1269,12 +1319,22 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err != nil {
 		return err
 	}
-	_, segmentsToRemove := findOverlaps(list)
+	keepSegments, segmentsToRemove := findOverlaps(list)
 
 	toRemove := make([]string, 0, len(segmentsToRemove))
 	for _, info := range segmentsToRemove {
 		toRemove = append(toRemove, info.Path)
 	}
+
+	// Close overlaps in memory before deleting them from disk to prevent Windows
+	// file-locking issues (mmap) and stale descriptors in dirty.
+	keepNames := make([]string, 0, len(keepSegments))
+	for _, info := range keepSegments {
+		keepNames = append(keepNames, info.Name())
+	}
+	s.dirtyLock.Lock()
+	s.closeWhatNotInList(keepNames)
+	s.dirtyLock.Unlock()
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
 	list, err = snaptype.IdxFiles(s.dir)
@@ -1375,7 +1435,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 				if sn.Decompressor == nil {
 					continue
 				}
-				if sn.segType.FileName(sn.version, sn.from, sn.to) != fName {
+				if sn.FileName() != fName {
 					continue
 				}
 				sn.canDelete.Store(true)

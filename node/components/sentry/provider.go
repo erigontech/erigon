@@ -54,10 +54,10 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -123,9 +123,9 @@ type Config struct {
 	// config.Snapshot.ChainName. Not used in external-sentry mode.
 	ChainName string
 
-	// NodesDir is the node database directory; the Provider appends
-	// per-protocol subdirectories beneath it (e.g. "eth68", "eth69").
-	// Not used in external-sentry mode.
+	// NodesDir is the node database directory; the Provider appends a
+	// single "eth" subdirectory beneath it for the shared p2p.Server's
+	// enode database. Not used in external-sentry mode.
 	NodesDir string
 
 	// EnableWitProtocol toggles the WIT sideprotocol on the direct
@@ -188,10 +188,11 @@ type Provider struct {
 	ExecutionP2PPeerPenalizer   *execp2p.PeerPenalizer
 
 	// Internal
-	cfg     Config
-	logger  log.Logger
-	started bool           // guards Start from firing twice
-	eg      errgroup.Group // tracks background goroutines launched in Start
+	cfg             Config
+	logger          log.Logger
+	started         bool           // guards Start from firing twice
+	eg              errgroup.Group // tracks background goroutines launched in Start
+	sharedP2PServer *p2p.Server    // shared p2p.Server backing all GrpcServers in local mode; Close() stops it
 }
 
 // Configure stores the Provider's configuration. Call before Initialize.
@@ -231,9 +232,14 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		return nil
 	}
 
-	// Local sentry: build one server per protocol version.
+	// Local sentry: build one GrpcServer per protocol version, then back them
+	// all by a single shared p2p.Server so the node publishes one ENR / one
+	// listener port / one Node ID. Running a Server per protocol used to race
+	// in the discovery DHT — each Server signed its own ENR under the same
+	// Node ID and only the highest seq survived, so peers would dial the
+	// wrong listener and inbound stuck at a fraction of MaxPeers.
 	//
-	// The readNodeInfo callback is captured by each server so the ENR can be
+	// The readNodeInfo callback is captured by every sentry so the ENR can be
 	// refreshed on demand from ChainDB.
 	readNodeInfo := func() *eth.NodeInfo {
 		var res *eth.NodeInfo
@@ -256,44 +262,19 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		chainDNSNetwork = spec.DNSNetwork
 	}
 
-	listenHost, listenPort, err := splitAddrIntoHostAndPort(p.cfg.P2P.ListenAddr)
-	if err != nil {
-		return err
-	}
+	sharedCfg := p.buildSharedP2PConfig()
 
-	var pi int // index into AllowedPorts
+	// Create one GrpcServer per protocol version. Each instance keeps its own
+	// statusData / message streams so the MultiClient can address them by
+	// protocol; the per-peer state lives in a shared PeerStore that
+	// startSharedP2PServer injects below (so wit/0, deduped to one sentry,
+	// shares PeerInfo with the eth Run that ran on a different sentry).
 	for _, protocol := range p.cfg.P2P.ProtocolVersion {
-		cfg := p.cfg.P2P
-		cfg.NodeDatabase = filepath.Join(p.cfg.NodesDir, eth.ProtocolToString[protocol])
-
-		// Pick a listen port from the allowed list.
-		var picked bool
-		for ; pi < len(cfg.AllowedPorts); pi++ {
-			pc := int(cfg.AllowedPorts[pi])
-			if pc == 0 {
-				// Ephemeral port — skip the availability probe.
-				picked = true
-				break
-			}
-			if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
-				p.logger.Warn("bind protocol to port has failed: port is busy",
-					"protocol", eth.ProtocolToString[protocol], "port", pc)
-				continue
-			}
-			if listenPort != pc {
-				listenPort = pc
-			}
-			pi++
-			picked = true
-			break
-		}
-		if !picked {
-			return fmt.Errorf("run out of allowed ports for p2p eth protocols %v. Extend allowed port list via --p2p.allowed-ports", cfg.AllowedPorts)
-		}
-
-		cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-
-		server := sentry.NewGrpcServer(p.cfg.SentryCtx, nil, readNodeInfo, &cfg, protocol, p.logger, chainBootnodes, chainDNSNetwork)
+		// Pass the shared p2p.Config to NewGrpcServer. The sentry will not
+		// build its own Server (SetP2PServer below blocks the lazy path), but
+		// it still uses cfg for things like DiscoveryDNS, NoDiscovery, etc.
+		cfgCopy := sharedCfg
+		server := sentry.NewGrpcServer(p.cfg.SentryCtx, nil, readNodeInfo, &cfgCopy, protocol, p.logger, chainBootnodes, chainDNSNetwork)
 		p.Servers = append(p.Servers, server)
 
 		var sideProtocols []sentryproto.Protocol
@@ -307,7 +288,116 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		p.Sentries = append(p.Sentries, sentryClient)
 	}
 
+	// Build the single shared p2p.Server and inject it into every GrpcServer.
+	if err := p.startSharedP2PServer(&sharedCfg, chainBootnodes, chainDNSNetwork); err != nil {
+		return err
+	}
+
 	p.buildStatusAndExecutionP2P()
+	return nil
+}
+
+// buildSharedP2PConfig returns the p2p.Config used by the single shared
+// p2p.Server. Sets NodeDatabase to a unified subdirectory; the caller's
+// ListenAddr is honoured as-is (binding fails if the port is busy).
+func (p *Provider) buildSharedP2PConfig() p2p.Config {
+	cfg := p.cfg.P2P
+
+	// Single enode database. Previously each protocol Server had its own
+	// (eth68/, eth69/, …); with one Server we use one DB. Existing
+	// per-protocol dirs become inert on upgrade — peer discovery rebuilds
+	// quickly from bootnodes.
+	cfg.NodeDatabase = filepath.Join(p.cfg.NodesDir, "eth")
+	return cfg
+}
+
+// startSharedP2PServer collects the per-protocol Protocols registered by each
+// GrpcServer, builds one p2p.Server with the union (deduplicated by
+// name+version so sideprotocols like wit aren't registered N times), starts
+// it, and injects it back into every GrpcServer.
+//
+// All GrpcServers are wired to one shared sentry.PeerStore so wit/0 (which
+// is deduped to a single GrpcServer here) and the negotiated eth/* (which
+// fires on a different GrpcServer per peer) see the same PeerInfo and
+// share its eth-ready signal. Each GrpcServer still reports peers filtered
+// by its own eth protocol version, so admin_peers aggregation across
+// sentries is non-duplicating and the multi-sentry message router maps
+// each peer to the correct sentry's gRPC client.
+func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string, chainDNSNetwork string) error {
+	if len(p.Servers) == 0 {
+		return errors.New("sentry provider: no GrpcServers to back with a shared p2p.Server")
+	}
+
+	// Chain-specific bootnodes — only seeded when the caller hasn't supplied
+	// any (matches the legacy makeP2PServer behaviour). An explicit empty
+	// slice from --bootnodes= is preserved.
+	if cfg.BootstrapNodes == nil && len(chainBootnodes) > 0 {
+		bootstrapNodes, err := enode.ParseNodesFromURLs(chainBootnodes)
+		if err != nil {
+			return fmt.Errorf("sentry provider: parse chain bootnodes: %w", err)
+		}
+		cfg.BootstrapNodes = bootstrapNodes
+		cfg.BootstrapNodesV5 = bootstrapNodes
+	}
+
+	// Apply DNS discovery to each Protocol's DialCandidates, then merge.
+	if !cfg.NoDiscovery && len(cfg.DiscoveryDNS) == 0 && chainDNSNetwork != "" {
+		cfg.DiscoveryDNS = []string{chainDNSNetwork}
+	}
+
+	seen := make(map[string]struct{}, 4)
+	var protocols []p2p.Protocol
+	for _, ss := range p.Servers {
+		for i := range ss.Protocols {
+			proto := ss.Protocols[i]
+			key := fmt.Sprintf("%s/%d", proto.Name, proto.Version)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			if !cfg.NoDiscovery && len(cfg.DiscoveryDNS) > 0 && proto.DialCandidates == nil {
+				dialCandidates, err := sentry.SetupDNSDiscovery(cfg.DiscoveryDNS)
+				if err != nil {
+					return fmt.Errorf("sentry provider: setup DNS discovery for %s: %w", key, err)
+				}
+				proto.DialCandidates = dialCandidates
+			}
+			protocols = append(protocols, proto)
+		}
+	}
+
+	cfg.Protocols = protocols
+	srv := &p2p.Server{Config: *cfg}
+
+	// Validate first so we don't leave half-injected state if a later
+	// GrpcServer rejects the inject.
+	for i, ss := range p.Servers {
+		if ss.GetP2PServer() != nil {
+			return fmt.Errorf("sentry provider: GrpcServer[%d] already has a p2p.Server; cannot share", i)
+		}
+	}
+
+	// Wire the shared PeerStore + Server reference into every GrpcServer
+	// BEFORE srv.Start. Once the listener is up peers can connect and
+	// Protocol.Run fires immediately; if SetSharedPeerStore happened later
+	// the early Runs would land in per-sentry stores and wit/0's
+	// WaitForEth would never see the eth handshake complete (it lives on
+	// a different sentry post-dedup), disconnecting the peer after
+	// ethProtocolTimeout. The shared store keeps one PeerInfo per peer
+	// across sentries.
+	shared := sentry.NewPeerStore()
+	for _, ss := range p.Servers {
+		ss.SetSharedPeerStore(shared)
+		if err := ss.SetP2PServer(srv); err != nil {
+			return fmt.Errorf("sentry provider: inject shared p2p server: %w", err)
+		}
+	}
+
+	if err := srv.Start(p.cfg.SentryCtx, p.logger); err != nil {
+		srv.Stop()
+		return fmt.Errorf("sentry provider: start shared p2p server: %w", err)
+	}
+	p.sharedP2PServer = srv
 	return nil
 }
 
@@ -356,51 +446,25 @@ type MultiClientDeps struct {
 	// anchor-based backward download.
 	Engine rules.Engine
 
-	// SyncCfg carries the staged-sync configuration (batch sizes, etc).
-	SyncCfg ethconfig.Sync
-
-	// BlockBufferSize bounds the number of unseen blocks held while waiting
-	// for headers to catch up. Pass 0 to use the package default (128).
-	BlockBufferSize int
-
 	// LogPeerInfo enables verbose peer-info logging in the MultiClient.
 	LogPeerInfo bool
-
-	// MaxBlockBroadcastPeers decides how many peers a NewBlock
-	// announcement is gossiped to (header-aware so Bor validators can
-	// override the default cap).
-	MaxBlockBroadcastPeers func(*types.Header) uint
-
-	// DisableBlockDownload suppresses the header + body downloaders inside
-	// the MultiClient. Pass true when blocks are supplied via another path
-	// (CL engine, staged sync headers stage).
-	DisableBlockDownload bool
 }
 
 // BuildMultiClient constructs the multi-sentry Client. Must be called after
 // Initialize (which populates Sentries + StatusDataProvider) and once the
-// late-binding deps (engine, max-broadcast-peers callback) are ready.
+// late-binding engine dep is ready.
 //
 // On success, p.Client is ready for consumers.
 func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
-	bufSize := deps.BlockBufferSize
-	if bufSize == 0 {
-		bufSize = sentry_multi_client.DefaultBlockBufferSize
-	}
-
 	client, err := sentry_multi_client.NewMultiClient(
 		deps.Dirs,
 		p.cfg.ChainDB,
 		p.cfg.ChainConfig,
 		deps.Engine,
 		p.Sentries,
-		deps.SyncCfg,
 		p.cfg.BlockReader,
-		bufSize,
 		p.StatusDataProvider,
 		deps.LogPeerInfo,
-		deps.MaxBlockBroadcastPeers,
-		deps.DisableBlockDownload,
 		p.cfg.EnableWitProtocol,
 		p.logger,
 	)
@@ -541,6 +605,14 @@ func (p *Provider) runPeerCountLogger() error {
 func (p *Provider) Close() error {
 	for _, srv := range p.Servers {
 		srv.Close()
+	}
+	// Stop the shared p2p.Server (if any). Each GrpcServer.Close above is a
+	// no-op for externally-owned Servers, so the listener and discovery
+	// goroutines would otherwise outlive Provider.Close until SentryCtx is
+	// cancelled.
+	if p.sharedP2PServer != nil {
+		p.sharedP2PServer.Stop()
+		p.sharedP2PServer = nil
 	}
 	return p.eg.Wait()
 }

@@ -217,7 +217,7 @@ func valueString(path AccountPath, value any) string {
 		return (&num).String()
 	case StoragePath:
 		num := value.(uint256.Int)
-		return fmt.Sprintf("%x", &num)
+		return num.Hex()[2:]
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
@@ -283,8 +283,16 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 				// explicitly to keep both consistent.
 				revivalLimit := vr.txIndex - 1
 				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+				// Same-tx re-creation (metamorphic SD+CREATE2): AddressPath
+				// at TxIdx >= destructTxIndex signals re-creation within or
+				// after the destruct.
+				if hi, ok := vr.versionMap.LatestTxIndex(address, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
 					revived = true
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+						revived = true
+					}
 				}
 				if !revived {
 					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
@@ -344,7 +352,11 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 }
 
 func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int) (T, bool) {
-	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
+	// A Dependency (Estimate) cell holds the same latest in-block write a Done
+	// cell does; finalize reconstruction must consume it, not fall back to the
+	// pre-block DB value — doing so commits stale state once invalidated txs
+	// flush Estimate instead of Done.
+	if res := versionMap.Read(addr, path, key, txIndex); res.Status() != MVReadResultNone {
 		return res.Value().(T), true
 	}
 	var v T
@@ -728,12 +740,31 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
 	}
 
+	// First pass: if a Balance entry exists for this addr, just update value.
+	// Tracks whether ANY entry for this addr exists — if yes we MUST NOT
+	// re-emit Nonce/Incarnation/CodeHash from the pre-block snapshot acc,
+	// because the worker has already written some fields with the correct
+	// post-execution values; appending pre-block field entries after the
+	// worker's writes would clobber them under last-wins downstream merge.
+	addrHasAnyWrite := false
 	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
+		if w.Address != addr {
+			continue
+		}
+		addrHasAnyWrite = true
+		if w.Path == BalancePath {
 			w.Val = val
 			w.BalanceChangeReason = reason
 			return writes
 		}
+	}
+	if addrHasAnyWrite {
+		// Worker already wrote some other field (e.g. Nonce on a miner
+		// self-send where sender == coinbase). Append only the Balance
+		// write; the other fields are correct in the existing entries.
+		return append(writes,
+			&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
+		)
 	}
 	// Account not in writes — emit complete account fields.
 	return append(writes,
@@ -813,6 +844,18 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		// tipInsideBlock failing with gas exactly 4800 short under
 		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
 		destructTxIndex := res.DepIdx()
+		if !commited {
+			if vw, ok := s.versionedWrite(addr, path, key); ok {
+				// The current tx has itself written this field — a same-tx
+				// value-transfer or recreate that revived the account. A tx
+				// always observes its own write, regardless of a prior tx's
+				// self-destruct, so return it directly as WriteSetRead (issue
+				// #21319). Falling through to the normal read path instead
+				// would route an own-write read through the cross-tx
+				// dependency check and spuriously abort.
+				return vw.Val.(T), WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+			}
+		}
 		// Per-path revival resolution (issue #21319): the account was
 		// self-destructed at destructTxIndex. THIS field is revived iff the
 		// version map holds a write to THIS path at a strictly higher
@@ -1012,6 +1055,50 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 					}
 					// Fall through to storage read below
+				}
+			}
+		}
+
+		// Self-destructed account: a per-account field (Balance/Nonce/
+		// Incarnation/CodeHash/Code) with no dedicated versionMap cell reads as
+		// the post-SD zero value. Record the read as a dependency on the
+		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion
+		// read — the latter is rejected on sight by the validator's
+		// path==AddressPath cross-check (IncarnationPath is Done), producing a
+		// non-converging validator-invalid retry loop. The SelfDestructPath
+		// dependency validates cleanly via checkVersion. (Branch 794's SD
+		// short-circuit misses this when its revival check fires for a
+		// recreate-in-the-same-tx target.)
+		//
+		// Per-path revival resolution (issue #21319): reaching here means res
+		// — the version-map read of THIS path — was MVReadResultNone, so this
+		// field has no post-SD write and per-path it is not revived; it reads
+		// as the post-SD zero value regardless of whether other fields were
+		// revived. The old account-wide LatestTxIndex scan over
+		// Balance|Nonce|CodeHash would, for a value-transfer revival
+		// (BalancePath write only), treat the whole account as revived and
+		// fall through to surface a stale pre-SD nonce/codeHash — the same
+		// imprecision #21323 removed from the branch-794 SD short-circuit.
+		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
+			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if sd := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); sd.Status() == MVReadResultDone {
+				if destructed, ok := sd.Value().(bool); ok && destructed {
+					sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
+					if !commited {
+						if s.versionedReads == nil {
+							s.versionedReads = ReadSet{}
+						}
+						s.versionedReads.Set(VersionedRead{
+							Address: addr,
+							Path:    SelfDestructPath,
+							Key:     accounts.NilKey,
+							Source:  MapRead,
+							Version: sdVer,
+							Val:     true,
+						})
+					}
+					var zero T
+					return zero, MapRead, sdVer, nil
 				}
 			}
 		}
@@ -1514,17 +1601,9 @@ func ensureAccountState(accounts map[accounts.Address]*accountState, addr accoun
 func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32) {
 	switch vw.Path {
 	case StoragePath:
-		// Skip intra-tx net-zero storage writes: if this is the first write
-		// to the slot (no prior tx wrote to it) and the written value equals
-		// the original read value, it's a no-op that should remain as a read.
-		if !hasStorageWrite(account.changes, vw.Key) {
-			if val, ok := vw.Val.(uint256.Int); ok {
-				if origVal, wasRead := account.storageReadValues[vw.Key]; wasRead && val.Eq(&origVal) {
-					return
-				}
-			}
+		if val, ok := vw.Val.(uint256.Int); ok {
+			account.addStorageUpdate(vw.Key, accessIndex, val)
 		}
-		addStorageUpdate(account.changes, vw, accessIndex)
 	case BalancePath:
 		val, ok := vw.Val.(uint256.Int)
 		if !ok {
@@ -1639,28 +1718,29 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 	}
 }
 
-func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint32) {
-	// If we already recorded a read for this slot, drop it because a write takes precedence.
-	removeStorageRead(ac, vw.Key)
-
-	if ac.StorageChanges == nil {
-		ac.StorageChanges = []*types.SlotChanges{{
-			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
-		}}
-		return
-	}
-
+// addStorageUpdate records a value-changing storage write in a single pass over
+// the slot's changes, applying the EIP-7928 no-op filter: a write whose value
+// equals the slot's current value — the most recent earlier write this block,
+// or the pre-block read value for the first write — is not a change and is
+// omitted (the slot stays a read).
+func (account *accountState) addStorageUpdate(slot accounts.StorageKey, accessIndex uint32, val uint256.Int) {
+	ac := account.changes
 	for _, slotChange := range ac.StorageChanges {
-		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: vw.Val.(uint256.Int)})
+		if slotChange.Slot == slot {
+			if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
+				return
+			}
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: accessIndex, Value: val})
 			return
 		}
 	}
-
+	if origVal, wasRead := account.storageReadValues[slot]; wasRead && val.Eq(&origVal) {
+		return
+	}
+	removeStorageRead(ac, slot) // a real write supersedes any recorded read
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
-		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: accessIndex, Value: val}},
 	})
 }
 

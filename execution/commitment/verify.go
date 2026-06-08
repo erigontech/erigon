@@ -120,8 +120,9 @@ func VerifyBranchHashes(
 		c.stateHashLen = 0
 
 		// Create a fresh HexPatriciaHashed for each cell to avoid any shared state issues.
-		hph := NewHexPatriciaHashed(length.Addr, nil)
-		hph.memoizationOff = true
+		verifyCfg := DefaultTrieConfig()
+		verifyCfg.MemoizationOff = true
+		hph := NewHexPatriciaHashed(length.Addr, nil, verifyCfg)
 
 		computed, err := hph.computeCellHash(c, depth, nil)
 		if err != nil {

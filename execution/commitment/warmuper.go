@@ -175,17 +175,18 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			for item := range w.work {
+			for {
 				select {
 				case <-w.ctx.Done():
 					return w.ctx.Err()
-				default:
+				case item, ok := <-w.work:
+					if !ok {
+						return nil
+					}
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.keysProcessed.Add(1)
 				}
-
-				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
-				w.keysProcessed.Add(1)
 			}
-			return nil
 		})
 	}
 }
