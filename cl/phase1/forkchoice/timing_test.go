@@ -369,6 +369,47 @@ func TestGetProposerHeadReorgsGloasLatePayload(t *testing.T) {
 	require.Equal(t, parentRoot, f.GetProposerHead(headRoot, 2))
 }
 
+func TestGetProposerHeadNoReorgOnNonFullPayload(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+
+	parentRoot := common.Hash{0x10}
+	headRoot := common.Hash{0x11}
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	verifiedExecutionPayload.Add(headRoot, struct{}{})
+	f := &ForkChoiceStore{
+		genesisTime:              0,
+		beaconCfg:                &cfg,
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		forkGraph: ptcVoteForkGraph{
+			envelopes: map[common.Hash]bool{headRoot: true},
+			blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
+				parentRoot: {Block: &cltypes.BeaconBlock{Slot: 0}},
+				headRoot: {
+					Block: &cltypes.BeaconBlock{
+						Slot:       1,
+						ParentRoot: parentRoot,
+					},
+				},
+			},
+		},
+	}
+	f.time.Store(2 * cfg.SecondsPerSlot)
+	f.headHash = headRoot
+
+	// EMPTY payload should NOT trigger the late-payload reorg, even with the
+	// same PTC vote setup that triggers it for FULL in the test above.
+	f.headPayloadStatus = cltypes.PayloadStatusEmpty
+	f.payloadTimelinessVote.Store(headRoot, ptcVotes(0, ptcVoteThreshold()+1))
+	// Mark head as timely so isHeadLate returns false (prevent fallthrough reorg).
+	var timely [clparams.NumBlockTimelinessDeadlines]bool
+	timely[clparams.AttestationTimelinessIndex] = true
+	f.blockTimeliness.Store(headRoot, timely)
+
+	require.Equal(t, headRoot, f.GetProposerHead(headRoot, 2))
+}
+
 func TestGetProposerHeadSkipsPayloadReorgOnRootMismatch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.GloasForkEpoch = 0

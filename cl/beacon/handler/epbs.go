@@ -50,6 +50,10 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		return nil, err
 	}
 
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
+	}
+
 	// PTC duties only available from GLOAS fork onwards
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,

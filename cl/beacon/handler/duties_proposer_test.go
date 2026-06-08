@@ -282,7 +282,7 @@ func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "overflows")
 }
 
-func TestDependentRootSlotNoUnderflow(t *testing.T) {
+func TestComputeDependentRootSlotNoUnderflow(t *testing.T) {
 	slotsPerEpoch := uint64(32)
 	tests := []struct {
 		name     string
@@ -299,17 +299,7 @@ func TestDependentRootSlotNoUnderflow(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var slot uint64
-			switch {
-			case tc.epoch == 0:
-				slot = 0
-			case tc.attester && tc.epoch <= 1:
-				slot = 0
-			case tc.attester:
-				slot = (tc.epoch-1)*slotsPerEpoch - 1
-			default:
-				slot = tc.epoch*slotsPerEpoch - 1
-			}
+			slot := computeDependentRootSlot(tc.epoch, slotsPerEpoch, tc.attester)
 			require.Equal(t, tc.wantSlot, slot)
 		})
 	}
@@ -321,6 +311,18 @@ func TestGetAttesterDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
 	epoch := uint64(math.MaxUint64)
 	body := strings.NewReader(`["0"]`)
 	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(epoch, 10), body)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "overflows")
+}
+
+func TestPostPtcDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	epoch := uint64(math.MaxUint64)
+	body := strings.NewReader(`["0"]`)
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/"+strconv.FormatUint(epoch, 10), body)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
