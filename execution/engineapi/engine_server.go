@@ -207,6 +207,9 @@ func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
 	}
@@ -227,11 +230,17 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	}
+	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry slotNumber
 	}
 	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
