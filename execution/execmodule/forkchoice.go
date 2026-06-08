@@ -647,7 +647,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// Close the persistent SD (overlay was already flushed into rwTx at
 		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
 		// creates a fresh overlay for the next block cycle.
-		if hasOverlay {
+		//
+		// Must run unconditionally on success — not gated on hasOverlay.
+		// Post #21300, InsertBlocks with >16 blocks flushes + closes the
+		// BlockOverlay before returning, so hasOverlay can legitimately be
+		// false at FCU entry even though e.currentContext is still set. If
+		// the clear was skipped, currentContext would survive across the
+		// FCU and break the next path that polls for quiescence (mode-B
+		// SetHead's waitForQuiescence times out after 2 minutes — see
+		// TestSetHead_E2E_ModeB_SequentialUnwinds[_NonAligned]).
+		if e.currentContext != nil {
 			e.currentContext.Close()
 			e.lock.Lock()
 			e.currentContext = nil
