@@ -250,17 +250,17 @@ constraint 1) instead of 16 persistent hphs.
 - Modify: `execution/commitment/streaming_commitment.go`
 - Modify: `execution/commitment/streaming_commitment_test.go`
 
-- [ ] bounded background goroutine pool; `TouchKey` enqueues dirtied splits
-- [ ] `foldSplit` stores `{cell,deferred}` only if `gen` unchanged since fold start; else leave dirty (CAS)
-- [ ] **storageRoot cross-dependency** (constraint 2): a storage-slot touch must bump the OWNING ACCOUNT split's `gen` (the account leaf embeds storageRoot), even mid big-storage fan-out. Define how a storage touch maps to its account split and bumps it.
-- [ ] per-split `mu`; ensure deep fan-out (`concurrentStorageRoot`) uses a separate errgroup (no shared SetLimit) — no deadlock/starvation
-- [ ] ➕ (from Task 3) re-fold safety vs engine self-flush: `readBranchAndCheckForFlushing` writes a pending prefix to ctx mid-fold on collapse re-read, so re-folding a *collapsed* split double-applies and corrupts. The scheduler MUST isolate fold writes (per-fold overlay ctx discarded unless committed) or skip re-folding splits that self-flushed. Repro: `foldDirtySplits` N× over a `sparseBatch2(..., deletes=true)` corpus diverges from sequential.
-- [ ] add a **re-fold counter** (per split + total) to quantify wasted work (the only instrument we keep from the old Task 5)
-- [ ] `Process()` drains: waits for in-flight, folds remaining dirty, then merges
-- [ ] write concurrency test (`-race`): interleave `TouchKey` from multiple goroutines with background folds → root+branches == sequential
-- [ ] write re-touch-after-fold test (account-granular): fold a split, touch it again → re-fold → parity
-- [ ] write **storage-mid-account-fold** test: touch an account, start its fold, touch one of its storage slots mid-fold → storageRoot changes → assert re-fold happens and parity holds
-- [ ] run tests (`-race`, `-count=10`) — must pass before next task
+- [x] bounded background goroutine pool; `TouchKey` enqueues dirtied splits — `StartScheduler` launches `numWorkers` goroutines draining a buffered `dirtyCh`; `TouchKey` enqueues (non-blocking, deduped via `splitState.queued`). Opt-in: when `StartScheduler` is never called the committer stays in the lazy fold-at-Process path (all Task 1-3 tests unchanged).
+- [x] `foldSplit` stores `{cell,deferred}` only if `gen` unchanged since fold start; else leave dirty (CAS) — `foldSplitBg` snapshots `genStart`, CAS at store time (`s.gen != genStart` → discard + leave dirty).
+- [x] **storageRoot cross-dependency** (constraint 2): a storage key's 128-nibble hash starts with the OWNING ACCOUNT's top nibble (`keccak(addr)[0]`), so a storage touch routes to and bumps the account's split via the same `nib := hashedKey[0]` path — no separate mapping needed; the gen CAS catches a slot touched mid big-storage fold. Documented on `TouchKey`, verified by `TestStreaming_StorageMidAccountFold`.
+- [x] per-split `mu`; deep fan-out separate errgroup — `splitState.mu` guards gen/dirty/folded/cell/deferred; background folds fold sequentially (no `concurrentStorageRoot` in the bg path) so no nested errgroup contends; Process-time `foldSplit` still uses `concurrentStorageRoot`'s own fresh `errgroup.Group` (never shares the scheduler's pool, which is stopped before Process).
+- [x] ➕ (from Task 3) re-fold safety vs engine self-flush: background folds run against an `overlayContext` that discards branch writes (reads fall through), so the engine's mid-fold self-flush never mutates the real store; a fold whose overlay was written (collapse) is discarded and left dirty for Process to fold against the real ctx. Verified deterministically by `TestStreaming_SchedulerCollapseParity` (mid-block store == post-block-1 snapshot, final root+branches == sequential).
+- [x] add a **re-fold counter** (per split + total) — `splitState.refolds` + `refoldTotal` atomic, exposed via `RefoldCount()`.
+- [x] `Process()` drains: waits for in-flight, folds remaining dirty, then merges — `Process` calls `Stop()` (signals workers, `wg.Wait` on in-flight), then `foldPresentSplits` folds non-reusable (dirty) splits while reusing cached clean cells, then stitches/merges.
+- [x] write concurrency test (`-race`): interleave `TouchKey` from multiple goroutines with background folds → root+branches == sequential — `TestStreaming_SchedulerConcurrentParity` (4 touch goroutines, workers 1/4/8).
+- [x] write re-touch-after-fold test (account-granular): fold a split, touch it again → re-fold → parity — `TestStreaming_RetouchAfterFold`.
+- [x] write **storage-mid-account-fold** test: touch an account, start its fold, touch one of its storage slots mid-fold → storageRoot changes → assert re-fold happens and parity holds — `TestStreaming_StorageMidAccountFold` (foldGate injects the withheld slot during the owning split's fold; asserts `RefoldCount() > 0` + parity).
+- [x] run tests (`-race`, `-count=10`) — pass (`-race -count=10` on the three concurrency tests; `make lint` clean)
 
 ### Task 5: Single fold-trigger policy (defer alternatives to measurement)
 

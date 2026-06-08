@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -232,6 +234,212 @@ func makeBranch(prefix []byte, afterMap uint16, touched []int, seed byte, prev [
 		}
 	}
 	return getDeferredUpdate(prefix, tm, tm, afterMap, &cells, prev)
+}
+
+// waitSplitsClean blocks until the background scheduler has folded every dirty
+// split (collapse-free corpora only — a self-flushed split stays dirty for
+// Process). Fails the test if they do not settle in time.
+func waitSplitsClean(t *testing.T, sc *StreamingCommitter) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		dirty := 0
+		sc.trieMu.RLock()
+		for _, s := range sc.splits {
+			s.mu.Lock()
+			if s.dirty {
+				dirty++
+			}
+			s.mu.Unlock()
+		}
+		sc.trieMu.RUnlock()
+		if dirty == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background folds did not settle: %d splits still dirty", dirty)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestStreaming_SchedulerConcurrentParity runs the background scheduler while
+// many goroutines touch keys concurrently, then asserts the drained Process root
+// and every stored branch match sequential. The corpus is from-scratch
+// (collapse-free), so background folds cache authoritative cells and Process only
+// merges. Run under -race.
+func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(77, 4000)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	for _, w := range []int{1, 4, 8} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc.SetNumWorkers(w)
+		require.NoError(t, sc.StartScheduler(context.Background()))
+
+		const goroutines = 4
+		var wg sync.WaitGroup
+		for g := range goroutines {
+			wg.Add(1)
+			go func(start int) {
+				defer wg.Done()
+				for i := start; i < len(keys); i += goroutines {
+					sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+				}
+			}(g)
+		}
+		wg.Wait()
+
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equalf(t, seqRoot, root, "scheduler(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+		sc.Release()
+	}
+}
+
+// TestStreaming_RetouchAfterFold folds a first wave of touches to completion,
+// then re-touches keys landing in already-folded splits, forcing those splits to
+// re-fold before Process. The final root + branches must match sequential — the
+// re-fold picks up the later touch rather than serving the stale cached cell.
+func TestStreaming_RetouchAfterFold(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(33, 2500)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+	require.NoError(t, sc.StartScheduler(context.Background()))
+
+	const hold = 8
+	for i := 0; i < len(keys)-hold; i++ {
+		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+	}
+	waitSplitsClean(t, sc)
+
+	for i := len(keys) - hold; i < len(keys); i++ {
+		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+	}
+	waitSplitsClean(t, sc)
+
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, seqRoot, root, "streaming re-touch root != sequential")
+	requireBranchParity(t, seqMs, ms)
+}
+
+// TestStreaming_StorageMidAccountFold injects a withheld storage-slot touch into
+// the owning account's split via foldGate, exactly while that split is folding.
+// The in-flight fold's snapshot misses the slot, so its gen check fails, the
+// result is discarded (RefoldCount bumps) and the split re-folds with the new
+// slot — proving the storageRoot cross-dependency is honored. Final root +
+// branches match sequential.
+func TestStreaming_StorageMidAccountFold(t *testing.T) {
+	t.Parallel()
+	keys, upds := genRandomAccountsStorage(300)
+
+	withheld := -1
+	for i, k := range keys {
+		if len(k) > length.Addr {
+			withheld = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, withheld, 0, "corpus must contain a storage key")
+	targetNib := KeyToHexNibbleHash(keys[withheld])[0]
+
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	var once sync.Once
+	sc.SetFoldGate(func(nib byte) {
+		if nib != targetNib {
+			return
+		}
+		once.Do(func() {
+			sc.TouchKey(KeyToHexNibbleHash(keys[withheld]), keys[withheld], nil)
+		})
+	})
+
+	require.NoError(t, sc.StartScheduler(context.Background()))
+	for i, k := range keys {
+		if i == withheld {
+			continue
+		}
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+	waitSplitsClean(t, sc)
+
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, seqRoot, root, "streaming storage-mid-fold root != sequential")
+	requireBranchParity(t, seqMs, ms)
+	require.Positive(t, sc.RefoldCount(), "expected a mid-fold re-fold to be triggered")
+}
+
+// TestStreaming_SchedulerCollapseParity runs the background scheduler over a
+// delete batch that collapses branches on a non-empty pre-image — the regime the
+// Task-3 caveat flagged as unsafe for naive re-folds. After draining in-flight
+// folds (Stop), the store must be byte-for-byte the post-block-1 snapshot: the
+// overlay isolates every self-flush so no branch is written mid-block. Process
+// then folds the still-dirty collapsed splits against the real ctx, and the final
+// root + branches match sequential — proving the isolation prevents the
+// double-apply corruption.
+func TestStreaming_SchedulerCollapseParity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	k1, u1 := genRandomAccountsStorage(400)
+	k2, u2 := sparseBatch2(k1, 3, true)
+	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+
+	for _, w := range []int{1, 4} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+
+		require.NoError(t, ms.applyPlainUpdates(k1, u1))
+		sc1 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc1.SetNumWorkers(w)
+		for _, k := range k1 {
+			sc1.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		_, err := sc1.Process(ctx)
+		require.NoError(t, err)
+		sc1.Release()
+		snap := snapshotBranches(ms)
+
+		require.NoError(t, ms.applyPlainUpdates(k2, u2))
+		sc2 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc2.SetNumWorkers(w)
+		require.NoError(t, sc2.StartScheduler(ctx))
+		for _, k := range k2 {
+			sc2.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		sc2.Stop()
+		requireBranchesUnchanged(t, snap, ms)
+
+		root, err := sc2.Process(ctx)
+		require.NoError(t, err)
+		sc2.Release()
+		require.Equalf(t, seqRoot, root, "scheduler collapse(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+	}
 }
 
 // TestStreaming_SplitMergeCollisionDedup models a prefix emitted by two slices
