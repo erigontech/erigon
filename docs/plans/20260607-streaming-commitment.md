@@ -330,9 +330,20 @@ if the flag turns out to fork behavior in more than one switch.
 **Files:**
 - Create: `execution/commitment/streaming_commitment_bench_test.go`
 
-- [ ] simulated-execution benchmark: interleave a tunable CPU cost per touch with background folds; compare total wall-clock vs touch-all-then-`Process`. **Label it a mechanism sanity-check only** (re-fold count + Process-time reduction) — NOT a perf claim; the synthetic-CPU number must not be cited as the headline (the real number is the live-node run, Post-Completion).
-- [ ] report re-fold count and Process-only time for the whale + mixed corpora
-- [ ] document results inline in the plan (Progress Tracking)
+- [x] simulated-execution benchmark: interleave a tunable CPU cost per touch with background folds; compare total wall-clock vs touch-all-then-`Process`. **Label it a mechanism sanity-check only** (re-fold count + Process-time reduction) — NOT a perf claim; the synthetic-CPU number must not be cited as the headline (the real number is the live-node run, Post-Completion). — `Benchmark_StreamingOverlap` (overlap vs batch × whale/mixed × cpu={0,500,5000}); `burnCPU` is the tunable per-touch synthetic cost; custom metrics `process-ns/op` + `refolds/op` reported via `b.ReportMetric`. Header comment states it is a mechanism check, not a perf claim.
+- [x] report re-fold count and Process-only time for the whale + mixed corpora — `TestStreaming_Metrics` logs both corpora overlap-vs-batch at cpu=2000 (the reproducible source for the numbers below); the benchmark reports the same two metrics per sub-case.
+- [x] document results inline in the plan (Progress Tracking)
+
+**Task 9 results (mechanism sanity-check, Apple M5 Max, NOT a perf claim).** `TestStreaming_Metrics`, cpu=2000 iters/touch:
+
+| corpus | keys | mode | total | Process-only | refolds |
+|---|---|---|---|---|---|
+| whale | 40057 | batch | 102.0ms | 17.7ms | — |
+| whale | 40057 | overlap | 358.7ms | 77.4ms | 363 |
+| mixed | 20000 | batch | 48.0ms | 6.8ms | — |
+| mixed | 20000 | overlap | 188.8ms | 6.4ms | 2051 |
+
+Reading (as the plan predicted — MockState has no real execution to hide folds under, so synthetic overlap cannot win wall-clock): overlap total wall-clock is *higher*, not lower, because the background pool burns CPU re-folding hot splits that keep getting re-dirtied (whale: 363 discarded folds — the single big-storage account's 40k slots all route to one top-nibble split and bump its gen on every slot touch; the gen-CAS correctly discards each stale fold). Mixed Process-only time is ~flat (6.4 vs 6.8ms); whale Process-only is *higher* under overlap because the still-dirty whale split re-folds at Process via the sequential bg path rather than reusing a cached cell. **Conclusion: the instrument works (re-fold count + Process-only time are quantified) but the synthetic number is not a perf signal — the real overlap win requires live-node execution to hide folds under, which is the Post-Completion measurement.**
 
 ### Task 10: Verify acceptance criteria
 - [ ] streaming root+branches == sequential across all corpora (mixed, big-account, whale, random, nested-storage)
