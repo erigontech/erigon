@@ -185,15 +185,15 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 		kv.PtcWindowTable, kv.LatestExecutionPayloadBidTable,
 	}
 	ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
-	for i := 0; i < 30; i++ {
-		dirs := datadir.New(t.TempDir())
-		touchFiles(t, dirs, ranges)
-		for _, table := range emptyTables {
-			for _, r := range ranges {
-				delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, table))
-				delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, table))
-			}
+	dirs := datadir.New(t.TempDir())
+	touchFiles(t, dirs, ranges)
+	for _, table := range emptyTables {
+		for _, r := range ranges {
+			delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, table))
+			delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, table))
 		}
+	}
+	for i := 0; i < 30; i++ {
 		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true))
 	}
 }
