@@ -80,10 +80,9 @@ while IFS=$'\t' read -r name url want; do
 
 	if [[ ! -f "$tar_path" ]] || [[ "$(sha256 "$tar_path")" != "$want" ]]; then
 		echo "$name: downloading from $url"
-		# Ride out transient upstream 5xx (release CDN) with exponential backoff over 5 min;
-		# --dns-cache-timeout 0 forces DNS re-resolution each attempt for short-TTL CDN records.
+		# Ride out transient upstream 5xx (release CDN) with exponential backoff over a 5-min window.
 		curl -fsSL --retry 10 --retry-all-errors --retry-delay 0 \
-			--retry-max-time 300 --connect-timeout 30 --dns-cache-timeout 0 \
+			--retry-max-time 300 --connect-timeout 30 \
 			-o "$tar_path.tmp" "$url"
 		got=$(sha256 "$tar_path.tmp")
 		if [[ "$got" != "$want" ]]; then
