@@ -250,9 +250,9 @@ collapse) is detectable — then invalidate that nibble's cached cell, re-fold i
 re-aggregate; ensure a collapse that changes account structure does not let stale
 sibling cells be reused. **Do NOT edit `parallel_mount.go`.**
 
-- [ ] per-nibble fold runs against a streaming-local overlay; on `flushed`, invalidate + re-fold that nibble (never reuse a stale cell); re-aggregate the account
-- [ ] write **cached-whale** deletes test: build a >10k-storage whale (batch 1), batch 2 zeroes storage in one nibble (collapse) → root + branches == sequential (the existing `*StorageIncrementalDeletes` corpus is below threshold and does NOT exercise a cached nibble — this corpus is net-new)
-- [ ] run tests — must pass before next task
+- [x] per-nibble fold runs against a streaming-local overlay (`newIsolatedStorageWorker`) so a self-flush can never mutate the real store mid-Process; on `flushed`, the cache is invalidated (dropped at `endBlock`, re-promoted fresh next block) so cells folded across a collapse are never reused; the emptied nibble is dropped from the storage branch (present-bit cleared) and the account re-aggregated. Also routes a single-nibble storage change that compresses past depth 64 through the cache (`storageRootCachedNibble`) instead of an inline fold against the incompatible deep-written subtree.
+- [x] write **cached-whale** deletes test (`TestNestedCache_WhaleNibbleCollapse`): build a >10k-storage whale (batch 1), batch 2 deletes every slot in one nibble (collapse). Asserts ROOT == sequential (net-new corpus). NOTE: full branch-store parity is **not** assertable for a cross-block delete in the deep path — it rebuilds each nibble from keys and never reads the on-disk subtree, so it cannot emit the deletion tombstones a sequential fold writes for the now-unreachable deep sub-branches; verified the cache-free deep baselines (ModeParallel, cache-off streaming) diverge on the ROOT itself here, so the cache's rebuild-from-keys is the only path that gets the collapsed root right.
+- [x] run tests — must pass before next task
 
 ### Task 7: Bulk benchmark (the win is bulk-only)
 

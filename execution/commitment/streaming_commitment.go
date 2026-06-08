@@ -1091,6 +1091,28 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 		return errors.New("StreamingCommitter: trie leaf without a plainKey")
 	}
 
+	// A cached account whose storage was touched in a single first-storage-nibble
+	// has no node at depth 64 — trie compression merges the account pass-through
+	// into the storage subtree's extension, so dfsDeepLocal enters with path
+	// already past 64. Route it through the cache (the account leaf is reloaded
+	// from ctx) rather than folding the storage inline against the deep-written
+	// on-disk subtree, which is not byte-compatible with a sequential fold.
+	if len(path) > accountKeyNibbles {
+		if cache := sc.cacheFor(path[:accountKeyNibbles]); cache != nil {
+			accPath := path[:accountKeyNibbles]
+			if err := w.followAndUpdate(accPath, cache.accPlainKey, nil); err != nil {
+				return err
+			}
+			sr, err := sc.storageRootCachedNibble(pu, cache, node, path)
+			if err != nil {
+				return fmt.Errorf("storageRootCachedNibble: %w", err)
+			}
+			setAccountStorageRoot(w, accPath, sr)
+			sc.deepLocalFolds.Add(1)
+			return nil
+		}
+	}
+
 	if len(path) == 64 {
 		if cache := sc.cacheFor(path); cache != nil {
 			if node.plainKey == nil {
@@ -1125,13 +1147,6 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 		base := len(path)
 		path = append(path, nib)
 		path = append(path, child.ext...)
-		// A cached account whose storage compressed past depth 64 (account
-		// untouched, a single first-storage-nibble changed) bypasses the cache
-		// route above; its cached cells can no longer be trusted, so invalidate
-		// the cache (swept at endBlock) and fold the storage inline this block.
-		if base < accountKeyNibbles && len(path) > accountKeyNibbles {
-			sc.invalidateCache(path[:accountKeyNibbles])
-		}
 		if err := sc.dfsDeepLocal(ctx, w, pu, child, path); err != nil {
 			return err
 		}
@@ -1155,14 +1170,6 @@ func (sc *StreamingCommitter) cacheFor(accHash []byte) *accountStorageCache {
 	return c
 }
 
-// invalidateCache marks the account's cache for drop at endBlock; a no-op if the
-// account is not cached. Reused cells would be stale after a structural bypass.
-func (sc *StreamingCommitter) invalidateCache(accHash []byte) {
-	if c := sc.caches[string(accHash)]; c != nil {
-		c.invalid = true
-	}
-}
-
 // storageRootCached re-folds the cached account's dirty storage nibbles (reusing
 // its clean cached cells), aggregates them into the storage branch, and returns
 // the account's storageRoot. It first folds the current block's touched slots
@@ -1171,7 +1178,6 @@ func (sc *StreamingCommitter) invalidateCache(accHash []byte) {
 // nibble from keys alone and cannot read the on-disk subtree, so the cache is the
 // authoritative key source across blocks. Deferred branch updates land in pu.
 func (sc *StreamingCommitter) storageRootCached(pu *parallelUpdate, cache *accountStorageCache, node *prefixNode, path []byte) (common.Hash, error) {
-	accNib := int(path[63])
 	childIdx := 0
 	for bm := node.bitmap; bm != 0; {
 		nib := int(bits.TrailingZeros16(bm))
@@ -1186,15 +1192,42 @@ func (sc *StreamingCommitter) storageRootCached(pu *parallelUpdate, cache *accou
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
+	return sc.foldCachedStorageRoot(pu, cache, int(path[63]))
+}
+
+// storageRootCachedNibble re-folds a cached account whose storage compressed past
+// depth 64: node is the subtree of the single touched first-storage-nibble
+// (path[64]). It retains that nibble's slots into the cache, marks it dirty, then
+// re-folds through the cache exactly like storageRootCached.
+func (sc *StreamingCommitter) storageRootCachedNibble(pu *parallelUpdate, cache *accountStorageCache, node *prefixNode, path []byte) (common.Hash, error) {
+	nib := int(path[accountKeyNibbles])
+	for _, tk := range collectStorageNibbleKeys(node, path) {
+		cache.retain(nib, tk)
+	}
+	cache.perNibble[nib].dirty = true
+	return sc.foldCachedStorageRoot(pu, cache, int(path[63]))
+}
+
+// foldCachedStorageRoot builds the per-nibble key groups from the cache's
+// accumulated slot sets and re-folds only the dirty nibbles, returning the
+// account's storageRoot hash. Deferred branch updates land in pu.
+func (sc *StreamingCommitter) foldCachedStorageRoot(pu *parallelUpdate, cache *accountStorageCache, accNib int) (common.Hash, error) {
 	var groups [16][]touchedKey
 	for x := range 16 {
 		groups[x] = cache.sortedKeys(x)
 	}
-	sr, folded, err := foldStorageRootCached(sc.newStorageWorker, cache, accNib, &groups, pu.appendDeferred)
+	sr, folded, flushed, err := foldStorageRootCached(sc.newIsolatedStorageWorker, cache, accNib, &groups, pu.appendDeferred)
 	if err != nil {
 		return common.Hash{}, err
 	}
 	sc.nibbleFolds.Add(uint64(folded))
+	// A self-flush means a nibble's subtree collapsed mid-fold; the storageRoot
+	// stays correct (folded self-consistently against the overlay) but the cached
+	// cells span a structural change, so drop the cache at endBlock and let the
+	// account re-promote fresh.
+	if flushed {
+		cache.invalid = true
+	}
 	return sr.hash, nil
 }
 
@@ -1222,7 +1255,7 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		present |= uint16(1) << nib
 		g.Go(func() error {
 			group := collectStorageNibbleKeys(ch, cp)
-			w, release := sc.newStorageWorker()
+			w, release, _ := sc.newStorageWorker()
 			c, err := foldStorageChildCell(w, accNib, group)
 			if err != nil {
 				release()
@@ -1242,7 +1275,7 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		return common.Hash{}, err
 	}
 
-	w, release := sc.newStorageWorker()
+	w, release, _ := sc.newStorageWorker()
 	sr, err := aggregateStorageRoot(w, path, accNib, &children, present)
 	if err != nil {
 		release()
@@ -1258,7 +1291,7 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 // newStorageWorker yields a pooled trie worker set up for a deferring storage
 // fold and a release that drains it back to the pool (resetForReuse + Put) and
 // frees its context — the storageWorkerFactory the cache fold helpers consume.
-func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
+func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func(), func() bool) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	wctx, cleanup := sc.trieCtxFactory()
 	w.ResetContext(wctx)
@@ -1271,7 +1304,29 @@ func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
 		if cleanup != nil {
 			cleanup()
 		}
-	}
+	}, nil
+}
+
+// newIsolatedStorageWorker is the cache path's worker: its writes go to an
+// overlay so a mid-fold self-flush (a delete-driven collapse re-reading a pending
+// prefix) can never mutate the real store during a speculative cache re-fold. The
+// returned flushed accessor reports whether that happened, so the caller can
+// invalidate the cache rather than trust a cell folded across a collapse.
+func (sc *StreamingCommitter) newIsolatedStorageWorker() (*HexPatriciaHashed, func(), func() bool) {
+	w := sc.workerPool.Get().(*HexPatriciaHashed)
+	wctx, cleanup := sc.trieCtxFactory()
+	ov := &overlayContext{base: wctx}
+	w.ResetContext(ov)
+	w.SetTrace(sc.trace)
+	w.branchEncoder.setDeferUpdates(true)
+	w.SetLeaveDeferredForCaller(true)
+	return w, func() {
+		w.resetForReuse()
+		sc.workerPool.Put(w)
+		if cleanup != nil {
+			cleanup()
+		}
+	}, func() bool { return ov.flushed }
 }
 
 // collectStorageNibbleKeys walks one first-storage-nibble subtree in sorted order,

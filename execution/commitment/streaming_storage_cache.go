@@ -137,10 +137,12 @@ func newPromotedCache(prefix, accPlainKey []byte, mask uint16) *accountStorageCa
 	return c
 }
 
-// storageWorkerFactory yields a fresh trie worker (clean grid, context bound)
-// and its release. The cache calls it once per storage nibble it re-folds and
-// once for the final aggregation.
-type storageWorkerFactory func() (w *HexPatriciaHashed, release func())
+// storageWorkerFactory yields a fresh trie worker (clean grid, context bound),
+// its release, and a flushed accessor (nil when the worker is not isolated). The
+// cache calls it once per storage nibble it re-folds and once for the final
+// aggregation; a non-nil flushed reporting true means the fold self-flushed a
+// collapse against an isolating overlay and its cell must not be trusted.
+type storageWorkerFactory func() (w *HexPatriciaHashed, release func(), flushed func() bool)
 
 // foldStorageChildCell folds one storage nibble's keys in a standalone worker and
 // returns the depth-65 storage-branch child cell. Production copy of the deep-fold
@@ -233,8 +235,16 @@ func assembleAccountRoot(w *HexPatriciaHashed, addr, accHash []byte, accNib int,
 // holds the current touched keys per first-storage-nibble. onDeferred, when
 // non-nil, receives the deferred branch updates each re-folded nibble and the
 // aggregation emit so the Process path can stage them for the caller.
-func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorageCache, accNib int, groups *[16][]touchedKey, onDeferred func([]*DeferredBranchUpdate)) (cell, int, error) {
+//
+// A re-folded nibble that empties (all its slots deleted) is dropped from the
+// storage branch (present bit cleared) so the aggregate root reflects the
+// collapse. The returned flushed flag is set when a per-nibble fold self-flushed
+// a collapse against an isolating overlay: its cell stays self-consistent (the
+// root is correct) but the cache should be invalidated so a structurally changed
+// account re-promotes fresh rather than reusing cells folded across the collapse.
+func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorageCache, accNib int, groups *[16][]touchedKey, onDeferred func([]*DeferredBranchUpdate)) (cell, int, bool, error) {
 	folded := 0
+	flushed := false
 	for x := range 16 {
 		bit := uint16(1) << x
 		n := &cache.perNibble[x]
@@ -244,27 +254,34 @@ func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorage
 		if cache.present&bit != 0 && !n.dirty {
 			continue
 		}
-		w, release := newWorker()
+		w, release, flushedFn := newWorker()
 		c, err := foldStorageChildCell(w, accNib, groups[x])
 		if err == nil && onDeferred != nil {
 			if d := w.TakeDeferredUpdates(); len(d) > 0 {
 				onDeferred(d)
 			}
 		}
+		if flushedFn != nil && flushedFn() {
+			flushed = true
+		}
 		if release != nil {
 			release()
 		}
 		if err != nil {
-			return cell{}, folded, err
+			return cell{}, folded, flushed, err
 		}
 		cache.children[x] = c
-		cache.present |= bit
+		if c.IsEmpty() {
+			cache.present &^= bit
+		} else {
+			cache.present |= bit
+		}
 		n.dirty = false
 		n.lastFoldedSize = uint64(len(groups[x]))
 		folded++
 	}
 
-	w, release := newWorker()
+	w, release, _ := newWorker()
 	sr, err := aggregateStorageRoot(w, cache.prefix, accNib, &cache.children, cache.present)
 	if err == nil && onDeferred != nil {
 		if d := w.TakeDeferredUpdates(); len(d) > 0 {
@@ -275,7 +292,7 @@ func foldStorageRootCached(newWorker storageWorkerFactory, cache *accountStorage
 		release()
 	}
 	if err != nil {
-		return cell{}, folded, err
+		return cell{}, folded, flushed, err
 	}
-	return sr, folded, nil
+	return sr, folded, flushed, nil
 }
