@@ -507,18 +507,59 @@ func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain st
 	return res, nil
 }
 
-// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
-func LoadRemotePreverified(ctx context.Context, chainName string) error {
-	var hashes []byte
-	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
-		log.Info("Loading local preverified override file", "file", s)
+// FetchTomlFromURL fetches a chain.toml file from an arbitrary URL. Plain HTTP
+// GET, no CDN-specific headers. Used by the --snap.chaintoml-url override.
+func FetchTomlFromURL(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch snapshot hashes from overridden URL %q: status code %d %s", url, resp.StatusCode, resp.Status)
+	}
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("empty response from overridden URL %s", url)
+	}
+	return res, nil
+}
 
-		b, err := os.ReadFile(s)
+// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
+//
+// forceChainTomlURL, when non-empty, replaces the default R2/GitHub fetch with
+// a single HTTP GET to that exact URL. There is no fallback — if the URL fetch
+// fails the function returns the error and the registry is not modified. The
+// ERIGON_REMOTE_PREVERIFIED env var (local-file override) still takes
+// precedence over both forceChainTomlURL and the default path.
+func LoadRemotePreverified(ctx context.Context, chainName string, forceChainTomlURL string) error {
+	var hashes []byte
+	switch {
+	case os.Getenv(RemotePreverifiedEnvKey) != "":
+		path := os.Getenv(RemotePreverifiedEnvKey)
+		log.Info("Loading local preverified override file", "file", path)
+
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
 		hashes = b
-	} else {
+	case forceChainTomlURL != "":
+		log.Info("Loading snapshot hashes from forced URL", "chain", chainName, "url", forceChainTomlURL)
+
+		b, err := FetchTomlFromURL(ctx, forceChainTomlURL)
+		if err != nil {
+			return fmt.Errorf("fetching forced chain.toml URL %q: %w", forceChainTomlURL, err)
+		}
+		hashes = b
+	default:
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
 		var err error

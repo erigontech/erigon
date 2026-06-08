@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -833,4 +834,23 @@ func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64)
 	// Generate changesets for blocks within the reorg window of the batch end,
 	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
+}
+
+// changesetWindowStart returns the first block in [startBlockNum, maxBlockNum]
+// for which shouldGenerateChangeSets is true, or math.MaxUint64 when there is
+// none. Parallel exec gates per-block changeset capture and the commitment
+// calculator's per-block mode on this boundary.
+func changesetWindowStart(alwaysGenerateChangesets bool, maxReorgDepth uint64, frozenBlocks uint64, startBlockNum uint64, maxBlockNum uint64) uint64 {
+	if alwaysGenerateChangesets {
+		return startBlockNum
+	}
+	windowStart := startBlockNum
+	if maxBlockNum > maxReorgDepth {
+		windowStart = max(windowStart, maxBlockNum-maxReorgDepth)
+	}
+	windowStart = max(windowStart, frozenBlocks)
+	if windowStart > maxBlockNum {
+		return math.MaxUint64
+	}
+	return windowStart
 }
