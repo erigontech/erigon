@@ -61,9 +61,6 @@ func (rf BbdResultFeed) close() {
 
 type BlockBatchResult struct {
 	Blocks []*types.Block
-	// BALs holds EIP-7928 block access list bytes positionally aligned with Blocks.
-	// BALs[i] is nil when block i has no BAL (pre-Amsterdam, or a best-effort miss).
-	// The whole slice is nil when no block in the batch carried a BAL.
-	BALs [][]byte
-	Err  error
+	BALs   [][]byte
+	Err    error
 }

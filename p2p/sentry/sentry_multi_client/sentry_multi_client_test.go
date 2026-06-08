@@ -360,7 +360,3 @@ func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 		t.Errorf("response[1] (unknown block): have %x, want 0x80 sentinel", resp.BlockAccessListsPacket[1])
 	}
 }
-
-// Client-side eth/71 BAL fetch (the inbound BlockAccessLists response handler
-// and its subscription) moved to execution/p2p. Only the server-side
-// GetBlockAccessLists handler remains here — see TestGetBlockAccessLists71_AnswersAndSends.

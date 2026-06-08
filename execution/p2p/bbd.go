@@ -512,29 +512,25 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			)
 
 			eg.Go(func() error {
-				// Fetch this batch's BALs concurrently with its bodies — independent
-				// requests to the same body peer, sharing the body-fetch timeout —
-				// recovering any BAL the body peer lacks from the other peers. A miss
-				// just means execution recomputes the BAL.
 				reqs := balRequestsForHeaders(headerBatch)
 				var (
 					bodiesResponse FetcherResponse[[]*types.Body]
-					bodiesErr      error
 					bals           map[common.Hash][]byte
 				)
 				var batchEg errgroup.Group
 				batchEg.Go(func() error {
-					bodiesResponse, bodiesErr = bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
-					return nil
+					var err error
+					bodiesResponse, err = bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
+					return err
 				})
 				if bbd.balFetcher != nil && len(reqs) > 0 {
 					batchEg.Go(func() error {
-						bals, _ = bbd.balFetcher.Fetch(ctx, reqs, &peerId, peers.peersExcept(peerId), config.bodiesBatchFetchTimeout)
+						bals = bbd.balFetcher.Fetch(ctx, reqs, &peerId, peers.peersExcept(peerId), config.bodiesBatchFetchTimeout)
 						return nil
 					})
 				}
-				_ = batchEg.Wait()
-				if bodiesErr != nil {
+				err := batchEg.Wait()
+				if err != nil {
 					bbd.logger.Debug(
 						"[backward-block-downloader] could not fetch bodies batch",
 						"fromNum", headerBatch[0].Number.Uint64(),
@@ -542,7 +538,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
 						"toHash", headerBatch[len(headerBatch)-1].Hash(),
 						"peerId", peerId.String(),
-						"err", bodiesErr,
+						"err", err,
 					)
 					return nil
 				}

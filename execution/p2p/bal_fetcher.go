@@ -50,16 +50,15 @@ type BALRequest struct {
 // BALFetcher fetches EIP-7928 block access lists over eth/71 (EIP-8159). Results
 // are best-effort: a block whose BAL no peer holds is simply absent from the map.
 type BALFetcher interface {
-	// Fetch requests the BALs for reqs from peerId; for any BALs that peer doesn't
-	// serve it falls back to fallbackPeers, raced concurrently. The returned map is
-	// keyed by block hash; misses are absent. A hash mismatch or protocol violation
-	// penalises that peer.
-	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) (map[common.Hash][]byte, error)
+	// Fetch queries peerId and fallbackPeers concurrently (up to balFetchParallelism at
+	// a time), taking the first BAL per block that validates against its header
+	// commitment; misses are absent. A hash mismatch or protocol violation penalises
+	// that peer.
+	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) map[common.Hash][]byte
 }
 
-// balFetchParallelism bounds how many fallback peers Fetch races concurrently when
-// the body peer doesn't serve a batch's BALs.
-const balFetchParallelism = 8
+// balFetchParallelism bounds how many peers Fetch queries concurrently for a batch's BALs.
+const balFetchParallelism = 4
 
 func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer) BALFetcher {
 	return &balFetcher{
@@ -77,15 +76,11 @@ type balFetcher struct {
 	peerPenalizer   *PeerPenalizer
 }
 
-// Fetch requests reqs from peerId first; for any BALs that peer doesn't serve it
-// falls back to fallbackPeers, racing up to balFetchParallelism concurrently.
-// Misses are simply absent from the result.
-func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) (map[common.Hash][]byte, error) {
+func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) map[common.Hash][]byte {
 	if len(reqs) == 0 {
-		return nil, nil
+		return nil
 	}
-	// Bound the whole fetch — body peer plus any fallback — to one timeout, so it
-	// completes within the same budget as the concurrent body fetch.
+	// Bound the whole fetch to one timeout.
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
@@ -96,35 +91,18 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 		}
 		return got
 	}
-	return fetchWithFallback(ctx, reqs, peerId, fallbackPeers, balFetchParallelism, fetch), nil
+	allPeers := append([]PeerId{*peerId}, fallbackPeers...)
+	return fetchAcrossPeers(ctx, reqs, allPeers, balFetchParallelism, fetch)
 }
 
-// fetchWithFallback fetches reqs from peerId and, for any reqs that peer didn't
-// serve, races up to maxParallel fallbackPeers for the remainder, keeping the
-// peerId result where both have a block. fetch is injected so the logic is
-// unit-tested without the network.
-func fetchWithFallback(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, maxParallel int, fetch func(context.Context, []BALRequest, *PeerId) map[common.Hash][]byte) map[common.Hash][]byte {
-	out := make(map[common.Hash][]byte, len(reqs))
-	for hash, bal := range fetch(ctx, reqs, peerId) {
-		out[hash] = bal
-	}
-	missing := missingRequests(reqs, out)
-	if len(missing) == 0 || len(fallbackPeers) == 0 {
-		return out
-	}
-	for hash, bal := range fetchAcrossPeers(ctx, missing, fallbackPeers, maxParallel, fetch) {
-		if _, ok := out[hash]; !ok {
-			out[hash] = bal
-		}
-	}
-	return out
-}
+// peerFetchFunc fetches BALs from a single peer, injected so fetchAcrossPeers is
+// unit-testable without the network.
+type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) map[common.Hash][]byte
 
-// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and
-// merges their validated results, keeping the first correct BAL per block and
-// cancelling the remaining peers once every req is covered. fetch is injected so
-// the fallback logic is unit-tested without the network.
-func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch func(context.Context, []BALRequest, *PeerId) map[common.Hash][]byte) map[common.Hash][]byte {
+// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and merges
+// their validated results, keeping the first correct BAL per block and cancelling the
+// remaining peers once every req is covered.
+func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash][]byte {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (
@@ -161,30 +139,14 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 	return out
 }
 
-// missingRequests returns the subset of reqs whose hash is not present in have.
-func missingRequests(reqs []BALRequest, have map[common.Hash][]byte) []BALRequest {
-	if len(have) == 0 {
-		return reqs
-	}
-	missing := make([]BALRequest, 0, len(reqs))
-	for _, r := range reqs {
-		if _, ok := have[r.Hash]; !ok {
-			missing = append(missing, r)
-		}
-	}
-	return missing
-}
-
 func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) (map[common.Hash][]byte, error) {
 	if len(reqs) == 0 {
 		return nil, nil
 	}
-
 	response, err := f.fetchOnce(ctx, reqs, peerId, timeout)
 	if err != nil {
 		return nil, err
 	}
-
 	out, badPeer, err := validateBALResponse(reqs, response)
 	if badPeer {
 		f.penalize(ctx, peerId)
@@ -200,7 +162,6 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 	if len(response) > len(reqs) {
 		return nil, true, fmt.Errorf("%w: peer returned %d entries for %d requests", ErrBadBALResponse, len(response), len(reqs))
 	}
-
 	out := make(map[common.Hash][]byte, len(reqs))
 	for i := range response {
 		entry := response[i]
@@ -235,16 +196,13 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 		case messages <- message:
 		}
 	}
-
 	unregister := f.messageListener.RegisterBlockAccessListsObserver(observer)
 	defer unregister()
-
 	requestId := rand.Uint64() //nolint:gosec // request id does not need crypto-grade randomness
 	hashes := make([]common.Hash, len(reqs))
 	for i, r := range reqs {
 		hashes[i] = r.Hash
 	}
-
 	err := f.messageSender.SendGetBlockAccessLists(ctx, peerId, eth.GetBlockAccessListsPacket66{
 		RequestId:                 requestId,
 		GetBlockAccessListsPacket: hashes,
@@ -252,7 +210,6 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 	if err != nil {
 		return nil, err
 	}
-
 	message, _, err := awaitResponse(ctx, timeout, messages, filterBlockAccessLists(peerId, requestId))
 	if err != nil {
 		return nil, err
