@@ -346,11 +346,11 @@ if the flag turns out to fork behavior in more than one switch.
 Reading (as the plan predicted — MockState has no real execution to hide folds under, so synthetic overlap cannot win wall-clock): overlap total wall-clock is *higher*, not lower, because the background pool burns CPU re-folding hot splits that keep getting re-dirtied (whale: 363 discarded folds — the single big-storage account's 40k slots all route to one top-nibble split and bump its gen on every slot touch; the gen-CAS correctly discards each stale fold). Mixed Process-only time is ~flat (6.4 vs 6.8ms); whale Process-only is *higher* under overlap because the still-dirty whale split re-folds at Process via the sequential bg path rather than reusing a cached cell. **Conclusion: the instrument works (re-fold count + Process-only time are quantified) but the synthetic number is not a perf signal — the real overlap win requires live-node execution to hide folds under, which is the Post-Completion measurement.**
 
 ### Task 10: Verify acceptance criteria
-- [ ] streaming root+branches == sequential across all corpora (mixed, big-account, whale, random, nested-storage)
-- [ ] no regression: `go test ./execution/commitment/ -run TestVerifyParallel -count=1` on `default`, `ERIGON_CMT_MOUNT=1`, and `ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1` (streaming reuses `concurrentStorageRoot`)
-- [ ] `-race` clean on the streaming concurrency tests
-- [ ] `make lint` clean (run repeatedly; non-deterministic)
-- [ ] `make erigon` builds
+- [x] streaming root+branches == sequential across all corpora (mixed, big-account, whale, random, nested-storage) — full `TestStreaming` suite green
+- [x] no regression: `go test ./execution/commitment/ -run TestVerifyParallel -count=1` on `default`, `ERIGON_CMT_MOUNT=1`, and `ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1` (streaming reuses `concurrentStorageRoot`) — all three configs ok
+- [x] `-race` clean on the streaming concurrency tests (SchedulerConcurrentParity, RetouchAfterFold, StorageMidAccountFold, SchedulerCollapseParity)
+- [x] `make lint` clean (run repeatedly; non-deterministic) — 0 issues
+- [x] `make erigon` builds
 
 ### Task 11: [Final] Docs
 - [ ] update `/Users/awskii/org/wrk/HANDOFF-parallel-storage-fold.md` with the streaming results
