@@ -200,6 +200,8 @@ func (s *chainReaderShim) CurrentSafeHeader() *types.Header                     
 func (s *chainReaderShim) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (s *chainReaderShim) GetHeaderByNumber(number uint64) *types.Header           { return nil }
 func (s *chainReaderShim) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (s *chainReaderShim) GetTd(hash common.Hash, number uint64) *uint256.Int      { return uint256.NewInt(0) }
-func (s *chainReaderShim) FrozenBlocks() uint64                                    { return 0 }
-func (s *chainReaderShim) FrozenBorBlocks(align bool) uint64                       { return 0 }
+func (s *chainReaderShim) GetTd(hash common.Hash, number uint64) *uint256.Int {
+	return uint256.NewInt(0)
+}
+func (s *chainReaderShim) FrozenBlocks() uint64              { return 0 }
+func (s *chainReaderShim) FrozenBorBlocks(align bool) uint64 { return 0 }

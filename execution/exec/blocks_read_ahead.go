@@ -85,6 +85,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 type cachePopulatingGetter struct {
 	g            kv.TemporalGetter
 	sc           *cache.StateCache
+	stepSize     uint64 // for the read txNum upper bound (last txNum of the read's step)
 	codeHashHint []byte // valid only for the next CodeDomain read; cleared after use
 }
 
@@ -100,7 +101,9 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 			// storage slot, no code) and caching it lets repeated probes
 			// skip the file accessor stack. Mirrors revm's CacheAccount
 			// { account: None, status: LoadedNotExisting } pattern.
-			cpg.sc.Put(name, k, v)
+			// Stamp with an upper bound on the value's write txNum (last txNum
+			// of the step it came from) so unwind invalidation is correct.
+			cpg.sc.Put(name, k, v, (uint64(step)+1)*cpg.stepSize-1)
 		}
 	}
 	return v, step, err
@@ -226,7 +229,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				var getter kv.TemporalGetter = ttx
 				var cpg *cachePopulatingGetter
 				if bra.stateCache != nil {
-					cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache}
+					cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
 					getter = cpg
 				}
 				stateReader := state.NewReaderV3(getter)
@@ -305,7 +308,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			var getter kv.TemporalGetter = ttx
 			var cpg *cachePopulatingGetter
 			if bra.stateCache != nil {
-				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache}
+				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)

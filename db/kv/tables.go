@@ -907,8 +907,6 @@ const (
 	   	AccountChangeSet has record: bigEndian(N) + A -> X
 	   	PlainState has record: A -> Y
 
-	   See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
-
 	   As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
 	   MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 	   Both buckets are DupSort-ed and have physical format:
@@ -950,8 +948,6 @@ const (
 	   It allows:
 	     - server task 1. by 1 db operation db.seekInFiles(A+bigEndian(X))
 	     - server task 2. by 1 db operation db.Get(A+0xFF)
-
-	   see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
 	   AccountsHistory:
 

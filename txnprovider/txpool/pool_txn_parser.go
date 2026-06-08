@@ -563,10 +563,10 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		deployerData = aaTx.DeployerData
 	}
 	if aaTx.Paymaster != nil {
-		paymaster = aaTx.Paymaster.Bytes()
+		paymaster = aaTx.Paymaster[:]
 	}
 	if aaTx.Deployer != nil {
-		deployer = aaTx.Deployer.Bytes()
+		deployer = aaTx.Deployer[:]
 	}
 	if aaTx.BuilderFee != nil {
 		builderFee = aaTx.BuilderFee.Bytes()

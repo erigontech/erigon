@@ -17,14 +17,12 @@
 package cache
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
@@ -111,9 +109,6 @@ type CodeCache struct {
 	codeSizeEntries    atomic.Int64
 	codeSizeCapEntries int64
 
-	blockHash common.Hash // hash of the last block processed
-	mu        sync.RWMutex
-
 	// Stats counters (atomic for concurrent access)
 	addrHits       atomic.Uint64
 	addrMisses     atomic.Uint64
@@ -196,7 +191,7 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 // Uses fast maphash to compute the code identifier.
 // addrToHash is an LRU (auto-evicts oldest when full); hashToCode is byte-capped
 // and no-ops on new writes when full (code is immutable, so existing entries stay).
-func (c *CodeCache) Put(addr []byte, code []byte) {
+func (c *CodeCache) Put(addr []byte, code []byte, _ uint64) {
 	if len(code) == 0 {
 		return
 	}
@@ -272,7 +267,7 @@ func (c *CodeCache) PutWithEthHash(addr []byte, code []byte, ethHash []byte) {
 	}
 
 	if len(addr) > 0 {
-		c.Put(addr, code)
+		c.Put(addr, code, 0) // addr layer is cleared on unwind, not txNum-tracked
 	}
 
 	// Populate the size-only layer alongside the bytes layer — every time
@@ -334,57 +329,18 @@ func (c *CodeCache) Delete(addr []byte) {
 // The codeHash → code mappings are preserved since they're immutable.
 func (c *CodeCache) Clear() {
 	c.addrToHash.Purge()
+	c.addrToEthHash.Purge()
 }
 
-// GetBlockHash returns the hash of the last block processed by the cache.
-func (c *CodeCache) GetBlockHash() common.Hash {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.blockHash
-}
-
-// SetBlockHash sets the hash of the current block being processed.
-func (c *CodeCache) SetBlockHash(hash common.Hash) {
-	c.mu.Lock()
-	c.blockHash = hash
-	c.mu.Unlock()
-}
-
-// ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
-// If there's a mismatch (indicating non-sequential block processing), the address cache is cleared.
-// The code cache (hash → code) is preserved since code hashes are immutable.
-// Returns true if the cache was valid (hashes matched or cache was empty), false if cleared.
-func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Empty blockHash means cache hasn't processed any block yet - always valid
-	if c.blockHash == (common.Hash{}) {
-		c.addrToHash.Purge()
-		c.blockHash = incomingBlockHash
-		return true
-	}
-
-	// Check if we're continuing from the expected block
-	if c.blockHash == parentHash {
-		c.blockHash = incomingBlockHash
-		return true
-	}
-
-	// Mismatch - clear address mappings (they may be stale)
-	// Keep code mappings since hash → code is immutable
+// Unwind drops the mutable address → code mappings, which may now reflect a
+// dead fork's code for an address. The content-addressed code layers
+// (hash → code, ethHash → code, codeSize) are immutable and kept. The addr
+// layers are small and clearing them on the rare unwind is cheap, so unlike
+// GenericCache they don't need epoch tracking. unwindToTxNum is accepted for
+// interface symmetry; the addr layers don't carry per-entry txNums.
+func (c *CodeCache) Unwind(_ uint64) {
 	c.addrToHash.Purge()
-	c.blockHash = incomingBlockHash
-	return false
-}
-
-// ClearWithHash clears the address cache and sets the block hash.
-// Used during unwind to reset the cache to a known state.
-func (c *CodeCache) ClearWithHash(hash common.Hash) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.addrToHash.Purge()
-	c.blockHash = hash
+	c.addrToEthHash.Purge()
 }
 
 // Len returns the number of entries in the address cache.
