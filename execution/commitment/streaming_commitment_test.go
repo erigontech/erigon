@@ -487,3 +487,82 @@ func TestStreaming_SplitMergeCollisionDedup(t *testing.T) {
 	require.Equal(t, byte(0x10+0), brow[0].hash[0], "bare apply dropped the split set's low half (clobbered by prev)")
 	require.Equal(t, byte(0x80+4), brow[4].hash[0], "bare apply kept the merge set's high half")
 }
+
+// foldedSplitCount reports how many splits hold an authoritative background-folded
+// cell (eager policy reached them before Process).
+func foldedSplitCount(sc *StreamingCommitter) int {
+	n := 0
+	sc.trieMu.RLock()
+	for _, s := range sc.splits {
+		s.mu.Lock()
+		if s.folded {
+			n++
+		}
+		s.mu.Unlock()
+	}
+	sc.trieMu.RUnlock()
+	return n
+}
+
+// TestStreaming_FoldEagerPolicy exercises the single shipped fold trigger
+// (foldEager, fold-on-dirty) across both regimes it governs: the eager path,
+// where every touched split is background-folded before Process (drained), and
+// the fall-through path, where splits the scheduler never reached fold at Process
+// — both the lazy committer (scheduler never started) and a scheduler stopped
+// immediately after touching. Every regime must match the sequential root and
+// branches; the drained eager run must actually fold splits in the background.
+func TestStreaming_FoldEagerPolicy(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMixedCorpus(123, 5000)
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	newCommitter := func() (*StreamingCommitter, *MockState) {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc.SetNumWorkers(4)
+		return sc, ms
+	}
+
+	t.Run("lazy_fall_through", func(t *testing.T) {
+		sc, ms := newCommitter()
+		defer sc.Release()
+		for _, k := range keys {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		require.Zero(t, foldedSplitCount(sc), "no scheduler: nothing folds before Process")
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, root, "lazy fall-through root != sequential")
+		requireBranchParity(t, seqMs, ms)
+	})
+
+	t.Run("eager_drained", func(t *testing.T) {
+		sc, ms := newCommitter()
+		defer sc.Release()
+		require.NoError(t, sc.StartScheduler(context.Background()))
+		for _, k := range keys {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		waitSplitsClean(t, sc)
+		require.Positive(t, foldedSplitCount(sc), "eager policy must fold splits in the background")
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, root, "eager drained root != sequential")
+		requireBranchParity(t, seqMs, ms)
+	})
+
+	t.Run("eager_partial_fall_through", func(t *testing.T) {
+		sc, ms := newCommitter()
+		defer sc.Release()
+		require.NoError(t, sc.StartScheduler(context.Background()))
+		for _, k := range keys {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, root, "eager partial fall-through root != sequential")
+		requireBranchParity(t, seqMs, ms)
+	})
+}

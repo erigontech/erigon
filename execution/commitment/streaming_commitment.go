@@ -52,6 +52,17 @@ type splitState struct {
 // instead of re-folding. Callers must hold s.mu.
 func (s *splitState) reusable() bool { return s.folded && !s.dirty }
 
+// foldTrigger decides whether a dirtied split should be enqueued for an eager
+// background fold. Callers hold s.mu.
+type foldTrigger func(s *splitState) bool
+
+// foldEager is the single shipped fold-trigger policy: fold-on-dirty. Every
+// dirtied split is eligible, so a touched split folds in the background as soon
+// as a worker is free; a split the scheduler never reaches (queue full or never
+// started) falls through to fold-at-Process. Alternative policies are deferred
+// until measurement shows re-fold waste worth a heuristic.
+func foldEager(*splitState) bool { return true }
+
 // StreamingCommitter overlaps commitment fold work with block execution. It owns
 // a persistent prefix trie of touched keys (Insert is order-independent) and,
 // per top-nibble split point, the state needed to (re-)fold that subtree.
@@ -70,6 +81,7 @@ type StreamingCommitter struct {
 	workerPool sync.Pool
 	trie       *prefixTrie
 	splits     map[byte]*splitState
+	foldPolicy foldTrigger
 
 	// pph is held only to reuse the proven deep storage fan-out
 	// (dfsSubtreeDeep / concurrentStorageRoot) for big-storage accounts; its
@@ -114,6 +126,7 @@ func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, c
 		numWorkers:     runtime.NumCPU(),
 		trie:           newPrefixTrie(),
 		splits:         make(map[byte]*splitState),
+		foldPolicy:     foldEager,
 		pph:            NewParallelPatriciaHashed(ctxFactory, accountKeyLen, cfg),
 	}
 	sc.resetPool()
@@ -183,7 +196,7 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 	s.mu.Lock()
 	s.dirty = true
 	s.gen++
-	enqueue := sc.started.Load() && !s.queued
+	enqueue := sc.started.Load() && !s.queued && sc.foldPolicy(s)
 	if enqueue {
 		s.queued = true
 	}

@@ -272,9 +272,9 @@ Cut from the original plan: the three-way pluggable policy framework was YAGNI
 before any realistic measurement. Ship ONE policy now; the re-fold counter lives
 in Task 4. Add a second policy ONLY if Task 9 / the live run shows re-fold waste.
 
-- [ ] implement one fold trigger: `foldEager` (fold-on-dirty) for hot splits, fall through to fold-at-Process for splits never scheduled
-- [ ] write test: policy yields root+branches == sequential (correctness invariant)
-- [ ] run tests — must pass before next task
+- [x] implement one fold trigger: `foldEager` (fold-on-dirty) for hot splits, fall through to fold-at-Process for splits never scheduled — named `foldTrigger`/`foldEager`, `sc.foldPolicy` field defaults to `foldEager`, `TouchKey`'s enqueue routes through it (the single seam a measurement-driven second policy slots into). markQueued re-enqueue intentionally bypasses the policy (re-folding an invalidated split is mandatory, not policy).
+- [x] write test: policy yields root+branches == sequential (correctness invariant) — `TestStreaming_FoldEagerPolicy` covers the eager-drained regime (asserts splits actually background-fold), lazy fall-through (asserts nothing folds pre-Process), and eager-partial fall-through; all three == sequential root+branches
+- [x] run tests — must pass before next task (`-race` green on `TestStreaming_*`; `make lint` clean)
 
 ### Task 6: ModeStreaming in Updates (provide Update OR read from ctx)
 
