@@ -922,6 +922,48 @@ func TestStreaming_MultiBlockResetWithScheduler(t *testing.T) {
 	requireBranchParity(t, seqMs, ms)
 }
 
+// TestStreaming_MultiBlockNoResetAccumulation reuses one committer across two
+// blocks the way production does: the commitment calculator rotates only the
+// Updates buffer (NewEmpty) and never calls sc.Reset() between blocks. Process
+// must drain its own prefix trie + split state at the block boundary, otherwise
+// block 2 re-folds block 1's keys (unbounded growth within a batch). Roots stay
+// correct either way, so the accumulation is asserted directly on the trie.
+func TestStreaming_MultiBlockNoResetAccumulation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	k1, u1 := genRandomAccountsStorage(400)
+	k2, u2 := sparseBatch2(k1, 3, true)
+
+	seqRoot1, _ := sequentialRoot(t, k1, u1)
+	seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	for _, k := range k1 {
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+	root1, err := sc.Process(ctx)
+	require.NoError(t, err)
+	require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
+
+	require.Zero(t, sc.trie.root.subtreeCount, "Process left block-1 keys in the prefix trie")
+	require.Empty(t, sc.splits, "Process left stale split state")
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	for _, k := range k2 {
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+	root2, err := sc.Process(ctx)
+	require.NoError(t, err)
+	require.Equal(t, seqRoot2, root2, "block-2 streaming root without reset != sequential")
+	requireBranchParity(t, seqMs, ms)
+}
+
 // TestStreamingCommitterStateRoundTrip drives the streaming variant through the
 // public Trie.Process path, encodes the resulting trie state via the persistence
 // template, restores it into a fresh streaming instance, and asserts the

@@ -286,7 +286,23 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	sc.captureRoot(base)
-	return base.RootHash()
+	rh, err := base.RootHash()
+	if err != nil {
+		return nil, err
+	}
+	sc.endBlock()
+	return rh, nil
+}
+
+// endBlock drains the per-block touch funnel (prefix trie + split state) so a
+// reused committer folds only the next block's touches; the scheduler base and
+// worker pool survive, and the caller's staged root/deferred snapshots are kept.
+func (sc *StreamingCommitter) endBlock() {
+	if sc.trie != nil {
+		sc.trie.Reset()
+	}
+	sc.dropSplitDeferred()
+	clear(sc.splits)
 }
 
 // captureRoot snapshots the base trie's terminal root cell and flags (by value,
