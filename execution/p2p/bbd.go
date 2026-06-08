@@ -568,8 +568,12 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					blockBatches[batchIndex] = blockBatch
 					if len(balsResponse) > 0 {
 						balBatches[batchIndex] = balsResponse
-						bbd.logger.Debug(
-							"[backward-block-downloader] fetched BALs over eth/71",
+						bbd.logger.Trace(
+							"[backward-block-downloader] fetched BALs for batch",
+							"fromNum", headerBatch[0].Number.Uint64(),
+							"fromHash", headerBatch[0].Hash(),
+							"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
+							"toHash", headerBatch[len(headerBatch)-1].Hash(),
 							"got", len(balsResponse),
 						)
 					}
