@@ -489,6 +489,65 @@ func TestStreaming_SplitMergeCollisionDedup(t *testing.T) {
 	require.Equal(t, byte(0x80+4), brow[4].hash[0], "bare apply kept the merge set's high half")
 }
 
+// drainContext models the production concurrent apply context: PutBranch writes
+// into a drain-later collector (last-write-wins on a key) that Branch cannot read
+// until drained. This reproduces the read-your-writes gap MockState hides — the
+// flush-then-reread guard saw the stale pre-image here and clobbered the first
+// colliding update.
+type drainContext struct {
+	*MockState
+	pending map[string][]byte
+}
+
+func newDrainContext(ms *MockState) *drainContext {
+	return &drainContext{MockState: ms, pending: make(map[string][]byte)}
+}
+
+func (d *drainContext) PutBranch(prefix, data, _ []byte) error {
+	d.pending[string(prefix)] = common.Copy(data)
+	return nil
+}
+
+func (d *drainContext) drain() error {
+	for k, v := range d.pending {
+		if err := d.MockState.PutBranch([]byte(k), v, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TestStreaming_SplitMergeCollisionDedup_WriteOnlyCtx asserts the dedup guard
+// survives a write-only apply context (the production collector), where a flushed
+// branch is not visible to a subsequent Branch read. Both colliding halves must
+// survive; with the prior reread-based guard the second half merged against the
+// stale pre-image and clobbered the first.
+func TestStreaming_SplitMergeCollisionDedup_WriteOnlyCtx(t *testing.T) {
+	t.Parallel()
+	prefix := []byte{0x0a, 0x03}
+	all := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+
+	ms := NewMockState(t)
+	_, err := ApplyDeferredBranchUpdates(
+		[]*DeferredBranchUpdate{makeBranch(prefix, 0xFFFF, all, 0x10, nil)},
+		1, ms.PutBranch)
+	require.NoError(t, err)
+	prev := append([]byte(nil), ms.cm[string(prefix)]...)
+
+	dctx := newDrainContext(ms)
+	require.NoError(t, applyDeferredGuarded(dctx, []*DeferredBranchUpdate{
+		makeBranch(prefix, 0xFFFF, []int{0, 1, 2, 3}, 0x40, prev),
+		makeBranch(prefix, 0xFFFF, []int{4, 5, 6, 7}, 0x80, prev),
+	}, 4))
+	require.NoError(t, dctx.drain())
+
+	_, _, row, err := BranchData(ms.cm[string(prefix)]).decodeCells()
+	require.NoError(t, err)
+	require.Equal(t, byte(0x40+0), row[0].hash[0], "split set's low-half cell survived write-only apply")
+	require.Equal(t, byte(0x80+4), row[4].hash[0], "merge set's high-half cell survived write-only apply")
+	require.Equal(t, byte(0x10+8), row[8].hash[0], "prev's untouched cell survived")
+}
+
 // foldedSplitCount reports how many splits hold an authoritative background-folded
 // cell (eager policy reached them before Process).
 func foldedSplitCount(sc *StreamingCommitter) int {

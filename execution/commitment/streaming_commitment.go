@@ -836,49 +836,68 @@ func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) er
 	return nil
 }
 
-// applyDeferredGuarded applies deferred branch updates with a duplicate-prefix
-// flush guard mirroring BranchEncoder.CollectDeferredUpdate: the combined slice
-// concatenates the per-split sets and then the merge set, whose split-boundary
-// prefix can collide with the merge's bottom row. Bare ApplyDeferredBranchUpdates
-// does not dedup across the slice, so a colliding prefix's second update would
-// merge against the stale pre-image and clobber the first. Here, whenever a
-// prefix already staged in the pending batch reappears the batch is flushed, and
-// prev is re-read from ctx for every update, so a prefix written by an earlier
-// flush merges against the just-written value — last-writer-wins is cumulative,
-// matching the sequential single-write.
+// applyDeferredGuarded applies deferred branch updates, collapsing any prefix
+// emitted by more than one fold set (a per-split set colliding with the merge's
+// bottom row). The apply context may be write-only — the concurrent factory
+// routes PutBranch to a drain-later collector that Branch cannot read — so a
+// colliding prefix's later update is merged against the earlier update's encoded
+// result held in an in-memory overlay, not a re-read of ctx. Bare
+// ApplyDeferredBranchUpdates does not dedup, so the collision-free slice (the
+// common case) takes its parallel fast path.
 func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate, numWorkers int) error {
-	pending := make([]*DeferredBranchUpdate, 0, len(deferred))
-	seen := make(map[string]struct{}, len(deferred))
-	flush := func() error {
-		if len(pending) == 0 {
-			return nil
-		}
-		if _, err := ApplyDeferredBranchUpdates(pending, numWorkers, ctx.PutBranch); err != nil {
-			return err
-		}
-		pending = pending[:0]
-		clear(seen)
-		return nil
+	if !hasDuplicatePrefix(deferred) {
+		_, err := ApplyDeferredBranchUpdates(deferred, numWorkers, ctx.PutBranch)
+		return err
 	}
+
+	encoder := workerEncoderPool.Get().(*BranchEncoder)
+	merger := workerMergerPool.Get().(*BranchMerger)
+	defer workerEncoderPool.Put(encoder)
+	defer workerMergerPool.Put(merger)
+
+	applied := make(map[string][]byte, len(deferred))
 	for _, upd := range deferred {
 		if upd == nil {
 			continue
 		}
 		key := string(upd.prefix)
-		if _, dup := seen[key]; dup {
-			if err := flush(); err != nil {
+		if prev, ok := applied[key]; ok {
+			upd.prev = common.Copy(prev)
+		} else {
+			prev, _, err := ctx.Branch(upd.prefix)
+			if err != nil {
 				return err
 			}
+			upd.prev = common.Copy(prev)
 		}
-		prev, _, err := ctx.Branch(upd.prefix)
-		if err != nil {
+		if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
 			return err
 		}
-		upd.prev = common.Copy(prev)
-		pending = append(pending, upd)
+		if upd.encoded == nil {
+			applied[key] = upd.prev
+			continue
+		}
+		if err := ctx.PutBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			return err
+		}
+		applied[key] = common.Copy(upd.encoded)
+	}
+	return nil
+}
+
+func hasDuplicatePrefix(deferred []*DeferredBranchUpdate) bool {
+	seen := make(map[string]struct{}, len(deferred))
+	for _, upd := range deferred {
+		if upd == nil {
+			continue
+		}
+		key := string(upd.prefix)
+		if _, ok := seen[key]; ok {
+			return true
+		}
 		seen[key] = struct{}{}
 	}
-	return flush()
+	return false
 }
 
 // Reset clears per-split state, the prefix trie, and any staged deferred updates
