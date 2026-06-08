@@ -30,6 +30,31 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
+type recordingStreamSink struct{ touches int }
+
+func (r *recordingStreamSink) TouchKey(hashedKey, plainKey []byte, update *Update) {
+	r.touches++
+}
+
+// TestUpdates_NewEmpty_PreservesStreaming guards the calculator funnel: the
+// commitment calculator rotates its buffer via NewEmpty (committer.go), and the
+// rotated buffer must keep forwarding touches to the StreamingCommitter,
+// otherwise the committer receives no touches and silently computes the
+// unchanged base root.
+func TestUpdates_NewEmpty_PreservesStreaming(t *testing.T) {
+	u := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	sink := &recordingStreamSink{}
+	u.SetStreamingCommitter(sink)
+
+	rotated := u.NewEmpty()
+	require.True(t, rotated.Streaming(), "NewEmpty dropped the streaming funnel")
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0xab
+	rotated.TouchPlainKeyDirect(string(addr), &Update{Flags: BalanceUpdate})
+	require.NotZero(t, sink.touches, "rotated buffer did not forward touch to the streamer")
+}
+
 // streamingRoot drives a StreamingCommitter over keys/upds touched in the order
 // given by idxOrder, returning its root and MockState (with committed branches).
 func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxOrder []int) ([]byte, *MockState) {

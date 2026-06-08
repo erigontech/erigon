@@ -1553,10 +1553,15 @@ type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
-// NewEmpty creates a fresh Updates with the same mode, tmpdir, and hasher
-// as the receiver. Used by SwapUpdates to replace the buffer atomically.
+// NewEmpty creates a fresh Updates with the same mode, tmpdir, hasher, and
+// streaming sink as the receiver. The commitment calculator rotates its buffer
+// through this on every block, so the streamer must carry over or the attached
+// StreamingCommitter stops receiving touches and silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
-	return NewUpdates(t.mode, t.tmpdir, t.hasher)
+	n := NewUpdates(t.mode, t.tmpdir, t.hasher)
+	n.streamer = t.streamer
+	n.streaming = t.streaming
+	return n
 }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
