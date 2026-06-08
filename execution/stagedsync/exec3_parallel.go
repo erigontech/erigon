@@ -1185,24 +1185,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 // path into a spurious InvalidBlock error — the BenchmarkFeeHistory
 // 200-block fixture exhausts the 5MB batch budget at block 114 and
 // previously errored despite blocks 1..114 being applied cleanly.
-//
-// applyLoopFlushAsComplete decides the `complete` flag the apply loop passes
-// to versionMap.FlushVersionedWrites. A tx's writes can only be flagged Done
-// (vs Estimate) when:
-//   - this tx itself passed validation (`valid`), AND
-//   - no prior tx in the same validation iteration failed (`cntInvalid == 0`).
-//
-// The `valid` term is the regression guard for the gnosis-block-18,483,405
-// phantom-write bug: `cntInvalid` counts *prior* invalid txs in the iteration
-// only, so a current tx with VersionInvalid verdict would otherwise be flushed
-// as Done and become visible to downstream OCC readers as committed state.
-// See TestApplyLoopFlush_InvalidTxWritesAreEstimate.
-func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
-	return valid && cntInvalid == 0
-}
-
-// Pure function — extracted from the apply loop's channel-close branch
-// so the invariant is unit-testable. See TestApplyLoopMissingBlocks.
 func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
@@ -1211,6 +1193,16 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 		}
 	}
 	return missing
+}
+
+// applyLoopFlushAsComplete returns the `complete` flag for
+// versionMap.FlushVersionedWrites. cntInvalid counts only prior
+// VersionTooEarly txs in the current iteration — not the current tx's own
+// VersionInvalid verdict — so the `valid` term is required to prevent an
+// invalidated tx's writes being flushed as Done and read as committed by
+// downstream OCC consumers.
+func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
+	return valid && cntInvalid == 0
 }
 
 // execLoopExitDecision is the result of evaluating the exec-loop's
@@ -2389,12 +2381,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		tx := toValidate[i]
 		txTask := be.tasks[tx].Task
 		txResult := be.results[tx]
-		// Each scheduled run wraps the task in a fresh *taskVersion whose
-		// Version() carries the current Incarnation (set in scheduleExecution).
-		// Reading from the result's task surfaces that incarnation; reading
-		// from be.tasks[tx].Task (the bare TxTask) returns the structural
-		// Version() which never advances Incarnation past 0 — making this
-		// txVersion misleading on retries.
+		// txResult.Task is the *taskVersion wrapper from this scheduled run,
+		// carrying the current Incarnation. be.tasks[tx].Task is the bare
+		// TxTask whose Version().Incarnation never advances past 0.
 		txVersion := txResult.Task.Version()
 
 		var trace bool
@@ -2462,16 +2451,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		// OCC invariant: `Done` means committed. `cntInvalid` here only counts
-		// *prior* tooEarly txs in this iteration, so it does NOT include this
-		// tx's own VersionInvalid verdict. Without `valid` an invalidated tx's
-		// writes would be flushed as Done and become visible to downstream
-		// readers as committed phantoms (see
-		// TestApplyLoopFlush_InvalidTxWritesAreEstimate). The Estimate flag
-		// instead causes downstream reads of these cells to return
-		// MVReadResultDependency, which the validator treats as
-		// VersionInvalid — forcing the dependent tx to re-execute after the
-		// retry settles, restoring OCC's "Done = committed" invariant.
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
 		be.versionMap.SetTrace(false)
 
