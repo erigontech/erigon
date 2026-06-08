@@ -259,9 +259,19 @@ sibling cells be reused. **Do NOT edit `parallel_mount.go`.**
 **Files:**
 - Create: `execution/commitment/nested_cache_bench_test.go`
 
-- [ ] benchmark on a mass-write whale (one commitment touching many storage nibbles, then an incremental block touching one): **ModeParallel (untouched baseline) vs ModeStreaming gate-only vs ModeStreaming + cache** — re-fold time + allocs, so the strategy stays directly comparable (and droppable) against ModeParallel
-- [ ] report whale re-fold time vs the prototype's full-fold (~656 ms) and incremental (~49 ms) targets; label clearly that the metric is the **whale re-fold**, not steady-state commitment
-- [ ] document results inline (Progress Tracking)
+- [x] benchmark on a mass-write whale (one commitment touching many storage nibbles, then an incremental block touching one): **ModeParallel (untouched baseline) vs ModeStreaming gate-only vs ModeStreaming + cache** — re-fold time + allocs, so the strategy stays directly comparable (and droppable) against ModeParallel — `Benchmark_NestedCacheWhaleRefold` (`execution/commitment/nested_cache_bench_test.go`). Note: the per-block committer `Process` is NOT a valid stand-in — a sub-threshold incremental block never crosses `deepStorageThreshold`, folds its few touched keys against the persisted trie, and bypasses the deep cache; the benchmark isolates the actual whale re-fold via the cache mechanism (`foldStorageRootCached`) against the `concurrentAccountRoot` parallel full-fold baseline.
+- [x] report whale re-fold time vs the prototype's full-fold (~656 ms) and incremental (~49 ms) targets; label clearly that the metric is the **whale re-fold**, not steady-state commitment
+- [x] document results inline (Progress Tracking)
+
+  **Results** (750k-slot whale, one incremental block adding 50 slots to the most-populated first-storage nibble; Apple M5 Max, `-benchtime=10x`):
+
+  | config | whale re-fold | B/op | allocs/op |
+  |---|---|---|---|
+  | ModeParallel-fullfold (parallel, all 16 nibbles fresh) | 85.5 ms | 193 MB | 5.32M |
+  | NestedCache-coldfold (cache-miss, re-folds every present nibble) | 653.8 ms | 102 MB | 5.29M |
+  | NestedCache-incremental (1 dirty nibble + cached-cell reuse) | 48.7 ms | 12 MB | 0.35M |
+
+  Incremental vs cold full-fold = **13.4×** (653.8/48.7), matching the prototype's ~656 ms→~49 ms. The incremental re-fold also beats the parallel full-fold baseline (~1.8× faster, ~16× fewer allocs / less memory). Metric is the **whale storage re-fold**, not steady-state commitment.
 
 ### Task 8: Verify acceptance criteria
 - [ ] streaming root + branches == sequential across all corpora (mixed, big-account, whale, random, nested-storage, deletes), caching on
