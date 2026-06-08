@@ -164,13 +164,15 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return fmt.Errorf("database not initialized")
 	}
 
-	// Pre-Flush: drop any cached entries past the EL's current head.
-	//
-	// An admin SetHead (mode B) may have unwound the EL chain past entries
-	// we already buffered. Those entries' parent TDs were wiped by
-	// Provider.Unwind, so engine.InsertBlocks would loop forever on
-	// "parent's total difficulty not found". Reproduced live on hoodi
-	// 2026-06-08 — see docs/caplin-componentization-requirements.md.
+	// Pre-Flush: drop cached entries that are unreachable from the EL's
+	// current head. An admin SetHead (mode B) may have unwound the EL chain
+	// past entries we already buffered, leaving them parented to a wiped TD
+	// row — InsertBlocks would loop forever on "parent's total difficulty
+	// not found". Only prune when a gap exists between elHead and the
+	// lowest cached entry; a contiguous queue starting at elHead+1 is
+	// insertable and preserved. Reproduced live on hoodi 2026-06-08 —
+	// see docs/caplin-componentization-requirements.md for the architectural
+	// follow-up.
 	//
 	// TODO(componentization): the right fix is for Caplin to write through
 	// the storage component and subscribe to its bus, where Provider.Unwind
@@ -426,13 +428,25 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil
 }
 
-// pruneStaleCachedBlocks deletes any rows in p.db whose block number is
-// strictly greater than the EL's current head. See the call site in Flush
-// for the rationale; see docs/caplin-componentization-requirements.md for
-// the architectural follow-up.
+// pruneStaleCachedBlocks deletes rows in p.db whose block number is
+// strictly greater than the EL's current head AND unreachable from it —
+// i.e. only when a gap exists between elHead and the lowest cached entry.
+// A contiguous chain starting at elHead+1 is insertable and preserved.
 //
-// Idempotent and cheap on the steady-state path (no cached rows past
-// head → cursor.Seek returns nil immediately, single RwTx, no deletes).
+// Three cases on the entry seeked to (elHead+1):
+//
+//	A. No cached row past elHead → nothing to do.
+//	B. Lowest cached row is exactly elHead+1 → contiguous; keep it.
+//	C. Lowest cached row is > elHead+1 → gap; delete everything past elHead
+//	   (their parent TDs were wiped by mode-B's Provider.Unwind, or were
+//	   never written; InsertBlocks would loop on parent-not-found).
+//
+// See the call site in Flush for the rationale;
+// docs/caplin-componentization-requirements.md captures the architectural
+// follow-up where this stop-gap is replaced by a storage-bus subscription.
+//
+// Idempotent and cheap on the steady-state path (Case A returns
+// immediately after one cursor Seek; Case B does one comparison).
 func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) error {
 	currentHeader, err := p.engine.CurrentHeader(ctx)
 	if err != nil {
@@ -447,13 +461,30 @@ func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) e
 	binary.BigEndian.PutUint64(cutoff, elHead+1)
 
 	var pruned int
+	var firstPast uint64
 	if err := p.db.Update(ctx, func(tx kv.RwTx) error {
 		cursor, err := tx.RwCursor(kv.Headers)
 		if err != nil {
 			return err
 		}
 		defer cursor.Close()
-		for k, _, err := cursor.Seek(cutoff); k != nil; k, _, err = cursor.Next() {
+
+		k, _, err := cursor.Seek(cutoff)
+		if err != nil {
+			return err
+		}
+		if k == nil {
+			return nil // case A: nothing past elHead
+		}
+		if len(k) < 8 {
+			return fmt.Errorf("pruneStaleCachedBlocks: malformed key length=%d", len(k))
+		}
+		firstPast = binary.BigEndian.Uint64(k)
+		if firstPast == elHead+1 {
+			return nil // case B: contiguous from elHead, insertable
+		}
+		// case C: gap detected, delete from cursor forward
+		for ; k != nil; k, _, err = cursor.Next() {
 			if err != nil {
 				return err
 			}
@@ -467,7 +498,8 @@ func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) e
 		return err
 	}
 	if pruned > 0 {
-		p.logger.Info("[BlockCollector] pruned stale cached blocks past EL head", "elHead", elHead, "pruned", pruned)
+		p.logger.Info("[BlockCollector] pruned unreachable cached blocks (gap from EL head)",
+			"elHead", elHead, "firstPast", firstPast, "pruned", pruned)
 	}
 	return nil
 }
