@@ -302,6 +302,6 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.epoch.Load(),
 		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
-		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
+		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }

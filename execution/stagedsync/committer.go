@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -108,6 +109,13 @@ type commitmentCalculator struct {
 	// LAST block's changeset, which is wrong for per-block unwind.
 	forcePerBlockCompute bool
 
+	// perBlockFrom is the batch's changeset window start: blocks >= it
+	// compute per-block (their changesets must record per-block branch
+	// deltas); blocks below it accumulate in batch mode. The last
+	// pre-window block triggers a transition compute (computeTransition)
+	// so no pre-window branch deltas leak into a window block's changeset.
+	perBlockFrom uint64
+
 	wg   sync.WaitGroup
 	done chan struct{}
 }
@@ -119,6 +127,7 @@ func newCommitmentCalculator(
 	logPrefix string,
 	logger log.Logger,
 	forcePerBlockCompute bool,
+	perBlockFrom uint64,
 	in chan applyResult,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
@@ -138,7 +147,7 @@ func newCommitmentCalculator(
 	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
 	// deferred here. Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
 	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
 	// back and the calculator goroutine is gone.
@@ -161,6 +170,7 @@ func newCommitmentCalculator(
 		in:                   in,
 		out:                  out,
 		forcePerBlockCompute: forcePerBlockCompute,
+		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
 	}, nil
 }
@@ -179,6 +189,7 @@ func (cc *commitmentCalculator) Stop() {
 }
 
 func (cc *commitmentCalculator) loop(ctx context.Context) {
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer cc.wg.Done()
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
@@ -248,8 +259,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
 		// || shouldGenerateChangesets || ...` check) — per-block compute is
 		// required when changesets must record per-block branch deltas
-		// (reorg support, KeepExecutionProofs).
-		if !dbg.BatchCommitments || cc.forcePerBlockCompute {
+		// (reorg support, KeepExecutionProofs). Blocks from the changeset
+		// window (perBlockFrom) onward compute per-block for the same reason.
+		if !dbg.BatchCommitments || cc.forcePerBlockCompute || r.BlockNum >= cc.perBlockFrom {
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block is partial (resumed mid-block).
 				// Compute it (like serial does) to save trie state, then
@@ -259,6 +271,18 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			} else {
 				cc.computeAndCheck(ctx, r)
 			}
+			if r.BlockNum+1 == cc.perBlockFrom {
+				// Pre-window per-block computes (BatchCommitments off) defer
+				// branch writes too — flush the boundary block's pending update
+				// outside any changeset before the first window block's compute
+				// routes into its saved CS.
+				cc.flushPendingUpdatesWithoutChangeset(ctx, r)
+			}
+		} else if r.BlockNum+1 == cc.perBlockFrom {
+			// Last pre-window block: fold everything accumulated in batch
+			// mode now, so the first window block's per-block compute (and
+			// changeset) covers only its own deltas.
+			cc.computeTransition(ctx, r)
 		}
 		// In BatchCommitments mode (without forcePerBlockCompute): just
 		// accumulate — compute only on explicit commitComputeRequest from
@@ -338,7 +362,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	}
 
 	// Check against expected root from the block header.
-	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
+	if !bytes.Equal(rh, br.StateRoot[:]) {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
 	}
 
@@ -438,7 +462,80 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.hasComputed = true
 
 	// Only publish on mismatch — success is silent.
-	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
+	if mismatch := !bytes.Equal(rh, br.StateRoot[:]); mismatch {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			rootHash: rh,
+			err:      fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot),
+		})
+	}
+}
+
+// flushPendingUpdatesWithoutChangeset eagerly applies the pending deferred
+// update under a nil accumulator — a pre-window block's branch deltas must
+// not pend into the first window block's changeset-routed compute.
+func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
+	cc.doms.LockChangesetAccumulator()
+	prev := cc.doms.GetChangesetAccumulatorLocked()
+	cc.doms.SetChangesetAccumulatorLocked(nil)
+	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	cc.doms.SetChangesetAccumulatorLocked(prev)
+	cc.doms.UnlockChangesetAccumulator()
+	if err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: %w", err),
+		})
+	}
+}
+
+// computeTransition folds all batch-mode blocks at the last pre-window block
+// so the first window block's compute (and changeset) covers only its own
+// deltas. Branch writes and the deferred-update flush run under a nil
+// accumulator — pre-window deltas must not land in any block's changeset.
+func (cc *commitmentCalculator) computeTransition(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
+	cc.state.FlushToUpdates(cc.updates)
+	cc.state.ResetBlockFlags()
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	cc.doms.LockChangesetAccumulator()
+	prev := cc.doms.GetChangesetAccumulatorLocked()
+	cc.doms.SetChangesetAccumulatorLocked(nil)
+	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	if err == nil {
+		err = cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}
+	cc.doms.SetChangesetAccumulatorLocked(prev)
+	cc.doms.UnlockChangesetAccumulator()
+	if err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: %w", err),
+		})
+		return
+	}
+
+	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
+
+	if !bytes.Equal(rh, br.StateRoot[:]) {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
 			txNum:    br.lastTxNum,

@@ -349,8 +349,6 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		c.rootHits.Add(1)
 		return entry, true
 	}
-	// Check pinned tier before tail. Pinned entries never evict and
-	// are fed by PinEntry (preload) + Put updates that preserve pin.
 	if entry, ok := c.pinned.Get(prefix); ok {
 		c.pinnedHits.Add(1)
 		return entry, true
@@ -364,6 +362,21 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	}
 	c.tailHits.Add(1)
 	return entry, true
+}
+
+// peek is the write-path equivalent of lookup: same tier walk, but does
+// not bump hit/miss counters and does not fire the onMiss callback.
+// Used by PutIfClean / MarkDirty so write traffic doesn't masquerade as
+// read-miss pressure for the adaptive pin controller.
+func (c *BranchCache) peek(prefix []byte) (*branchCacheEntry, bool) {
+	if isRootPrefix(prefix) {
+		entry := c.root.Load()
+		return entry, entry != nil
+	}
+	if entry, ok := c.pinned.Get(prefix); ok {
+		return entry, true
+	}
+	return c.tail.Get(prefix)
 }
 
 // fireOnMiss invokes the registered miss callback (if any). Hot path —
@@ -439,18 +452,27 @@ func (c *BranchCache) SetMissCallback(cb MissCallback) {
 
 // ContractHashFromPrefix extracts the 32-byte contract hash from a
 // commitment-trunk prefix. Returns (hash, true) if the prefix is a
-// storage-trunk prefix (depth >= 64, encoded as compact-hex with the
-// contract's 64-nibble keccak prefix), or (_, false) for shorter
+// storage-trunk prefix (depth >= 64, encoded as hex-prefix compact with
+// the contract's 64-nibble keccak prefix), or (_, false) for shorter
 // prefixes (account-trie branches at depth < 64).
 //
-// Compact-hex encoding: 1-byte HP flag, then nibble-pairs packed
-// 2-per-byte. The contract's 64-nibble path occupies 32 bytes after
-// the flag byte, so a storage-trunk prefix is at least 33 bytes.
+// Hex-prefix encoding (see nibbles.HexToCompact): bit 4 of byte 0 is the
+// odd-length flag. When set, the first nibble of the path lives in the
+// low nibble of byte 0 and the remaining nibbles are packed 2-per-byte
+// in buf[1:]; reading prefix[1:33] directly mis-attributes the hash by
+// one nibble. Decoding via the high/low-nibble split here handles both
+// parities.
 func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 	if len(prefix) < 33 {
 		return hash, false
 	}
-	copy(hash[:], prefix[1:33])
+	if prefix[0]&0x10 == 0 {
+		copy(hash[:], prefix[1:33])
+		return hash, true
+	}
+	for i := 0; i < 32; i++ {
+		hash[i] = ((prefix[i] & 0x0f) << 4) | (prefix[i+1] >> 4)
+	}
 	return hash, true
 }
 
@@ -577,7 +599,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, txNum uint64, origin strin
 // Same semantics as WarmupCache.PutBranchIfClean — see that doc for the
 // race-it-protects-against narrative.
 func (c *BranchCache) PutIfClean(prefix []byte, data []byte, txNum uint64, origin string) bool {
-	if existing, ok := c.lookup(prefix); ok && existing.dirty.Load() {
+	if existing, ok := c.peek(prefix); ok && existing.dirty.Load() {
 		return false
 	}
 	c.Put(prefix, data, txNum, origin)
@@ -615,7 +637,7 @@ func (c *BranchCache) GetWithOrigin(prefix []byte) (data []byte, origin string, 
 //
 // No-op if no entry exists at prefix.
 func (c *BranchCache) MarkDirty(prefix []byte) {
-	if entry, ok := c.lookup(prefix); ok {
+	if entry, ok := c.peek(prefix); ok {
 		entry.dirty.Store(true)
 	}
 }

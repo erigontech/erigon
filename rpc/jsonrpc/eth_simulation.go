@@ -164,7 +164,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger)
+	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	// Meter this request's state reads under the rpc source (flushed at Close).
 	// SimulateV1 owns this SharedDomains on a single goroutine.
 	sharedDomains.StartRequestMetrics(kvmetrics.SourceRPC)
-	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
+	sharedDomains.SetDeferCommitmentUpdates(false)
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
@@ -1173,11 +1173,13 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
-			addressKey := address.Value().Bytes()
+			addrValue := address.Value()
+			addressKey := addrValue[:]
 			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
 			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
 			for _, loc := range locations {
-				locationKey := loc.Value().Bytes()
+				locValue := loc.Value()
+				locationKey := locValue[:]
 				copy(storageFullKey[:length.Addr], addressKey)
 				copy(storageFullKey[length.Addr:], locationKey)
 				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)
