@@ -303,6 +303,19 @@ in scheduling.
 `ConcurrentPatriciaHashed` is the only consumer of the 16 per-nibble ETL
 collectors; ModeParallel does not allocate them.
 
+A fourth variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
+`VariantStreamingHexPatricia`), layers on this one rather than replacing it: it
+reuses the same prefix trie, mount/fold engine, and `concurrentStorageRoot`, and
+upholds R1 identically. It differs only in *when* the fold runs — touched keys are
+re-folded per top-nibble split in a background worker pool overlapping execution,
+so `Process` collapses to a merge of already-folded split cells. Folds are
+stateless (re-folded from the prefix-trie key set, never a persistent per-split hph
+mutated by touches — that would break the monotonic `followAndUpdate` contract). It
+uses the `streaming` flag on `Updates` (not a new `Mode`) and is not layered with
+the `ERIGON_CMT_MOUNT`/`ERIGON_CMT_DEEP` env gates. Its only real win is on a live
+node (hiding unfold DB-read latency under execution); the in-memory benchmark cannot
+show it. See `execution/commitment/streaming_commitment.go`.
+
 ## 11. Performance characteristics *(informative)*
 
 Throughput on the benchmark corpus peaks near 8 workers and is bounded by memory
@@ -326,3 +339,4 @@ not a CI gate.
 | `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |
 | `execution/commitment/hex_concurrent_patricia_hashed.go` | `ConcurrentPatriciaHashed`, for contrast |
+| `execution/commitment/streaming_commitment.go` | `StreamingCommitter`, the prepare-on-touch variant layered on this one |

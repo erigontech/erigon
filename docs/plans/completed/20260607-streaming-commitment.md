@@ -353,9 +353,9 @@ Reading (as the plan predicted — MockState has no real execution to hide folds
 - [x] `make erigon` builds
 
 ### Task 11: [Final] Docs
-- [ ] update `/Users/awskii/org/wrk/HANDOFF-parallel-storage-fold.md` with the streaming results
-- [ ] update repo `CLAUDE.md`/agents docs if new patterns warrant
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `/Users/awskii/org/wrk/HANDOFF-parallel-storage-fold.md` with the streaming results — added section 8 (shipped design, mechanism-only metrics table, correctness oracle, the two collapse/partial-update subtleties, live-node measurement pointer)
+- [x] update repo `CLAUDE.md`/agents docs if new patterns warrant — added a streaming variant subsection + source-map entry to `docs/design/parallel-patricia-hashed.md` (the architecture spec for this area). Repo `CLAUDE.md` is contributor-guidelines, not per-feature architecture — no streaming convention added there
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Manual / external — no checkboxes.*
