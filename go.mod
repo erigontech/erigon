@@ -105,7 +105,7 @@ require (
 	github.com/ugorji/go/codec v1.2.13
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/valyala/fastjson v1.6.10
-	github.com/vektah/gqlparser/v2 v2.5.32
+	github.com/vektah/gqlparser/v2 v2.5.33
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
