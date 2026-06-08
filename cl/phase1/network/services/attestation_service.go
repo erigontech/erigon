@@ -312,6 +312,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if blockHeader.Slot == data.Slot && data.CommitteeIndex != 0 {
 			return errors.New("attestation data index must be 0 when block slot equals attestation slot")
 		}
+		if data.CommitteeIndex == 1 && !s.forkchoiceStore.IsPayloadVerified(root) {
+			return unverifiedGloasPayloadError(s.forkchoiceStore, root)
+		}
 	}
 
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
