@@ -62,7 +62,7 @@ jobs:
           fi
           {
             echo "found=$found"
-            echo "run-id=$run_id"
+            echo "run_id=$run_id"
           } >> "$GITHUB_OUTPUT"
 
       - name: Download merge-queue coverage artifact
@@ -70,7 +70,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: sonar-coverage
-          run-id: ${{ steps.coverage-artifact.outputs.run-id }}
+          run-id: ${{ steps.coverage-artifact.outputs.run_id }}
           github-token: ${{ github.token }}
 
       - name: Run tests with coverage
