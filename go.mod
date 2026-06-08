@@ -63,7 +63,7 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/heimdalr/dag v1.5.0
+	github.com/heimdalr/dag v1.5.1
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.3-0.20260228135838-087f4b32f234
 	github.com/huandu/xstrings v1.5.0
