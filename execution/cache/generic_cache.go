@@ -18,7 +18,7 @@ package cache
 
 import (
 	"bytes"
-	"sync"
+	"math"
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
@@ -43,9 +43,11 @@ const avgBytesPerEntry = 256
 // the OnEvict callback can update currentSize without re-running
 // sizeFunc.
 type entry[T any] struct {
-	key  []byte
-	val  T
-	size int
+	key   []byte
+	val   T
+	size  int
+	txNum uint64 // commit/read txNum the cached value reflects (upper bound)
+	epoch uint32 // unwind generation the entry was written in
 }
 
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
@@ -56,14 +58,23 @@ type GenericCache[T any] struct {
 	currentSize atomic.Int64
 	mode        Mode
 
-	blockHash common.Hash
-	mu        sync.RWMutex
+	// Cache coherence across unwinds is txNum/epoch based — no block awareness,
+	// no diffset. An entry is valid iff it was written in the current epoch OR
+	// its txNum is strictly below unwindFloor (the first unwound txNum), so it
+	// predates every unwind seen and can't be stale. Unwind bumps the epoch and
+	// lowers the floor (O(1), no scan); stale entries are dropped lazily on their
+	// next read. txNum slots
+	// are reused across forks, so the epoch — not the txNum — is what tells a
+	// dead fork's write apart from the live fork's at the same txNum.
+	epoch       atomic.Uint32
+	unwindFloor atomic.Uint64
 
-	hits      atomic.Uint64
-	misses    atomic.Uint64
-	inserts   atomic.Uint64
-	evictions atomic.Uint64
-	dropped   atomic.Uint64
+	hits         atomic.Uint64
+	misses       atomic.Uint64
+	inserts      atomic.Uint64
+	evictions    atomic.Uint64
+	dropped      atomic.Uint64
+	staleEvicted atomic.Uint64 // entries dropped lazily on read after an unwind
 
 	sizeFunc func(T) int
 }
@@ -101,6 +112,9 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 		mode:      mode,
 		sizeFunc:  sizeFunc,
 	}
+	// Before any unwind every entry predates the (nonexistent) floor, so all
+	// reads are valid; the floor only drops once an unwind happens.
+	c.unwindFloor.Store(math.MaxUint64)
 	// OnEvict fires for capacity-driven LRU eviction (ModeEvictLRU) and
 	// for explicit Remove(). In both cases we want currentSize to follow.
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
@@ -138,8 +152,8 @@ func (c *DomainCache) Get(key []byte) ([]byte, bool) {
 }
 
 // Put stores data for the given key, implementing the Cache interface.
-func (c *DomainCache) Put(key []byte, value []byte) {
-	c.GenericCache.Put(key, value)
+func (c *DomainCache) Put(key []byte, value []byte, txNum uint64) {
+	c.GenericCache.Put(key, value, txNum)
 }
 
 // Delete removes the data for the given key, delegating to GenericCache.
@@ -156,6 +170,21 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 		var zero T
 		return zero, false
 	}
+	// Lazy unwind invalidation: an entry from a superseded epoch whose txNum is
+	// at or above the unwind floor reflects dead-fork state — drop it and miss so
+	// the read falls through to the reverted domain and repopulates. The floor is
+	// the first unwound txNum (Min(UnwindPoint+1), the first txNum of the first
+	// rolled-back block), so an entry stamped exactly at the floor belongs to a
+	// dead block — e.g. an EIP-4788 beacon-root write in the block-begin system
+	// tx — and must be dropped; >= not > (the surviving block's last txNum is
+	// floor-1, so this never drops a live entry).
+	if e.epoch != c.epoch.Load() && e.txNum >= c.unwindFloor.Load() {
+		c.data.Remove(h)
+		c.staleEvicted.Add(1)
+		c.misses.Add(1)
+		var zero T
+		return zero, false
+	}
 	c.hits.Add(1)
 	return e.val, true
 }
@@ -164,17 +193,18 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // sharded LRU evicts cold entries when its entry-count cap is reached.
 // In ModeNoOp inserts that would overflow the byte budget are dropped
 // (and counted via the dropped metric).
-func (c *GenericCache[T]) Put(key []byte, value T) {
+func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
+	ep := c.epoch.Load()
 
 	// Existing key — update in place. Reuse the stored key buffer to
 	// avoid an extra allocation; the freshly-decoded value replaces the
 	// old one.
 	if existing, ok := c.data.Get(h); ok && bytes.Equal(existing.key, key) {
 		oldSize := existing.size
-		c.data.Add(h, entry[T]{key: existing.key, val: value, size: newSize})
+		c.data.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
 		c.currentSize.Add(int64(newSize - oldSize))
 		return
 	}
@@ -191,7 +221,7 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 	// trade-off code_cache.go / balcache.go / db/state/cache.go accept.
 
 	keyCopy := common.Copy(key)
-	c.data.Add(h, entry[T]{key: keyCopy, val: value, size: newSize})
+	c.data.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
 	c.currentSize.Add(int64(newSize))
 	c.inserts.Add(1)
 }
@@ -210,50 +240,25 @@ func (c *GenericCache[T]) Clear() {
 	c.currentSize.Store(0)
 }
 
-// GetBlockHash returns the hash of the last block processed by the cache.
-func (c *GenericCache[T]) GetBlockHash() common.Hash {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.blockHash
-}
-
-// SetBlockHash sets the hash of the current block being processed.
-func (c *GenericCache[T]) SetBlockHash(hash common.Hash) {
-	c.mu.Lock()
-	c.blockHash = hash
-	c.mu.Unlock()
-}
-
-// ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
-func (c *GenericCache[T]) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.blockHash == (common.Hash{}) {
-		c.data.Purge()
-		c.currentSize.Store(0)
-		c.blockHash = incomingBlockHash
-		return true
+// Unwind invalidates entries that reflect dead-fork state. unwindToTxNum is the
+// first rolled-back txNum (Min(UnwindPoint+1)); every entry at or above it is on
+// the dead fork. O(1): bump the epoch (so entries written in the new, live epoch
+// stay valid) and lower the floor to unwindToTxNum (so entries strictly below it
+// — which predate the unwind and can't be stale — stay warm). Stale entries (old
+// epoch, txNum >= floor) are dropped lazily on their next read. The floor only
+// ever moves down, to the deepest unwind seen, so a later shallower unwind can't
+// resurrect entries an earlier deeper one invalidated.
+func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
+	c.epoch.Add(1)
+	for {
+		cur := c.unwindFloor.Load()
+		if unwindToTxNum >= cur {
+			break
+		}
+		if c.unwindFloor.CompareAndSwap(cur, unwindToTxNum) {
+			break
+		}
 	}
-
-	if c.blockHash == parentHash {
-		c.blockHash = incomingBlockHash
-		return true
-	}
-
-	c.data.Purge()
-	c.currentSize.Store(0)
-	c.blockHash = incomingBlockHash
-	return false
-}
-
-// ClearWithHash clears the cache and sets the block hash.
-func (c *GenericCache[T]) ClearWithHash(hash common.Hash) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data.Purge()
-	c.currentSize.Store(0)
-	c.blockHash = hash
 }
 
 // Len returns the number of entries in the cache.
@@ -283,6 +288,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	inserts := c.inserts.Swap(0)
 	evictions := c.evictions.Swap(0)
 	dropped := c.dropped.Swap(0)
+	staleEvicted := c.staleEvicted.Swap(0)
 	total := hits + misses
 	var hitRate float64
 	if total > 0 {
@@ -290,11 +296,12 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	}
 	sizeBytes := c.currentSize.Load()
 	usagePct := float64(sizeBytes) / float64(c.capacityB) * 100
-	log.Debug(name+" cache stats",
+	log.Info(name+" cache stats",
 		"mode", c.mode.String(),
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
+		"stale_evicted", staleEvicted, "epoch", c.epoch.Load(),
 		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
-		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
+		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }

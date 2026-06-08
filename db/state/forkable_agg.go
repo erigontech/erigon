@@ -177,11 +177,13 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 			}
 		}
 
+		r.wg.Add(1)
 		go func() {
+			defer r.wg.Done()
 			defer func() {
 				close(fin)
 			}()
-			if err := r.MergeLoop(r.ctx); err != nil {
+			if err := r.mergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					r.logger.Debug("[fork_agg] MergeLoop cancelled/stopped", "err", err)
 					return
@@ -215,7 +217,13 @@ func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	return res
 }
 
-func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
+func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
+	r.wg.Add(1)
+	defer r.wg.Done()
+	return r.mergeLoop(ctx)
+}
+
+func (r *ForkableAgg) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || r.mergeDisabled.Load() || !r.mergingFiles.CompareAndSwap(false, true) {
 		r.logger.Debug("[fork_agg] MergeLoop disabled or already in progress. Skipping...")
 		return nil
@@ -228,8 +236,6 @@ func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	r.wg.Add(1)
-	defer r.wg.Done()
 	defer r.mergingFiles.Store(false)
 
 	somethingMerged := true

@@ -779,7 +779,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 // flush, so they hold committed, fork-agnostic state.
 func (sd *TemporalMemBatch) FlushWithCallback(
 	ctx context.Context, tx kv.RwTx,
-	cb func(domain kv.Domain, k []byte, v []byte, step kv.Step),
+	cb func(domain kv.Domain, k []byte, v []byte, txNum uint64),
 ) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
@@ -790,7 +790,7 @@ func (sd *TemporalMemBatch) FlushWithCallback(
 				continue
 			}
 			latest := history[len(history)-1]
-			cb(kv.Domain(d), []byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
+			cb(kv.Domain(d), []byte(keyStr), latest.data, latest.txNum)
 		}
 	}
 	// StorageDomain entries live in sd.storage (a btree), not sd.domains.
@@ -799,7 +799,7 @@ func (sd *TemporalMemBatch) FlushWithCallback(
 			return true
 		}
 		latest := history[len(history)-1]
-		cb(kv.StorageDomain, []byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
+		cb(kv.StorageDomain, []byte(keyStr), latest.data, latest.txNum)
 		return true
 	})
 

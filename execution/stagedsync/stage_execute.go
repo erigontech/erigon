@@ -60,11 +60,6 @@ const (
 	stateStreamLimit uint64 = 1_000
 )
 
-type headerDownloader interface {
-	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
-	POSSync() bool
-}
-
 type ExecuteBlockCfg struct {
 	db            kv.TemporalRwDB
 	batchSize     datasize.ByteSize
@@ -76,7 +71,6 @@ type ExecuteBlockCfg struct {
 	badBlockHalt  bool
 	stateStream   bool
 	blockReader   services.FullBlockReader
-	hd            headerDownloader
 	author        accounts.Address
 	// last valid number of the stage
 
@@ -102,7 +96,6 @@ func StageExecuteBlocksCfg(
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
-	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
@@ -124,7 +117,6 @@ func StageExecuteBlocksCfg(
 		stateStream:     stateStream,
 		badBlockHalt:    badBlockHalt,
 		blockReader:     blockReader,
-		hd:              hd,
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,
@@ -212,8 +204,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 		}
 	}
-	// Get the hash of the last executed block (the tip we're unwinding from)
-	// so RevertWithDiffset can detect if the cache was modified by a rolled-back tx.
+	// Get the hash of the last executed block (the tip we're unwinding from).
 	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
 	if err != nil {
 		lastExecHash = common.Hash{}
@@ -221,14 +212,12 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	// Surgically evict keys touched by the unwound blocks from the state cache.
-	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
-	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
-		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
-		if err != nil {
-			unwindTargetHash = common.Hash{}
-		}
-		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
+	// Invalidate the state cache for everything above the unwind point. txNum/epoch
+	// based and diffset-free (see StateCache.Unwind), so it runs unconditionally —
+	// independent of whether changesets were generated for the unwound range, which
+	// they are not below the reorg window. Matches the domain overlay's maxtx prune.
+	if stateCache := doms.GetStateCache(); stateCache != nil {
+		stateCache.Unwind(txNum)
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)

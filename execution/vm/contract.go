@@ -53,6 +53,14 @@ type Contract struct {
 	CodeHash accounts.CodeHash
 
 	value uint256.Int
+
+	// selfBalance memoizes SELFBALANCE for the lifetime of this frame.
+	// Invalidated after opcodes that return control to this frame and may have
+	// changed the account's balance via a nested execution (CALL, CALLCODE,
+	// DELEGATECALL, CREATE, CREATE2). STATICCALL is exempt (whole subtree is
+	// read-only). SELFDESTRUCT is exempt because the frame halts.
+	selfBalance       uint256.Int
+	selfBalanceCached bool
 }
 
 // around 64MB cache in the worst case.
@@ -105,7 +113,8 @@ func (c *Contract) isCode(udest uint64) bool {
 	c.analysis = codeBitmap(c.Code)
 
 	if !isCodeHashZero {
-		jumpDestCache.Put(codeHash[:], c.analysis)
+		// content-addressed by codeHash and never unwound, so txNum is irrelevant
+		jumpDestCache.Put(codeHash[:], c.analysis, 0)
 	}
 
 	return c.analysis.codeSegment(udest)

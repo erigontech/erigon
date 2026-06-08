@@ -19,38 +19,28 @@ import (
 )
 
 // BatchBranchResolver resolves a batch of compact-encoded CommitmentDomain
-// keys to their (already-dereferenced) branch-node values, reading from the
-// file layer only — no MDBX cursor, hence no per-key cgo boundary crossing.
-// The implementation is expected to fan the batch out across worker RoTxs;
-// keys are passed in ascending key order so a contiguous-slice partition maps
-// to contiguous file regions (drives page-cache readahead). Results MUST be
-// returned in the same order as keys, with vals[i] == nil for keys not present
-// in the file layer.
-//
-// Decoupled (callback form) so the commitment package needn't import db/state.
+// keys to branch-node values, reading from the file layer only (no MDBX cursor,
+// no per-key cgo crossing). Keys are passed in ascending key order so a
+// contiguous-slice partition maps to contiguous file regions (page-cache
+// readahead). Results MUST be returned in the same order as keys, with
+// vals[i] == nil for keys not present.
 type BatchBranchResolver func(keys [][]byte) (vals [][]byte, err error)
 
-// estimatedEntryCost is the predicted RAM cost of pinning a (key, value) branch
-// entry — see estimatedEntryOverheadBytes in preload.go.
 func estimatedEntryCost(key, value []byte) int {
 	return estimatedEntryOverheadBytes + len(key) + len(value)
 }
 
-// minEntryBytes is a true lower bound on estimatedEntryCost for a storage-trunk
+// minEntryBytes: true lower bound on estimatedEntryCost for a storage-trunk
 // branch (33 = shortest HexToCompact key at depth >= 64; value may be empty).
-// Used to bound a wave's *file fetch*: capping at remaining/minEntryBytes+1
-// never under-fetches, so the budget is guaranteed exhausted inside the wave.
+// Bounds a wave's file fetch so the budget is guaranteed exhausted inside it.
 const minEntryBytes = estimatedEntryOverheadBytes + 33
 
-// maxStorageTrunkDepth is the deepest total nibble path a storage branch can
-// have: 64 (account path) + 64 (keccak256(slot)) = 128.
+// maxStorageTrunkDepth: 64 (account path) + 64 (keccak256(slot)) = 128.
 const maxStorageTrunkDepth = 128
 
-// pathKey is a single frontier entry: the nibble path (1 byte / nibble) and the
-// HexToCompact-encoded CommitmentDomain key.
 type pathKey struct {
 	path []byte // nibble path (1 byte / nibble)
-	key  []byte // HexToCompact(path) — the CommitmentDomain key
+	key  []byte // HexToCompact(path)
 }
 
 func toPathKey(path []byte) pathKey {
@@ -60,37 +50,17 @@ func toPathKey(path []byte) pathKey {
 	return pathKey{path: path, key: kc}
 }
 
-// ContractTrunkPreloadParallel is the resumable analogue of ContractTrunkPreload
-// (the serial BFS via CommitmentReader). It walks the contract's storage subtree
-// breadth-first one depth-level ("wave") at a time and resolves missing branches
-// through a batched, file-only BatchBranchResolver — no MDBX boundary crossings
-// in the hot path. Each Run advances zero or more complete waves bounded by a
-// per-call step budget; partial waves can be truncated by the file-fetch cap to
-// fit the budget, but the truncated tail's siblings are skipped (BFS at the
-// frontier is then resumed at depth+1 from the children of whatever was pinned).
+// ContractTrunkPreloadParallel is the wave-BFS analogue of ContractTrunkPreload.
+// It walks one depth-level per wave and resolves missing branches through a
+// batched, file-only BatchBranchResolver (no MDBX in the hot path). Each Run
+// advances zero or more waves bounded by stepBudgetBytes; partial waves are
+// truncated to fit the budget and resumed on the next Run.
 //
-// Mirrors ContractTrunkPreload's API surface (Run/PinnedTotal/UsedBytes/
-// QueueRemaining/MaxDepthReached/PinnedPrefixes/ContractHash) so it slots in to
-// adaptive_pin.go as a drop-in replacement without changing the controller's
-// promote/extend/demote loop.
+// dbBranches shadows file values for the same key — DB is authoritative for
+// steps not yet flushed to files. Pass nil for cold-snapshot / file-only mode.
 //
-// Correctness: dbBranches values shadow file values for the same key (DB is
-// authoritative for steps not yet flushed to files), so callers extending on a
-// live node should pass the freshest MDBX-resident set per Run. With an empty
-// dbBranches Run is a pure file-only preload — correct only from a cold snapshot
-// or when MDBX/SD's flush-callback has already populated the cache with any
-// freshly-written branches that would otherwise shadow the file values.
-//
-// Caller MUST NOT use the same instance from multiple goroutines. The
-// BatchBranchResolver is passed PER Run rather than held on the struct so
-// callers can supply a fresh tx-scoped resolver each call (e.g. adaptive
-// controller building a resolver from the in-flight Flush tx every block).
-//
-// Resumability: when a step budget cuts a wave mid-iteration, the un-processed
-// items at the current depth are preserved in `frontier`; the children of
-// the items that did get pinned this wave land in `pendingChildren` at depth
-// nextDepth+1. The next Run finishes the current depth first, then advances.
-// Once a wave fully completes, frontier := pendingChildren and nextDepth++.
+// Not goroutine-safe. The resolver is passed per-Run (not held) so callers
+// can supply a fresh tx-scoped resolver each block.
 type ContractTrunkPreloadParallel struct {
 	contractHash    []byte
 	frontier        []pathKey // paths to process at depth = nextDepth
@@ -103,10 +73,7 @@ type ContractTrunkPreloadParallel struct {
 	dbHitsPinned    int
 }
 
-// NewContractTrunkPreloadParallel seeds a resumable preload state at depth 64
-// (storage subtree root) for the given contract. The resolver is passed
-// per-Run (not stored on the state) so callers can hand a fresh tx-scoped
-// resolver to each call.
+// NewContractTrunkPreloadParallel seeds a preload at depth 64 (storage subtree root).
 func NewContractTrunkPreloadParallel(contractHash []byte) (*ContractTrunkPreloadParallel, error) {
 	if len(contractHash) != 32 {
 		return nil, fmt.Errorf("NewContractTrunkPreloadParallel: contractHash must be 32 bytes, got %d", len(contractHash))
@@ -121,20 +88,9 @@ func NewContractTrunkPreloadParallel(contractHash []byte) (*ContractTrunkPreload
 	}, nil
 }
 
-// Run advances the wave-BFS, pinning branches into cache until either the step
-// budget is exhausted, the frontier is empty (preload complete), or
-// maxStorageTrunkDepth is reached. Returns newlyPinned during THIS call (not
-// cumulative — see PinnedTotal), whether the preload is now complete, and any
-// resolver error.
-//
-// dbBranches is consulted per wave (MDBX-resident overlays — values shadow file
-// values, freshest). Pass nil for file-only mode (correct from a cold snapshot
-// or when SD.Flush's cache callback has already populated freshly-written
-// branches into the cache that would otherwise need to come from dbBranches).
-//
-// On resolver error the partial pin set survives; the wave position is
-// preserved so a retry on the next Run picks up where it left off (at the same
-// p.nextDepth).
+// Run advances the wave-BFS until stepBudgetBytes is exhausted, the frontier
+// is empty, or maxStorageTrunkDepth is reached. On resolver error the partial
+// pin set and wave position survive for retry on the next Run.
 func (p *ContractTrunkPreloadParallel) Run(
 	stepBudgetBytes int,
 	dbBranches map[string][]byte,
@@ -156,8 +112,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	chunkPinned := 0
 	budgetHit := false
 
-	// pin records the entry, advances accounting, queues the branch's
-	// children. Returns false if the entry didn't fit (step budget exhausted).
+	// pin records the entry and queues its children. Returns false on budget hit.
 	pin := func(pk pathKey, v []byte, depth int, next *[]pathKey) bool {
 		cost := estimatedEntryCost(pk.key, v)
 		if p.usedBytes+cost > stepCap {
@@ -195,14 +150,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
-		// Ascending key order so a contiguous-slice partition of the file batch
-		// is contiguous-in-file (page-cache readahead). BFS append order is
-		// already key-sorted (HexToCompact packing is monotone for same-length
-		// paths), but sort defensively — a few k entries / wave, cheap.
+		// Ascending key order so the file-batch partition is contiguous-in-file.
 		sort.Slice(p.frontier, func(i, j int) bool { return bytes.Compare(p.frontier[i].key, p.frontier[j].key) < 0 })
 
-		// Split this wave into DB-resident hits (have the value) and file-misses
-		// (need a fetch). Both stay sorted (sub-sequences of the sorted frontier).
 		var dbHits []pathKey
 		var dbVals [][]byte
 		var fileMiss []pathKey
@@ -217,10 +167,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 		}
 
-		// Cap the *file fetch* at what the step budget can absorb after the
-		// DB-hits (which we pin first). minEntryBytes is a true lower bound,
-		// so this never under-fetches; if the cap truncates the wave, the
-		// un-fetched tail is preserved in p.frontier for the next Run.
+		// Cap the file fetch by what the budget can absorb after dbHits.
 		var fileMissDeferred []pathKey
 		if fileBudget := stepCap - p.usedBytes - dbHitsBytes; fileBudget <= 0 {
 			fileMissDeferred = fileMiss
@@ -238,7 +185,6 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 			fileVals, err = resolve(keys)
 			if err != nil {
-				// State unchanged — retry on next Run picks up at same depth.
 				return chunkPinned, false, fmt.Errorf("preload at depth %d: %w", depth, err)
 			}
 			if len(fileVals) != len(keys) {
@@ -246,10 +192,6 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 		}
 
-		// Pin in dbHits-then-fileMiss order. Children of pinned items accumulate
-		// in p.pendingChildren (depth nextDepth+1). On budget hit mid-iteration,
-		// the un-processed remainder of dbHits/fileMiss + the deferred
-		// fileMissDeferred all become the new frontier (still at nextDepth).
 		dbHitStop := len(dbHits)
 		for i, pk := range dbHits {
 			if !pin(pk, dbVals[i], depth, &p.pendingChildren) {
@@ -263,7 +205,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			for i, pk := range fileMiss {
 				v := fileVals[i]
 				if v == nil {
-					continue // not in the file layer either
+					continue
 				}
 				if !pin(pk, v, depth, &p.pendingChildren) {
 					fileMissStop = i
@@ -273,26 +215,18 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 
 		if budgetHit {
-			// Preserve un-pinned items at the current depth for the next Run.
-			// Resolved-but-not-pinned file values are discarded (callable resolver
-			// will be re-invoked on the next Run for these keys).
+			// Preserve un-pinned items at current depth; pendingChildren stays
+			// at depth+1 for when this depth is drained on a future Run.
 			rest := make([]pathKey, 0, len(dbHits)-dbHitStop+len(fileMiss)-fileMissStop+len(fileMissDeferred))
 			rest = append(rest, dbHits[dbHitStop:]...)
 			rest = append(rest, fileMiss[fileMissStop:]...)
 			rest = append(rest, fileMissDeferred...)
 			p.frontier = rest
-			// Don't advance nextDepth — pendingChildren stays at depth+1 for
-			// when this depth is fully drained on a future Run.
 			break
 		}
 
-		// Wave fully processed. Anything in fileMissDeferred (won't have any
-		// since !budgetHit ⇒ no truncation) goes back to frontier; pending
-		// children promote to the next wave.
 		if len(fileMissDeferred) > 0 {
-			// Shouldn't happen — if we got here without budgetHit, no truncation
-			// occurred. Defensive: re-queue them at the current depth so we
-			// don't lose data.
+			// Defensive: !budgetHit should mean no truncation. Re-queue at current depth.
 			p.frontier = fileMissDeferred
 		} else {
 			p.frontier = p.pendingChildren
@@ -318,43 +252,21 @@ func (p *ContractTrunkPreloadParallel) Run(
 	return chunkPinned, queueEmpty, nil
 }
 
-// PinnedTotal returns the cumulative number of branches pinned by this preload
-// state across all Run calls.
-func (p *ContractTrunkPreloadParallel) PinnedTotal() int { return p.pinned }
+func (p *ContractTrunkPreloadParallel) PinnedTotal() int     { return p.pinned }
+func (p *ContractTrunkPreloadParallel) UsedBytes() int       { return p.usedBytes }
+func (p *ContractTrunkPreloadParallel) MaxDepthReached() int { return p.maxDepthReached }
+func (p *ContractTrunkPreloadParallel) DbHitsPinned() int    { return p.dbHitsPinned }
+func (p *ContractTrunkPreloadParallel) ContractHash() []byte { return p.contractHash }
 
-// UsedBytes returns the cumulative byte cost of this preload's pin set.
-func (p *ContractTrunkPreloadParallel) UsedBytes() int { return p.usedBytes }
-
-// QueueRemaining returns the number of paths still queued for descent
-// (un-processed at the current depth + accumulated children at the next).
-// Zero means the preload is complete; further Run calls are no-ops.
 func (p *ContractTrunkPreloadParallel) QueueRemaining() int {
 	return len(p.frontier) + len(p.pendingChildren)
 }
 
-// MaxDepthReached returns the deepest trie depth pinned so far.
-func (p *ContractTrunkPreloadParallel) MaxDepthReached() int { return p.maxDepthReached }
-
-// PinnedPrefixes returns the prefix slices this preload has added to the cache
-// so far. The adaptive controller uses this to Invalidate the contract's pin
-// set on demotion. The returned slice aliases internal storage; do not mutate.
+// PinnedPrefixes returns slices aliasing internal storage — do not mutate.
 func (p *ContractTrunkPreloadParallel) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
 
-// ContractHash returns the contract this preload targets.
-func (p *ContractTrunkPreloadParallel) ContractHash() []byte { return p.contractHash }
-
-// DbHitsPinned returns the cumulative number of branches that were pinned from
-// the dbBranches overlay (rather than via the file resolver). Diagnostic only.
-func (p *ContractTrunkPreloadParallel) DbHitsPinned() int { return p.dbHitsPinned }
-
-// PreloadContractTrunkParallel pins contract H's storage-trunk branches into
-// cache in a single call, bounded by ramBudgetBytes. Convenience wrapper around
-// NewContractTrunkPreloadParallel + Run for callers that don't need phased
-// loading. The startup PIN_CONTRACT_TRUNKS hook uses this; the adaptive layer
-// holds a *ContractTrunkPreloadParallel and calls Run incrementally.
-//
-// dbBranches is the MDBX-resident set — values shadow file values for the same
-// key. Pass nil/empty for file-only mode (correct only from a cold snapshot).
+// PreloadContractTrunkParallel is the one-shot wrapper around
+// NewContractTrunkPreloadParallel + Run.
 func PreloadContractTrunkParallel(
 	contractHash []byte,
 	ramBudgetBytes int,

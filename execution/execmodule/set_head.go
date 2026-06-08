@@ -103,6 +103,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer sd.Close()
 
+	// Wire the shared state cache so unwindExec3 invalidates it (epoch bump +
+	// floor lower). Without this, GetStateCache() returns nil during the unwind,
+	// the cache keeps pre-unwind values, and the next FCU re-execution reads them
+	// and computes a stale state root (BadBlock). Mirrors ValidateChain/forkchoice.
+	sd.SetStateCache(e.stateCache)
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
@@ -148,15 +154,6 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := sd.Flush(ctx, tx); err != nil {
 		return fmt.Errorf("failed to flush shared domains: %w", err)
 	}
-
-	// SetHead unwinds commitment history but the BranchCache (aggregator-
-	// scope, shared across SDs) still holds entries from the pre-unwind
-	// state — notably KeyCommitmentState pointing at the original head
-	// blockNum. The next FCU's NewSharedDomains.SeekCommitment would hit
-	// the cache, see the original-head blockNum, and trip
-	// ErrBehindCommitment against the now-truncated TxNums index. Clear
-	// the cache so subsequent reads see the post-unwind MDBX state.
-	sd.ClearBranchCache()
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
