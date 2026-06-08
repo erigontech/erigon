@@ -164,6 +164,23 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return fmt.Errorf("database not initialized")
 	}
 
+	// Pre-Flush: drop any cached entries past the EL's current head.
+	//
+	// An admin SetHead (mode B) may have unwound the EL chain past entries
+	// we already buffered. Those entries' parent TDs were wiped by
+	// Provider.Unwind, so engine.InsertBlocks would loop forever on
+	// "parent's total difficulty not found". Reproduced live on hoodi
+	// 2026-06-08 — see docs/caplin-componentization-requirements.md.
+	//
+	// TODO(componentization): the right fix is for Caplin to write through
+	// the storage component and subscribe to its bus, where Provider.Unwind
+	// already publishes the event we'd want to consume. While Caplin is not
+	// a component, this prune-on-Flush stop-gap stands in for that
+	// subscription. See docs/caplin-componentization-requirements.md.
+	if err := p.pruneStaleCachedBlocks(ctx); err != nil {
+		p.logger.Warn("[BlockCollector] failed to prune stale cached blocks past EL head", "err", err)
+	}
+
 	blocksBatch := []*types.Block{}
 	inserted := uint64(0)
 	var lastInsertedBlock *types.Block
@@ -407,6 +424,52 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	}
 
 	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil
+}
+
+// pruneStaleCachedBlocks deletes any rows in p.db whose block number is
+// strictly greater than the EL's current head. See the call site in Flush
+// for the rationale; see docs/caplin-componentization-requirements.md for
+// the architectural follow-up.
+//
+// Idempotent and cheap on the steady-state path (no cached rows past
+// head → cursor.Seek returns nil immediately, single RwTx, no deletes).
+func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) error {
+	currentHeader, err := p.engine.CurrentHeader(ctx)
+	if err != nil {
+		return fmt.Errorf("CurrentHeader: %w", err)
+	}
+	if currentHeader == nil {
+		// No head yet (e.g. genesis before any execution). Nothing to prune.
+		return nil
+	}
+	elHead := currentHeader.Number.Uint64()
+	cutoff := make([]byte, 8)
+	binary.BigEndian.PutUint64(cutoff, elHead+1)
+
+	var pruned int
+	if err := p.db.Update(ctx, func(tx kv.RwTx) error {
+		cursor, err := tx.RwCursor(kv.Headers)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close()
+		for k, _, err := cursor.Seek(cutoff); k != nil; k, _, err = cursor.Next() {
+			if err != nil {
+				return err
+			}
+			if err := cursor.DeleteCurrent(); err != nil {
+				return err
+			}
+			pruned++
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if pruned > 0 {
+		p.logger.Info("[BlockCollector] pruned stale cached blocks past EL head", "elHead", elHead, "pruned", pruned)
+	}
+	return nil
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64, lastInserted **types.Block) error {
