@@ -184,11 +184,11 @@ byte-identical BEFORE any cache logic — so a later failure localizes to the ca
 not the extraction. `parallel_mount.go` stays untouched (ModeParallel unaffected by
 construction; the meaningful guard is streaming-root-unchanged across this swap).
 
-- [ ] add `sc.dfsDeepLocal(...)` mirroring `dfsSubtreeDeep` (big-account detect, `concurrentStorageRoot`-equivalent via the Task-1 per-nibble fold + assembler, `setAccountStorageRoot` inject, skip storage children) — no cache yet
-- [ ] `foldSplit` calls `sc.dfsDeepLocal` instead of `sc.pph.dfsSubtreeDeep`
-- [ ] gate: `TestStreaming_DeepBranchParity` + the `streaming` arm of `requireIncrementalEquiv` stay green (streaming root + branches byte-identical across the extraction)
-- [ ] confirm `ModeParallel` (`ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1`) still green (it cannot regress — `parallel_mount.go` untouched — but verify)
-- [ ] run tests — must pass before next task
+- [x] add `sc.dfsDeepLocal(...)` mirroring `dfsSubtreeDeep` (big-account detect, `concurrentStorageRoot`-equivalent via the Task-1 per-nibble fold + assembler, `setAccountStorageRoot` inject, skip storage children) — no cache yet
+- [x] `foldSplit` calls `sc.dfsDeepLocal` instead of `sc.pph.dfsSubtreeDeep` (removed the now-vestigial `sc.pph` field; the deep walk no longer routes through parallel_mount.go)
+- [x] gate: `TestStreaming_DeepBranchParity` + the `streaming` arm of `requireIncrementalEquiv` stay green (streaming root + branches byte-identical across the extraction)
+- [x] confirm `ModeParallel` (`ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1`) still green (it cannot regress — `parallel_mount.go` untouched — but verify)
+- [x] run tests — must pass before next task
 
 ### Task 3: Per-account cache + TouchKey routing + promotion + lifecycle + seam
 

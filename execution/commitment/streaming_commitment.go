@@ -93,11 +93,6 @@ type StreamingCommitter struct {
 	splits     map[byte]*splitState
 	eagerFloor uint64
 
-	// pph is held only to reuse the proven deep storage fan-out
-	// (dfsSubtreeDeep / concurrentStorageRoot) for big-storage accounts; its
-	// factory and worker count are kept in sync with sc at Process time.
-	pph *ParallelPatriciaHashed
-
 	// trieMu serializes prefix-trie mutation (TouchKey's Insert) against the
 	// background scheduler's structural reads (snapshotting a split's keys).
 	trieMu sync.RWMutex
@@ -120,6 +115,11 @@ type StreamingCommitter struct {
 
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
+
+	// deepLocalFolds counts big-storage accounts folded through the
+	// streaming-local deep walk (dfsDeepLocal) — a test seam proving the
+	// streaming path no longer routes through parallel_mount.go's deep fan-out.
+	deepLocalFolds atomic.Uint64
 
 	// rootCell + flags snapshot the base trie's terminal root after a successful
 	// fold so the owning ParallelPatriciaHashed can promote them into its
@@ -148,7 +148,6 @@ func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, c
 		trie:           newPrefixTrie(),
 		splits:         make(map[byte]*splitState),
 		eagerFloor:     defaultEagerFold,
-		pph:            NewParallelPatriciaHashed(ctxFactory, accountKeyLen, cfg),
 	}
 	sc.resetPool()
 	return sc
@@ -174,9 +173,6 @@ func (sc *StreamingCommitter) SetNumWorkers(n int) {
 // SetTrieContextFactory replaces the per-worker context factory.
 func (sc *StreamingCommitter) SetTrieContextFactory(f TrieContextFactory) {
 	sc.trieCtxFactory = f
-	if sc.pph != nil {
-		sc.pph.SetTrieContextFactory(f)
-	}
 }
 
 // SetLeaveDeferredForCaller makes Process leave the accumulated deferred branch
@@ -459,8 +455,6 @@ func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	sc.bgCtx = ctx
 	sc.quit = make(chan struct{})
 	sc.dirtyCh = make(chan byte, 256)
-	sc.pph.SetNumWorkers(sc.numWorkers)
-	sc.pph.SetTrieContextFactory(sc.trieCtxFactory)
 	sc.started.Store(true)
 
 	sc.wg.Add(sc.numWorkers)
@@ -690,9 +684,6 @@ func (o *overlayContext) Storage(plainKey []byte) (*Update, error) { return o.ba
 // the base, recording which slots were folded. It never applies or merges; the
 // folded cell and the fold's deferred branch updates land in each splitState.
 func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
-	sc.pph.SetNumWorkers(sc.numWorkers)
-	sc.pph.SetTrieContextFactory(sc.trieCtxFactory)
-
 	var present [16]bool
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(sc.numWorkers)
@@ -781,8 +772,8 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 
 // foldSplit re-folds one top-nibble subtree statelessly: mount a pooled worker
 // on the unfolded base, replay the split's keys in sorted (in-order) prefix-trie
-// order via the deep walk (a big-storage account's storage fans out concurrently
-// through concurrentStorageRoot), fold to the split cell — never to the root —
+// order via the streaming-local deep walk (a big-storage account's storage fans
+// out concurrently through storageRootLocal), fold to the split cell — never to the root —
 // and capture the fold's deferred branch updates into s, replacing any prior set.
 func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
@@ -801,7 +792,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path := make([]byte, 0, 144)
 	path = append(path, ni)
 	path = append(path, child.ext...)
-	if err := sc.pph.dfsSubtreeDeep(ctx, w, &pu, child, path); err != nil {
+	if err := sc.dfsDeepLocal(ctx, w, &pu, child, path); err != nil {
 		w.resetForReuse()
 		sc.workerPool.Put(w)
 		for _, upd := range pu.deferredCombined {
@@ -835,6 +826,146 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	s.dirty = false
 	s.mu.Unlock()
 	return nil
+}
+
+// DeepLocalFolds reports how many big-storage accounts the streaming-local deep
+// walk folded — a test seam proving the deep path no longer calls parallel_mount.
+func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds.Load() }
+
+// dfsDeepLocal is the streaming-local copy of ParallelPatriciaHashed.dfsSubtreeDeep:
+// it walks a mount worker's subtree and, at an account whose touched storage
+// exceeds deepStorageThreshold, folds that account's storage concurrently via the
+// streaming-local primitives (storageRootLocal), injects the storageRoot into the
+// account leaf, and skips the storage stream. Cache-free: it re-folds the whole
+// storage every call, byte-identical to dfsSubtreeDeep, so a later cache failure
+// localizes to the cache, not this extraction. parallel_mount.go is untouched.
+func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHashed, pu *parallelUpdate, node *prefixNode, path []byte) error {
+	if node == nil {
+		return nil
+	}
+	if node.plainKey != nil {
+		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
+			return err
+		}
+	} else if node.bitmap == 0 {
+		return errors.New("StreamingCommitter: trie leaf without a plainKey")
+	}
+
+	if node.plainKey != nil && len(path) == 64 && bits.OnesCount16(node.bitmap) >= 2 &&
+		node.subtreeCount > deepStorageThreshold {
+		sr, err := sc.storageRootLocal(pu, node, path)
+		if err != nil {
+			return fmt.Errorf("storageRootLocal: %w", err)
+		}
+		setAccountStorageRoot(w, path, sr)
+		sc.deepLocalFolds.Add(1)
+		return nil
+	}
+
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := byte(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		base := len(path)
+		path = append(path, nib)
+		path = append(path, child.ext...)
+		if err := sc.dfsDeepLocal(ctx, w, pu, child, path); err != nil {
+			return err
+		}
+		path = path[:base]
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return nil
+}
+
+// storageRootLocal folds each first-storage-nibble subtree of one account in its
+// own pooled worker, aggregates the depth-65 child cells into the storage branch,
+// and returns its hash (the account's storageRoot). Streaming-local copy of
+// concurrentStorageRoot reusing the Task-1 per-nibble fold + assembler; path is
+// the 64-nibble account hash.
+func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
+	accNib := int(path[63])
+	var children [16]cell
+	var present uint16
+
+	var g errgroup.Group
+	g.SetLimit(sc.numWorkers)
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := int(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		cpath := make([]byte, len(path), len(path)+1+len(child.ext))
+		copy(cpath, path)
+		cpath = append(cpath, byte(nib))
+		cpath = append(cpath, child.ext...)
+		ni, ch, cp := nib, child, cpath
+		present |= uint16(1) << nib
+		g.Go(func() error {
+			group := collectStorageNibbleKeys(ch, cp)
+			w, release := sc.newStorageWorker()
+			c, err := foldStorageChildCell(w, accNib, group)
+			if err != nil {
+				release()
+				return fmt.Errorf("storage mount[%x] build: %w", ni, err)
+			}
+			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
+				pu.appendDeferred(deferred)
+			}
+			children[ni] = c
+			release()
+			return nil
+		})
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	if err := g.Wait(); err != nil {
+		return common.Hash{}, err
+	}
+
+	w, release := sc.newStorageWorker()
+	sr, err := aggregateStorageRoot(w, path, accNib, &children, present)
+	if err != nil {
+		release()
+		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
+	}
+	if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
+		pu.appendDeferred(deferred)
+	}
+	release()
+	return sr.hash, nil
+}
+
+// newStorageWorker yields a pooled trie worker set up for a deferring storage
+// fold and a release that drains it back to the pool (resetForReuse + Put) and
+// frees its context — the storageWorkerFactory the cache fold helpers consume.
+func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
+	w := sc.workerPool.Get().(*HexPatriciaHashed)
+	wctx, cleanup := sc.trieCtxFactory()
+	w.ResetContext(wctx)
+	w.SetTrace(sc.trace)
+	w.branchEncoder.setDeferUpdates(true)
+	w.SetLeaveDeferredForCaller(true)
+	return w, func() {
+		w.resetForReuse()
+		sc.workerPool.Put(w)
+		if cleanup != nil {
+			cleanup()
+		}
+	}
+}
+
+// collectStorageNibbleKeys walks one first-storage-nibble subtree in sorted order,
+// copying each key's hashed nibbles off the reused walk path; plainKey/update stay
+// referenced. The fold replays them in this (dfsSubtree) order, matching
+// concurrentStorageRoot's live walk byte-for-byte.
+func collectStorageNibbleKeys(node *prefixNode, path []byte) []touchedKey {
+	out := make([]touchedKey, 0, node.subtreeCount)
+	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
+		out = append(out, touchedKey{hk: append([]byte(nil), hk...), pk: pk, upd: upd})
+		return nil
+	})
+	return out
 }
 
 // dropSplitDeferred returns every split's staged deferred branch updates to the
@@ -948,9 +1079,6 @@ func (sc *StreamingCommitter) Reset() {
 		putDeferredUpdate(upd)
 	}
 	sc.deferredForCaller = nil
-	if sc.pph != nil {
-		sc.pph.Reset()
-	}
 	sc.resetPool()
 }
 
@@ -975,9 +1103,5 @@ func (sc *StreamingCommitter) Release() {
 		putDeferredUpdate(upd)
 	}
 	sc.deferredForCaller = nil
-	if sc.pph != nil {
-		sc.pph.Release()
-		sc.pph = nil
-	}
 	sc.resetPool()
 }

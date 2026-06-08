@@ -160,6 +160,34 @@ func TestStreaming_DeepBranchParity(t *testing.T) {
 	}
 }
 
+// TestStreaming_DeepLocalWalkUsed proves the deep big-storage fold now runs
+// through the streaming-local walk (dfsDeepLocal/storageRootLocal) rather than
+// parallel_mount.go: the committer's DeepLocalFolds counter must fire and the
+// root must still match sequential. This is the Task-2 isolation gate.
+func TestStreaming_DeepLocalWalkUsed(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildBigAccountCorpus(15_000)
+
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+	for i := range keys {
+		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+	}
+	root, err := sc.Process(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, root, "streaming-local deep root != sequential")
+	requireBranchParity(t, seqMs, ms)
+	require.NotZero(t, sc.DeepLocalFolds(), "deep account must fold through the streaming-local walk")
+}
+
 // snapshotBranches deep-copies a MockState's stored branches so a later
 // comparison can detect any mid-block write.
 func snapshotBranches(ms *MockState) map[string][]byte {
