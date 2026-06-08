@@ -613,6 +613,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return fmt.Errorf("invalid block access list: %w", err)
 				}
 			}
+			te.logger.Debug("[exec3-bal-verify] block access list load", "block", blockNum, "hasBAL", len(data) > 0 && !dbg.IgnoreBAL, "bytes", len(data))
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

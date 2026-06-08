@@ -21,7 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -47,11 +50,16 @@ type BALRequest struct {
 // BALFetcher fetches EIP-7928 block access lists over eth/71 (EIP-8159). Results
 // are best-effort: a block whose BAL no peer holds is simply absent from the map.
 type BALFetcher interface {
-	// FetchFromPeer requests the BALs for reqs from a single peer (e.g. the peer
-	// that already served the bodies). The returned map is keyed by block hash;
-	// misses are absent. A hash mismatch or protocol violation penalises the peer.
-	FetchFromPeer(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) (map[common.Hash][]byte, error)
+	// Fetch requests the BALs for reqs from peerId; for any BALs that peer doesn't
+	// serve it falls back to fallbackPeers, raced concurrently. The returned map is
+	// keyed by block hash; misses are absent. A hash mismatch or protocol violation
+	// penalises that peer.
+	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) (map[common.Hash][]byte, error)
 }
+
+// balFetchParallelism bounds how many fallback peers Fetch races concurrently when
+// the body peer doesn't serve a batch's BALs.
+const balFetchParallelism = 8
 
 func NewBALFetcher(logger log.Logger, ml *MessageListener, ms *MessageSender, penalizer *PeerPenalizer) BALFetcher {
 	return &balFetcher{
@@ -69,7 +77,105 @@ type balFetcher struct {
 	peerPenalizer   *PeerPenalizer
 }
 
-func (f *balFetcher) FetchFromPeer(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) (map[common.Hash][]byte, error) {
+// Fetch requests reqs from peerId first; for any BALs that peer doesn't serve it
+// falls back to fallbackPeers, racing up to balFetchParallelism concurrently.
+// Misses are simply absent from the result.
+func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, timeout time.Duration) (map[common.Hash][]byte, error) {
+	if len(reqs) == 0 {
+		return nil, nil
+	}
+	// Bound the whole fetch — body peer plus any fallback — to one timeout, so it
+	// completes within the same budget as the concurrent body fetch.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
+		got, err := f.fetchFromPeer(ctx, rs, p, timeout)
+		if err != nil {
+			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
+			return nil
+		}
+		return got
+	}
+	return fetchWithFallback(ctx, reqs, peerId, fallbackPeers, balFetchParallelism, fetch), nil
+}
+
+// fetchWithFallback fetches reqs from peerId and, for any reqs that peer didn't
+// serve, races up to maxParallel fallbackPeers for the remainder, keeping the
+// peerId result where both have a block. fetch is injected so the logic is
+// unit-tested without the network.
+func fetchWithFallback(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, maxParallel int, fetch func(context.Context, []BALRequest, *PeerId) map[common.Hash][]byte) map[common.Hash][]byte {
+	out := make(map[common.Hash][]byte, len(reqs))
+	for hash, bal := range fetch(ctx, reqs, peerId) {
+		out[hash] = bal
+	}
+	missing := missingRequests(reqs, out)
+	if len(missing) == 0 || len(fallbackPeers) == 0 {
+		return out
+	}
+	for hash, bal := range fetchAcrossPeers(ctx, missing, fallbackPeers, maxParallel, fetch) {
+		if _, ok := out[hash]; !ok {
+			out[hash] = bal
+		}
+	}
+	return out
+}
+
+// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and
+// merges their validated results, keeping the first correct BAL per block and
+// cancelling the remaining peers once every req is covered. fetch is injected so
+// the fallback logic is unit-tested without the network.
+func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch func(context.Context, []BALRequest, *PeerId) map[common.Hash][]byte) map[common.Hash][]byte {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		mu  sync.Mutex
+		out = make(map[common.Hash][]byte, len(reqs))
+	)
+	var eg errgroup.Group
+	eg.SetLimit(maxParallel)
+	for i := range peerIds {
+		peerId := &peerIds[i]
+		eg.Go(func() error {
+			if ctx.Err() != nil {
+				return nil
+			}
+			got := fetch(ctx, reqs, peerId)
+			if len(got) == 0 {
+				return nil
+			}
+			mu.Lock()
+			for hash, bal := range got {
+				if _, ok := out[hash]; !ok {
+					out[hash] = bal
+				}
+			}
+			covered := len(out) == len(reqs)
+			mu.Unlock()
+			if covered {
+				cancel()
+			}
+			return nil
+		})
+	}
+	_ = eg.Wait()
+	return out
+}
+
+// missingRequests returns the subset of reqs whose hash is not present in have.
+func missingRequests(reqs []BALRequest, have map[common.Hash][]byte) []BALRequest {
+	if len(have) == 0 {
+		return reqs
+	}
+	missing := make([]BALRequest, 0, len(reqs))
+	for _, r := range reqs {
+		if _, ok := have[r.Hash]; !ok {
+			missing = append(missing, r)
+		}
+	}
+	return missing
+}
+
+func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) (map[common.Hash][]byte, error) {
 	if len(reqs) == 0 {
 		return nil, nil
 	}
@@ -122,7 +228,6 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]rlp.RawValue, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
 	messages := make(chan *DecodedInboundMessage[*eth.BlockAccessListsPacket66])
 	observer := func(message *DecodedInboundMessage[*eth.BlockAccessListsPacket66]) {
 		select {
@@ -156,7 +261,8 @@ func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *P
 }
 
 func (f *balFetcher) penalize(ctx context.Context, peerId *PeerId) {
-	if err := f.peerPenalizer.Penalize(ctx, peerId); err != nil {
+	err := f.peerPenalizer.Penalize(ctx, peerId)
+	if err != nil {
 		f.logger.Debug("[p2p.bal] failed to penalize peer", "peerId", peerId, "err", err)
 	}
 }

@@ -17,7 +17,10 @@
 package p2p
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -105,12 +108,159 @@ func TestValidateBALResponse(t *testing.T) {
 func TestBALRequestsForHeaders(t *testing.T) {
 	t.Parallel()
 	balHash := common.BytesToHash([]byte{0xaa})
+	emptyHash := empty.BlockAccessListHash
 	withBAL := &types.Header{Number: *uint256.NewInt(10), BlockAccessListHash: &balHash}
-	preFork := &types.Header{Number: *uint256.NewInt(11)} // BlockAccessListHash == nil
+	preFork := &types.Header{Number: *uint256.NewInt(11)}                                   // BlockAccessListHash == nil
+	emptyBAL := &types.Header{Number: *uint256.NewInt(12), BlockAccessListHash: &emptyHash} // genuinely empty BAL
 
-	reqs := balRequestsForHeaders([]*types.Header{preFork, withBAL})
-	require.Len(t, reqs, 1)
+	reqs := balRequestsForHeaders([]*types.Header{preFork, withBAL, emptyBAL})
+	require.Len(t, reqs, 1) // pre-fork and empty-BAL headers are not requested
 	require.Equal(t, withBAL.Hash(), reqs[0].Hash)
 	require.Equal(t, balHash, reqs[0].ExpectedHash)
 	require.Equal(t, uint64(10), reqs[0].Number)
+}
+
+func TestFetchAcrossPeers(t *testing.T) {
+	t.Parallel()
+	h0 := common.BytesToHash([]byte{1})
+	h1 := common.BytesToHash([]byte{2})
+	reqs := []BALRequest{{Hash: h0}, {Hash: h1}}
+	serveAll := func(rs []BALRequest) map[common.Hash][]byte {
+		out := map[common.Hash][]byte{}
+		for _, r := range rs {
+			out[r.Hash] = []byte{0xaa}
+		}
+		return out
+	}
+
+	t.Run("collects all BALs when one peer serves the batch", func(t *testing.T) {
+		serving := PeerIdFromUint64(3)
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
+			if p.Equal(serving) {
+				return serveAll(rs)
+			}
+			return nil // non-serving peer
+		}
+		out := fetchAcrossPeers(context.Background(), reqs,
+			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *serving}, 8, fetch)
+		require.Len(t, out, 2)
+	})
+
+	t.Run("merges partial results across peers", func(t *testing.T) {
+		fetch := func(_ context.Context, _ []BALRequest, p *PeerId) map[common.Hash][]byte {
+			if p.Equal(PeerIdFromUint64(1)) {
+				return map[common.Hash][]byte{h0: {0xaa}}
+			}
+			return map[common.Hash][]byte{h1: {0xbb}}
+		}
+		out := fetchAcrossPeers(context.Background(), reqs,
+			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
+		require.Len(t, out, 2)
+		require.Equal(t, []byte{0xaa}, out[h0])
+		require.Equal(t, []byte{0xbb}, out[h1])
+	})
+
+	t.Run("no peer serves -> empty result", func(t *testing.T) {
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash][]byte { return nil }
+		out := fetchAcrossPeers(context.Background(), reqs,
+			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
+		require.Empty(t, out)
+	})
+
+	t.Run("honours the parallelism limit", func(t *testing.T) {
+		var live, peak atomic.Int32
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash][]byte {
+			n := live.Add(1)
+			for {
+				if p := peak.Load(); n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			live.Add(-1)
+			return nil // none serve, so every peer is tried
+		}
+		fetchAcrossPeers(context.Background(), reqs,
+			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *PeerIdFromUint64(3), *PeerIdFromUint64(4)}, 2, fetch)
+		require.LessOrEqual(t, peak.Load(), int32(2)) // limit 2 enforced (would reach 4 unbounded)
+	})
+}
+
+func TestMissingRequests(t *testing.T) {
+	t.Parallel()
+	h0 := common.BytesToHash([]byte{1})
+	h1 := common.BytesToHash([]byte{2})
+	h2 := common.BytesToHash([]byte{3})
+	reqs := []BALRequest{{Hash: h0}, {Hash: h1}, {Hash: h2}}
+
+	require.Equal(t, reqs, missingRequests(reqs, nil)) // nothing fetched yet -> all missing
+
+	got := missingRequests(reqs, map[common.Hash][]byte{h1: {0x01}})
+	require.Len(t, got, 2)
+	require.Equal(t, h0, got[0].Hash)
+	require.Equal(t, h2, got[1].Hash)
+
+	require.Empty(t, missingRequests(reqs, map[common.Hash][]byte{h0: {0x01}, h1: {0x01}, h2: {0x01}}))
+}
+
+func TestFetchWithFallback(t *testing.T) {
+	t.Parallel()
+	h0 := common.BytesToHash([]byte{1})
+	h1 := common.BytesToHash([]byte{2})
+	reqs := []BALRequest{{Hash: h0}, {Hash: h1}}
+	main := PeerIdFromUint64(1)
+	fallback := []PeerId{*PeerIdFromUint64(2), *PeerIdFromUint64(3)}
+
+	t.Run("main peer serves all -> no fallback", func(t *testing.T) {
+		var usedFallback atomic.Bool
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
+			if !p.Equal(main) {
+				usedFallback.Store(true)
+			}
+			out := map[common.Hash][]byte{}
+			for _, r := range rs {
+				out[r.Hash] = []byte{0xaa}
+			}
+			return out
+		}
+		out := fetchWithFallback(context.Background(), reqs, main, fallback, 8, fetch)
+		require.Len(t, out, 2)
+		require.False(t, usedFallback.Load()) // main had everything; fallback peers untouched
+	})
+
+	t.Run("main peer misses some -> fallback fills the rest", func(t *testing.T) {
+		fetch := func(_ context.Context, _ []BALRequest, p *PeerId) map[common.Hash][]byte {
+			if p.Equal(main) {
+				return map[common.Hash][]byte{h0: {0xaa}} // main only has h0
+			}
+			return map[common.Hash][]byte{h1: {0xbb}} // fallback has h1
+		}
+		out := fetchWithFallback(context.Background(), reqs, main, fallback, 8, fetch)
+		require.Len(t, out, 2)
+		require.Equal(t, []byte{0xaa}, out[h0]) // kept from main
+		require.Equal(t, []byte{0xbb}, out[h1]) // recovered from fallback
+	})
+
+	t.Run("main peer serves none -> fallback fills all", func(t *testing.T) {
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash][]byte {
+			if p.Equal(main) {
+				return nil
+			}
+			out := map[common.Hash][]byte{}
+			for _, r := range rs {
+				out[r.Hash] = []byte{0xbb}
+			}
+			return out
+		}
+		out := fetchWithFallback(context.Background(), reqs, main, fallback, 8, fetch)
+		require.Len(t, out, 2)
+	})
+
+	t.Run("no fallback peers -> only the main peer's BALs", func(t *testing.T) {
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash][]byte {
+			return map[common.Hash][]byte{h0: {0xaa}} // main has only h0, h1 stays missing
+		}
+		out := fetchWithFallback(context.Background(), reqs, main, nil, 8, fetch)
+		require.Len(t, out, 1)
+	})
 }

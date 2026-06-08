@@ -660,7 +660,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.sentryProvider.ExecutionP2PMessageSender,
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 	)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, balFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir)
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// the consensus engine which is only available after polygon + engine

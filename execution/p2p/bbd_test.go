@@ -68,7 +68,7 @@ func newTestBbd(t *testing.T, fetcher Fetcher) *BackwardBlockDownloader {
 	logger := testlog.Logger(t, log.LvlCrit)
 	peerTracker := NewPeerTracker(logger, nil)
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
-	return NewBackwardBlockDownloader(logger, fetcher, nil, &PeerPenalizer{}, peerTracker, t.TempDir())
+	return NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir())
 }
 
 // EL behind the requested header by more than the limit: fail-fast at initial-header step.

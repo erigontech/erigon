@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/etl"
@@ -49,22 +50,37 @@ type BackwardBlockDownloader struct {
 	tmpDir        string
 }
 
+// BackwardBlockDownloaderOption configures a BackwardBlockDownloader.
+type BackwardBlockDownloaderOption func(*BackwardBlockDownloader)
+
+// WithBALFetcher wires an eth/71 BAL fetcher into the downloader so each batch's
+// block access lists are fetched alongside its bodies. Omit it (e.g. polygon) to
+// download blocks without BALs.
+func WithBALFetcher(balFetcher BALFetcher) BackwardBlockDownloaderOption {
+	return func(bbd *BackwardBlockDownloader) {
+		bbd.balFetcher = balFetcher
+	}
+}
+
 func NewBackwardBlockDownloader(
 	logger log.Logger,
 	fetcher Fetcher,
-	balFetcher BALFetcher,
 	peerPenalizer *PeerPenalizer,
 	peerTracker *PeerTracker,
 	tmpDir string,
+	opts ...BackwardBlockDownloaderOption,
 ) *BackwardBlockDownloader {
-	return &BackwardBlockDownloader{
+	bbd := &BackwardBlockDownloader{
 		logger:        logger,
 		fetcher:       fetcher,
-		balFetcher:    balFetcher,
 		peerPenalizer: peerPenalizer,
 		peerTracker:   peerTracker,
 		tmpDir:        tmpDir,
 	}
+	for _, opt := range opts {
+		opt(bbd)
+	}
+	return bbd
 }
 
 // DownloadBlocksBackwards downloads blocks backwards given a starting block hash. It uses the underlying header reader
@@ -496,8 +512,29 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			)
 
 			eg.Go(func() error {
-				bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
-				if err != nil {
+				// Fetch this batch's BALs concurrently with its bodies — independent
+				// requests to the same body peer, sharing the body-fetch timeout —
+				// recovering any BAL the body peer lacks from the other peers. A miss
+				// just means execution recomputes the BAL.
+				reqs := balRequestsForHeaders(headerBatch)
+				var (
+					bodiesResponse FetcherResponse[[]*types.Body]
+					bodiesErr      error
+					bals           map[common.Hash][]byte
+				)
+				var batchEg errgroup.Group
+				batchEg.Go(func() error {
+					bodiesResponse, bodiesErr = bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
+					return nil
+				})
+				if bbd.balFetcher != nil && len(reqs) > 0 {
+					batchEg.Go(func() error {
+						bals, _ = bbd.balFetcher.Fetch(ctx, reqs, &peerId, peers.peersExcept(peerId), config.bodiesBatchFetchTimeout)
+						return nil
+					})
+				}
+				_ = batchEg.Wait()
+				if bodiesErr != nil {
 					bbd.logger.Debug(
 						"[backward-block-downloader] could not fetch bodies batch",
 						"fromNum", headerBatch[0].Number.Uint64(),
@@ -505,7 +542,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
 						"toHash", headerBatch[len(headerBatch)-1].Hash(),
 						"peerId", peerId.String(),
-						"err", err,
+						"err", bodiesErr,
 					)
 					return nil
 				}
@@ -514,61 +551,43 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				blockBatch := make([]*types.Block, 0, len(headerBatch))
 				for i, header := range headerBatch {
 					body := bodies[i]
-					err = body.MatchesHeader(header)
-					if err == nil {
-						block := types.NewBlockFromNetwork(header, body)
-						blockBatch = append(blockBatch, block)
-						continue
-					}
-
-					bbd.logger.Debug(
-						"[backward-block-downloader] body does not match header, penalizing peer",
-						"num", header.Number.Uint64(),
-						"hash", header.Hash(),
-						"peerId", peerId.String(),
-						"err", err,
-					)
-
-					err = bbd.peerPenalizer.Penalize(ctx, &peerId)
+					err := body.MatchesHeader(header)
 					if err != nil {
 						bbd.logger.Debug(
-							"[backward-block-downloader] could not penalize peer",
+							"[backward-block-downloader] body does not match header, penalizing peer",
+							"num", header.Number.Uint64(),
+							"hash", header.Hash(),
 							"peerId", peerId.String(),
 							"err", err,
 						)
+						err = bbd.peerPenalizer.Penalize(ctx, &peerId)
+						if err != nil {
+							bbd.logger.Debug(
+								"[backward-block-downloader] could not penalize peer",
+								"peerId", peerId.String(),
+								"err", err,
+							)
+						}
+						break
 					}
-
-					break
+					blockBatch = append(blockBatch, types.NewBlockFromNetwork(header, body))
 				}
 				if len(blockBatch) == len(headerBatch) {
 					blockBatches[batchIndex] = blockBatch
-					if bbd.balFetcher != nil {
-						if reqs := balRequestsForHeaders(headerBatch); len(reqs) > 0 {
-							// Best-effort: fetch BALs from the same peer that served the
-							// bodies. A miss just means execution recomputes the BAL.
-							bals, balErr := bbd.balFetcher.FetchFromPeer(ctx, reqs, &peerId, config.balBatchFetchTimeout)
-							if balErr != nil {
-								bbd.logger.Debug(
-									"[backward-block-downloader] best-effort BAL fetch failed",
-									"peerId", peerId.String(),
-									"err", balErr,
-								)
-							} else {
-								balBatches[batchIndex] = bals
-								bbd.logger.Debug(
-									"[backward-block-downloader] fetched BALs over eth/71",
-									"peerId", peerId.String(),
-									"got", len(bals),
-									"requested", len(reqs),
-								)
-							}
-						}
+					if len(bals) > 0 {
+						balBatches[batchIndex] = bals
+						bbd.logger.Debug(
+							"[backward-block-downloader] fetched BALs over eth/71",
+							"got", len(bals),
+							"requested", len(reqs),
+						)
 					}
 				}
 				return nil
 			})
 		}
-		if err := eg.Wait(); err != nil {
+		err := eg.Wait()
+		if err != nil {
 			panic(err) // workers do not return errs
 		}
 		// mark peers as exhausted for those that had unsuccessful fetches
@@ -624,9 +643,11 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 // batch (those committing to a BlockAccessListHash); pre-Amsterdam headers are
 // skipped.
 func balRequestsForHeaders(headers []*types.Header) []BALRequest {
-	var reqs []BALRequest
+	reqs := make([]BALRequest, 0, len(headers))
 	for _, header := range headers {
-		if header.BlockAccessListHash == nil {
+		// Skip pre-Amsterdam headers (no BAL) and headers committing to the empty
+		// BAL, whose empty contents execution recomputes for free.
+		if header.BlockAccessListHash == nil || *header.BlockAccessListHash == empty.BlockAccessListHash {
 			continue
 		}
 		reqs = append(reqs, BALRequest{
@@ -695,4 +716,16 @@ func (pc *peersContext) nextAvailablePeers(n int) ([]PeerId, error) {
 func (pc *peersContext) incrementCurrentPeerIndex() {
 	pc.currentPeerIndex++
 	pc.currentPeerIndex %= len(pc.exhaustedPeers)
+}
+
+// peersExcept returns every tracked peer except peerId, as values — the BAL-fetch
+// fallback set for a batch whose bodies were served by peerId.
+func (pc *peersContext) peersExcept(peerId PeerId) []PeerId {
+	out := make([]PeerId, 0, len(pc.all))
+	for _, p := range pc.all {
+		if *p != peerId {
+			out = append(out, *p)
+		}
+	}
+	return out
 }
