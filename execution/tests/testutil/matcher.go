@@ -135,6 +135,22 @@ func (tm *TestMatcher) CheckFailureWithName(t *testing.T, name string, err error
 	return err
 }
 
+// CheckFailureForName is the testing.T-free counterpart of CheckFailureWithName
+// for CLI runners: it matches name against the expected-failure patterns and, on
+// a match, swallows a non-nil err (expected) or reports "test succeeded
+// unexpectedly" when err is nil.
+func (tm *TestMatcher) CheckFailureForName(name string, err error) error {
+	for _, m := range tm.failpat {
+		if m.p.MatchString(name) {
+			if err != nil {
+				return nil
+			}
+			return errors.New("test succeeded unexpectedly")
+		}
+	}
+	return err
+}
+
 // Walk invokes its runTest argument for all subtests in the given directory.
 //
 // runTest should be a function of type func(t *testing.T, name string, x <TestType>),
