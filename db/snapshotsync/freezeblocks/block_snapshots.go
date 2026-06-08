@@ -93,10 +93,6 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	return snapshotsync.TypedSegments(dir, snaptype2.BlockSnapshotTypes, true)
-}
-
 func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
@@ -142,8 +138,9 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cf
 }
 
 type BlockRetire struct {
-	maxScheduledBlock atomic.Uint64
-	working           atomic.Bool
+	maxScheduledBlock  atomic.Uint64
+	working            atomic.Bool
+	lastRetireGapStart atomic.Uint64
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -271,10 +268,20 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		if !ok {
 			return nil
 		}
-		lastInFiles := br.snapshots().SegmentsMax() + 1
-		haveGap = lastInFiles < firstInDB
+		nextBlockInSnapshots := br.snapshots().SegmentsMax() + 1
+		haveGap = nextBlockInSnapshots < firstInDB
 		if haveGap {
-			log.Debug("[snapshots] not enough blocks in db to create snapshots", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB, "recommendations", "it's ok to ignore this message. can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`")
+			// Log once per unique gap: Swap stores firstInDB and returns the previous
+			// value. If it matches, we already logged for this exact gap — skip.
+			if br.lastRetireGapStart.Swap(firstInDB) != firstInDB {
+				br.logger.Debug("skipping block snapshot retirement: db does not contain the next block after snapshots",
+					"nextBlockInSnapshots", nextBlockInSnapshots,
+					"firstBlockInDB", firstInDB,
+					"gapBlocks", firstInDB-nextBlockInSnapshots,
+					"recommendation", "retirement will resume once matching snapshots are downloaded or the gap is covered")
+			}
+		} else {
+			br.lastRetireGapStart.Store(0)
 		}
 		return nil
 	}); err != nil {

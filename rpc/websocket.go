@@ -278,9 +278,13 @@ func (a *wsConnAdapter) encode(v any) error {
 		ctx, cancel = context.WithDeadline(ctx, dl)
 		defer cancel()
 	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
+	data, ok := v.(rawResponse)
+	if !ok {
+		marshaled, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		data = marshaled
 	}
 	return a.conn.Write(ctx, websocket.MessageText, data)
 }

@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	libchain "github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -1231,7 +1230,9 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	t.Parallel()
 	// Generate the original common chain segment and the two competing forks
 
-	m, m2 := execmoduletester.New(t), execmoduletester.New(t)
+	// The competitor fork reorgs ~2*triesInMemory blocks deep — beyond
+	// MaxReorgDepth, so the inserting node needs changesets for every block.
+	m, m2 := execmoduletester.New(t), execmoduletester.New(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 
 	shared, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1318,8 +1319,9 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("generate fork: %v", err)
 	}
 
-	// Import the canonical chain
-	m2 := execmoduletester.New(t)
+	// Import the canonical chain. The fork branches at block 11 — far beyond
+	// MaxReorgDepth — so the inserting node needs changesets for every block.
+	m2 := execmoduletester.New(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 
 	if err := m2.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
@@ -2189,6 +2191,27 @@ func TestEIP2718Transition(t *testing.T) {
 	}
 }
 
+// eip1559Config is a PoW (Ethash) config with London active from genesis, so
+// blockgen and verification agree on difficulty and the miner earns the PoW
+// block reward this test asserts on.
+func eip1559Config() *libchain.Config {
+	return &libchain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 libchain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
+		Ethash:                new(libchain.EthashConfig),
+	}
+}
+
 // TestEIP1559Transition tests the following:
 //
 //  1. A transaction whose feeCap is greater than the baseFee is valid.
@@ -2200,7 +2223,6 @@ func TestEIP2718Transition(t *testing.T) {
 //  6. Legacy transaction behave as expected (e.g. gasPrice = feeCap = tip).
 func TestEIP1559Transition(t *testing.T) {
 	t.Parallel()
-	t.Skip("needs fixing")
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 
@@ -2213,7 +2235,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = accounts.InternAddress(crypto.PubkeyToAddress(key2.PublicKey))
 		funds   = new(uint256.Int).Mul(&u256.Num1, new(uint256.Int).SetUint64(common.Ether))
 		gspec   = &types.Genesis{
-			Config: chainspec.Sepolia.Config,
+			Config: eip1559Config(),
 			Alloc: types.GenesisAlloc{
 				addr1.Value(): {Balance: funds.ToBig()},
 				addr2.Value(): {Balance: funds.ToBig()},
@@ -2284,7 +2306,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		statedb := state.New(m.NewHistoryStateReader(1, tx))
+		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
@@ -2332,7 +2354,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		statedb := state.New(m.NewHistoryStateReader(1, tx))
+		statedb := state.New(m.NewHistoryStateReader(block.NumberU64()+1, tx))
 		baseFee := block.BaseFee()
 		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
 		effectiveTip := tip.Uint64()
