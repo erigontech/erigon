@@ -223,7 +223,9 @@ func (s *payloadAttestationService) loop(ctx context.Context) {
 	// Wake any blocked Wait() on context cancellation to prevent deadlock.
 	go func() {
 		<-ctx.Done()
+		s.pendingCond.L.Lock()
 		s.pendingCond.Broadcast()
+		s.pendingCond.L.Unlock()
 	}()
 
 	for {
