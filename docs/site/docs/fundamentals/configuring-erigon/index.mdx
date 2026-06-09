@@ -108,6 +108,10 @@ Flags for managing how old chain data is handled and stored.
   * Default: `false`
 * `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
+* `--snap.p2p-manifest` (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via ENR instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
+  * Default: `false`
+* `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. A local `preverified.toml` in the datadir still takes precedence; delete it to re-fetch from the URL.
+  * Default: `""` (uses the built-in CDN)
 
 ### Transaction Pool (TxPool)
 
@@ -538,8 +542,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 **Execution and Processing:**
 
-* `EXEC3_PARALLEL` - Enables parallel execution in version 3
-* `EXEC3_WORKERS` - Sets number of execution workers
+* `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
+* `EXEC3_WORKERS` - Sets number of parallel execution workers (default: number of CPU cores)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
 ### Memory and Debugging Variables
