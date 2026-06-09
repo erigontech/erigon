@@ -319,6 +319,17 @@ background-fold reuse) stays unchanged.
 **Files:**
 - Create: `execution/commitment/streaming_multidepth_parity_test.go`
 
+⚠️ BLOCKER: the multi-depth COLLAPSE/DELETE parity variant uncovered a confirmed,
+deterministic streaming-mode correctness bug — a two-block whale-storage collapse
+diverges from sequential (== ModeParallel) whenever the whale shares the trie with
+any other account; streaming encodes a wrong folded afterMap (stale extra child
+bits) on the block-2 collapse. Minimal repro + investigation in
+`docs/plans/BLOCKER-streaming-collapse-in-populated-trie.md`. The single-block
+multi-depth parity test (`TestStreaming_MultiDepthSplitParity`) is written and
+passes (root + branch parity vs ModeDirect AND ModeParallel, StorageSplits/
+DeepLocalFolds seams, `-race -count=20`). The collapse/delete checkboxes below stay
+unchecked until the engine bug is fixed; no weakened/failing test was committed.
+
 - [ ] build a corpus whose touched keys create split-points at SEVERAL depths (account-trie
       forks + a whale storage subtree with deep forks); reuse `whaleByNibble` + existing
       parity harnesses
