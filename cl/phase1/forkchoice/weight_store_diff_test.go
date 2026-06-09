@@ -97,6 +97,15 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	require.NoError(tb, err)
 	require.NoError(tb, sd.OnHeadState(s0))
 	require.NoError(tb, store.OnAttestation(att, false, false))
+	// Indexed-vote maintenance is gated to the GLOAS vote path, so the pre-GLOAS
+	// fixtures above fill latestMessages but not the index. Mirror latestMessages
+	// into the index directly so the differential check scores the index against
+	// the full-scan store over the same votes.
+	for i := 0; i < store.latestMessages.latestMessagesCount(); i++ {
+		if msg, has := store.latestMessages.get(i); has && msg != (LatestMessage{}) {
+			store.indexedWeightStore.IndexVote(uint64(i), msg)
+		}
+	}
 	return store
 }
 
