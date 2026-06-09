@@ -6,7 +6,7 @@ sidebar_position: 2
 
 # Sync Modes
 
-Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four pruning modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                    | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
