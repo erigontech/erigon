@@ -30,6 +30,7 @@
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
+- [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats.
 - [Caplin](https://docs.erigon.tech/fundamentals/caplin): Erigon's built-in consensus layer — run a full node without an external CL client.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
 - [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks): OS-level tuning, memory settings, and tips to maximize sync throughput.
