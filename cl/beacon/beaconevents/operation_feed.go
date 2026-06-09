@@ -1,6 +1,6 @@
 package beaconevents
 
-import ethevent "github.com/erigontech/erigon/p2p/event"
+import ethevent "github.com/erigontech/erigon/common/event"
 
 type operationFeed struct {
 	feed *ethevent.Feed

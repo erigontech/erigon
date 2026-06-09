@@ -9,13 +9,32 @@ on:
   schedule:
     # Every Sunday at 00:00 UTC
     - cron: "0 0 * * 0"
+  # Auto-fire on PRs that touch this workflow's own YAML so the exec-mode
+  # matrix change can be validated in-PR without a manual dispatch.
+  # Regular PRs that don't touch this file are unaffected.
+  pull_request:
+    paths:
+      - '.github/workflows/qa-txpool-performance-test.yml'
 
 jobs:
   tx_pool_assertoor_test:
+    name: tx_pool_assertoor_test (${{ matrix.exec_mode }})
     runs-on: [self-hosted, qa, X64, long-running]
+    strategy:
+      fail-fast: false
+      # Self-hosted long-running pool is small; matrix entries serialize.
+      max-parallel: 1
+      matrix:
+        exec_mode:
+          - serial
+          - parallel
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
+      ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}-${{ matrix.exec_mode }}"
+      # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
+      # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
+      # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
+      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
       - name: Fast checkout git repository
@@ -29,7 +48,17 @@ jobs:
 
       - name: Docker build current branch
         run: |
-          docker build -t test/erigon:current .
+          docker build -t test/erigon:current-base .
+
+      - name: Bake exec_mode env into the runtime image
+        # Add ERIGON_EXEC3_PARALLEL as an ENV layer on top of the base image
+        # so the matrix entries differ in exec mode. ENV layers are cheap and
+        # don't invalidate earlier layer caches.
+        run: |
+          docker build -t test/erigon:current - <<EOF
+          FROM test/erigon:current-base
+          ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}
+          EOF
 
       - name: Run self hosted Kurtosis + assertoor tests
         id: erigon_kurtosis_test
@@ -118,7 +147,7 @@ jobs:
         id: upload_outputs_kurtosis_json
         uses: actions/upload-artifact@v7
         with:
-          name: outputs_kurtosis.json
+          name: outputs_kurtosis-${{ matrix.exec_mode }}.json
           path: outputs_kurtosis.json
 
       - name: Create HDR plots PNG artifacts
@@ -225,7 +254,7 @@ jobs:
         id: upload_latency_plots
         uses: actions/upload-artifact@v7
         with:
-          name: tx-pool-latency-plots
+          name: tx-pool-latency-plots-${{ matrix.exec_mode }}
           path: tx_pool_latency_analysis_*.png
           if-no-files-found: ignore
 
@@ -234,7 +263,7 @@ jobs:
         id: upload_throughput_plots
         uses: actions/upload-artifact@v7
         with:
-          name: tx-pool-throughput-plots
+          name: tx-pool-throughput-plots-${{ matrix.exec_mode }}
           path: tx_pool_throughput_analysis_*.png
           if-no-files-found: ignore
 

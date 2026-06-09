@@ -1292,7 +1292,10 @@ func concat(s1 []byte, s2 ...byte) []byte {
 // Root returns the root hash of the trie.
 //
 // Deprecated: use Hash instead.
-func (t *Trie) Root() []byte { return t.Hash().Bytes() }
+func (t *Trie) Root() []byte {
+	h := t.Hash()
+	return h[:]
+}
 
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
@@ -1547,6 +1550,11 @@ func RLPDecode(encodedNodes [][]byte) (*Trie, error) {
 	// Build a map from hash -> decoded node
 	nodeMap := make(map[common.Hash]Node)
 	for _, encoded := range encodedNodes {
+		// The legacy witness carries the empty storage-trie preimage (RLP empty
+		// string, keccak256 == EmptyRoot); it is not a trie node, so skip it.
+		if len(encoded) == 1 && encoded[0] == 0x80 {
+			continue
+		}
 		hash := crypto.Keccak256Hash(encoded)
 		node, err := decodeTrieNode(encoded)
 		if err != nil {

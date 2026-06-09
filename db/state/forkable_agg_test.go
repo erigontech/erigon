@@ -571,7 +571,8 @@ func fillForkables(t *testing.T, rwtx kv.RwTx, headerTx, bodyTx MarkedTxI, amoun
 			// just use different value
 			HEADER_M, BODY_M = 200, 201
 		}
-		hash := tr.RandHash().Bytes()
+		rh := tr.RandHash()
+		hash := rh[:]
 		err := headerTx.Put(Num(i), hash, Num(i*HEADER_M).EncTo8Bytes(), rwtx)
 		require.NoError(t, err)
 
@@ -657,5 +658,22 @@ func TestUnmarkedForkableUnwindDeletesVals(t *testing.T) {
 		v, err := rwtx.GetOne(kv.BlockBody, kv.EncToBytes(uint64(i), true))
 		require.NoError(t, err)
 		require.Nil(t, v)
+	}
+}
+
+// The merge goroutine BuildFilesInBackground spawns must register on wg before the
+// build goroutine's wg.Done, so wg.Wait (what Close does) never races that Add from zero.
+func TestForkableAggCloseWaitsForBackgroundMerge(t *testing.T) {
+	dirs, db, logger := setupDb(t)
+	_, header := setupHeader(t, db, logger, dirs)
+
+	agg := NewForkableAgg(t.Context(), dirs, db, logger)
+	t.Cleanup(agg.Close)
+	agg.RegisterMarkedForkable(header)
+	require.NoError(t, agg.OpenFolder())
+
+	for range 64 {
+		agg.BuildFilesInBackground(RootNum(10))
+		agg.wg.Wait()
 	}
 }

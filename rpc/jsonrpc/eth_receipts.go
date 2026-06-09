@@ -450,7 +450,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 		var topicsUnion stream.U64
 		for _, topic := range sub {
-			it, err := tx.IndexRange(kv.LogTopicIdx, topic.Bytes(), int(from), int(to), asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.LogTopicIdx, topic[:], int(from), int(to), asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}

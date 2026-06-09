@@ -54,11 +54,14 @@ func TestCapabilities(t *testing.T) {
 	const chainSize = 20
 	const testPruneDistance = uint64(10)
 
-	testFullMode := prune.Mode{
+	testLegacyFull := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
-		Blocks:      prune.DefaultBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
+		Blocks:      prune.KeepPostMergeBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
 	}
+	// Both History and Blocks finite — stands in for both the post-#21342
+	// production FullMode shape and MinimalMode at test scale (the production
+	// distances differ but the per-subtest assertions don't care which).
 	testMinimalMode := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
@@ -138,7 +141,7 @@ func TestCapabilities(t *testing.T) {
 		dbTx, err := m.DB.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer dbTx.Rollback()
-		_, err = prune.EnsureNotChanged(dbTx, testFullMode)
+		_, err = prune.EnsureNotChanged(dbTx, testLegacyFull)
 		require.NoError(t, err)
 		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
 		if persistReceipts {
@@ -193,7 +196,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_no_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, false, false)
+		api, head := setupAPI(t, testLegacyFull, false, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -204,7 +207,7 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.State))
 		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		require.Equal(t, testPruneDistance, window(t, result.Receipts))
-		// DefaultBlocksPruneMode: no explicit window; oldest depends on chain history expiry
+		// KeepPostMergeBlocksPruneMode: no explicit window; oldest depends on chain history expiry
 		// (here 0 because the test chain has no MergeHeight)
 		require.Equal(t, uint64(0), oldest(t, result.Tx))
 		require.Equal(t, uint64(0), oldest(t, result.Blocks))
@@ -215,7 +218,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_persist_receipts", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, false, true)
+		api, head := setupAPI(t, testLegacyFull, false, true)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -230,7 +233,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_with_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, true, false)
+		api, head := setupAPI(t, testLegacyFull, true, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
@@ -266,18 +269,59 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
+	// Post-#21342 production FullMode: Blocks is a finite Distance (EIP-8252 retention window),
+	// not the KeepPostMergeBlocksPruneMode sentinel. Without --persist.receipts, receipts/logs are
+	// bounded by max(stateOldest, blocksOldest) — equal here, so both report the prune window.
+	t.Run("full_eip8252_no_persist", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testMinimalMode, false, false)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Tx))
+		require.Equal(t, pruned, oldest(t, result.Blocks))
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.State))
+		require.Equal(t, testPruneDistance, window(t, result.Tx))
+		require.Equal(t, testPruneDistance, window(t, result.Blocks))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
+	})
+
+	// full (EIP-8252) + --persist.receipts: persist.receipts widens past state history, but
+	// block bodies and log indexes are still pruned at prune.Blocks, so receipts/logs are
+	// bounded by blocksOldest, NOT genesis. This is the common pruned-archive config and the
+	// case a routing layer would misroute if oldestBlock were reported as 0.
+	t.Run("full_eip8252_persist_receipts", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testMinimalMode, false, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Tx))
+		require.Equal(t, pruned, oldest(t, result.Blocks))
+	})
+
+	// minimal + --persist.receipts: block bodies and log indexes are still pruned at the same
+	// distance as state, so persist.receipts cannot widen receipts/logs past blocksOldest —
+	// eth_getBlockReceipts needs the body and getLogsV3 needs the log indexes.
 	t.Run("minimal_persist_receipts", func(t *testing.T) {
 		t.Parallel()
 		api, head := setupAPI(t, testMinimalMode, false, true)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --persist.receipts overrides the prune window: receipts and logs available from genesis.
-		require.Equal(t, uint64(0), oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
-		require.Equal(t, uint64(0), oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
-		// state, tx, and blocks still respect the minimal prune window.
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		require.Equal(t, pruned, oldest(t, result.State))
 		require.Equal(t, pruned, oldest(t, result.Tx))
 		require.Equal(t, pruned, oldest(t, result.Blocks))
@@ -301,7 +345,7 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, uint64(chainSize)-testPruneDistance, oldest(t, result.State))
 	})
 
-	// When MergeHeight > head-pruneDistance, pre-merge blocks are absent (DefaultBlocksPruneMode)
+	// When MergeHeight > head-pruneDistance, pre-merge blocks are absent (KeepPostMergeBlocksPruneMode)
 	// so receipts.oldestBlock and logs.oldestBlock must be clamped to the merge point.
 	t.Run("full_merge_height_receipts_seam", func(t *testing.T) {
 		t.Parallel()
@@ -338,8 +382,8 @@ func TestCapabilities(t *testing.T) {
 		raw, err := json.Marshal(result)
 		require.NoError(t, err)
 		s := string(raw)
-		require.Contains(t, s, fmt.Sprintf(`"retentionBlocks":%d`, testPruneDistance), "retentionBlocks must be decimal, not hex")
-		require.NotContains(t, s, `"retentionBlocks":"0x`, "retentionBlocks must not be hex-encoded")
+		require.Contains(t, s, fmt.Sprintf(`"retentionBlocks":"0x%x"`, testPruneDistance), "retentionBlocks must be hex-encoded per execution-apis uint schema")
+		require.NotContains(t, s, fmt.Sprintf(`"retentionBlocks":%d`, testPruneDistance), "retentionBlocks must not be a plain decimal integer")
 		require.Contains(t, s, `"oldestBlock":"0x`, "oldestBlock must be hex-encoded")
 		require.Contains(t, s, `"disabled":false`, "disabled:false must be present, not omitted")
 		require.Contains(t, s, `"stateproofs":{"disabled":true}`, "disabled category must serialize as {disabled:true} only")

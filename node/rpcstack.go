@@ -34,7 +34,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	libdeflate "github.com/erigontech/go-libdeflate"
+	"github.com/erigontech/go-libdeflate"
 
 	"github.com/rs/cors"
 
@@ -568,13 +568,6 @@ func putDst(dst []byte) {
 	}
 }
 
-func gzDstGrow(b []byte, wantLen int) []byte {
-	if cap(b) >= wantLen {
-		return b[:wantLen]
-	}
-	return make([]byte, wantLen, max(wantLen, 2*cap(b)))
-}
-
 type gzipResponseWriter struct {
 	buf    *bytes.Buffer
 	gzw    *gzip.Writer
@@ -646,7 +639,8 @@ func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
 	defer gzCompressorPool.Put(c)
 
 	dst := gzDstPool.Get().([]byte)
-	dst = gzDstGrow(dst, c.GzipCompressBound(len(src)))
+	gzBound := c.GzipCompressBound(len(src))
+	dst = slices.Grow(dst[:0], gzBound)[:gzBound]
 	defer putDst(dst)
 
 	n, err := c.CompressGzip(dst, src)

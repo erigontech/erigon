@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
@@ -447,51 +446,25 @@ type MultiClientDeps struct {
 	// anchor-based backward download.
 	Engine rules.Engine
 
-	// SyncCfg carries the staged-sync configuration (batch sizes, etc).
-	SyncCfg ethconfig.Sync
-
-	// BlockBufferSize bounds the number of unseen blocks held while waiting
-	// for headers to catch up. Pass 0 to use the package default (128).
-	BlockBufferSize int
-
 	// LogPeerInfo enables verbose peer-info logging in the MultiClient.
 	LogPeerInfo bool
-
-	// MaxBlockBroadcastPeers decides how many peers a NewBlock
-	// announcement is gossiped to (header-aware so Bor validators can
-	// override the default cap).
-	MaxBlockBroadcastPeers func(*types.Header) uint
-
-	// DisableBlockDownload suppresses the header + body downloaders inside
-	// the MultiClient. Pass true when blocks are supplied via another path
-	// (CL engine, staged sync headers stage).
-	DisableBlockDownload bool
 }
 
 // BuildMultiClient constructs the multi-sentry Client. Must be called after
 // Initialize (which populates Sentries + StatusDataProvider) and once the
-// late-binding deps (engine, max-broadcast-peers callback) are ready.
+// late-binding engine dep is ready.
 //
 // On success, p.Client is ready for consumers.
 func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
-	bufSize := deps.BlockBufferSize
-	if bufSize == 0 {
-		bufSize = sentry_multi_client.DefaultBlockBufferSize
-	}
-
 	client, err := sentry_multi_client.NewMultiClient(
 		deps.Dirs,
 		p.cfg.ChainDB,
 		p.cfg.ChainConfig,
 		deps.Engine,
 		p.Sentries,
-		deps.SyncCfg,
 		p.cfg.BlockReader,
-		bufSize,
 		p.StatusDataProvider,
 		deps.LogPeerInfo,
-		deps.MaxBlockBroadcastPeers,
-		deps.DisableBlockDownload,
 		p.cfg.EnableWitProtocol,
 		p.logger,
 	)

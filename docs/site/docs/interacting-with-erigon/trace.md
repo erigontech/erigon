@@ -53,7 +53,7 @@ The `traceAddress` field of all returned traces, gives the exact location in the
 
 i.e. if the trace is:
 
-```
+```text
 A
   CALLs B
     CALLs G

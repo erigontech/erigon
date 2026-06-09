@@ -127,6 +127,31 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	require.Equal(t, common.Hash{}, canonicalRoot)
 }
 
+func TestReadCanonicalHead(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	slot, root, err := ReadCanonicalHead(tx)
+	require.NoError(t, err)
+	require.Zero(t, slot)
+	require.Equal(t, common.Hash{}, root)
+
+	root10 := common.Hash{0x10}
+	root12 := common.Hash{0x12}
+	root11 := common.Hash{0x11}
+	require.NoError(t, MarkRootCanonical(context.Background(), tx, 10, root10))
+	require.NoError(t, MarkRootCanonical(context.Background(), tx, 12, root12))
+	require.NoError(t, MarkRootCanonical(context.Background(), tx, 11, root11))
+
+	slot, root, err = ReadCanonicalHead(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), slot)
+	require.Equal(t, root12, root)
+}
+
 func TestReadBeaconBlockHeader(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
