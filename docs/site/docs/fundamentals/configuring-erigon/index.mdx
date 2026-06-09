@@ -416,6 +416,19 @@ Flags for configuring Fork Choice Update behavior.
 * `--fcu.background.commit`: Enables background flush and commit after FCU.
   * Default: `false`
 
+### Execution
+
+Flags for configuring the parallel block execution engine.
+
+* `--exec.serial` *(New in v3.5)*: Force serial execution by clamping the parallel executor to a single worker. Wins over `--exec.workers` and `EXEC3_WORKERS` — use to disable parallelism for diagnostics or like-for-like baseline comparisons.
+  * Default: `false`
+* `--exec.no-prune` *(New in v3.5)*: Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.
+  * Default: `false`
+* `--exec.no-merge`: Disable state-aggregator file merges for Domain / History / Inverted-Index. Equivalent to `NO_MERGE=true`. Diagnostic / perf-comparison use only.
+  * Default: `false`
+* `--exec.no-background-maintenance`: Suppress background state-aggregator and E2 block-snapshot retirement goroutines so execution is not perturbed by housekeeping work. Equivalent to `NO_BACKGROUND_E3_BUILD=true`. Diagnostic / focused-performance-testing use only — NOT an operational setting.
+  * Default: `false`
+
 ### Caplin (Consensus Layer)
 
 Flags for configuring the Caplin consensus layer.
@@ -535,8 +548,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 **Synchronization and Pruning:**
 
-* `NO_PRUNE` - Disables pruning when set to true
-* `NO_MERGE` - Disables merging operations
+* `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
+* `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 * `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `512`)
 
