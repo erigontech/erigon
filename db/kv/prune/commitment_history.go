@@ -24,6 +24,21 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+// ValidateCommitmentHistoryOlder rejects a commitment-history retention window
+// (in blocks) that exceeds the regular state-history retention. Commitment
+// history older than the available state history cannot serve eth_getProof
+// (which falls back to state history), so the wider window is meaningless. A
+// zero window (unlimited) or an unlimited/expiry History mode imposes no bound.
+func ValidateCommitmentHistoryOlder(m Mode, olderBlocks uint64) error {
+	if olderBlocks == 0 || !m.History.Enabled() {
+		return nil
+	}
+	if distance := m.History.toValue(); olderBlocks > distance {
+		return fmt.Errorf("--prune.commitment-history.older=%d exceeds --prune.distance=%d; commitment history older than state-history retention cannot serve eth_getProof", olderBlocks, distance)
+	}
+	return nil
+}
+
 // EnsureCommitmentHistoryOlderCompatible checks that the configured
 // --prune.commitment-history.older value (in blocks; 0 = unlimited) is
 // compatible with what was previously persisted in kv.DatabaseInfo.

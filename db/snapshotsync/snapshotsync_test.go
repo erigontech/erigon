@@ -273,6 +273,22 @@ func TestBlocksToStepDistance(t *testing.T) {
 	}
 }
 
+func TestGetMaxBlockInSnapshots(t *testing.T) {
+	pv := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "v1-000000-000500-headers.seg"},
+		{Name: "v1-000500-001000-headers.seg"},
+		{Name: "v1-000500-001000-bodies.seg"},
+		{Name: "v1-000500-001000-transactions.seg"},
+		// Consensus-layer segments carry slot-based "to" values (scaled here
+		// above the EL tip); they must not skew the EL max-block calculation.
+		{Name: "v1-001000-002000-beaconblocks.seg"},
+		{Name: "v1-002000-003000-blobsidecars.seg"},
+		// State segments are ignored too.
+		{Name: "domain/v1.0-commitment.0-64.kv"},
+	}}
+	assert.Equal(t, uint64(1_000_000), getMaxBlockInSnapshots(pv))
+}
+
 func TestShouldSkipCommitmentHistorySegment(t *testing.T) {
 	cases := []struct {
 		name    string

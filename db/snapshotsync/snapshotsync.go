@@ -266,14 +266,21 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 	return maxTo, nil
 }
 
-// getMaxBlockInSnapshots returns the highest block number "to" across all
+// getMaxBlockInSnapshots returns the highest block number "to" across the EL
 // block-numbered preverified segments (headers/bodies/transactions). State
-// (domain/history/idx) segments are ignored.
+// (domain/history/idx) and consensus-layer (beaconblocks/blobsidecars) segments
+// are ignored: the latter carry slot-based "to" values, not EL block numbers,
+// and would skew the blocks->steps conversion on chains where slots outrun blocks.
 func getMaxBlockInSnapshots(preverified snapcfg.Preverified) uint64 {
 	var maxTo uint64
 	for _, p := range preverified.Items {
-		info, stateFile, ok := snaptype.ParseFileName("", p.Name)
-		if !ok || stateFile {
+		if !strings.Contains(p.Name, "headers") &&
+			!strings.Contains(p.Name, "bodies") &&
+			!strings.Contains(p.Name, "transactions") {
+			continue
+		}
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
 			continue
 		}
 		if info.To > maxTo {

@@ -253,6 +253,10 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.Prune = mode
 
+	if err := prune.ValidateCommitmentHistoryOlder(mode, cfg.CommitmentHistoryOlder); err != nil {
+		utils.Fatalf("%v", err)
+	}
+
 	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
 		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)

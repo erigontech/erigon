@@ -108,3 +108,29 @@ func TestEnsureCommitmentHistoryOlderCompatible(t *testing.T) {
 		assert.False(t, ok)
 	})
 }
+
+func TestValidateCommitmentHistoryOlder(t *testing.T) {
+	finite := Mode{Initialised: true, History: Distance(100_000), Blocks: Distance(100_000)}
+	cases := []struct {
+		name    string
+		mode    Mode
+		older   uint64
+		wantErr bool
+	}{
+		{"unlimited-older-no-constraint", finite, 0, false},
+		{"unlimited-history-no-constraint", ArchiveMode, 200_000, false},
+		{"within-distance-allowed", finite, 50_000, false},
+		{"equal-distance-allowed", finite, 100_000, false},
+		{"exceeds-distance-rejected", finite, 200_000, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommitmentHistoryOlder(tc.mode, tc.older)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
