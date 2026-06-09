@@ -55,7 +55,7 @@ func foldWhaleStorageChildren(t *testing.T, ms *MockState, accNib int, groups [1
 			g[i] = touchedKey{hk: groups[x][i].hk, pk: groups[x][i].pk, upd: &groups[x][i].upd}
 		}
 		w := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-		c, err := foldStorageChildCell(w, accNib, g)
+		c, err := foldChildSubtree(w, accNib, g)
 		require.NoError(t, err)
 		w.Release()
 		children[x] = c

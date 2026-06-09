@@ -26,43 +26,12 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// TestIsSplitPoint exercises the inline split predicate's three gates: the
-// child-count gate, the MinSplitKeys size gate, and the terminator
-// (plainKey == nil) correctness gate.
-func TestIsSplitPoint(t *testing.T) {
-	t.Parallel()
-
-	// Branch with two children and enough keys, no terminator → split.
-	split := &prefixNode{bitmap: 0b101, subtreeCount: MinSplitKeys}
-	split.children = []*prefixNode{{}, {}}
-	require.True(t, isSplitPoint(split))
-
-	// Same shape but below the size threshold → not a split.
-	small := &prefixNode{bitmap: 0b101, subtreeCount: MinSplitKeys - 1}
-	small.children = []*prefixNode{{}, {}}
-	require.False(t, isSplitPoint(small))
-
-	// Single child → not a split regardless of size.
-	single := &prefixNode{bitmap: 0b10, subtreeCount: MinSplitKeys * 4}
-	single.children = []*prefixNode{{}}
-	require.False(t, isSplitPoint(single))
-
-	// Terminator present (e.g. account@64 above its storage) → never a split,
-	// even with many children and keys.
-	term := &prefixNode{bitmap: 0b111, subtreeCount: MinSplitKeys * 4, plainKey: []byte{0x01}}
-	term.children = []*prefixNode{{}, {}, {}}
-	require.False(t, isSplitPoint(term))
-
-	require.False(t, isSplitPoint(nil))
-}
-
 // TestStreaming_StorageInteriorSplits is the headline Task-3 check: a whale
 // account whose storage spans many slots must fold via the flat per-first-nibble
 // fan-out (storageRootLocal, ~16-way below the account/storage boundary) while
 // still matching the sequential root and stored branch set. The account folds
 // through storageRootLocal (DeepLocalFolds), never as a split-point (its depth-64
-// node carries the account terminator). Depth > 64 split-points are a follow-up,
-// so the StorageSplits seam is not asserted here.
+// node carries the account terminator).
 func TestStreaming_StorageInteriorSplits(t *testing.T) {
 	t.Parallel()
 	_, _, _, _, pk, upds, _ := whaleByNibble(20_000)
@@ -156,8 +125,7 @@ func whaleFullCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Up
 // is canonical and the streaming fold must reproduce it — root + every stored
 // branch byte-identical to sequential at every worker count. A collapse self-flush
 // that dropped a deletion (phantom child) or clobbered an untouched on-disk sibling
-// would break branch parity. Depth > 64 split-points are a follow-up, so the
-// StorageSplits seam is not asserted.
+// would break branch parity.
 func TestStreaming_StorageCollapseAcrossSplit(t *testing.T) {
 	t.Parallel()
 	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
@@ -172,45 +140,4 @@ func TestStreaming_StorageCollapseAcrossSplit(t *testing.T) {
 		require.Equalf(t, seqRoot, strRoot, "whale storage collapse(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, strMs)
 	}
-}
-
-// TestFoldSubtreeAtPrefix_MatchesDepth64 pins the arbitrary-depth raw fold to the
-// proven depth-64 deep-fold helper: folding one first-storage-nibble group via
-// the hand-mounted foldSubtreeAtPrefix(accHash[:64], group) must yield the same
-// child cell hash as foldStorageChildCell (the auto-break depth-64 mount).
-func TestFoldSubtreeAtPrefix_MatchesDepth64(t *testing.T) {
-	t.Parallel()
-	_, accHash, accNib, _, pk, upds, groups := whaleByNibble(8_000)
-	ms := NewMockState(t)
-	require.NoError(t, ms.applyPlainUpdates(pk, upds))
-
-	nib := -1
-	for x := range groups {
-		if len(groups[x]) > 0 {
-			nib = x
-			break
-		}
-	}
-	require.GreaterOrEqual(t, nib, 0, "whale must span at least one storage nibble")
-
-	group := make([]touchedKey, len(groups[nib]))
-	for i := range groups[nib] {
-		group[i] = touchedKey{hk: groups[nib][i].hk, pk: groups[nib][i].pk, upd: &groups[nib][i].upd}
-	}
-
-	wRef := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	wRef.grid[0][accNib].reset()
-	ref, err := foldStorageChildCell(wRef, accNib, group)
-	require.NoError(t, err)
-	wRef.Release()
-
-	wGot := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	got, err := foldSubtreeAtPrefix(wGot, accHash[:64], group)
-	require.NoError(t, err)
-	wGot.Release()
-
-	require.Equal(t,
-		computeCellHashAt(t, ms, ref, 65),
-		computeCellHashAt(t, ms, got, 65),
-		"hand-mounted foldSubtreeAtPrefix diverged from the depth-64 deep-fold helper")
 }

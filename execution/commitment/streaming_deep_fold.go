@@ -41,14 +41,6 @@ func foldChildSubtree(w *HexPatriciaHashed, col int, group []touchedKey) (cell, 
 	return c, nil
 }
 
-// foldStorageChildCell folds one storage nibble's keys in a standalone worker and
-// returns the depth-65 storage-branch child cell — foldChildSubtree mounted at the
-// account boundary (depth 64). Production copy of the deep-fold test helper
-// foldChildAt; parallel_mount.go is intentionally left untouched.
-func foldStorageChildCell(w *HexPatriciaHashed, accNib int, group []touchedKey) (cell, error) {
-	return foldChildSubtree(w, accNib, group)
-}
-
 // aggregateSubtreeRoot stitches the present child cells into the branch at depth
 // len(prefix)+1 and folds it once to the subtree's root cell at depth len(prefix).
 // The destination grid cell is reset first so no stale pooled-grid field survives

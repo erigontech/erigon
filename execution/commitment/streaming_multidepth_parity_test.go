@@ -74,8 +74,7 @@ func parallelRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]by
 // concurrent engine to the SAME root and stored-branch set as sequential
 // ModeDirect AND ModeParallel, at every worker count. DeepLocalFolds asserts the
 // whale's account@64 boundary still routes through storageRootLocal (the flat
-// per-first-nibble fan-out); depth > 64 splits are a follow-up, so the
-// StorageSplits seam is not asserted here.
+// per-first-nibble fan-out).
 func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMultiDepthCorpus()

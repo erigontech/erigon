@@ -123,11 +123,6 @@ type StreamingCommitter struct {
 	// streaming path no longer routes through parallel_mount.go's deep fan-out.
 	deepLocalFolds atomic.Uint64
 
-	// storageSplits counts storage-interior split-points folded concurrently at
-	// depth > 64 — a test seam proving the recursive fold reaches below the
-	// account/storage boundary, not just the top-16 + first-storage-nibble fan-out.
-	storageSplits atomic.Uint64
-
 	// rootCell + flags snapshot the base trie's terminal root after a successful
 	// fold so the owning ParallelPatriciaHashed can promote them into its
 	// persistence template (RootTrie) for EncodeCurrentState/SetState. rootValid
@@ -860,11 +855,6 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 // DeepLocalFolds reports how many big-storage accounts the streaming-local deep
 // walk folded — a test seam proving the deep path no longer calls parallel_mount.
 func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds.Load() }
-
-// StorageSplits reports how many storage-interior split-points (depth > 64) the
-// recursive fold processed concurrently — a test seam proving multi-depth
-// concurrency reaches below the account/storage boundary.
-func (sc *StreamingCommitter) StorageSplits() uint64 { return sc.storageSplits.Load() }
 
 // dfsDeepLocal is the streaming-local copy of ParallelPatriciaHashed.dfsSubtreeDeep:
 // it walks a mount worker's subtree and, at a big-storage account whose touched

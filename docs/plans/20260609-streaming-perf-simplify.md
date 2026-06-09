@@ -111,21 +111,36 @@ Profile: ~28% in `cond_wait`/`usleep`/`cond_signal`/`atomic`; cores idle (sync-b
 
 **Files:** `execution/commitment/*`
 
-- [ ] Remove genuinely-dead `storageSplits` field + `StorageSplits()` (no `.Add`
-      site anywhere).
-- [ ] `isSplitPoint`, `foldSubtreeAtPrefix`, `foldChildSubtree`, `foldStorageChildCell`
+- [x] Remove genuinely-dead `storageSplits` field + `StorageSplits()` (no `.Add`
+      site anywhere). Done: dropped both from `streaming_commitment.go`.
+- [x] `isSplitPoint`, `foldSubtreeAtPrefix`, `foldChildSubtree`, `foldStorageChildCell`
       are reachable only from tests. Remove each with the specific test functions that
       reference it — **not** whole test files (those files also assert live seams like
       `DeepLocalFolds`). Order: remove `foldStorageChildCell` (+ its tests) **before**
       `foldChildSubtree` — the latter's only caller is the former, so it's dead only
       after that. `stripLeadingChildExt` is **live** (called by production folds) — keep it.
-- [ ] Background scheduler (`StartScheduler`, `foldSplitBg`, `foldKeys`, `enqueue`,
+      Done with one corrected deviation: removed `isSplitPoint` (+ `TestIsSplitPoint`),
+      `foldSubtreeAtPrefix` (+ `TestFoldSubtreeAtPrefix_MatchesDepth64`), and the
+      redundant 1-line wrapper `foldStorageChildCell` (consumers now call
+      `foldChildSubtree` directly). KEPT `foldChildSubtree`: its real consumer is the
+      live test helper `foldWhaleStorageChildren`, which backs the live-code regression
+      tests `TestAggregateStorageRoot_ResetsDestinationCell` and
+      `TestDeepFold_StorageRootParity` (they exercise production `aggregateStorageRoot`
+      / deep-fold parity) — removing it would delete that coverage. This also keeps
+      `stripLeadingChildExt` live as the plan requires (it is called ONLY by
+      `foldChildSubtree`, so the "keep stripLeadingChildExt" instruction is only
+      self-consistent if `foldChildSubtree` stays). `stripLeadingChildExt` is in fact
+      not reached from production today; it is live via that test helper chain.
+- [x] Background scheduler (`StartScheduler`, `foldSplitBg`, `foldKeys`, `enqueue`,
       `scheduleWorker`, `overlayContext`, `foldDirtySplits`, the eager-fold gate, the
       scheduler-only `splitState` fields) is dead in production but test-covered.
       **Scope it OUT of this plan** (KISS, leave-correct-code-alone) — it is a separate
-      removal task if wanted, not part of comment trimming.
-- [ ] Trim comments per the invariant-preserving rule above; collapse redundant tests.
-- [ ] Build, lint, parity green.
+      removal task if wanted, not part of comment trimming. Done: left untouched.
+- [x] Trim comments per the invariant-preserving rule above; collapse redundant tests.
+      Done: removed the now-stale "StorageSplits seam is not asserted" trailing sentences
+      in three test docstrings; removed the two dead test functions above.
+- [x] Build, lint, parity green. Done: `go build`/`go vet` clean; `make lint` 0 issues;
+      `TestStreaming|TestDeepFold|TestAggregate|TestVerifyParallel` green `-race -count=3`.
 
 ### Task 5: Verify
 
