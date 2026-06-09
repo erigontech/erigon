@@ -10,7 +10,7 @@ import Link from '@docusaurus/Link';
 
 Erigon is an Ethereum execution layer client focused on performance, low disk usage, and modular architecture.
 
-A core benefit of Erigon is its **reduced disk footprint** across all available prune modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
+A core benefit of Erigon is its **reduced disk footprint** across all available pruning modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
 
 {/* ─── Stats strip ─── */}
 
@@ -65,7 +65,7 @@ Erigon's architecture provides measurable improvements in cost, performance, and
   <div className="lp-card-desc">Historical data lives in immutable files distributed via BitTorrent — up to <strong>10× cheaper</strong> to backup, repair, and distribute. No double-disk usage, no complex serialisation.</div>
 </Link>
 
-<Link to="../fundamentals/prune-modes" className="lp-card">
+<Link to="../fundamentals/pruning-modes" className="lp-card">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
     <path d="M18 9a9 9 0 0 1-9 9"/>
@@ -91,7 +91,7 @@ Erigon's architecture provides measurable improvements in cost, performance, and
   <div className="lp-card-desc">Core node, RPC Daemon, and TxPool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.</div>
 </Link>
 
-<Link to="../fundamentals/prune-modes" className="lp-card">
+<Link to="../fundamentals/pruning-modes" className="lp-card">
   <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
   </svg>
