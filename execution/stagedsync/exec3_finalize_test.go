@@ -1838,6 +1838,51 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 	assert.Equal(t, designator, gotCode, "recovered code is the 7702 designator bytes")
 }
 
+// The SetCode short-circuit variant: the designator is already committed (so a
+// re-delegating tx's SetCode short-circuits and the versionMap holds NO
+// CodePath for this tx at all). The fill-missing loop still fills CodeHashPath
+// from committed state, so recovery must fall back to stateReader.ReadAccountCode
+// — the versionMap path alone (the original fix) would miss this and persist a
+// codeHash with no code.
+func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	authority := accounts.InternAddress([20]byte{0x42})
+	designator := types.AddressToDelegation(accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02}))
+	designatorHash := accounts.InternCodeHash(crypto.Keccak256Hash(designator))
+
+	const txIndex = 5
+
+	// authority is an already-committed 7702 delegation: its designator code +
+	// codeHash live in committed state, NOT in this batch's versionMap.
+	reader := newMapStateReader()
+	reader.accounts[authority] = &accounts.Account{Nonce: 1, CodeHash: designatorHash}
+	reader.code[authority] = designator
+
+	// Re-delegating tx: SetCode short-circuits (code unchanged), so the only
+	// write is the nonce bump — no CodePath/CodeHashPath, and nothing for
+	// CodePath in the versionMap.
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: authority, Path: state.NoncePath, Val: uint64(2),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}, true, "")
+	rawWrites := state.VersionedWrites{
+		{Address: authority, Path: state.NoncePath, Val: uint64(2),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}
+
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true)
+
+	require.Equal(t, 1, countPath(result, state.CodeHashPath),
+		"codeHash is filled from committed state for the modified account")
+	require.Equal(t, 1, countPath(result, state.CodePath),
+		"CodePath must be recovered via stateReader when the versionMap has none")
+	for _, w := range result {
+		if w.Path == state.CodePath {
+			assert.Equal(t, designator, w.Val.([]byte), "recovered code is the committed designator")
+		}
+	}
+}
+
 // TestCalcFees_EmitsAddressPathForCoinbase pins the fix for the mainnet
 // block 25151825 tx 31 +25k gas bug. Background:
 //
