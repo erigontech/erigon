@@ -798,14 +798,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	balMap := make(map[common.Hash][]byte)
-	for i, bal := range chain.BlockAccessLists {
-		if len(bal) > 0 {
-			block := chain.Blocks[i]
-			balMap[block.Hash()] = bal
-		}
-	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
+	if err := wr.InsertBlocksAndWait(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
 		return err
 	}
 

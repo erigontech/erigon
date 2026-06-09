@@ -392,9 +392,11 @@ func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, com
 
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }
 
-func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block, bool) error { return nil }
+func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block, [][]byte, bool) error {
+	return nil
+}
 
-func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error { return nil }
+func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 
