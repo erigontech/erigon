@@ -1105,7 +1105,10 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 }
 
 func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
-	uncompactedBranchKey := nibbles.CompactToHex(branchKey)
+	uncompactedBranchKey, err := nibbles.DecodeKeyV2(branchKey)
+	if err != nil {
+		return fmt.Errorf("decode branch key: %w", err)
+	}
 	if nibbles.HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
 	}

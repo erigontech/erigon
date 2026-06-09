@@ -344,7 +344,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(nibbles.HexToCompact([]byte{0}))
+		zeroPrefixBranch, _, err := p.root.ctx.Branch(nibbles.EncodeKeyV2([]byte{0}))
 		if err != nil {
 			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
 		}

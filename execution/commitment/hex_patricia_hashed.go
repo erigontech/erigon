@@ -1730,7 +1730,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := nibbles.HexToCompact(hph.currentKey[:hph.currentKeyLen])
+	key := nibbles.EncodeKeyV2(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
 	branchData, err := hph.readBranchAndCheckForFlushing(key)
@@ -2273,7 +2273,7 @@ func (hph *HexPatriciaHashed) fold() error {
 
 	depth := hph.depths[row]
 
-	updateKey := nibbles.HexToCompact(hph.currentKey[:updateKeyLen])
+	updateKey := nibbles.EncodeKeyV2(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {

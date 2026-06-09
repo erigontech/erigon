@@ -69,8 +69,8 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, len(branchData) > 0)
 
-	// Build the branchKey (compacted nibbles for depth=0 means empty path)
-	branchKey := nibbles.HexToCompact(nil) // empty path
+	// Build the branchKey (V2-encoded nibbles for depth=0 means empty path)
+	branchKey := nibbles.EncodeKeyV2(nil) // empty path
 
 	// Serialize the account value
 	accVal := accounts.SerialiseV3(&acc)
@@ -174,7 +174,7 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 		t.Fatal(err)
 	}
 	branchNibbles := []byte{c.hashedExtension[0]}
-	branchKey := nibbles.HexToCompact(branchNibbles)
+	branchKey := nibbles.EncodeKeyV2(branchNibbles)
 
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
@@ -256,7 +256,7 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	require.NoError(t, err)
 
 	// branchKey for root branch: empty path (0 nibbles → depth = 0 + 1 = 1)
-	branchKey := nibbles.HexToCompact(nil)
+	branchKey := nibbles.EncodeKeyV2(nil)
 
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
@@ -329,7 +329,7 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 		nib[i*2] = hashBuf2[i] >> 4
 		nib[i*2+1] = hashBuf2[i] & 0x0f
 	}
-	branchKey := nibbles.HexToCompact(nib[:])
+	branchKey := nibbles.EncodeKeyV2(nib[:])
 
 	// Build domain values map
 	storageValues := map[string][]byte{
