@@ -61,6 +61,22 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build erigon Docker image (with BuildKit layer cache)
+        id: build_erigon_image
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current-base
+          build-args: |
+            BINARIES=erigon caplin
+          cache-from: type=gha,scope=kurtosis-erigon-build
+          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      # docker/build-push-action has no retry input; retry once so a transient
+      # Docker Hub / GHA-cache failure doesn't fail an otherwise-good build.
+      - name: Retry erigon Docker image build on transient failure
+        if: steps.build_erigon_image.outcome == 'failure'
         uses: docker/build-push-action@v6
         with:
           context: .
