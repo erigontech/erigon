@@ -26,6 +26,12 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 They are enabled by default for **Minimal** and **Full Node.** They can be activated or deactivated with the flag `--persist.receipts <value>` .
 :::
 
+:::note[Breaking change in v3.5]
+**`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** Full mode previously pruned pre-merge block data (EIP-4444 history-expiry) and kept the last 100,000 blocks of state history. In v3.5 it retains the last **262,144 blocks (~36.4 days)** for both state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`.
+
+`--prune.mode=blocks` also bumps from 100,000 to 262,144 blocks for its `History` retention window. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start; no operator action required. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+:::
+
 ## Archive node
 
 Ethereum's state refers to account balances, contracts, and consensus data. Archive nodes retain all historical state and require more **disk space.** However, Erigon 3 has consistently reduced the [disk space](../get-started/hardware-requirements.mdx#disk-size-and-ram-requirements) requirements for running an archive node, rendering it more affordable and accessible to a broader range of users.
