@@ -115,4 +115,4 @@ If you need to reclaim space without resyncing from scratch:
 - [Architecture](architecture) — how this storage model fits into staged sync and the flat-KV state design
 - [Optimizing Storage](optimizing-storage) — concrete recipes for splitting the datadir across multiple disks
 - [Hardware Requirements](../get-started/hardware-requirements) — disk-size numbers for each `--prune.mode`
-- [Pruning Modes](prune-modes) — choosing what history to keep
+- [Pruning Modes](pruning-modes) — choosing what history to keep
