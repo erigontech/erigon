@@ -177,11 +177,12 @@ tests are red and need reconciliation here:
 
 ### Task 4: Full validation
 
-- [ ] `TestStreaming_MultiDepthCollapseParity` green at workers 1/4/8.
-- [ ] `go test -run 'TestStreaming|TestDeepFold|TestVerifyParallel|TestAggregate' -race -count=20` green.
-- [ ] `make lint` clean (run repeatedly), `make erigon integration` builds.
-- [ ] The collapse parity test (already committed) is now green; ensure no test
-      was muted/skipped to get there.
+- [x] `TestStreaming_MultiDepthCollapseParity` green at workers 1/4/8.
+- [x] `go test -run 'TestStreaming|TestDeepFold|TestVerifyParallel|TestAggregate' -race -count=20` green.
+- [x] `make lint` clean (run repeatedly), `make erigon integration` builds.
+- [x] The collapse parity test (already committed) is now green; ensure no test
+      was muted/skipped to get there. Confirmed: the only `t.Skip` in the package
+      is the pre-existing `-short` bench-metrics guard, unrelated to this fix.
 
 ## Post-Completion
 - Confirm the whale-bottleneck benchmark still shows the storage concurrency win
