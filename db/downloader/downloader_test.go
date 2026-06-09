@@ -18,10 +18,12 @@ package downloader
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,6 +59,39 @@ func TestConcurrentDownload(t *testing.T) {
 		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
 		w(t.Context())
 	}
+}
+
+// TestAllActiveSnapshotsConcurrentWithWrites pins that allActiveSnapshots may run concurrently
+// with torrentsByName mutations; it data-races under -race unless the map read holds d.lock.
+func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	ctx := t.Context()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				d.allActiveSnapshots()
+			}
+		}
+	}()
+
+	for i := range 64 {
+		name := fmt.Sprintf("v1-%06d-%06d-headers.seg", i, i+1)
+		ih := snaptype.Hex2InfoHash(fmt.Sprintf("%040x", i+1))
+		require.NoError(t, d.testStartSingleDownloadNoWait(ctx, ih, name))
+	}
+
+	close(stop)
+	wg.Wait()
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
