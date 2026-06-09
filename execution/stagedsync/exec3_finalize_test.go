@@ -1762,6 +1762,82 @@ func countPath(writes state.VersionedWrites, path state.AccountPath) int {
 	return n
 }
 
+// TestNormalizeWriteSet_CodePathTravelsWithCodeHash reproduces the EIP-7702
+// write-drop that wrongly rejected a delegated sender with "sender not an eoa".
+//
+// A delegating tx re-executes in parallel. On the re-exec, SetCode short-circuits
+// (so.Code() already returns the designator written by the prior incarnation, so
+// bytes.Equal(prevcode, code) is true), so the validated incarnation emits the
+// authority's nonce bump but NO fresh CodePath/CodeHashPath. The raw writeset
+// therefore carries the stale prior-incarnation code writes. normalizeWriteSet
+// keeps CodeHashPath (resolved from the versionMap) but the incarnation filter
+// drops the stale CodePath — leaving a codeHash with no code. The account then
+// persists a non-empty codeHash whose code bytes are missing from CodeDomain, so
+// a later block's GetDelegatedDesignation reads empty and EIP-3607 rejects the
+// 7702 sender. CodePath must be recovered so code always travels with its hash.
+func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	authority := accounts.InternAddress([20]byte{0x42})
+
+	// EIP-7702 delegation designator: 0xef0100 || target(20 bytes).
+	designator := types.AddressToDelegation(accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02}))
+	designatorHash := accounts.InternCodeHash(crypto.Keccak256Hash(designator))
+
+	const txIndex = 5
+
+	// Incarnation 0 delegates: designator code + its hash + authority nonce bump.
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: authority, Path: state.CodePath, Val: designator,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: authority, Path: state.CodeHashPath, Val: designatorHash,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: authority, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}, true, "")
+
+	// Incarnation 1 (validated) re-executes; SetCode short-circuits, so only the
+	// nonce is re-emitted — no fresh CodePath/CodeHashPath.
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: authority, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
+	}, true, "")
+
+	// blockIO.WriteSet retains both incarnations' entries (versionMap doesn't
+	// clear old), so the validated tx's raw writeset carries the stale inc-0
+	// code writes alongside the inc-1 nonce.
+	rawWrites := state.VersionedWrites{
+		{Address: authority, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
+		{Address: authority, Path: state.CodePath, Val: designator,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
+		{Address: authority, Path: state.CodeHashPath, Val: designatorHash,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
+	}
+
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
+
+	var gotHash *accounts.CodeHash
+	var gotCode []byte
+	for _, w := range result {
+		switch w.Path {
+		case state.CodeHashPath:
+			h := w.Val.(accounts.CodeHash)
+			gotHash = &h
+		case state.CodePath:
+			gotCode = w.Val.([]byte)
+		}
+	}
+
+	require.NotNil(t, gotHash, "codeHash must be present in the normalized writeset")
+	assert.Equal(t, designatorHash, *gotHash, "codeHash is the 7702 designator hash")
+
+	// The regression: code was dropped while the hash survived. Code must travel
+	// with its hash so the account is never persisted with a codeHash but no code.
+	require.Equal(t, 1, countPath(result, state.CodePath),
+		"CodePath must be recovered so code is never persisted without its codeHash")
+	assert.Equal(t, designator, gotCode, "recovered code is the 7702 designator bytes")
+}
+
 // TestCalcFees_EmitsAddressPathForCoinbase pins the fix for the mainnet
 // block 25151825 tx 31 +25k gas bug. Background:
 //

@@ -3391,6 +3391,55 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
+	// CodePath travels with CodeHashPath. The CodeHashPath case and the
+	// fill-missing loop above both recover an account's codeHash from the
+	// versionMap, but CodePath has no equivalent recovery: the case above keeps
+	// it only when this tx's CodePath write is present at the validated
+	// incarnation (the incarnation filter), and the fill loop never emits it.
+	// So a tx whose validated writeset lacks a fresh CodePath — e.g. an EIP-7702
+	// delegating tx that re-executes: SetCode short-circuits because so.Code()
+	// already returns the designator written by the prior incarnation
+	// (bytes.Equal(prevcode, code)), so the validated incarnation emits no new
+	// CodePath — still recovers CodeHashPath here while CodePath is dropped. The
+	// account then persists a non-empty codeHash with no code bytes; a later
+	// block's GetCode/GetDelegatedDesignation reads empty, and for a 7702 sender
+	// the EIP-3607 check wrongly rejects the tx ("sender not an eoa"). Recover
+	// the code this tx wrote from the versionMap — regardless of incarnation,
+	// scoped to this tx (Version().TxIndex == txIndex) so we never re-emit a
+	// prior tx's code for a merely-touched contract — mirroring CodeHashPath so
+	// code can never be lost while its hash survives.
+	codeInOutput := make(map[accounts.Address]bool)
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	for _, w := range filtered {
+		switch w.Path {
+		case state.CodePath:
+			codeInOutput[w.Address] = true
+		case state.CodeHashPath:
+			if h, ok := w.Val.(accounts.CodeHash); ok {
+				codeHashInOutput[w.Address] = h
+			}
+		}
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+			continue
+		}
+		rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1)
+		if rr.Status() != state.MVReadResultDone || rr.Version().TxIndex != txIndex {
+			continue
+		}
+		code, ok := rr.Value().([]byte)
+		if !ok || len(code) == 0 {
+			continue
+		}
+		filtered = append(filtered, &state.VersionedWrite{
+			Address: addr,
+			Path:    state.CodePath,
+			Val:     code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
+		})
+	}
+
 	// EIP-161 empty account removal: if an account has Balance=0, Nonce=0,
 	// and empty CodeHash, it should be deleted — not written as a regular
 	// account with zero values. Serial's updateAccount checks Empty() and
