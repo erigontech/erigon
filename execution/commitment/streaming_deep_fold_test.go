@@ -107,7 +107,7 @@ func TestAggregateStorageRoot_ResetsDestinationCell(t *testing.T) {
 }
 
 // TestDeepFold_StorageRootParity drives the production deep-fold child helper
-// (foldStorageChildCell at depth 64) and checks the resulting account root equals
+// (foldChildSubtree at depth 64) and checks the resulting account root equals
 // the sequential ModeDirect oracle.
 func TestDeepFold_StorageRootParity(t *testing.T) {
 	addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(20_000)

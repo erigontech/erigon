@@ -43,13 +43,6 @@ type Metrics struct {
 	spentUnfolding  atomic.Int64
 	spentFolding    atomic.Int64
 	spentProcessing atomic.Int64
-	// per-key hot-path counts accumulated without atomics by the single owning
-	// goroutine; folded into the atomics above by flushHot before any read.
-	addressKeysN uint64
-	storageKeysN uint64
-	loadAccountN uint64
-	loadStorageN uint64
-	loadBranchN  uint64
 	// metric config related
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
@@ -137,7 +130,6 @@ func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
 }
 
 func (m *Metrics) AsValues() MetricValues {
-	m.flushHot()
 	return MetricValues{
 		mu:              &m.Accounts.m,
 		Accounts:        m.Accounts.AccountStats,
@@ -179,7 +171,6 @@ func (m *Metrics) WriteToCSV() {
 }
 
 func (m *Metrics) logMetrics() []any {
-	m.flushHot()
 	return []any{
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
@@ -222,7 +213,6 @@ func (m *Metrics) Headers() []string {
 }
 
 func (m *Metrics) Values() [][]string {
-	m.flushHot()
 	vals := [][]string{
 		{
 			strconv.FormatUint(m.updates.Load(), 10),
@@ -305,11 +295,6 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 }
 
 func (m *Metrics) Reset() {
-	m.addressKeysN = 0
-	m.storageKeysN = 0
-	m.loadAccountN = 0
-	m.loadStorageN = 0
-	m.loadBranchN = 0
 	m.updates.Store(0)
 	m.addressKeys.Store(0)
 	m.storageKeys.Store(0)
@@ -351,36 +336,11 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 	}
 }
 
-// flushHot folds the non-atomic per-key counters into their atomics. Called by
-// the owning goroutine before any metrics read so snapshots stay consistent.
-func (m *Metrics) flushHot() {
-	if m.addressKeysN != 0 {
-		m.addressKeys.Add(m.addressKeysN)
-		m.addressKeysN = 0
-	}
-	if m.storageKeysN != 0 {
-		m.storageKeys.Add(m.storageKeysN)
-		m.storageKeysN = 0
-	}
-	if m.loadAccountN != 0 {
-		m.loadAccount.Add(m.loadAccountN)
-		m.loadAccountN = 0
-	}
-	if m.loadStorageN != 0 {
-		m.loadStorage.Add(m.loadStorageN)
-		m.loadStorageN = 0
-	}
-	if m.loadBranchN != 0 {
-		m.loadBranch.Add(m.loadBranchN)
-		m.loadBranchN = 0
-	}
-}
-
 func (m *Metrics) Updates(plainKey []byte) {
 	if len(plainKey) == length.Addr {
-		m.addressKeysN++
+		m.addressKeys.Add(1)
 	} else {
-		m.storageKeysN++
+		m.storageKeys.Add(1)
 
 		if m.collectCommitmentMetrics {
 			m.Accounts.collect(plainKey, func(mx *AccountStats) {
@@ -391,7 +351,7 @@ func (m *Metrics) Updates(plainKey []byte) {
 }
 
 func (m *Metrics) AccountLoad(plainKey []byte) {
-	m.loadAccountN++
+	m.loadAccount.Add(1)
 	if m.collectCommitmentMetrics {
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadAccount++
@@ -400,7 +360,7 @@ func (m *Metrics) AccountLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StorageLoad(plainKey []byte) {
-	m.loadStorageN++
+	m.loadStorage.Add(1)
 	if m.collectCommitmentMetrics {
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadStorage++
@@ -409,7 +369,7 @@ func (m *Metrics) StorageLoad(plainKey []byte) {
 }
 
 func (m *Metrics) BranchLoad(plainKey []byte) {
-	m.loadBranchN++
+	m.loadBranch.Add(1)
 	if m.collectCommitmentMetrics {
 		m.Branches.collect(plainKey, func(mx *BranchStats) {
 			mx.LoadBranch++

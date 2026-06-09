@@ -1075,3 +1075,45 @@ func TestStreamingCommitterStateRoundTrip(t *testing.T) {
 	require.Equal(t, published, restored,
 		"RootHash after SetState must reproduce the published streaming root")
 }
+
+// TestKeyArena_PointerStability verifies the chunked keyArena returns stable,
+// independent slices: prior keys survive a new-chunk allocation, each returned
+// slice is full-cap so a caller append cannot clobber the next key, and an
+// oversize key still copies its full contents.
+func TestKeyArena_PointerStability(t *testing.T) {
+	var arena keyArena
+
+	inputs := make([][]byte, 0, 4096)
+	got := make([][]byte, 0, 4096)
+	// Push enough small keys to roll over at least two 64KB chunks.
+	for i := range 4096 {
+		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32) // 64 bytes/key
+		inputs = append(inputs, in)
+		got = append(got, arena.copy(in))
+	}
+	// A key larger than one chunk forces the max(keyArenaChunk, len) path.
+	big := bytes.Repeat([]byte{0xAB}, keyArenaChunk+128)
+	inputs = append(inputs, big)
+	got = append(got, arena.copy(big))
+
+	for i, in := range inputs {
+		require.True(t, bytes.Equal(in, got[i]),
+			"key %d corrupted: returned slice does not equal its input", i)
+		require.Equal(t, len(got[i]), cap(got[i]),
+			"key %d not full-cap: a caller append could overwrite the next key", i)
+	}
+
+	// Stamp a unique byte into every returned slice, then confirm none was
+	// overwritten by a neighbour sharing the same backing chunk.
+	for i := range got {
+		for j := range got[i] {
+			got[i][j] = byte(i)
+		}
+	}
+	for i := range got {
+		for j := range got[i] {
+			require.Equal(t, byte(i), got[i][j],
+				"key %d overlaps another arena slice (overwritten at byte %d)", i, j)
+		}
+	}
+}
