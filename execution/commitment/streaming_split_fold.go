@@ -147,17 +147,7 @@ func (sc *StreamingCommitter) foldStorageChild(sem chan struct{}, pu *parallelUp
 	group := collectStorageNibbleKeys(child, childPrefix)
 	sem <- struct{}{}
 	w, release := sc.newStorageWorker()
-	var c cell
-	var err error
-	if len(parentPrefix) == 64 {
-		// Account-boundary first-nibble subtree: fold on a fresh worker that
-		// bootstraps from the root and unfolds the on-disk storage branch, so an
-		// incremental collapse preserves untouched on-disk siblings. The arbitrary-
-		// depth pre-mount (foldSubtreeAtPrefix) skips that unfold and drops them.
-		c, err = foldChildSubtree(w, int(parentPrefix[63]), group)
-	} else {
-		c, err = foldSubtreeAtPrefix(w, parentPrefix, group)
-	}
+	c, err := foldSubtreeAtPrefix(w, parentPrefix, group)
 	if err == nil {
 		if d := w.TakeDeferredUpdates(); len(d) > 0 {
 			pu.appendDeferred(d)
