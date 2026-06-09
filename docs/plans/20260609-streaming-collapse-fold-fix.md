@@ -82,7 +82,7 @@ free from `base`.
 **Files:**
 - Modify: `execution/commitment/streaming_multidepth_parity_test.go`
 
-- [ ] Add `TestStreaming_MultiDepthCollapseParity`:
+- [x] Add `TestStreaming_MultiDepthCollapseParity`:
 
 ```go
 func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
@@ -97,11 +97,11 @@ func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
 }
 ```
 
-- [ ] Confirm it is RED for the right reason: `requireIncrementalEquiv` shows
+- [x] Confirm it is RED for the right reason: `requireIncrementalEquiv` shows
       `parallel == seq` passes but `streaming`/`streaming-scheduled` diverge
       (the assertion message is "streaming(workers=N) vs sequential root
       mismatch"; `branchDiff` dumps whale-storage afterMap diffs).
-- [ ] The flat-leaf fix in `streaming_split_fold.go` (`len(parentPrefix)==64 →
+- [x] The flat-leaf fix in `streaming_split_fold.go` (`len(parentPrefix)==64 →
       foldChildSubtree`) is already committed; confirm
       `TestStreaming_StorageCollapseAcrossSplit` and
       `TestStreaming_MultiDepthSplitParity` stay green.

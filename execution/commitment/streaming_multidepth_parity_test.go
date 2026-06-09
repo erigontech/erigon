@@ -108,8 +108,20 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 	}
 }
 
-// NOTE: the multi-depth COLLAPSE/DELETE parity variant
-// (TestStreaming_MultiDepthCollapseParity) is added as the TDD-red step of
-// docs/plans/20260609-streaming-collapse-fold-fix.md — it surfaces the confirmed
-// streaming-mode deep-collapse divergence and is committed green only once that
-// fix lands. Per repo policy a failing test is not committed here.
+// TestStreaming_MultiDepthCollapseParity is the deep-collapse parity gate: a
+// whale account whose deep storage collapses (block 2 deletes 1/3 + updates 1/3)
+// while embedded among thousands of other accounts must fold via the streaming
+// concurrent engine to the SAME root and stored-branch set as sequential
+// ModeDirect AND ModeParallel, at every worker count. This surfaces the
+// streaming-mode deep-collapse divergence fixed by
+// docs/plans/20260609-streaming-collapse-fold-fix.md.
+func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+	for _, w := range []int{1, 4, 8} {
+		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
+	}
+}
