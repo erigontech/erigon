@@ -67,13 +67,13 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
 
-| Prune Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
+| Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
 | Archive | — | 4 TB | 32 GB | 64 GB |
 | Full (Default) | — | 2 TB | 16 GB | 32 GB |
 | Minimal | — | 1 TB | 16 GB | 64 GB |
 
-| **Prune Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | — | 1 TB                        | 16 GB              | 32 GB                 |
 | Full (Default) | —    | 1 TB                        | 8 GB               | 16 GB                 |
@@ -83,7 +83,7 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
 :::
 
-| **Prune Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
 | Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
@@ -828,7 +828,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired prune mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired pruning mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -855,8 +855,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Prune Mode (Optional) ---
-      # To change Prune Mode, uncomment the line below:
+      # --- Pruning Mode (Optional) ---
+      # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -905,7 +905,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired prune mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired pruning mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -931,8 +931,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Prune Mode (Optional) ---
-      # To change Prune Mode, uncomment the line below:
+      # --- Pruning Mode (Optional) ---
+      # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -1034,7 +1034,7 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-n
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired prune mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired pruning mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -1060,8 +1060,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Prune Mode (Optional) ---
-      # To change Prune Mode, uncomment the line below:
+      # --- Pruning Mode (Optional) ---
+      # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
@@ -1379,7 +1379,7 @@ URL: https://docs.erigon.tech/fundamentals/pruning-modes
 
 Erigon 3 supports four pruning modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
-| **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
+| **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | * Full Node(Default) | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
 | \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
@@ -7527,7 +7527,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 
 1. **What is the difference between Erigon and Geth?** Erigon originated as a fork of Geth but has been entirely rewritten with a focus on disk space and sync speed. It uses a flat, key-value database (MDBX) instead of a Merkle Patricia Trie, resulting in a much smaller disk footprint and faster synchronization times.
 2. **Is Erigon a good choice for client diversity?** Yes. The codebases have diverged so significantly from Geth that they are now considered separate clients, making Erigon an excellent choice to support Ethereum's client diversity goals.
-3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and prune mode.
+3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and pruning mode.
 4. **How long does it take to sync a node?** Initial synchronization time is highly dependent on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in as little as few hours, while on slower hardware, it can take several days.
 5. **How much disk space is required?** Disk space needs are constantly changing as the blockchain grows. As of September 2025, an Ethereum Mainnet full node requires about 920GB, while an archive node is significantly larger at around 1.77TB. See [Hardware Requirements](/get-started/hardware-requirements) for up-to-date figures.
 6. **Can I run Erigon on an HDD?** It is not recommended to run Erigon on an HDD. The client's performance is critically dependent on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the blockchain tip.
@@ -7718,7 +7718,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Use a High-End NVMe SSD             | This is a non-negotiable prerequisite. NVMe SSDs are essential for reliable, high-performance node operation. See [Hardware Requirements](/get-started/hardware-requirements).  | Erigon is highly disk I/O intensive. Fast storage prevents bottlenecks and sync issues.                                                                                                 |
 | Integrate Hardware Reliability      | Use ECC memory and consider a disk RAID setup. Do regular backups of your chain data.                                                                                           | While Erigon's database is fully-transactional and resilient to graceful shutdowns, crashes, and power outages, it is not protected against hardware failures (disk or RAM corruption). |
 | Symlink Data Directories (Advanced) | For systems with multiple disks, consider symlinking `snapshots` and `temp` directories to a cheaper, high-capacity drive, while keeping the main `chaindata` on the fast NVMe. See [Optimizing Storage](/fundamentals/optimizing-storage). | Optimizes cost and capacity while retaining performance for critical files.                                                                          |
-| Maintain Sufficient RAM             | Ensure your system has at least the recommended RAM for your chosen network and [prune mode](/fundamentals/pruning-modes). See [Hardware Requirements](/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory).                                                                                   |
+| Maintain Sufficient RAM             | Ensure your system has at least the recommended RAM for your chosen network and [pruning mode](/fundamentals/pruning-modes). See [Hardware Requirements](/get-started/hardware-requirements). | Insufficient RAM, even with Erigon's memory efficiency, will lead to OOM-kill events (Out-of-Memory).                                                                                   |
 
 ## Node Configuration and Startup
 

@@ -13,7 +13,7 @@ sidebar_position: 3
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired prune mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired pruning mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -40,8 +40,8 @@ services:
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
-      # --- Prune Mode (Optional) ---
-      # To change Prune Mode, uncomment the line below:
+      # --- Pruning Mode (Optional) ---
+      # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
