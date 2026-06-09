@@ -365,6 +365,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}()
 
 	go func() {
+		defer close(finishCh)
+
 		for !cfg.downloader.Finished() {
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
 				log.Warn("closing backfilling routine", "err", err)
@@ -374,7 +376,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		// Recover FULL blocks whose envelopes were skipped during backward download.
 		if skipped := cfg.downloader.SkippedFullBlocks(); len(skipped) > 0 {
-			recoverSkippedEnvelopes(ctx, cfg, skipped)
+			recovered, total := recoverSkippedEnvelopes(ctx, cfg, skipped)
+			if recovered < total {
+				log.Warn("[BackwardBeaconDownloader] skipped envelope recovery incomplete, not notifying backfilled",
+					"recovered", recovered, "total", total)
+				return
+			}
 		}
 
 		cfg.antiquary.NotifyBackfilled()
@@ -382,7 +389,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Info("Full backfilling finished")
 		}
 
-		close(finishCh)
 		if cfg.blobDownloader != nil {
 			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
 			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
@@ -411,7 +417,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 // consecutive fetch failures. Successfully recovered envelopes are written
 // to the indices DB and added to the block collector so the EL chain has
 // no gaps.
-func recoverSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) {
+func recoverSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) (int, int) {
 	log.Info("[BackwardBeaconDownloader] recovering skipped GLOAS envelopes", "count", len(skipped))
 
 	envelopes := cfg.downloader.RecoverSkippedEnvelopes(ctx)
@@ -424,31 +430,45 @@ func recoverSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstruction
 				"slot", s.Block.Block.Slot, "root", common.Hash(s.Root))
 			continue
 		}
-
-		tx, err := cfg.indiciesDB.BeginRw(ctx)
-		if err != nil {
-			log.Warn("[BackwardBeaconDownloader] envelope recovery: begin tx failed", "err", err)
-			continue
-		}
-		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(s.Root), env.Message); err != nil {
-			tx.Rollback()
-			log.Warn("[BackwardBeaconDownloader] envelope recovery: write indices failed", "err", err)
-			continue
-		}
-		if err := tx.Commit(); err != nil {
-			log.Warn("[BackwardBeaconDownloader] envelope recovery: commit failed", "err", err)
+		if env.Message == nil || env.Message.Payload == nil {
+			log.Warn("[BackwardBeaconDownloader] recovered envelope is malformed",
+				"slot", s.Block.Block.Slot, "root", common.Hash(s.Root))
 			continue
 		}
 
-		if cfg.executionBlocksCollector != nil {
-			if err := cfg.executionBlocksCollector.AddGloasBlock(s.Block.Block, env); err != nil {
-				log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)
-				continue
-			}
+		if !recoverSkippedEnvelope(ctx, cfg, s, env) {
+			continue
 		}
 		recovered++
 	}
 
 	log.Info("[BackwardBeaconDownloader] envelope recovery complete",
 		"recovered", recovered, "total", len(skipped))
+	return recovered, len(skipped)
+}
+
+func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionCfg, s network.SkippedFullBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
+	tx, err := cfg.indiciesDB.BeginRw(ctx)
+	if err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: begin tx failed", "err", err)
+		return false
+	}
+	defer tx.Rollback()
+
+	if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(s.Root), env.Message); err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: write indices failed", "err", err)
+		return false
+	}
+	if err := tx.Commit(); err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: commit failed", "err", err)
+		return false
+	}
+
+	if cfg.executionBlocksCollector != nil {
+		if err := cfg.executionBlocksCollector.AddGloasBlock(s.Block.Block, env); err != nil {
+			log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)
+			return false
+		}
+	}
+	return true
 }
