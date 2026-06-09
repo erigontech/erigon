@@ -3385,10 +3385,13 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// account then persists a non-empty codeHash with no code bytes; a later
 	// block's GetCode/GetDelegatedDesignation reads empty, and for a 7702 sender
 	// the EIP-3607 check wrongly rejects the tx ("sender not an eoa"). Recover
-	// the code this tx wrote from the versionMap — regardless of incarnation,
-	// scoped to this tx (Version().TxIndex == txIndex) so we never re-emit a
-	// prior tx's code for a merely-touched contract — mirroring CodeHashPath so
-	// code can never be lost while its hash survives.
+	// the designator code (versionMap, else the post-state via stateReader) and
+	// re-emit CodePath, mirroring CodeHashPath so a delegation's code can never
+	// be lost while its hash survives. Bounded to 7702 designators (see below)
+	// so we never re-emit ordinary unchanged contract code for a touched
+	// contract. NOTE: this prevents the drop during forward execution; it
+	// cannot repair state already collated into immutable snapshot files with
+	// codeHash-but-no-code (that needs a snapshot unwind).
 	codeInOutput := make(map[accounts.Address]bool)
 	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
 	for _, w := range filtered {
@@ -3405,12 +3408,30 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
 			continue
 		}
-		rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1)
-		if rr.Status() != state.MVReadResultDone || rr.Version().TxIndex != txIndex {
-			continue
+		// Recover the code whose hash this tx emitted. Prefer the versionMap
+		// (this batch's writes); on the SetCode short-circuit path — a
+		// re-executing 7702 delegation whose code equals the already-committed
+		// designator, so the validated incarnation writes no CodePath and the
+		// prior incarnation's versionMap entry was invalidated on re-exec — the
+		// versionMap holds nothing for this tx, so fall back to the post-state
+		// via stateReader.
+		var code []byte
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok {
+				code = c
+			}
 		}
-		code, ok := rr.Value().([]byte)
-		if !ok || len(code) == 0 {
+		if len(code) == 0 && stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				code = c
+			}
+		}
+		// Only recover EIP-7702 delegation designators — the demonstrated drop
+		// (a 7702 sender wrongly rejected as "not an eoa"). Gating on the
+		// designator shape keeps this from re-emitting ordinary unchanged
+		// contract code for every modified contract (write amplification with no
+		// correctness benefit) and never misattributes a callee's code.
+		if _, ok := types.ParseDelegation(code); !ok {
 			continue
 		}
 		filtered = append(filtered, &state.VersionedWrite{
