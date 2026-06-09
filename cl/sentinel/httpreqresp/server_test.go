@@ -94,6 +94,15 @@ func TestMaxBytesReader(t *testing.T) {
 	}
 }
 
+func TestResponseCodeErrorMessageReturnsBodyReadError(t *testing.T) {
+	resp := &http.Response{
+		Body: io.NopCloser(newMaxBytesReader(bytes.NewReader(bytes.Repeat([]byte{0x80}, 8)), 4)),
+	}
+
+	_, err := ResponseCodeResourceUnavailable.ErrorMessage(resp)
+	require.ErrorIs(t, err, ErrResponseTooLarge)
+}
+
 // Do must not retain the handler's write buffer: callers such as http.Error hand Write fmt's
 // pooled buffer, which is reused after the call returns. If Do aliased it, a concurrent reuse of
 // that buffer would race with a caller reading resp.Body (the handshake.ValidatePeer path).
