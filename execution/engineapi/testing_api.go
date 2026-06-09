@@ -198,6 +198,9 @@ func (t *testingImpl) BuildBlockV1(
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return nil, &rpc.InvalidParamsError{Message: "slotNumber required for Glamsterdam and later forks"}
 	}
+	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
+		return nil, &rpc.InvalidParamsError{Message: "slotNumber not supported before Glamsterdam"}
+	}
 
 	// Validate targetGasLimit presence for Glamsterdam+.
 	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {

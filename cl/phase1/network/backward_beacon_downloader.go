@@ -328,16 +328,16 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			return nil
 		}
 
-		// Record FULL blocks passing through without envelope for post-download recovery.
-		if _, isFull := fullRootSet[common.Hash(blockRoot)]; isFull && envelope == nil {
-			b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Block: block, Root: blockRoot})
-		}
-
 		finished, err := b.onNewBlock(block, envelope)
 		b.finished.Store(finished)
 		if err != nil {
 			log.Warn("Error processing block", "err", err)
 			continue
+		}
+
+		// Record FULL blocks passing through without envelope for post-download recovery.
+		if _, isFull := fullRootSet[common.Hash(blockRoot)]; isFull && envelope == nil {
+			b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Block: block, Root: blockRoot})
 		}
 
 		advanced = true

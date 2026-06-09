@@ -489,6 +489,7 @@ func TestBuildBlockV1(t *testing.T) {
 		}
 		api := newTestingAPI(preAmsterdamChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.SlotNumber = nil
 		// attrs already has TargetGasLimit set, which is invalid pre-Glamsterdam.
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
 		require.Nil(t, resp)
@@ -496,6 +497,22 @@ func TestBuildBlockV1(t *testing.T) {
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Contains(t, rpcErr.Message, "targetGasLimit not supported before Glamsterdam")
+	})
+
+	t.Run("unexpected slotNumber pre-Glamsterdam", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(preAmsterdamChainConfig(), stub)
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.TargetGasLimit = nil
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "slotNumber not supported before Glamsterdam")
 	})
 
 	// These two tests exercise the waitForResponse busy-polling loop.
