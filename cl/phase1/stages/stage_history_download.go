@@ -378,9 +378,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if skipped := cfg.downloader.SkippedFullBlocks(); len(skipped) > 0 {
 			recovered, total := recoverSkippedEnvelopes(ctx, cfg, skipped)
 			if recovered < total {
-				log.Warn("[BackwardBeaconDownloader] skipped envelope recovery incomplete, not notifying backfilled",
-					"recovered", recovered, "total", total)
-				return
+				log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete, proceeding with gap",
+					"recovered", recovered, "total", total, "gap", total-recovered)
 			}
 		}
 
@@ -448,6 +447,13 @@ func recoverSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstruction
 }
 
 func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionCfg, s network.SkippedFullBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if cfg.executionBlocksCollector != nil {
+		if err := cfg.executionBlocksCollector.AddGloasBlock(s.Block.Block, env); err != nil {
+			log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)
+			return false
+		}
+	}
+
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		log.Warn("[BackwardBeaconDownloader] envelope recovery: begin tx failed", "err", err)
@@ -462,13 +468,6 @@ func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionC
 	if err := tx.Commit(); err != nil {
 		log.Warn("[BackwardBeaconDownloader] envelope recovery: commit failed", "err", err)
 		return false
-	}
-
-	if cfg.executionBlocksCollector != nil {
-		if err := cfg.executionBlocksCollector.AddGloasBlock(s.Block.Block, env); err != nil {
-			log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)
-			return false
-		}
 	}
 	return true
 }
