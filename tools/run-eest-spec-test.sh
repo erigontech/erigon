@@ -62,6 +62,10 @@ if (( $# != 1 )); then
 fi
 shard="$1"
 
+for tool in yq jq; do
+	command -v "$tool" >/dev/null 2>&1 || { echo "run-eest-spec-test: required tool '$tool' not found in PATH" >&2; exit 1; }
+done
+
 # Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
 # inherit from the parent shard (stable/devnet).
 case "$shard" in
