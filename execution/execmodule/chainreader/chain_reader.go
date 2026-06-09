@@ -212,14 +212,8 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
-}
-
-// InsertBlocksWithAccessLists inserts blocks and waits for confirmation.
-// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
-func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
-	rawBlocks := blocksToRaw(blocks, accessLists)
+func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
+	rawBlocks := blocksToRaw(blocks, bals)
 	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
 	if err != nil {
 		return err
@@ -230,19 +224,16 @@ func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, 
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
-	return c.InsertBlocks(ctx, []*types.Block{block})
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
+	return c.InsertBlocks(ctx, []*types.Block{block}, [][]byte{bal})
 }
 
-func blocksToRaw(blocks []*types.Block, accessLists map[common.Hash][]byte) []*types.RawBlock {
+func blocksToRaw(blocks []*types.Block, bals [][]byte) []*types.RawBlock {
 	raw := make([]*types.RawBlock, len(blocks))
 	for i, b := range blocks {
-		rawBody := b.RawBody()
-		rb := &types.RawBlock{Header: b.Header(), Body: rawBody}
-		if accessLists != nil {
-			if bal, ok := accessLists[b.Hash()]; ok {
-				rb.BlockAccessList = bal
-			}
+		rb := &types.RawBlock{Header: b.Header(), Body: b.RawBody()}
+		if i < len(bals) {
+			rb.BlockAccessList = bals[i]
 		}
 		raw[i] = rb
 	}

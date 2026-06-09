@@ -251,18 +251,18 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
-func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
 }
 
-func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block) error {
+func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlock(ctx, block)
+	return cc.chainRW.InsertBlock(ctx, block, bal)
 }
 
 func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {

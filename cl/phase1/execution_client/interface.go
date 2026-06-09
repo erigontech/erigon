@@ -39,8 +39,8 @@ type ExecutionEngine interface {
 	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash, executionRequestsList []hexutil.Bytes) (PayloadStatus, error)
 	ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error)
 	SupportInsertion() bool
-	InsertBlocks(ctx context.Context, blocks []*types.Block) error
-	InsertBlock(ctx context.Context, block *types.Block) error
+	InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error
+	InsertBlock(ctx context.Context, block *types.Block, bal []byte) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
 	IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error)
 	Ready(ctx context.Context) (bool, error)

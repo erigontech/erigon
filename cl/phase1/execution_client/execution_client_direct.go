@@ -83,7 +83,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startInsertBlock := time.Now()
-	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
@@ -158,12 +158,12 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
+	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
 }
 
-func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block) error {
-	return cc.chainRW.InsertBlock(ctx, blk)
+func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block, bal []byte) error {
+	return cc.chainRW.InsertBlock(ctx, blk, bal)
 }
 
 func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Header, error) {

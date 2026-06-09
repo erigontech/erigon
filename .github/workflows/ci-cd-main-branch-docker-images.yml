@@ -97,7 +97,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@v4.1.0
 
       - name: Set up Docker Buildx
         id: docker-buildx

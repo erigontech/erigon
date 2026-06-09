@@ -417,15 +417,13 @@ func (s *DirtySegment) close() {
 
 func (s *DirtySegment) closeAndRemoveFiles() {
 	if s != nil {
-		f := s.FilePath()
-		s.closeIdx()
-		s.closeSeg()
-		toRemove := make([]string, 0, 2)
-		toRemove = append(toRemove, f)
+		toRemove := make([]string, 0, 1+len(s.indexes))
+		toRemove = append(toRemove, s.FilePath())
 		for _, index := range s.indexes {
 			toRemove = append(toRemove, index.FilePath())
 		}
-
+		s.closeIdx()
+		s.closeSeg()
 		removeOldFiles(toRemove)
 	}
 }
@@ -568,6 +566,38 @@ type RoSnapshots struct {
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
+
+	// (type, from, to) of files a producer is currently building — a merge
+	// output, a dump, or a missed-index rebuild. The data file can be on disk
+	// before its index exists; openers skip these and other builders can't
+	// claim the same file, so nobody creates a duplicate segment or races the
+	// owner's index build.
+	rangesInProgress sync.Map // rangeKey -> struct{}
+}
+
+type rangeKey struct {
+	enum     snaptype.Enum
+	from, to uint64
+}
+
+// ErrRangeBuildInProgress means another builder holds the (type, range) claim;
+// the caller should retry later rather than treat it as a failure.
+var ErrRangeBuildInProgress = errors.New("range build is already in progress")
+
+// TryAcquireRange atomically claims (enum, from, to) for building. Returns false
+// if another builder already holds it, in which case the caller must skip it.
+func (s *RoSnapshots) TryAcquireRange(enum snaptype.Enum, from, to uint64) bool {
+	_, loaded := s.rangesInProgress.LoadOrStore(rangeKey{enum, from, to}, struct{}{})
+	return !loaded
+}
+
+func (s *RoSnapshots) ReleaseRange(enum snaptype.Enum, from, to uint64) {
+	s.rangesInProgress.Delete(rangeKey{enum, from, to})
+}
+
+func (s *RoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool {
+	_, ok := s.rangesInProgress.Load(rangeKey{enum, from, to})
+	return ok
 }
 
 type snapshotVisible struct {
@@ -792,6 +822,26 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 			}
 			if !sn.IsIndexed() {
 				continue
+			}
+
+			if len(newVisibleSegments) > 0 {
+				last := newVisibleSegments[len(newVisibleSegments)-1].src
+				// Same [from,to) range but different version: keep the newer one.
+				// Both pass the isSubSetOf check (equal ranges are not subsets), so without
+				// this guard both would be appended, causing the gap detector to truncate
+				// everything after the duplicate start.
+				if last.from == sn.from && last.to == sn.to {
+					if last.version.Less(sn.version) {
+						newVisibleSegments[len(newVisibleSegments)-1].src = sn
+					}
+					continue
+				}
+				// if this indexed segment is fully covered by the last visible
+				// segment, skip it. The backward-removal loop below handles the general case,
+				// but this avoids unnecessary list mutations for the common subsegment order.
+				if sn.isSubSetOf(last) {
+					continue
+				}
 			}
 
 			//protect from overlaps
@@ -1066,6 +1116,25 @@ func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []sna
 	return res, missingSnapshots, nil
 }
 
+// AllTypedSegments returns the raw, unfiltered list of segment files on disk
+// that match the given types. No overlap or gap removal is applied.
+func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInfo, err error) {
+	list, err := snaptype.Segments(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, segType := range types {
+		for _, f := range list {
+			if f.Type.Enum() != segType.Enum() {
+				continue
+			}
+			res = append(res, f)
+		}
+	}
+	return res, nil
+}
+
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
@@ -1093,6 +1162,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			continue
 		}
 		if !s.HasType(f.Type) {
+			continue
+		}
+		if s.isInProgress(f.Type.Enum(), f.From, f.To) {
 			continue
 		}
 
@@ -1175,7 +1247,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		files, _, err := TypedSegments(s.dir, s.Types(), false)
+		files, err := AllTypedSegments(s.dir, s.Types())
 		if err != nil {
 			return err
 		}
@@ -1201,13 +1273,13 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bool) error {
+func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	files, _, err := TypedSegments(s.dir, types, allowGaps)
+	files, err := AllTypedSegments(s.dir, types)
 
 	if err != nil {
 		return err
@@ -1218,6 +1290,9 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps, alignMin bo
 		list = append(list, fName)
 	}
 
+	// Do not call closeWhatNotInList(list) here. list only contains segments of the
+	// requested types; calling it would close all other types (e.g. Transactions) from dirty.
+	// Stale entries for the requested types are cleaned by the next OpenFolder call.
 	if err := s.openSegments(list, true, false); err != nil {
 		return err
 	}
@@ -1248,7 +1323,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 				if _, ok := protectFiles[seg.FileName()]; ok {
 					continue
 				}
-				if _, ok := toClose[seg.segType.Enum()]; !ok {
+				if _, ok := toClose[t]; !ok {
 					toClose[t] = make([]*DirtySegment, 0)
 				}
 				toClose[t] = append(toClose[t], seg)
@@ -1279,12 +1354,22 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err != nil {
 		return err
 	}
-	_, segmentsToRemove := findOverlaps(list)
+	keepSegments, segmentsToRemove := findOverlaps(list)
 
 	toRemove := make([]string, 0, len(segmentsToRemove))
 	for _, info := range segmentsToRemove {
 		toRemove = append(toRemove, info.Path)
 	}
+
+	// Close overlaps in memory before deleting them from disk to prevent Windows
+	// file-locking issues (mmap) and stale descriptors in dirty.
+	keepNames := make([]string, 0, len(keepSegments))
+	for _, info := range keepSegments {
+		keepNames = append(keepNames, info.Name())
+	}
+	s.dirtyLock.Lock()
+	s.closeWhatNotInList(keepNames)
+	s.dirtyLock.Unlock()
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
 	list, err = snaptype.IdxFiles(s.dir)
@@ -1474,6 +1559,12 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				if segment.IsIndexed() {
 					continue
 				}
+				// Skip if a merge/dump/another recovery is already building this
+				// (type, range); otherwise claim it so we don't double-build.
+				from, to := segment.From(), segment.To()
+				if !s.TryAcquireRange(t, from, to) {
+					continue
+				}
 				info := segment.FileInfo(dir)
 
 				newIdxBuilt = true
@@ -1483,6 +1574,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				indexBuilder := s.IndexBuilder(t.Type())
 
 				g.Go(func() error {
+					defer s.ReleaseRange(t, from, to)
 					p := &background.Progress{}
 					ps.Add(p)
 					defer notifySegmentIndexingFinished(info.Name())
