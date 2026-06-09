@@ -63,18 +63,17 @@ func VersionWithCommit(gitCommit string) string {
 	return vsn
 }
 
-// releaseTagPattern is the allowlist for GitTag. It is untrusted build-time git
-// metadata (git ref names permit `$`, backticks and other shell metacharacters),
-// so only a well-formed release tag — vMAJOR.MINOR.PATCH with an optional
-// pre-release suffix — is ever accepted into an advertised version string.
-var releaseTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$`)
+// advertisedVersionPattern keeps shell-metacharacter and control content out of
+// the advertised version: GitTag is untrusted build-time metadata (and may be
+// passed via env for builds without .git), so it is honored only when version-shaped.
+var advertisedVersionPattern = regexp.MustCompile(`^v?[0-9][0-9A-Za-z.+-]*$`)
 
 // NodeVersion is the human-facing version advertised to peers and over APIs.
-// A build from an exact release tag reports that tag (e.g. v3.5.0); any other
-// build reports the in-development version plus the short commit for provenance
+// A build from a release tag reports that tag (e.g. v3.5.0); any other build
+// reports the in-development version plus the short commit for provenance
 // (e.g. 3.5.0-dev-a53e9545).
 func NodeVersion() string {
-	if releaseTagPattern.MatchString(GitTag) {
+	if advertisedVersionPattern.MatchString(GitTag) {
 		return GitTag
 	}
 	return VersionWithCommit(GitCommit)

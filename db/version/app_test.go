@@ -40,18 +40,22 @@ func TestNodeVersion(t *testing.T) {
 	GitTag, GitCommit = "", ""
 	require.Equal(t, VersionWithMeta, NodeVersion())
 
-	// Well-formed release tags (incl. pre-release suffixes) are accepted.
+	// Version-shaped values are honored verbatim: release tags, pre-releases,
+	// and git-describe / operator-supplied (env) forms for builds without .git.
 	GitCommit = commit
-	for _, good := range []string{"v3.5.0", "v3.5.1", "v3.4.0-rc.1", "v3.0.0-beta1"} {
+	for _, good := range []string{
+		"v3.5.0", "v3.5.1", "v3.4.0-rc.1", "v3.0.0-beta1", "v3.5",
+		"3.5.0", "v3.5.0-5-gabcdef", "v3.0.0-beta1-4014-ga53e954",
+	} {
 		GitTag = good
 		require.Equal(t, good, NodeVersion(), "tag %q must be accepted", good)
 	}
 
-	// GitTag is untrusted build-time git metadata. Anything not matching the
-	// release-tag pattern (malformed, or shell/command-injection payloads that
-	// are valid git ref names) must be rejected and never advertised.
+	// GitTag is untrusted build-time git metadata. Shell/command-injection
+	// payloads that are nonetheless valid git ref names, and non-version junk,
+	// must be rejected and never advertised.
 	for _, bad := range []string{
-		"v3.5", "3.5.0", "garbage", "v3.5.0 -X evil",
+		"garbage", "v3.5.0 -X evil",
 		"v3.5.0`id`", "v3.5.0$(whoami)", "v3.5.0;rm -rf /", "v3.5.0|cat",
 	} {
 		GitTag = bad
