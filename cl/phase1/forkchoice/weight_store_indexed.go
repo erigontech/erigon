@@ -30,7 +30,6 @@ type VoteEntry struct {
 	ValidatorIndex uint64
 	Slot           uint64
 	PayloadPresent bool
-	Balance        uint64
 }
 
 // indexedWeightStore implements WeightStore with direct root mapping.
@@ -45,6 +44,10 @@ type indexedWeightStore struct {
 	// Key: block root (the actual target of the vote)
 	// Value: list of votes targeting this specific root
 	directVotes map[common.Hash][]VoteEntry
+
+	// checkpointState supplies fresh balances and active/slashed status for the
+	// current scoring pass; set via setCheckpointState before each head walk.
+	checkpointState *checkpointState
 
 	// version tracks changes to invalidate the index
 	version uint64
@@ -66,29 +69,27 @@ func NewIndexedWeightStore(f *ForkChoiceStore) *indexedWeightStore {
 // IndexVote adds a vote to the direct votes index.
 // Call this when a new attestation is processed.
 // O(1) - just appends to the target root's list.
-// Balance is looked up internally from the justified checkpoint state.
 func (w *indexedWeightStore) IndexVote(validatorIndex uint64, message LatestMessage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
-	// Look up balance from checkpoint state
-	balance := uint64(0)
-	justifiedCheckpoint := w.f.JustifiedCheckpoint()
-	if checkpointState, err := w.f.getCheckpointState(justifiedCheckpoint); err == nil && checkpointState != nil {
-		if int(validatorIndex) < len(checkpointState.balances) {
-			balance = checkpointState.balances[validatorIndex]
-		}
-	}
 
 	entry := VoteEntry{
 		ValidatorIndex: validatorIndex,
 		Slot:           message.Slot,
 		PayloadPresent: message.PayloadPresent,
-		Balance:        balance,
 	}
 
 	w.directVotes[message.Root] = append(w.directVotes[message.Root], entry)
 	w.version++
+}
+
+// setCheckpointState sets the checkpoint state from which GetAttestationScore /
+// GetProposerScore read fresh validator balances and active/slashed status. It
+// must be called (under f.mu) before each head-computation scoring pass.
+func (w *indexedWeightStore) setCheckpointState(cs *checkpointState) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.checkpointState = cs
 }
 
 // RemoveVote removes a validator's vote from the index.
@@ -113,6 +114,19 @@ func (w *indexedWeightStore) RemoveVote(validatorIndex uint64, oldRoot common.Ha
 		}
 	}
 
+	w.version++
+}
+
+// pruneFinalized drops indexed votes whose target block is finalized away
+// (slot at or below finalizedSlot) or no longer in the fork graph.
+func (w *indexedWeightStore) pruneFinalized(finalizedSlot uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for root := range w.directVotes {
+		if header, has := w.f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+			delete(w.directVotes, root)
+		}
+	}
 	w.version++
 }
 
@@ -189,42 +203,43 @@ func (w *indexedWeightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	cs := w.checkpointState
+	if cs == nil {
+		return 0
+	}
+
 	block, has := w.f.forkGraph.GetBlock(node.Root)
 	if !has || block == nil {
 		return 0
 	}
 
 	var score uint64
-
-	// DFS traversal using stack (iterative)
 	stack := []common.Hash{node.Root}
-
 	for len(stack) > 0 {
-		// Pop
 		current := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		// Process votes for current node
 		for _, entry := range w.directVotes[current] {
-			// Skip equivocating validators
+			idx := int(entry.ValidatorIndex)
+			if idx >= cs.validatorSetSize || idx >= len(cs.balances) {
+				continue
+			}
+			if !readFromBitset(cs.actives, idx) || readFromBitset(cs.slasheds, idx) {
+				continue
+			}
 			if w.f.isUnequivocating(entry.ValidatorIndex) {
 				continue
 			}
-
-			// Build LatestMessage from entry
 			message := LatestMessage{
-				Root:           current, // The actual root the validator voted for
+				Root:           current,
 				Slot:           entry.Slot,
 				PayloadPresent: entry.PayloadPresent,
 			}
-
-			// Use is_supporting_vote to check (handles all the complex logic)
 			if w.f.isSupportingVote(node, message) {
-				score += entry.Balance
+				score += cs.balances[idx]
 			}
 		}
 
-		// Push children
 		stack = append(stack, w.f.children(current)...)
 	}
 
@@ -233,13 +248,14 @@ func (w *indexedWeightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 
 // GetProposerScore returns the proposer boost score.
 func (w *indexedWeightStore) GetProposerScore() uint64 {
-	justifiedCheckpoint := w.f.JustifiedCheckpoint()
-	checkpointState, err := w.f.getCheckpointState(justifiedCheckpoint)
-	if err != nil {
+	w.mu.RLock()
+	cs := w.checkpointState
+	w.mu.RUnlock()
+	if cs == nil {
 		return 0
 	}
 
-	committeeWeight := checkpointState.activeBalance / w.f.beaconCfg.SlotsPerEpoch
+	committeeWeight := cs.activeBalance / w.f.beaconCfg.SlotsPerEpoch
 	return (committeeWeight * w.f.beaconCfg.ProposerScoreBoost) / 100
 }
 

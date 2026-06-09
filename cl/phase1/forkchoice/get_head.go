@@ -146,10 +146,13 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
+	// a nil state degrades to zero attestation weight, as before.
+	cs, _ := f.getCheckpointState(justifiedCheckpoint)
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 
 	// Get filtered block tree
 	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root)
@@ -160,8 +163,7 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
 
-	// Get weight store for weight calculation
-	ws := f.GetWeightStore()
+	ws := f.headWeightStore(cs)
 
 	for {
 		children := f.getNodeChildren(head, blocks)

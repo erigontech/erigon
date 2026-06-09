@@ -161,7 +161,7 @@ func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) 
 
 	f.latestMessages.set(int(index), message)
 
-	// Add new vote to index (balance looked up internally)
+	// Add new vote to index
 	if f.indexedWeightStore != nil {
 		f.indexedWeightStore.IndexVote(index, message)
 	}
