@@ -893,13 +893,14 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 	return nil
 }
 
-// storageRootLocal folds an account's storage subtree concurrently and returns
-// its hash (the account's storageRoot). Each first-storage-nibble subtree folds
-// independently, and a deep qualifying fork inside one of them splits again via
-// foldStorageChild — so storage-interior concurrency reaches below depth 64, not
-// just the flat 16-way first-nibble fan-out. path is the 64-nibble account hash;
-// account@64 carries a terminator and is never itself a split-point (handled by
-// the dfsDeepLocal boundary that calls this).
+// storageRootLocal folds an account's storage subtree concurrently and returns its
+// hash (the account's storageRoot). Each first-storage-nibble subtree folds
+// independently in its own worker mounted at the nibble's depth-65 prefix
+// (foldStorageLeaf), unfolding the on-disk branch there so an incremental collapse
+// preserves that subtree's untouched on-disk interior siblings; aggregateStorageRoot
+// then stitches the storage-root branch. This yields the canonical, embedding-
+// independent storageRoot (matching ModeDirect/ModeParallel for the embedded case).
+// path is the 64-nibble account hash.
 func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
 	accPrefix := append([]byte(nil), path...)
 	var children [16]cell
@@ -912,10 +913,28 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		nib := int(bits.TrailingZeros16(bm))
 		child := node.children[childIdx]
 		ni, ch := nib, child
+		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(ch.ext))
+		copy(childPrefix, accPrefix)
+		childPrefix = append(childPrefix, byte(ni))
+		childPrefix = append(childPrefix, ch.ext...)
+		group := collectStorageNibbleKeys(ch, childPrefix)
 		g.Go(func() error {
-			c, err := sc.foldStorageChild(sem, pu, accPrefix, ni, ch)
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			w, release := sc.newStorageWorker()
+			c, err := foldStorageLeaf(w, childPrefix, group)
+			if err == nil {
+				if d := w.TakeDeferredUpdates(); len(d) > 0 {
+					pu.appendDeferred(d)
+				}
+			}
+			release()
 			if err != nil {
-				return err
+				return fmt.Errorf("storage nibble[%x] fold: %w", ni, err)
+			}
+			if len(ch.ext) > 0 && !c.IsEmpty() {
+				copy(c.extension[:], ch.ext)
+				c.extLen = int16(len(ch.ext))
 			}
 			children[ni] = c
 			return nil

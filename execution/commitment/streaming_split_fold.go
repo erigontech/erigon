@@ -16,12 +16,7 @@
 
 package commitment
 
-import (
-	"fmt"
-	"math/bits"
-
-	"golang.org/x/sync/errgroup"
-)
+import "math/bits"
 
 // isSplitPoint reports whether a prefix-trie node is a concurrent-fold split
 // point: a branch with at least two children and at least MinSplitKeys touched
@@ -76,87 +71,5 @@ func foldSubtreeAtPrefix(w *HexPatriciaHashed, parentPrefix []byte, group []touc
 	}
 	c := w.grid[0][col]
 	stripLeadingChildExt(&c)
-	return c, nil
-}
-
-// foldStorageChild folds the subtree of child (which hangs off the parent branch
-// at nibble childNib, carrying child.ext) and returns the cell ready to place in
-// the parent branch's grid[1][childNib]. At a deeper qualifying fork it splits
-// again: every grandchild subtree folds concurrently in its own worker and the
-// branch is aggregated post-order — this is where storage-interior concurrency
-// (depth > 64) comes from. Non-split subtrees fold flat in a single worker.
-// sem bounds the number of concurrent fold workers across the whole recursion;
-// waiting goroutines never hold a slot, so the recursion cannot self-deadlock.
-func (sc *StreamingCommitter) foldStorageChild(sem chan struct{}, pu *parallelUpdate, parentPrefix []byte, childNib int, child *prefixNode) (cell, error) {
-	childPrefix := make([]byte, 0, len(parentPrefix)+1+len(child.ext))
-	childPrefix = append(childPrefix, parentPrefix...)
-	childPrefix = append(childPrefix, byte(childNib))
-	childPrefix = append(childPrefix, child.ext...)
-
-	if isSplitPoint(child) {
-		if len(childPrefix) > 64 {
-			sc.storageSplits.Add(1)
-		}
-		var gchildren [16]cell
-		present := child.bitmap
-		var g errgroup.Group
-		gi := 0
-		for bm := child.bitmap; bm != 0; {
-			gn := int(bits.TrailingZeros16(bm))
-			gc := child.children[gi]
-			g.Go(func() error {
-				c, err := sc.foldStorageChild(sem, pu, childPrefix, gn, gc)
-				if err != nil {
-					return err
-				}
-				gchildren[gn] = c
-				return nil
-			})
-			gi++
-			bm &^= uint16(1) << gn
-		}
-		if err := g.Wait(); err != nil {
-			return cell{}, err
-		}
-
-		sem <- struct{}{}
-		w, release := sc.newStorageWorker()
-		branchCell, err := aggregateSubtreeRoot(w, childPrefix, &gchildren, present)
-		if err == nil {
-			if d := w.TakeDeferredUpdates(); len(d) > 0 {
-				pu.appendDeferred(d)
-			}
-		}
-		release()
-		<-sem
-		if err != nil {
-			return cell{}, fmt.Errorf("storage split[%x] aggregate: %w", childNib, err)
-		}
-		// Lift child.ext: the aggregate is a direct branch cell at childPrefix;
-		// placed under the parent at childNib it becomes an extension node whose
-		// extension is child.ext (extensionHash is depth-independent). A fully
-		// collapsed subtree returns an empty cell — leave it empty so the parent
-		// drops this branch bit rather than treating the bare extension as a child.
-		if len(child.ext) > 0 && !branchCell.IsEmpty() {
-			copy(branchCell.extension[:], child.ext)
-			branchCell.extLen = int16(len(child.ext))
-		}
-		return branchCell, nil
-	}
-
-	group := collectStorageNibbleKeys(child, childPrefix)
-	sem <- struct{}{}
-	w, release := sc.newStorageWorker()
-	c, err := foldSubtreeAtPrefix(w, parentPrefix, group)
-	if err == nil {
-		if d := w.TakeDeferredUpdates(); len(d) > 0 {
-			pu.appendDeferred(d)
-		}
-	}
-	release()
-	<-sem
-	if err != nil {
-		return cell{}, fmt.Errorf("storage leaf[%x] fold: %w", childNib, err)
-	}
 	return c, nil
 }

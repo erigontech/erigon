@@ -16,6 +16,8 @@
 
 package commitment
 
+import "github.com/erigontech/erigon/execution/commitment/nibbles"
+
 // foldChildSubtree folds one subtree's collected keys in a standalone worker
 // mounted from the trie root and returns its cell at the deepest shared depth,
 // stripped of the leading extension nibble the parent column carries. col is that
@@ -96,4 +98,43 @@ func aggregateSubtreeRoot(w *HexPatriciaHashed, prefix []byte, children *[16]cel
 // hash is the storageRoot setAccountStorageRoot injects into the account leaf.
 func aggregateStorageRoot(w *HexPatriciaHashed, accHash []byte, children *[16]cell, present uint16) (cell, error) {
 	return aggregateSubtreeRoot(w, accHash[:64], children, present)
+}
+
+// foldStorageLeaf folds one first-storage-nibble subtree confined to its own
+// depth-65 prefix. The worker is mounted at childPrefix (= accHash + nibble +
+// child.ext) and, when an on-disk branch exists there, unfolds it so an incremental
+// collapse preserves this subtree's untouched on-disk interior siblings — without
+// reading the storage-root branch (which would pull in the sibling first-nibbles
+// other workers own) or the account trie above it. The returned cell is the
+// childPrefix branch with no extension; the caller lifts child.ext, mirroring the
+// recursive split aggregate's convention.
+func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKey) (cell, error) {
+	pd := int16(len(childPrefix))
+	col := int(childPrefix[pd-1])
+	copy(w.currentKey[:], childPrefix)
+	w.currentKeyLen = pd - 1
+	w.depths[0] = pd
+	w.activeRows = 1
+	w.grid[0][col].reset()
+	// Trigger the on-disk unfold at childPrefix when a branch exists there. The
+	// seeded hashLen is only a needUnfolding signal; unfoldBranchNode replaces the
+	// cell with the real on-disk children.
+	branch, err := w.branchFromCacheOrDB(nibbles.HexToCompact(childPrefix))
+	if err != nil {
+		return cell{}, err
+	}
+	if len(branch) > 0 {
+		w.grid[0][col].hashLen = 32
+	}
+	for i := range group {
+		if err := w.followAndUpdate(group[i].hk, group[i].pk, group[i].upd); err != nil {
+			return cell{}, err
+		}
+	}
+	for w.activeRows > 1 {
+		if err := w.fold(); err != nil {
+			return cell{}, err
+		}
+	}
+	return w.grid[0][col], nil
 }

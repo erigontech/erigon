@@ -100,26 +100,66 @@ resolve the three issues that blocked it (all recorded in FINDINGS):
 **Files:**
 - Modify: `execution/commitment/streaming_split_fold.go`,
   `execution/commitment/streaming_deep_fold.go`,
-  `execution/commitment/hex_patricia_hashed.go` (add read-only `readDiskBranch`)
+  `execution/commitment/streaming_commitment.go`
 
-- [ ] Replace the per-child leaf fold so each first-nibble subtree mounts at
+- [x] Replace the per-child leaf fold so each first-nibble subtree mounts at
       `accountHash+nibble` (depth 65), unfolds the on-disk branch there, folds the
-      child's touched keys, and returns the depth-65 cell (stripping the leading
-      nibble the parent column carries). Mirror `ModeParallel`'s inline result.
-- [ ] Add `forceFullBranch` (self-contained branch encoding) for storage folds
-      that unfolded on-disk data, to avoid the `BranchMerger.Merge` out-of-order
-      drop. Verify it changes no root hash.
-- [ ] Run the oracle at workers=1; iterate on the decoded-afterMap+child-hash diff
-      vs `ModeParallel` until storage branches match (target: 0 diff).
+      child's touched keys, and returns the depth-65 cell. Mirror `ModeParallel`'s
+      inline result. Done: new `foldStorageLeaf` mounts at `childPrefix`, seeds a
+      needUnfolding signal when an on-disk branch exists there so `unfoldBranchNode`
+      reads exactly that subtree's interior siblings, folds the touched keys, and
+      returns the childPrefix branch cell; `storageRootLocal` lifts `child.ext`
+      (mirroring the split-aggregate convention) and `aggregateStorageRoot` stitches.
+      The recursive deep-split `foldStorageChild` (the collapse-incorrect path) is
+      removed. `readDiskBranch` was unnecessary — `branchFromCacheOrDB` + the natural
+      `unfold` machinery suffice.
+- [x] ~~Add `forceFullBranch`~~ — **not needed**. The `BranchMerger.Merge`
+      out-of-order drop was specific to the deep-split recursion's cross-worker
+      merge. The flat per-first-nibble fold writes only disjoint subtree prefixes
+      in fold order, so no panic occurs and the stored branches match seq exactly
+      (verified: no panic across the whole streaming/deep suite; oracle 0-diff).
+- [x] Run the oracle at workers=1; iterate on the decoded-afterMap+child-hash diff
+      vs `ModeParallel` until storage branches match (target: 0 diff). Done:
+      `TestStreaming_MultiDepthCollapseParity` green at workers 1/4/8.
+
+**Linchpin confirmed by direct measurement (this session).** The plan's REFUTED
+section is correct:
+- **EMBEDDED**: `seq` 2-block incremental root == a fresh single-block build of the
+  exact surviving state (`d6c4a67e…`, with a *correct* account-update merge). The
+  embedded whale storageRoot is canonical/well-defined; the confined fold reproduces
+  it byte-for-byte (decoded afterMaps + child hashes: same=9514, diff=0 vs both
+  `seq` and `ModeParallel`).
+- **WHALE-ONLY**: `seq` incremental (`11732ba1…`) ≠ fresh (`94741c75…`). The
+  single-account incremental collapse is the degenerate one; the confined fold emits
+  the canonical `94741c75…`. `ModeParallel` *default* matches `seq` here only because
+  it folds storage **in-line** (the per-nibble `concurrentStorageRoot` is gated
+  behind `ERIGON_CMT_DEEP` and is not the default path). No embedding-insensitive
+  concurrent per-nibble fold can match both the canonical embedded answer and the
+  degenerate whale-only one — so `TestStreaming_StorageCollapseAcrossSplit`
+  (whale-only) now diverges on root. That test exercises a single-account trie that
+  cannot occur on a populated mainnet; Task 3 reconciles it (embed the whale, or
+  compare against the canonical reference) alongside the `StorageSplits>0` seam.
 
 ### Task 3: Resolve the deep-split / seam tension
 
-- [ ] If the flat depth-65 decomposition passes the oracle but the deep storage
-      split (depth>64) still diverges on collapse, gate the deep split to the
-      non-collapse path or remove it from the collapse path, and adjust the
-      `StorageSplits>0` seam: keep it on `TestStreaming_MultiDepthSplitParity`
-      (single-block insert, where deep splits are correct), drop/relax it where the
-      collapse path no longer deep-splits. Document the decision in the plan.
+After Task 2 the flat depth-65 fold does **no** depth>64 splits at all (the
+recursive `foldStorageChild` is removed), so `StorageSplits()` is always 0. Three
+tests are red and need reconciliation here:
+
+- [ ] `TestStreaming_MultiDepthSplitParity` and `TestStreaming_StorageInteriorSplits`
+      — root parity holds; only the `StorageSplits()>0` (and `DeepLocalFolds()>0`)
+      seam fails. These seams assert the depth>64 split optimization, which is a
+      follow-up (Post-Completion), not a correctness property. Relax/remove the
+      `StorageSplits>0` assertions (the flat 16-way fan-out is the proven win);
+      keep `DeepLocalFolds>0` only if `storageRootLocal` is still routed (it is).
+- [ ] `TestStreaming_StorageCollapseAcrossSplit` (whale-only) — **root mismatch**,
+      not just a seam: the confined fold emits the canonical `94741c75…` while `seq`
+      emits the degenerate single-account `11732ba1…` (see Task 2 linchpin). Make
+      this test non-degenerate (embed the whale among other accounts, as the oracle
+      does) so it asserts the canonical, mainnet-relevant result — or compare its
+      storage branches against `ModeParallel`/a fresh build rather than the
+      degenerate `seq` whale-only root. Do **not** revert the fold to match the
+      degenerate value. Document the decision in the plan.
 
 ### Task 4: Full validation
 
