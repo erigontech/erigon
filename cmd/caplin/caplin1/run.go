@@ -181,10 +181,22 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 	return nil
 }
 
+// RunCaplinService runs the Caplin consensus-layer client.
+//
+// localBlockTipFn, when non-nil and returning > 0, supplies the
+// canonical-block-tip stop bound for DownloadHistoricalBlocks. The
+// in-process Caplin (started from node/eth/backend.go) passes a closure
+// that queries the storage component's Inventory for the highest
+// contiguous Local block, honoring the on-disk file set as ground
+// truth. The standalone caplin binary passes nil and falls back to
+// DeriveManifestTips, which trusts preverified.toml's advertised
+// entries verbatim. The fallback is acceptable for the standalone
+// binary today; once Caplin is componentized it should also consume
+// the Inventory.
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
-	blockHeadersReady <-chan struct{}) error {
+	blockHeadersReady <-chan struct{}, localBlockTipFn func() uint64) error {
 
 	// Block until the storage component signals that the tip
 	// *-headers.seg file is readable and OpenSegments(Headers) has
@@ -681,13 +693,25 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	)
 
 	// Wire the canonical block-tip provider so the
-	// DownloadHistoricalBlocks stage stops backward-walking at the
-	// canonical chain.toml's block-tip rather than the EL's
-	// FrozenBlocks() — which collapses to state-tip after
-	// alignMin-true OpenFolder calls and causes Caplin to download
-	// ~2× the actual gap. See
+	// DownloadHistoricalBlocks stage stops backward-walking at a
+	// trustworthy bound, not the EL's FrozenBlocks() — which collapses
+	// to state-tip after alignMin-true OpenFolder calls and causes
+	// Caplin to download ~2× the actual gap. See
 	// docs/plans/20260515-three-layer-snapshot-distribution.md.
+	//
+	// Prefer the local Inventory's contiguous tip (passed via
+	// localBlockTipFn) so the bound reflects what's actually on disk.
+	// Fall back to DeriveManifestTips only when the caller supplied no
+	// inventory — the standalone caplin binary today. The fallback
+	// trusts preverified.toml's advertised entries verbatim and can
+	// overstate the local tip when an advertised file failed to
+	// download.
 	stageCfg.SetBlockSnapshotTipFn(func() uint64 {
+		if localBlockTipFn != nil {
+			if tip := localBlockTipFn(); tip > 0 {
+				return tip
+			}
+		}
 		cfg, known := snapcfg.KnownCfg(beaconConfig.ConfigName)
 		if !known || cfg == nil {
 			return 0

@@ -123,5 +123,8 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		MaxOutboundTrafficPerPeer: datasize.MB,
 		BootstrapNodes:            cfg.Bootnodes,
 		StaticPeers:               cfg.StaticPeers,
-	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema, nil /* blockHeadersReady: standalone caplin runs without storage */)
+	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema,
+		nil, /* blockHeadersReady: standalone caplin runs without storage */
+		nil, /* localBlockTipFn: standalone caplin has no inventory; RunCaplinService falls back to DeriveManifestTips */
+	)
 }

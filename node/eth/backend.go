@@ -1747,7 +1747,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// its clstages loop — see provider.watchTipHeaderForOpenSegments.
 			// Nil-safe: when storage isn't running its orchestrator the
 			// channel is nil and Caplin starts immediately (legacy path).
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady); err != nil {
+			// localBlockTipFn: query the storage component's Inventory
+			// for the highest contiguous Local block, so Caplin's
+			// canonical-block-tip stop bound reflects what's actually
+			// on disk rather than what preverified.toml advertises.
+			// Nil-safe: Inventory is nil for non-storage-driven
+			// configurations; RunCaplinService falls back to
+			// DeriveManifestTips in that case.
+			var localBlockTipFn func() uint64
+			if backend.components.Storage != nil && backend.components.Storage.Inventory != nil {
+				inv := backend.components.Storage.Inventory
+				localBlockTipFn = func() uint64 {
+					view := inv.View()
+					defer view.Close()
+					return view.LocalBlockTip()
+				}
+			}
+			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady, localBlockTipFn); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error("could not start caplin", "err", err)
 				}
