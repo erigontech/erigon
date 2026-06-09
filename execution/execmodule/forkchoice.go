@@ -708,16 +708,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if !e.fcuBackgroundCommit {
 			if e.fcuBackgroundPrune {
 				// RunPrune shares the pipeline Sync with the next FCU's RunLoop,
-				// so the goroutine holds the semaphore until done; it also tears
-				// down the overlay before releasing so the outer defer can't clear
-				// it after the next FCU has published its own.
+				// so the goroutine holds the semaphore until done. Tear the overlay
+				// down here (prune doesn't use it) to free the SD immediately, and
+				// so the outer defer can't clear it after the next FCU publishes
+				// its own.
 				shouldReleaseSema = false
-				bgSD := currentContext
-				currentContext = nil
-				dispatcher := e.pipelineExecutor.Dispatcher()
+				if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+					dispatcher.PublishOverlay(nil)
+				}
+				if currentContext != nil {
+					currentContext.Close()
+					currentContext = nil
+				}
 				go func() {
 					defer e.semaphore.Release(1)
-					defer bgSD.Close()
 					pruneTimings, err := e.runForkchoicePrune(initialCycle)
 					if err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)
@@ -727,9 +731,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 						dbg.ReadMemStats(&m)
 						pruneTimings = append(pruneTimings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 						e.logger.Info("Timings: Background Prune", pruneTimings...)
-					}
-					if dispatcher != nil {
-						dispatcher.PublishOverlay(nil)
 					}
 				}()
 			} else {
