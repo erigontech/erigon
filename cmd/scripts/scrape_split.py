@@ -49,8 +49,28 @@ def mean_us(metric, dom, lv):
         return None, 0
     return d["sum"] / d["count"] * 1e6, int(d["count"])
 
+def fc_line(dom):
+    d = data.get(("filecache_get", dom, "__"))
+    if not d or d.get("count", 0) == 0:
+        return "filecache: (none)"
+    return f"filecache: {d['sum']/d['count']*1e6:.2f}us/{int(d['count'])} hits"
+
+# filecache has no level label; capture it under a synthetic level "__"
+for ln in text.splitlines():
+    m = line_re.match(ln)
+    if not m:
+        continue
+    name, labels, val = m.group(1), m.group(2), float(m.group(3))
+    if name in ("filecache_get_sum", "filecache_get_count"):
+        base = name[:-4] if name.endswith("_sum") else name[:-6]
+        kind = "sum" if name.endswith("_sum") else "count"
+        dm = re.search(r'domain="([^"]*)"', labels)
+        if dm:
+            data.setdefault((base, dm.group(1), "__"), {})[kind] = val
+
 for dom in domains:
     print(f"\n=== domain={dom} (mean microseconds | count) ===")
+    print(f"  {fc_line(dom)}")
     print(f"{'level':>7} | {'kvei':>14} | {'btnav':>14} | {'kvval':>14} | {'kv_get(total)':>16}")
     for lv in levels:
         cells = []

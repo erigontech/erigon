@@ -130,7 +130,26 @@ var (
 	mxsKVEI  = newLevelledSummaries("kvei_get")
 	mxsBtNav = newLevelledSummaries("btnav_get")
 	mxsKVVal = newLevelledSummaries("kvval_get")
+
+	// per-domain file-cache (getFromFileCache) hit timing — short-circuits the file walk
+	mxsFileCache = newDomainSummaries("filecache_get")
 )
+
+func newDomainSummaries(metric string) [kv.DomainLen]metrics.Summary {
+	domNames := map[kv.Domain]string{
+		kv.AccountsDomain:   "account",
+		kv.StorageDomain:    "storage",
+		kv.CodeDomain:       "code",
+		kv.CommitmentDomain: "commitment",
+		kv.ReceiptDomain:    "receipt",
+		kv.RCacheDomain:     "rcache",
+	}
+	var out [kv.DomainLen]metrics.Summary
+	for d, dn := range domNames {
+		out[d] = metrics.GetOrCreateSummary(fmt.Sprintf("%s{domain=%q}", metric, dn))
+	}
+	return out
+}
 
 var kvLevelNames = []string{"L0", "L1", "L2", "L3", "L4", "recent"}
 

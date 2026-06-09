@@ -526,6 +526,10 @@ func kvvalReadMetric(name kv.Domain, level int) metrics.Summary {
 	return mxsKVVal[name][level]
 }
 
+func fileCacheReadMetric(name kv.Domain) metrics.Summary {
+	return mxsFileCache[name]
+}
+
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
@@ -1328,6 +1332,11 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
+	var fcStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		fcStart = time.Now()
+	}
+
 	getFromFileCache := dt.getFromFileCache
 
 	if useCache && getFromFileCache == nil {
@@ -1338,6 +1347,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	}
 	if getFromFileCache != nil && useCache {
 		if cv, ok := getFromFileCache.Get(hi); ok {
+			if dbg.KVReadLevelledMetrics {
+				fileCacheReadMetric(dt.name).ObserveDuration(fcStart)
+			}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
