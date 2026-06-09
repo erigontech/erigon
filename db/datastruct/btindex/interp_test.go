@@ -2,7 +2,6 @@ package btindex
 
 import (
 	"bytes"
-	"encoding/binary"
 	"math/rand"
 	"os"
 	"strconv"
@@ -83,24 +82,6 @@ func TestInterpVsBinary(t *testing.T) {
 		float64(interpTot)/float64(nS), interpMax,
 		100*float64(guardTrips)/float64(nS), float64(prefixSum)/float64(nS))
 	t.Logf("  interp probe histogram (probes:count): %v", histStr(interpHist[:]))
-}
-
-func commonPrefixLen(a, b []byte) int {
-	n := min(len(a), len(b))
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			return i
-		}
-	}
-	return n
-}
-
-func u64At(k []byte, p int) uint64 {
-	var buf [8]byte
-	for i := 0; i < 8 && p+i < len(k); i++ {
-		buf[i] = k[p+i]
-	}
-	return binary.BigEndian.Uint64(buf[:])
 }
 
 func binaryProbes(win [][]byte, target []byte) int {

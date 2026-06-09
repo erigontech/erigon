@@ -235,7 +235,9 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 }
 
 // bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
-func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
+// bs returns the pivot node and the data-index window [dl,dr] containing x, plus
+// the bounding pivot keys klo (<=x) and khi (>x) for in-window interpolation.
+func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64, klo, khi []byte) {
 	dr = b.offt.Count()
 	m, l, r := 0, 0, len(b.mx) //nolint
 
@@ -248,19 +250,21 @@ func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 		}
 		switch bytes.Compare(n.key, x) {
 		case 0:
-			return n, n.di, n.di
+			return n, n.di, n.di, n.key, n.key
 		case 1:
 			r = m
 			dr = n.di
+			khi = n.key
 		case -1:
 			l = m + 1
 			dl = n.di
 			if dl < dr {
 				dl++
 			}
+			klo = n.key
 		}
 	}
-	return n, dl, dr
+	return n, dl, dr, klo, khi
 }
 
 // Seek returns cursor pointing at first key which is >= seekKey.
@@ -279,7 +283,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	}
 
 	// check cached nodes and narrow roi
-	n, l, r := b.bs(seekKey) // l===r when key is found
+	n, l, r, _, _ := b.bs(seekKey) // l===r when key is found
 	if l == r {
 		cur.Reset(n.di, g)
 		return cur, nil
@@ -378,7 +382,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, pt *PhaseTimings) (v []byte, ok
 		return v0, true, 0, nil
 	}
 
-	n, l, r := b.bs(key) // l===r when key is found
+	n, l, r, klo, khi := b.bs(key) // l===r when key is found
 	if b.trace {
 		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
@@ -386,6 +390,30 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, pt *PhaseTimings) (v []byte, ok
 
 	var cmp int
 	var m uint64
+	if BtInterp && len(klo) > 0 && len(khi) > 0 {
+		probes := uint64(0)
+		for l < r {
+			if probes >= BtInterpBudget {
+				m = (l + r) >> 1
+			} else {
+				m = interpMid(key, klo, khi, l, r)
+			}
+			probes++
+			g.Reset(b.offt.Get(m))
+			km, _ := g.Next(nil)
+			cmp = bytes.Compare(key, km)
+			if cmp == 0 {
+				readVal()
+				return v, true, b.offt.Get(m), nil
+			} else if cmp < 0 {
+				r = m
+				khi = km
+			} else {
+				l = m + 1
+				klo = km
+			}
+		}
+	}
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip {
@@ -437,6 +465,51 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, pt *PhaseTimings) (v []byte, ok
 	}
 	readVal()
 	return v, true, b.offt.Get(l), nil
+}
+
+// interpMid estimates the index of key within [l,r) by linear interpolation on the
+// first 8 key bytes after the common prefix of the bound keys. Falls back to the
+// binary midpoint when the span is degenerate; result is clamped to [l, r-1].
+func interpMid(key, klo, khi []byte, l, r uint64) uint64 {
+	p := commonPrefixLen(klo, khi)
+	a, hi, x := u64At(klo, p), u64At(khi, p), u64At(key, p)
+	if hi <= a {
+		return (l + r) >> 1
+	}
+	f := float64(x-a) / float64(hi-a)
+	if f < 0 {
+		f = 0
+	} else if f > 1 {
+		f = 1
+	}
+	m := l + uint64(f*float64(r-1-l)+0.5)
+	if m < l {
+		m = l
+	} else if m >= r {
+		m = r - 1
+	}
+	return m
+}
+
+func commonPrefixLen(a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+func u64At(k []byte, p int) uint64 {
+	var buf [8]byte
+	for i := 0; i < 8 && p+i < len(k); i++ {
+		buf[i] = k[p+i]
+	}
+	return binary.BigEndian.Uint64(buf[:])
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }

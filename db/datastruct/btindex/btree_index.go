@@ -51,6 +51,12 @@ const BtreeLogPrefix = "btree"
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
 var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
+// BtInterp enables guarded interpolation search inside the leaf window instead of
+// plain binary search: interpolate for up to BtInterpBudget probes, then fall back
+// to binary. Reduces cold .kv probes where keys are ~uniform; binary tail bounds the skew.
+var BtInterp = dbg.EnvBool("BT_INTERP", false)
+var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 4))
+
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")

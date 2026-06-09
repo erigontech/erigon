@@ -75,7 +75,7 @@ func TestStorageGetBreakdown(t *testing.T) {
 		var probes int64
 		for _, key := range keys {
 			t0 := time.Now()
-			_, l, r := bp.bs(key)
+			_, l, r, _, _ := bp.bs(key)
 			dBs += time.Since(t0)
 
 			// in-file binary search (bt navigation): each compareKey touches the .kv at a pivot offset
