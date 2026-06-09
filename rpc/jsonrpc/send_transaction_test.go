@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -141,9 +142,9 @@ func TestSendRawTransaction_InvalidParams_OnMalformedRLP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := api.SendRawTransaction(ctx, hexutil.MustDecode(tc.raw))
 			require.Error(err)
-			var ec interface{ ErrorCode() int }
-			require.True(errors.As(err, &ec), "expected error implementing ErrorCode(), got %T: %v", err, err)
-			require.Equal(-32602, ec.ErrorCode(), "want InvalidParams (-32602), got %d (%v)", ec.ErrorCode(), err)
+			var invalid *rpc.InvalidParamsError
+			require.True(errors.As(err, &invalid), "expected *rpc.InvalidParamsError, got %T: %v", err, err)
+			require.Equal(-32602, invalid.ErrorCode(), "want InvalidParams (-32602), got %d (%v)", invalid.ErrorCode(), err)
 		})
 	}
 }
