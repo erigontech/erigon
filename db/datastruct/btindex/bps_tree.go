@@ -392,7 +392,8 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, pt *PhaseTimings) (v []byte, ok
 	var m uint64
 	if BtInterp && len(klo) > 0 && len(khi) > 0 {
 		probes := uint64(0)
-		for l < r {
+		var kmBuf, kloBuf, khiBuf []byte
+		for l < r && r-l > DefaultBtreeStartSkip { // hand the final small window to the binary linear scan (page-local)
 			if probes >= BtInterpBudget {
 				m = (l + r) >> 1
 			} else {
@@ -400,17 +401,20 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, pt *PhaseTimings) (v []byte, ok
 			}
 			probes++
 			g.Reset(b.offt.Get(m))
-			km, _ := g.Next(nil)
+			km, _ := g.Next(kmBuf[:0])
+			kmBuf = km
 			cmp = bytes.Compare(key, km)
 			if cmp == 0 {
 				readVal()
 				return v, true, b.offt.Get(m), nil
 			} else if cmp < 0 {
 				r = m
-				khi = km
+				khiBuf = append(khiBuf[:0], km...)
+				khi = khiBuf
 			} else {
 				l = m + 1
-				klo = km
+				kloBuf = append(kloBuf[:0], km...)
+				klo = kloBuf
 			}
 		}
 	}
