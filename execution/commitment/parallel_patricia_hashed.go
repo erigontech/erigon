@@ -1007,6 +1007,6 @@ func (p *ParallelPatriciaHashed) warmupSplitAncestors(pu *parallelUpdate, warmup
 		// equivalent to enqueueing every ancestor depth individually.
 		hashedKey := make([]byte, len(sp.prefix))
 		copy(hashedKey, sp.prefix)
-		warmuper.WarmKey(hashedKey, 0)
+		warmuper.WarmKey(hashedKey, 0, 0)
 	}
 }
