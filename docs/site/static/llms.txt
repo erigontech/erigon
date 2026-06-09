@@ -30,7 +30,6 @@
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
-- [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats.
 - [Caplin](https://docs.erigon.tech/fundamentals/caplin): Erigon's built-in consensus layer — run a full node without an external CL client.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
 - [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks): OS-level tuning, memory settings, and tips to maximize sync throughput.
@@ -45,6 +44,7 @@
 - [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose): Running Erigon and all its modules with Docker Compose.
 - [Otterscan](https://docs.erigon.tech/fundamentals/otterscan): Integrating Otterscan, the lightweight block explorer built for Erigon.
 - [web3 Wallet](https://docs.erigon.tech/fundamentals/web3-wallet): Connecting MetaMask and other web3 wallets to a local Erigon node.
+- [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats.
 - [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
 - [NAT](https://docs.erigon.tech/fundamentals/configuring-erigon/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
 - [Modules](https://docs.erigon.tech/fundamentals/modules): Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool.

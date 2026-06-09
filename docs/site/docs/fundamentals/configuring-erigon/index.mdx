@@ -110,7 +110,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `false`
 * `--snap.p2p-manifest` (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via ENR instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
   * Default: `false`
-* `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. A local `preverified.toml` in the datadir still takes precedence; delete it to re-fetch from the URL.
+* `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
   * Default: `""` (uses the built-in CDN)
 
 ### Transaction Pool (TxPool)
@@ -420,6 +420,8 @@ Flags for configuring Fork Choice Update behavior.
 
 Flags for configuring the parallel block execution engine.
 
+* `--exec.workers value`: Number of parallel block-execution workers (equivalent to the `EXEC3_WORKERS` env var). Overridden by `--exec.serial`.
+  * Default: half the number of CPU cores — the other half is reserved for snapshot build/merge/prune.
 * `--exec.serial` *(New in v3.5)*: Force serial execution by clamping the parallel executor to a single worker. Wins over `--exec.workers` and `EXEC3_WORKERS` — use to disable parallelism for diagnostics or like-for-like baseline comparisons.
   * Default: `false`
 * `--exec.no-prune` *(New in v3.5)*: Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.

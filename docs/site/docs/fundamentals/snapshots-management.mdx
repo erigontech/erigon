@@ -1,7 +1,7 @@
 ---
 title: "Snapshots Management"
 description: "Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats."
-sidebar_position: 6
+sidebar_position: 6.5
 ---
 
 # Snapshots Management
@@ -15,7 +15,7 @@ The `seg du` subcommand scans the snapshot directory for a given `--datadir` and
 ### Syntax
 
 ```bash
-erigon seg du --datadir <path> [--json] [-v | --verbose]
+erigon seg du [--datadir <path>] [--json] [-v | --verbose]
 ```
 
 ### Flags
@@ -42,10 +42,10 @@ total: 1.2TB (42810 files)
   other                     0.5GB       0.0%      8 files
 
 ── Estimated Size by Node Type ────────────────────────────────
-  archive        1.3TB          —    all blocks       all history
-  full           1.2TB     -70.0GB    last 262.144     last 262.144
-  blocks         1.3TB     -30.0GB    all blocks       last 262.144
-  minimal        1.1TB    -150.0GB    last 100.000     last 100.000
+  archive        1.4TB          —    all blocks       all history
+  blocks         1.3TB    -100.0GB    all blocks       last 262.144
+  full           1.2TB    -200.0GB    last 262.144     last 262.144
+  minimal        1.1TB    -300.0GB    last 100.000     last 100.000
 ```
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
@@ -126,11 +126,12 @@ Erigon v3.5 aligns the **Full** and **Blocks** prune modes with [EIP-8252](https
 
 **What this means for existing nodes:**
 
-- Nodes previously running in **Full** or **Blocks** mode now retain a larger history window (262,144 blocks instead of 100,000).
-- On first startup after upgrading to v3.5, Erigon **automatically migrates** your snapshot configuration — no manual intervention is required for most setups.
-- Disk usage for Full and Blocks nodes will increase slightly over time as the larger retention window fills in. Use `seg du` to monitor the change.
+- **Full mode** changes the most. In v3.4 it kept *all* post-merge block bodies, transactions, and receipts (pruning only pre-merge data); in v3.5 it prunes that block data down to the last **262,144 blocks**. A full node will therefore **stop serving block bodies and receipts older than ~36 days** and will *free* disk space as the older block segments are pruned away. The state-history window, by contrast, *grows* from 100,000 to 262,144 blocks.
+- **Blocks mode** still keeps every block back to genesis; only its **state-history** window widens from 100,000 to 262,144 blocks, so its disk usage rises modestly.
+- On first startup after upgrading to v3.5, Erigon **rewrites the persisted prune mode automatically** and logs the transition — no operator action is required (the migration shim accepts the full-mode block-pruning change in both directions). Note that **already-pruned block data cannot be recovered**; if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading.
+- Use `seg du` to inspect the resulting on-disk breakdown after the first prune pass.
 
-**Minimal mode is unchanged** — it continues to use a 100,000-block window and is not subject to EIP-8252 compliance requirements.
+**Minimal mode is unchanged** — it continues to use a 100,000-block window for both blocks and state and is not subject to EIP-8252 compliance requirements.
 
 ### Manual snapshot operations
 
