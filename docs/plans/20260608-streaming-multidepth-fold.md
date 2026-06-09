@@ -284,17 +284,35 @@ background-fold reuse) stays unchanged.
 - Modify: `execution/commitment/streaming_commitment.go` (per-fold worker setup, deferred collection, end-of-block apply)
 - Modify: `execution/commitment/streaming_commitment_test.go`
 
-- [ ] each split fold: wrap base ctx in `overlayContext`; `branchEncoder.setDeferUpdates(true)`
-      + `SetLeaveDeferredForCaller(true)`; collect deferred via `TakeDeferredUpdates` into
-      the per-walk `parallelUpdate` (`appendDeferred`, mutex-guarded)
-- [ ] end of block: merge deferred by prefix (`mergeDeferredByPrefix`), apply once via
+- [x] each split fold keeps `branchEncoder.setDeferUpdates(true)` + `SetLeaveDeferredForCaller(true)`
+      and collects deferred via `TakeDeferredUpdates` into the per-walk `parallelUpdate`
+      (`appendDeferred`, mutex-guarded, from Task 3). The planned per-Process-fold `overlayContext`
+      wrap was NOT adopted: an overlay at Process time discards a collapse self-flush —
+      `readBranchAndCheckForFlushing` does `ApplyDeferredUpdates`→`ClearDeferred`, so the flushed
+      branch survives only in the throwaway overlay and the deletion never reaches the store
+      (proven: wrapping `foldSplit` regressed account-level deletes in
+      `TestStreaming_MultiBlockNoResetAccumulation`; the background `foldKeys` tolerates the
+      overlay only because it discards-and-refolds on `flushed`). Instead concurrent folds write
+      self-flushes to the shared lock-guarded ctx on DISJOINT subtree prefixes — the proven
+      top-16 `foldSplit` pattern — so no fold observes another's pending writes, and the
+      authoritative branch state still flows out via `TakeDeferredUpdates` for the single
+      end-of-block apply.
+- [x] end of block: `mergeDeferredByPrefix` (re-added per Task 1) merges the root-fold deferred
+      onto the split sets by prefix (newer wins, superseded older recycled), applied once via
       `applyDeferredGuarded(sc.numWorkers)`
-- [ ] handle collapse propagating up past a split-point: emptied child split node returns an
-      empty cell; parent clears that branch bit at stitch (no re-fold, no flushed signal)
-- [ ] write tests: a delete-driven collapse that crosses a split boundary yields the same
-      root + branch set as sequential; verify no fold observes another's pending writes
-      (overlay isolation), under `-race -count>=20`
-- [ ] run `-race -count>=20`, `make lint`, `make erigon integration` — must pass before Task 5
+- [x] collapse up past a split-point: `aggregateSubtreeRoot` keeps an emptied child in `touchMap`
+      (recording the deletion against the on-disk pre-image) but drops it from `afterMap`; an
+      all-empty branch returns an empty cell so the caller drops the bit in turn, and
+      `foldStorageChild` skips lifting `child.ext` onto an empty aggregate (else the bare extension
+      would read as a phantom child)
+- [x] tests: `TestStreaming_StorageCollapseAcrossSplit` folds a 30k-slot whale whose block-2 batch
+      deletes a third of the slots, updates a third, and leaves a third untouched on disk — so the
+      fold crosses `deepStorageThreshold`, splits at depth > 64 (`StorageSplits` > 0), collapses
+      interior branches, AND must preserve untouched on-disk siblings (the read that triggers the
+      self-flush). Root + every stored branch match sequential at workers {1,4,8}; cross-worker
+      parity is the no-pending-write-observed check
+- [x] ran `-race -count=20` on the collapse path (+ full package `-count=1`), `make lint` (0 issues),
+      `make erigon integration` (both binaries build) — all pass
 
 ### Task 5: Multi-depth-split parity + race tests
 

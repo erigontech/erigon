@@ -290,7 +290,7 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		}
 	}
 	if d := base.TakeDeferredUpdates(); len(d) > 0 {
-		deferred = append(deferred, d...)
+		deferred = mergeDeferredByPrefix(deferred, d)
 	}
 
 	if sc.leaveDeferredForCaller {
@@ -945,7 +945,11 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 
 // newStorageWorker yields a pooled trie worker set up for a deferring storage
 // fold and a release that drains it back to the pool (resetForReuse + Put) and
-// frees its context.
+// frees its context. Concurrent storage folds operate on disjoint subtree
+// prefixes, so a collapse-driven mid-fold self-flush writes only this subtree's
+// own branches to the shared (lock-guarded) ctx — never a prefix another fold is
+// also writing — and the authoritative branch state still flows out via
+// TakeDeferredUpdates for the single end-of-block apply.
 func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	wctx, cleanup := sc.trieCtxFactory()
@@ -984,6 +988,30 @@ func (sc *StreamingCommitter) dropSplitDeferred() {
 		}
 		s.deferred = nil
 	}
+}
+
+// mergeDeferredByPrefix combines two deferred-update slices, keeping newer's
+// entry for any prefix both supply and recycling the superseded older one. Split
+// folds emit disjoint subtree prefixes so collisions are confined to the root
+// fold re-touching a prefix a split already staged; keeping newer makes the
+// end-of-block apply order-independent rather than relying on slice position.
+func mergeDeferredByPrefix(older, newer []*DeferredBranchUpdate) []*DeferredBranchUpdate {
+	if len(older) == 0 {
+		return newer
+	}
+	inNewer := make(map[string]struct{}, len(newer))
+	for _, u := range newer {
+		inNewer[string(u.prefix)] = struct{}{}
+	}
+	out := newer
+	for _, u := range older {
+		if _, ok := inNewer[string(u.prefix)]; ok {
+			putDeferredUpdate(u)
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }
 
 func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) error {

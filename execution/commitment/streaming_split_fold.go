@@ -134,8 +134,10 @@ func (sc *StreamingCommitter) foldStorageChild(sem chan struct{}, pu *parallelUp
 		}
 		// Lift child.ext: the aggregate is a direct branch cell at childPrefix;
 		// placed under the parent at childNib it becomes an extension node whose
-		// extension is child.ext (extensionHash is depth-independent).
-		if len(child.ext) > 0 {
+		// extension is child.ext (extensionHash is depth-independent). A fully
+		// collapsed subtree returns an empty cell — leave it empty so the parent
+		// drops this branch bit rather than treating the bare extension as a child.
+		if len(child.ext) > 0 && !branchCell.IsEmpty() {
 			copy(branchCell.extension[:], child.ext)
 			branchCell.extLen = int16(len(child.ext))
 		}

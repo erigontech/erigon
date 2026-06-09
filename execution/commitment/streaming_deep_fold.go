@@ -50,10 +50,23 @@ func foldStorageChildCell(w *HexPatriciaHashed, accNib int, group []touchedKey) 
 // aggregateSubtreeRoot stitches the present child cells into the branch at depth
 // len(prefix)+1 and folds it once to the subtree's root cell at depth len(prefix).
 // The destination grid cell is reset first so no stale pooled-grid field survives
-// into the folded cell. The returned cell's hash is the subtree root.
+// into the folded cell. A child that folded to an empty cell (its whole sub-subtree
+// collapsed under deletes) stays in touchMap — so the branch update records the
+// deletion against the on-disk pre-image — but is dropped from afterMap. If every
+// child collapsed the whole subtree is empty and an empty cell is returned so the
+// caller drops this branch bit in turn. The returned cell's hash is the subtree root.
 func aggregateSubtreeRoot(w *HexPatriciaHashed, prefix []byte, children *[16]cell, present uint16) (cell, error) {
 	d := int16(len(prefix))
 	col := int(prefix[d-1])
+	after := present
+	for x := range 16 {
+		if present&(uint16(1)<<x) != 0 && children[x].IsEmpty() {
+			after &^= uint16(1) << x
+		}
+	}
+	if after == 0 {
+		return cell{}, nil
+	}
 	copy(w.currentKey[:], prefix)
 	w.currentKeyLen = d
 	w.depths[0] = d
@@ -63,12 +76,14 @@ func aggregateSubtreeRoot(w *HexPatriciaHashed, prefix []byte, children *[16]cel
 	w.touchMap[0] = uint16(1) << col
 	w.afterMap[0] = uint16(1) << col
 	for x := range 16 {
-		if present&(uint16(1)<<x) != 0 {
+		if after&(uint16(1)<<x) != 0 {
 			w.grid[1][x] = children[x]
+		} else {
+			w.grid[1][x].reset()
 		}
 	}
 	w.touchMap[1] = present
-	w.afterMap[1] = present
+	w.afterMap[1] = after
 	if err := w.fold(); err != nil {
 		return cell{}, err
 	}

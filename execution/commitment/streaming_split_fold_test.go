@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -86,6 +87,83 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 		require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through storageRootLocal (workers=%d)", w)
 		require.NotZerof(t, sc.StorageSplits(), "storage must split at depth > 64 (workers=%d)", w)
 		sc.Release()
+	}
+}
+
+// whaleCollapseCorpus builds a two-block whale-storage delete corpus that drives
+// the concurrent deep-fold path. Block 1 (pk/upds) is a whale whose storage spans
+// many slots. Block 2 (k2/u2) touches the account and rewrites a SUBSET of the
+// slots — a third deleted, a third updated, a third left untouched on disk — so
+// the block-2 fold still crosses deepStorageThreshold (routing through
+// storageRootLocal's split fan-out) while the deletes collapse interior storage
+// branches AND untouched on-disk siblings must be preserved across the fold. That
+// untouched-sibling read is what makes the engine self-flush mid-fold; the fold
+// must write only deferred (applied once at end of block) and stay parity-clean.
+func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	var addr []byte
+	addr, _, _, _, pk, upds, _ = whaleByNibble(30_000)
+
+	k2 = [][]byte{addr}
+	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	u2[0].Balance.SetUint64(99)
+	u2[0].Nonce = 7
+	for i := range pk {
+		if len(pk[i]) == length.Addr || i%3 == 2 {
+			continue // leave every third slot untouched on disk
+		}
+		var u Update
+		if i%3 == 0 {
+			u.Flags = DeleteUpdate
+		} else {
+			u.Flags = StorageUpdate
+			u.StorageLen = 4
+			binary.BigEndian.PutUint32(u.Storage[:4], uint32(i)*97+3)
+		}
+		k2 = append(k2, pk[i])
+		u2 = append(u2, u)
+	}
+	return pk, upds, k2, u2
+}
+
+// TestStreaming_StorageCollapseAcrossSplit drives a delete batch that collapses
+// storage branches BELOW the account/storage boundary (depth > 64) through the
+// concurrent deep-fold path. The streaming root + every stored branch must match
+// sequential at every worker count, including the deep split-points firing
+// (StorageSplits > 0). With per-fold writes not linearized to the single
+// end-of-block apply a collapse self-flush would drop a deletion (leaving a
+// phantom child) or clobber an untouched on-disk sibling.
+func TestStreaming_StorageCollapseAcrossSplit(t *testing.T) {
+	t.Parallel()
+	pk, upds, k2, u2 := whaleCollapseCorpus()
+
+	seqRoot, seqMs := runIncremental(t, modeSeq, 0, pk, upds, k2, u2)
+
+	for _, w := range []int{1, 4, 8} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(pk, upds))
+		sc1 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc1.SetNumWorkers(w)
+		for i := range pk {
+			sc1.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
+		}
+		_, err := sc1.Process(context.Background())
+		require.NoError(t, err)
+		sc1.Release()
+
+		require.NoError(t, ms.applyPlainUpdates(k2, u2))
+		sc2 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc2.SetNumWorkers(w)
+		for i := range k2 {
+			sc2.TouchKey(KeyToHexNibbleHash(k2[i]), k2[i], nil)
+		}
+		root, err := sc2.Process(context.Background())
+		require.NoError(t, err)
+
+		require.Equalf(t, seqRoot, root, "whale storage collapse(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+		require.NotZerof(t, sc2.StorageSplits(), "block-2 collapse must still split storage at depth > 64 (workers=%d)", w)
+		sc2.Release()
 	}
 }
 
