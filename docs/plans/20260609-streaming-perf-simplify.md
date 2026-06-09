@@ -144,9 +144,12 @@ Profile: ~28% in `cond_wait`/`usleep`/`cond_signal`/`atomic`; cores idle (sync-b
 
 ### Task 5: Verify
 
-- [ ] `go test -run 'TestStreaming|TestDeepFold|TestVerifyParallel|TestAggregate' -race -count=20` green.
-- [ ] `make lint` clean; `make erigon integration` builds.
-- [ ] Re-run the baseline benchmark; record ns/op + allocs/op delta. Roots byte-identical to ModeParallel is the pass gate.
+- [x] `go test -run 'TestStreaming|TestDeepFold|TestVerifyParallel|TestAggregate' -race -count=20` green.
+      Done: full suite green `-race -count=20` (501s).
+- [x] `make lint` clean; `make erigon integration` builds. Done: lint 0 issues; both binaries build.
+- [x] Re-run the baseline benchmark; record ns/op + allocs/op delta. Roots byte-identical to ModeParallel is the pass gate.
+      Done: 1M-whale Streaming-batch 914ms ns/op, 12.92M allocs/op (down from 13.82M baseline);
+      roots byte-identical to ModeParallel (parity tests green).
 
 ## Post-Completion
 - No `git push` task — pushing to the PR stays manual.
