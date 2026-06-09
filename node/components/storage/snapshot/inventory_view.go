@@ -16,7 +16,11 @@
 
 package snapshot
 
-import "sync"
+import (
+	"sort"
+	"strings"
+	"sync"
+)
 
 // ChangeSet describes an atomic transition emitted by Inventory.
 // Subscribers receive ChangeSet on every mutation (AddFile, RemoveFile,
@@ -189,6 +193,95 @@ func (v *InventoryView) CaplinFiles() []*FileEntry {
 		}
 	}
 	return out
+}
+
+// LocalBlockTip returns the highest block number such that the
+// contiguous run of (headers, bodies, transactions) starting at the
+// lowest Local entry extends through it, for all three types.
+//
+// "Highest contiguous local-tip" — distinct from the manifest's
+// advertised tip. A manifest may list files that haven't actually
+// arrived on disk (silent download failure); LocalBlockTip refuses to
+// count those. Consumers that need to answer "what's the highest block
+// I can execute against right now" should use this, not
+// snapshotsync.DeriveManifestTips.
+//
+// Contract:
+//   - Returns 0 when no Local block-data files exist.
+//   - Walks contiguity from the lowest Local FromBlock — does NOT
+//     require start-at-zero. A pruned set's contiguous run starts at
+//     the prune horizon.
+//   - Stops at the first gap in any of the three type lists.
+//   - Stops at the first non-Local entry, even if later entries are Local.
+//   - Treats merged segments (10k blocks) and 1k segments identically —
+//     contiguity is decided on FromBlock/ToBlock in raw block units.
+//
+// The view is already a snapshot, so no inventory lock is held.
+func (v *InventoryView) LocalBlockTip() uint64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	type rng struct {
+		from, to uint64
+	}
+	var headers, bodies, txs []rng
+	for _, e := range v.captured {
+		if e == nil || !e.Local {
+			continue
+		}
+		// Only block primaries (.seg) count. Block .idx accessors live
+		// in the same bucket but don't carry independent block data —
+		// counting them would inflate the apparent range coverage.
+		if !strings.HasSuffix(e.Name, ".seg") {
+			continue
+		}
+		if e.Domain != "" || e.Kind == KindMeta || e.Kind == KindSalt || e.Kind == KindCaplin {
+			continue
+		}
+		if e.ToBlock == 0 {
+			continue
+		}
+		r := rng{from: e.FromBlock, to: e.ToBlock}
+		switch {
+		case strings.Contains(e.Name, "headers"):
+			headers = append(headers, r)
+		case strings.Contains(e.Name, "bodies"):
+			bodies = append(bodies, r)
+		case strings.Contains(e.Name, "transactions"):
+			txs = append(txs, r)
+		}
+	}
+
+	contiguousTip := func(rs []rng) uint64 {
+		if len(rs) == 0 {
+			return 0
+		}
+		sort.Slice(rs, func(i, j int) bool { return rs[i].from < rs[j].from })
+		tip := rs[0].to
+		for i := 1; i < len(rs); i++ {
+			if rs[i].from != tip {
+				break
+			}
+			tip = rs[i].to
+		}
+		return tip
+	}
+
+	hTip := contiguousTip(headers)
+	bTip := contiguousTip(bodies)
+	tTip := contiguousTip(txs)
+
+	minTip := hTip
+	if bTip < minTip {
+		minTip = bTip
+	}
+	if tTip < minTip {
+		minTip = tTip
+	}
+	if minTip == 0 {
+		return 0
+	}
+	return minTip - 1
 }
 
 // Get implements HeldView.

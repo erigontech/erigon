@@ -429,3 +429,166 @@ func TestInventory_DrainOnEmptyIsNoOp(t *testing.T) {
 	default:
 	}
 }
+
+// TestInventoryViewLocalBlockTipEmpty: empty inventory returns 0.
+func TestInventoryViewLocalBlockTipEmpty(t *testing.T) {
+	inv := NewInventory()
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(0), v.LocalBlockTip())
+}
+
+// TestInventoryViewLocalBlockTipContiguous: when all three of
+// (headers,bodies,transactions) are Local across a contiguous prefix
+// starting at 0, the tip is the highest covered block (ToBlock-1).
+func TestInventoryViewLocalBlockTipContiguous(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-000001-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000001-000002-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(1999), v.LocalBlockTip(),
+		"two 1k-block ranges contiguous from 0 yield tip 1999")
+}
+
+// TestInventoryViewLocalBlockTipGapInMiddle is the exact wedge-repro
+// case: preverified.toml advertised 2973-2974, the download silently
+// failed, and the system kept advancing past it. LocalBlockTip must
+// return the tip BEFORE the gap so callers don't overstate what they
+// can actually use.
+func TestInventoryViewLocalBlockTipGapInMiddle(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		// Contiguous 2,971,000 → 2,972,999
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002971-002972-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002972-002973-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// GAP at 2,973,000-2,973,999 (the failed-download case).
+		// Files past the gap:
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002974-002975-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002975-002976-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(2972999), v.LocalBlockTip(),
+		"the gap at 2,973,000-2,973,999 must cap the contiguous tip at 2,972,999")
+}
+
+// TestInventoryViewLocalBlockTipNotLocalCapsTip: an entry that is in
+// inventory but has Local=false (advertised manifest entry, not yet
+// downloaded) must not contribute to the contiguous tip.
+func TestInventoryViewLocalBlockTipNotLocalCapsTip(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-000001-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// Range [1000,2000) declared but not Local — manifest entry only.
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000001-000002-" + kind + ".seg",
+			Local: false, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000002-000003-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(999), v.LocalBlockTip(),
+		"non-Local entry at [1000,2000) must cap the tip at 999, not skip to 2999")
+}
+
+// TestInventoryViewLocalBlockTipMissingType: if only headers and bodies
+// are Local but transactions is missing for a range, the tip stops at
+// the previous range — a usable block requires ALL three types.
+func TestInventoryViewLocalBlockTipMissingType(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-000001-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	// Range [1000,2000): only headers + bodies, no transactions.
+	for _, kind := range []string{"headers", "bodies"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000001-000002-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(999), v.LocalBlockTip(),
+		"transactions missing for [1000,2000) caps the tip at 999")
+}
+
+// TestInventoryViewLocalBlockTipPrunedStart: under a pruned set the
+// lowest Local range starts past 0 — the contiguous run still has a
+// valid tip. This mirrors the user's "pruned files at the end of the
+// file set" invariant: front-trimmed but contiguous from the horizon.
+func TestInventoryViewLocalBlockTipPrunedStart(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000001-000002-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(1999), v.LocalBlockTip(),
+		"single range [1000,2000) is its own contiguous run — tip is 1999")
+}
+
+// TestInventoryViewLocalBlockTipMixedSizes: a merged 10k-block file
+// followed by 1k-block files must still report the right contiguous tip.
+// Filename K-units differ (002960-002970 = 10k, 002970-002971 = 1k) but
+// FromBlock/ToBlock in the entry are in raw block units and contiguity
+// is decided on those.
+func TestInventoryViewLocalBlockTipMixedSizes(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		// Merged 10k-block file: blocks 2,960,000 → 2,969,999
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002960-002970-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// 1k-block file: 2,970,000 → 2,970,999
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002970-002971-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	// Pre-condition: AddFile populates FromBlock/ToBlock via PopulateFromName.
+	// 002960-002970 → FromBlock=2,960,000 ToBlock=2,970,000
+	merged, ok := inv.GetByName("v1.1-002960-002970-headers.seg")
+	require.True(t, ok)
+	require.Equal(t, uint64(2960000), merged.FromBlock)
+	require.Equal(t, uint64(2970000), merged.ToBlock)
+
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(2970999), v.LocalBlockTip(),
+		"merged 10k + adjacent 1k segments give contiguous tip at 2,970,999 (if start-at-zero pruned modes are honored separately)")
+}
