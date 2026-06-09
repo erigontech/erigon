@@ -457,6 +457,46 @@ func TestAccountRange(t *testing.T) {
 			require.Equal(t, v.CodeHash.String(), hashedCode.String())
 		}
 	})
+	t.Run("incompletes=true is accepted", func(t *testing.T) {
+		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+		n := rpc.BlockNumber(1)
+		without, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+		incompletes := true
+		with, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true, &incompletes)
+		require.NoError(t, err)
+		require.Equal(t, without, with)
+	})
+	t.Run("prefix start right-pads to address boundary", func(t *testing.T) {
+		n := rpc.BlockNumber(1)
+		prefix := []byte{0x53, 0x7e}
+		resultPrefix, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, prefix, 10, true, true, nil)
+		require.NoError(t, err)
+		var padded common.Address
+		copy(padded[:], prefix)
+		resultPadded, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, padded[:], 10, true, true, nil)
+		require.NoError(t, err)
+		require.Equal(t, resultPadded, resultPrefix)
+	})
+	t.Run("empty key returns error", func(t *testing.T) {
+		n := rpc.BlockNumber(1)
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []byte{}, 10, true, true, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "empty")
+	})
+	t.Run("32-byte key returns error", func(t *testing.T) {
+		key32 := make([]byte, 32)
+		n := rpc.BlockNumber(1)
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, key32, 10, true, true, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "32-byte")
+	})
+	t.Run("oversized key returns error", func(t *testing.T) {
+		key21 := make([]byte, 21)
+		n := rpc.BlockNumber(1)
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, key21, 10, true, true, nil)
+		require.ErrorContains(t, err, "at most 20 bytes")
+	})
 }
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
