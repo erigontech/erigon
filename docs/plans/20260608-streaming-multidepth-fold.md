@@ -246,25 +246,37 @@ Do NOT touch `parallel_update.go`/`Prepare` or re-key `sc.splits` — deep split
 transient (in-block recursion-local); the top-16 `sc.splits map[byte]` layer (with its
 background-fold reuse) stays unchanged.
 
-- [ ] add the inline split predicate `isSplitPoint(node)` =
-      `popcount(node.bitmap) >= 2 && node.subtreeCount >= MinSplitKeys && node.plainKey == nil`.
+- [x] added the inline split predicate `isSplitPoint(node)` in `streaming_split_fold.go` =
+      `node.plainKey == nil && popcount(node.bitmap) >= 2 && node.subtreeCount >= MinSplitKeys`.
       The `plainKey == nil` (terminator) guard is load-bearing for correctness (excludes the
-      account@64 node and slot terminators). NO depth cap.
-- [ ] implement the recursive, split-aware fold: walk a `prefixNode` subtree; at a child where
-      `isSplitPoint` holds, fold that child subtree CONCURRENTLY in its own worker (a transient
-      split node holding its folded cell) instead of recursing inline; cap concurrency at
-      `sc.numWorkers` via `errgroup`; post-order — the parent stitches child cells after they complete
-- [ ] keep `storageRootLocal` as the account/storage boundary handler (account@64 terminator is
-      never a split-point), but make it RECURSIVE: instead of a flat 16-way fan-out of first-storage
-      nibbles, each storage-nibble subtree is itself split at deeper qualifying forks via the same
-      recursive fold — this is where storage-interior concurrency (depth > 64) comes from
-- [ ] generalize `stitchSplitCells` to stitch a child split cell into its parent's column at any
-      depth (strip the leading extension nibble as today)
-- [ ] write tests: split-points at 2–3 depths fold to the same root as sequential; **assert a
-      split fires at depth > 64 inside a whale storage subtree** (seam/counter — parity alone
-      won't catch a regression to account-trie-only parallelism); assert account@64 still routes
-      through `storageRootLocal` (terminator node is never split)
-- [ ] run `-race -count>=20`, `make lint`, `make erigon integration` — must pass before Task 4
+      account@64 node and slot terminators). NO depth cap. Unit-tested in `TestIsSplitPoint`
+      (child-count, size, and terminator gates).
+- [x] implemented the recursive, split-aware fold `foldStorageChild`: walks a `prefixNode`
+      subtree; at a child where `isSplitPoint` holds, folds each grandchild subtree CONCURRENTLY
+      (one `errgroup.Go` per child) and aggregates the branch post-order via `aggregateSubtreeRoot`;
+      non-split subtrees fold flat in one worker via the new `foldSubtreeAtPrefix`. Concurrency is
+      capped at `sc.numWorkers` by a shared `sem chan struct{}` acquired only around actual fold
+      work — waiting goroutines hold no slot, so the recursion cannot self-deadlock (errgroups carry
+      no SetLimit). Added the arbitrary-prefix raw-key fold primitive `foldSubtreeAtPrefix`
+      (hand-mounts `currentKey`/`depths` at any prefix so the fold roots there, generalizing the
+      depth-64 deep-fold mount), pinned to the proven helper by `TestFoldSubtreeAtPrefix_MatchesDepth64`.
+- [x] made `storageRootLocal` RECURSIVE: it now calls `foldStorageChild` per first-storage-nibble,
+      and a deep qualifying fork inside one of those subtrees splits again — storage-interior
+      concurrency reaches below depth 64, not just the flat 16-way fan-out. account@64 carries a
+      terminator so it is never a split-point; it stays the boundary handled by the `dfsDeepLocal`
+      caller. Nested-split extensions are lifted onto the aggregate branch cell (`extensionHash` is
+      depth-independent).
+- [x] generalized the deep stitch: the row-0→any-depth strip is factored into the shared
+      `stripLeadingChildExt` helper (used by `foldChildSubtree` and `foldSubtreeAtPrefix`); placing a
+      folded child into a parent's column at any depth is done by `aggregateSubtreeRoot`'s grid[1]
+      stitch (`stitchSplitCells` stays the row-0 path, whose foldMounted-output convention differs)
+- [x] wrote tests: `TestStreaming_StorageInteriorSplits` folds a 20k-slot whale across workers
+      {1,4,8} and asserts root + every stored branch == sequential AND `StorageSplits()` > 0 (a
+      split fired at depth > 64, the seam parity alone can't prove) AND `DeepLocalFolds()` > 0
+      (account@64 routed through `storageRootLocal`, never split). Existing deep parity tests
+      (`TestStreaming_DeepBranchParity`, `TestDeepFold_StorageRootParity`) remain green.
+- [x] ran `-race -count>=20` on the new concurrency path (+ count=5 on deep parity), `make lint`
+      (0 issues), `make erigon integration` (both binaries build) — all pass
 
 ### Task 4: Write linearization at every split node
 

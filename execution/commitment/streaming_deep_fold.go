@@ -35,14 +35,7 @@ func foldChildSubtree(w *HexPatriciaHashed, col int, group []touchedKey) (cell, 
 		}
 	}
 	c := w.grid[0][col]
-	if c.hashedExtLen > 0 {
-		c.hashedExtLen--
-		copy(c.hashedExtension[:], c.hashedExtension[1:])
-	}
-	if c.extLen > 0 {
-		c.extLen--
-		copy(c.extension[:], c.extension[1:])
-	}
+	stripLeadingChildExt(&c)
 	return c, nil
 }
 

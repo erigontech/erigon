@@ -122,6 +122,11 @@ type StreamingCommitter struct {
 	// streaming path no longer routes through parallel_mount.go's deep fan-out.
 	deepLocalFolds atomic.Uint64
 
+	// storageSplits counts storage-interior split-points folded concurrently at
+	// depth > 64 — a test seam proving the recursive fold reaches below the
+	// account/storage boundary, not just the top-16 + first-storage-nibble fan-out.
+	storageSplits atomic.Uint64
+
 	// rootCell + flags snapshot the base trie's terminal root after a successful
 	// fold so the owning ParallelPatriciaHashed can promote them into its
 	// persistence template (RootTrie) for EncodeCurrentState/SetState. rootValid
@@ -836,6 +841,11 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 // walk folded — a test seam proving the deep path no longer calls parallel_mount.
 func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds.Load() }
 
+// StorageSplits reports how many storage-interior split-points (depth > 64) the
+// recursive fold processed concurrently — a test seam proving multi-depth
+// concurrency reaches below the account/storage boundary.
+func (sc *StreamingCommitter) StorageSplits() uint64 { return sc.storageSplits.Load() }
+
 // dfsDeepLocal is the streaming-local copy of ParallelPatriciaHashed.dfsSubtreeDeep:
 // it walks a mount worker's subtree and, at a big-storage account whose touched
 // storage crosses deepStorageThreshold, folds that account's storage via
@@ -883,41 +893,31 @@ func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHa
 	return nil
 }
 
-// storageRootLocal folds each first-storage-nibble subtree of one account in its
-// own pooled worker, aggregates the depth-65 child cells into the storage branch,
-// and returns its hash (the account's storageRoot). Streaming-local copy of
-// concurrentStorageRoot reusing the Task-1 per-nibble fold + assembler; path is
-// the 64-nibble account hash.
+// storageRootLocal folds an account's storage subtree concurrently and returns
+// its hash (the account's storageRoot). Each first-storage-nibble subtree folds
+// independently, and a deep qualifying fork inside one of them splits again via
+// foldStorageChild — so storage-interior concurrency reaches below depth 64, not
+// just the flat 16-way first-nibble fan-out. path is the 64-nibble account hash;
+// account@64 carries a terminator and is never itself a split-point (handled by
+// the dfsDeepLocal boundary that calls this).
 func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
-	accNib := int(path[63])
+	accPrefix := append([]byte(nil), path...)
 	var children [16]cell
-	var present uint16
+	present := node.bitmap
 
+	sem := make(chan struct{}, sc.numWorkers)
 	var g errgroup.Group
-	g.SetLimit(sc.numWorkers)
 	childIdx := 0
 	for bm := node.bitmap; bm != 0; {
 		nib := int(bits.TrailingZeros16(bm))
 		child := node.children[childIdx]
-		cpath := make([]byte, len(path), len(path)+1+len(child.ext))
-		copy(cpath, path)
-		cpath = append(cpath, byte(nib))
-		cpath = append(cpath, child.ext...)
-		ni, ch, cp := nib, child, cpath
-		present |= uint16(1) << nib
+		ni, ch := nib, child
 		g.Go(func() error {
-			group := collectStorageNibbleKeys(ch, cp)
-			w, release := sc.newStorageWorker()
-			c, err := foldStorageChildCell(w, accNib, group)
+			c, err := sc.foldStorageChild(sem, pu, accPrefix, ni, ch)
 			if err != nil {
-				release()
-				return fmt.Errorf("storage mount[%x] build: %w", ni, err)
-			}
-			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
-				pu.appendDeferred(deferred)
+				return err
 			}
 			children[ni] = c
-			release()
 			return nil
 		})
 		childIdx++
@@ -927,16 +927,19 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		return common.Hash{}, err
 	}
 
+	sem <- struct{}{}
 	w, release := sc.newStorageWorker()
 	sr, err := aggregateStorageRoot(w, path, &children, present)
-	if err != nil {
-		release()
-		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
-	}
-	if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
-		pu.appendDeferred(deferred)
+	if err == nil {
+		if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
+			pu.appendDeferred(deferred)
+		}
 	}
 	release()
+	<-sem
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
+	}
 	return sr.hash, nil
 }
 
