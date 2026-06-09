@@ -49,10 +49,10 @@ func (e *ExecModule) evictOldBuilders() {
 }
 
 func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		return AssembleBlockResult{Busy: true}, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
 		return AssembleBlockResult{}, err
@@ -97,10 +97,10 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *ExecModule) GetAssembledBlock(_ context.Context, payloadID uint64) (AssembledBlockResult, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		return AssembledBlockResult{Busy: true}, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	bldr, ok := e.builders[payloadID]
 	if !ok {

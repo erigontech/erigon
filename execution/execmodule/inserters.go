@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -55,11 +56,11 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	defer insertBlocksDuration.ObserveDuration(time.Now())
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return ExecutionStatusBusy, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
@@ -82,12 +83,26 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
+		// Chain to the newest in-flight commit generation (gate item 2) so
+		// the parent-TD read below sees a previous FCU's not-yet-committed
+		// block data instead of a stale DB.
+		if sd != nil {
+			if parent := e.latestGen(); parent != nil {
+				sd.SetParent(parent)
+			}
+		}
 		e.lock.Lock()
 		e.currentContext = sd
 		e.lock.Unlock()
 	}
 	if sd.BlockOverlay() == nil {
-		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		overlayBase := kv.TemporalTx(roTx)
+		if parent := e.latestGen(); parent != nil {
+			if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+				overlayBase = v
+			}
+		}
+		if err := sd.InitBlockOverlay(overlayBase, roTx.Debug().Dirs().Tmp); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
 	} else {

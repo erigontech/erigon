@@ -466,7 +466,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 	sdCtx := domains.GetCommitmentContext()
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	latestBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(roTx))
 	if err != nil {
 		return nil, err
 	}
@@ -673,7 +673,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	latestBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(roTx))
 	if err != nil {
 		return nil, err
 	}

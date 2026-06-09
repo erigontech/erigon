@@ -97,8 +97,9 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		end = header.Number.Uint64()
 
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		// Convert the RPC block numbers into internal representations.
+		// Overlay-wrap so an in-flight (not-yet-committed) FCU block is the head.
+		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 		if err != nil {
 			return nil, err
 		}
@@ -192,8 +193,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		begin = header.Number.Uint64()
 		end = header.Number.Uint64()
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		// Convert the RPC block numbers into internal representations.
+		// Overlay-wrap so an in-flight (not-yet-committed) FCU block is the head.
+		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 		if err != nil {
 			return nil, err
 		}

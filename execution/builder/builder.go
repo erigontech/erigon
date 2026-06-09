@@ -170,7 +170,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	if err := createBlock(b.ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := execBlock(b.ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
+	if err := execBlock(b.ctx, sd, parentSD, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
 		return nil, err
 	}
 	if err := finishBlock(compositeTx, finishCfg, b.logger); err != nil {

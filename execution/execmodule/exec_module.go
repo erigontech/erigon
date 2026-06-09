@@ -120,15 +120,16 @@ var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
 func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	// Read the latest *published* SharedDomains — the most recently executed
+	// block's stable leaf snapshot. Deliberately NOT e.currentContext: while
+	// an FCU is in progress currentContext is that block's half-written SD,
+	// actively mutated by the executing pipeline (the coinbase nonce is
+	// already bumped mid-block). A consumer that grabbed currentContext would
+	// see a not-yet-final block — e.g. GetTransactionCount and txpool
+	// validateTx in the same SubmitTransfer disagreeing by one nonce. The
+	// published leaf only advances at block completion, so it is stable.
 	var context *execctx.SharedDomains
-	if c.execModule != nil {
-		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
-		c.execModule.lock.RUnlock()
-	}
-	// Fall back to the published SD from Events during background commits
-	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
+	if c.publishedSD != nil {
 		context = c.publishedSD()
 	}
 
@@ -226,6 +227,22 @@ type ExecModule struct {
 	currentContext *execctx.SharedDomains
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
+	// Background-commit / foreground-priority coordination (gate item 2 —
+	// see bg_commit.go). fgMu guards fgCount + gens; fgIdle is signalled
+	// when fgCount reaches zero so the commit worker can run in a
+	// foreground-free window.
+	fgMu     sync.Mutex
+	fgCount  int
+	fgIdle   *sync.Cond
+	gens     []*commitGen
+	commitCh chan *commitGen
+	// commitWorker lifecycle: commitWorkerStop signals the worker to drain
+	// and exit; commitWg tracks it so shutdown (WaitIdle) waits for the
+	// worker — and its in-flight commit txs — to finish before DB-close.
+	commitWorkerStop chan struct{}
+	commitStopOnce   sync.Once
+	commitWg         sync.WaitGroup
+
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache  *cache.StateCache
 	readAheader *exec.BlockReadAheader
@@ -291,16 +308,41 @@ func NewExecModule(
 	if stateCache != nil {
 		stateCache.execModule = em
 	}
+
+	// Start the background-commit worker (gate item 2). It pulls completed
+	// generations off commitCh and commits each in a foreground-free
+	// window. The buffered channel keeps the foreground FCU's hand-off
+	// non-blocking. WaitIdle stops the worker before DB-close.
+	em.fgIdle = sync.NewCond(&em.fgMu)
+	em.commitCh = make(chan *commitGen, 1024)
+	em.commitWorkerStop = make(chan struct{})
+	em.commitWg.Add(1)
+	go em.commitWorker()
+
 	return em
 }
 
 // WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
 // Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+	if err := e.fgAcquire(ctx); err != nil {
 		return // context cancelled — best effort
 	}
-	e.semaphore.Release(1)
+	e.fgRelease()
+	// Stop the background-commit worker and wait for it to drain its queue
+	// (including any in-flight commit tx) so DB-close does not race it.
+	e.stopCommitWorker()
+	// Close the generation(s) still held — drainCommittedGens deliberately
+	// keeps the newest alive as Events.LatestSD; release it now that the
+	// worker has stopped and no foreground/RPC reader can be in flight.
+	e.closeAllGens()
+}
+
+// stopCommitWorker signals the background-commit worker to drain and exit,
+// then waits for it. Idempotent.
+func (e *ExecModule) stopCommitWorker() {
+	e.commitStopOnce.Do(func() { close(e.commitWorkerStop) })
+	e.commitWg.Wait()
 }
 
 // ForkValidator returns the fork validator owned by this module.
@@ -405,16 +447,20 @@ const nextForkBanner = `
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
-	e.currentContext.ResetPendingUpdates()
+	// currentContext is nil while a background commit holds the previous
+	// FCU's SD (gate item 2) — guard the access.
+	if e.currentContext != nil {
+		e.currentContext.ResetPendingUpdates()
+	}
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
@@ -445,22 +491,31 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 	} else {
-		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
-			if err != nil {
-				return err
-			}
-
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-			if err != nil {
-				return err
-			}
-			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
-			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-			return nil
-		}); err != nil {
+		// currentContext is nil — read block data through the newest
+		// in-flight commit generation's overlay when one exists (gate item
+		// 2), so the previous FCU's not-yet-committed headers/bodies/TDs
+		// are visible; otherwise a plain DB read.
+		roTx, err := e.db.BeginTemporalRo(ctx)
+		if err != nil {
 			return ValidationResult{}, err
 		}
+		defer roTx.Rollback()
+		var src kv.TemporalTx = roTx
+		if parent := e.latestGen(); parent != nil {
+			if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+				src = v
+			}
+		}
+		header, err = e.blockReader.Header(ctx, src, blockHash, blockNumber)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		body, err = e.blockReader.BodyWithTransactions(ctx, src, blockHash, blockNumber)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+		currentBlockNumber = rawdb.ReadCurrentBlockNumber(src)
 	}
 	if header == nil || body == nil {
 		return ValidationResult{
@@ -500,20 +555,21 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// We Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
-	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	// Back the validation overlay by the newest in-flight commit generation
+	// (gate item 2) so block-data reads cascade through its overlay instead
+	// of a stale DB while a background commit is in flight.
+	valOverlayBase := kv.TemporalTx(roTx)
+	if parent := e.latestGen(); parent != nil {
+		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+			valOverlayBase = v
+		}
+	}
+	if err := doms.InitBlockOverlay(valOverlayBase, roTx.Debug().Dirs().Tmp); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// DO NOT CHANGE THIS WITHOUT WORKING THROUGH THE UNWIND CACHING SCENARIOS.
-	// The earlier `header.ParentHash == ReadHeadBlockHash(tx)` head-extending-
-	// only gate has been intentionally widened back to "chain whenever a
-	// currentContext exists" because fork-payload caching needs the parent
-	// link too — see the two-role breakdown below. The narrower gate was
-	// merged from main during the post-#21017 rebase and is the WRONG choice
-	// for this branch; keep the wider gate.
-	//
 	// Chain the validation SD to the latest in-memory canonical generation:
 	// e.currentContext when present, otherwise the newest in-flight commit
 	// generation (gate item 2 — the prior FCU cleared currentContext and
@@ -535,13 +591,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// unwindToCommonCanonical has run, doms.mem.unwindChangeset holds every
 	// key the unwound canonical blocks touched, and TemporalMemBatch.getLatest
 	// resolves those from the unwind set before ever consulting the parent.
-	//
-	// Cherry-pick note: the upstream commit also chained to e.latestGen()
-	// (the gate-2 in-flight commit generation) when currentContext is nil;
-	// that generation chain is not on this branch, so currentContext is the
-	// only canonical generation here.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
+	} else if parent := e.latestGen(); parent != nil {
+		doms.SetParent(parent)
 	}
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
@@ -661,13 +714,13 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+	if err := e.fgAcquire(ctx); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 		return
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -713,11 +766,11 @@ func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return false, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 	return true, nil
 }
 

@@ -124,7 +124,13 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			if pendingBlock == nil {
 				blockNumber = plainStateBlockNumber
 			} else {
-				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
+				// latest must be true when the pending block coincides with the
+				// in-flight execution progress (plainStateBlockNumber is read via
+				// overlayTx, so it includes a not-yet-committed block). Returning
+				// latest=false there forces the historical read path, whose
+				// history is not committed during a background commit — yielding
+				// a stale/zero nonce. Mirrors the LatestBlockNumber handling.
+				return pendingBlock.NumberU64(), pendingBlock.Hash(), pendingBlock.NumberU64() == plainStateBlockNumber, true, nil
 			}
 		case rpc.LatestExecutedBlockNumber:
 			blockNumber = plainStateBlockNumber

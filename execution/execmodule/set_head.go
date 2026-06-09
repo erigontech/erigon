@@ -53,10 +53,10 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer acquireCancel()
-	if err := e.semaphore.Acquire(acquireCtx, 1); err != nil {
+	if err := e.fgAcquire(acquireCtx); err != nil {
 		return fmt.Errorf("execution module is busy: %w", err)
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {

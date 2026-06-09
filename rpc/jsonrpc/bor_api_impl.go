@@ -102,7 +102,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(tx)
+		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 		if err2 != nil {
 			return accounts.NilAddress, err2
 		}
@@ -298,7 +298,7 @@ func (api *BorImpl) getLatestBlockNum(ctx context.Context) (uint64, error) {
 	}
 	defer tx.Rollback()
 
-	return rpchelper.GetLatestBlockNumber(tx)
+	return rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 }
 
 // GetSnapshotProposer retrieves the in-turn signer at a given block.

@@ -153,7 +153,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
@@ -161,12 +161,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
-	shouldReleaseSema := true
-	defer func() {
-		if shouldReleaseSema {
-			e.semaphore.Release(1)
-		}
-	}()
+	// The semaphore is always released when updateForkChoice returns — the
+	// background commit no longer holds it (gate item 2: the commit runs on
+	// the bg worker, decoupled from the foreground semaphore).
+	defer e.fgRelease()
+
+	// Retire the in-flight commit-generation chain if every generation has
+	// committed (gate item 2). Safe here: the foreground semaphore is held,
+	// so no concurrent op is reading a generation's SharedDomains.
+	e.drainCommittedGens()
 
 	defer UpdateForkChoiceDuration(time.Now())
 	defer e.forkValidator.ClearWithUnwind()
@@ -221,6 +224,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
 		// the canonical execution path running uncached against the aggTx.
 		currentContext.SetStateCache(e.stateCache)
+		// Chain to the newest in-flight commit generation (gate item 2):
+		// if a previous FCU's commit has not yet landed, its domain state
+		// lives only in that generation's sd.mem — SetParent lets this FCU
+		// read through to it instead of a stale DB. nil when the chain is
+		// empty (all prior commits landed → DB is current).
+		if parent := e.latestGen(); parent != nil {
+			currentContext.SetParent(parent)
+		}
 	}
 
 	defer func() {
@@ -239,7 +250,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// hashes, stage progress, forkchoice markers, TxNums, etc.). All
 	// pipeline reads cascade through the overlay to the RO tx; writes
 	// stay in memory until commit.
-	if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	// Back the block overlay by the newest in-flight commit generation's
+	// overlay when one exists (gate item 2): block data — headers, bodies,
+	// TDs, receipts — written by a not-yet-committed FCU lives in that
+	// generation's overlay. A concurrent-safe temporal read view lets this
+	// FCU read through to it instead of a stale DB. The generation chain
+	// (closed as a unit by drainCommittedGens) keeps the backing valid.
+	overlayBase := kv.TemporalTx(roTx)
+	if parent := e.latestGen(); parent != nil {
+		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+			overlayBase = v
+		}
+	}
+	if err := currentContext.InitBlockOverlay(overlayBase, roTx.Debug().Dirs().Tmp); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: init block overlay: %w", err), false)
 	}
 	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
@@ -656,12 +679,38 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 		}
 
+		// Background commit (gate item 2): register the generation in the
+		// in-flight chain BEFORE dispatching notifications / publishing the
+		// overlay. The commit worker republishes the overlay as it commits
+		// each generation (bg_commit.go: latestUncommittedGenSD); if this
+		// generation were not yet in e.gens at that point, the worker would
+		// publish a stale (older or nil) overlay and clobber this FCU's.
+		var bgGen *commitGen
+		if e.fcuBackgroundCommit {
+			bgGen = &commitGen{
+				sd:                   currentContext,
+				roTx:                 roTx,
+				finishProgressBefore: finishProgressBefore,
+				isSynced:             isSynced,
+				initialCycle:         initialCycle,
+			}
+			e.addGen(bgGen)
+		}
+
 		// Dispatch notifications from the SD overlay (before flush/commit).
 		// After this, all consumers have the data — the semaphore can be
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
 		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+			// The generation is already registered; enqueue it so its commit
+			// still lands and the chain can drain — otherwise an uncommitted
+			// generation would block drainCommittedGens forever.
+			if bgGen != nil {
+				roTx = nil
+				currentContext = nil
+				e.enqueueCommit(bgGen)
+			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
 
@@ -669,31 +718,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// fcuBackgroundCommit is explicitly enabled.
 		var commitTimings []any
 		if e.fcuBackgroundCommit {
-			shouldReleaseSema = false
-			// Transfer roTx ownership to the goroutine so the outer defer
-			// (roTx.Rollback) becomes a no-op on nil.
-			bgRoTx := roTx
+			// Hand the commit to the background worker (gate item 2).
+			// shouldReleaseSema stays true → the outer defer fgRelease()s
+			// the semaphore the moment updateForkChoice returns, so the
+			// next FCU is never blocked on this commit. The worker commits
+			// in a foreground-free window (commitWorker → waitForegroundIdle)
+			// so the commit RwTx never overlaps a foreground roTx. The
+			// generation is added to the chain so the next FCU's SD can
+			// read its not-yet-committed domain state via SetParent.
 			roTx = nil
-			bgSD := currentContext
 			currentContext = nil
-			dispatcher := e.pipelineExecutor.Dispatcher()
-			go func() {
-				defer e.semaphore.Release(1)
-				defer bgSD.Close()
-				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
-				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
-				// defer is a safety net — Rollback is idempotent.
-				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					e.logger.Error("Error running background post forkchoice", "err", err)
-				}
-				// Signal that the DB commit is done — RPC consumers can
-				// drop their SD reference and read from committed DB.
-				if dispatcher != nil {
-					dispatcher.PublishOverlay(nil)
-				}
-			}()
+			e.enqueueCommit(bgGen)
 		} else {
 			// Foreground commit: pass the outer roTx so it gets released
 			// between Flush and Commit (same openTxs=2→1 optimization as
@@ -833,7 +868,7 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	}
 	defer rwTx.Rollback()
 	flushStart := time.Now()
-	if err := sd.Flush(e.bacgroundCtx, rwTx); err != nil {
+	if err := sd.FlushKeepMem(e.bacgroundCtx, rwTx); err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
