@@ -222,14 +222,15 @@ func (w *indexedWeightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 		stack = stack[:len(stack)-1]
 
 		for _, entry := range w.directVotes[current] {
-			idx := int(entry.ValidatorIndex)
-			if idx >= cs.validatorSetSize || idx >= len(cs.balances) {
+			vi := entry.ValidatorIndex
+			if vi >= uint64(cs.validatorSetSize) || vi >= uint64(len(cs.balances)) {
 				continue
 			}
+			idx := int(vi)
 			if !readFromBitset(cs.actives, idx) || readFromBitset(cs.slasheds, idx) {
 				continue
 			}
-			if w.f.isUnequivocating(entry.ValidatorIndex) {
+			if w.f.isUnequivocating(vi) {
 				continue
 			}
 			message := LatestMessage{

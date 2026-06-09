@@ -155,6 +155,8 @@ func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
 	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
 
 	b.Run("indexed", func(b *testing.B) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		idx := f.headWeightStore(cs)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -162,7 +164,9 @@ func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
 		}
 	})
 	b.Run("fullscan", func(b *testing.B) {
-		full := NewWeightStore(f)
+		full := NewWeightStore(f) // constructed outside the lock (getCheckpointState is cached)
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_ = full.GetAttestationScore(node)
