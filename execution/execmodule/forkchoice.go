@@ -707,7 +707,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// Only runs in foreground when both background flags are off.
 		if !e.fcuBackgroundCommit {
 			if e.fcuBackgroundPrune {
+				// RunPrune runs on the same pipeline Sync as the next FCU's
+				// RunLoop, so the goroutine must hold the semaphore until it
+				// finishes — otherwise the two race on the shared stage state.
+				shouldReleaseSema = false
 				go func() {
+					defer e.semaphore.Release(1)
 					pruneTimings, err := e.runForkchoicePrune(initialCycle)
 					if err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)

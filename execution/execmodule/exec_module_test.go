@@ -349,6 +349,73 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	}))
 }
 
+// Exercises the hive engine-cancun "Re-Org Back into Canonical Chain" scenario:
+// after producing each block N>5 the CL re-orgs the head back to block 5 and
+// then forward to N, re-applying blocks 6..N. With background prune enabled
+// (the node default) the prune runs on the shared pipeline sync, and before the
+// fix it could race the next FCU's RunLoop, skip the execution stage and leave
+// the head behind ("Invalid chain after execution"). Run under -race.
+func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
+	for _, bgPrune := range []bool{false, true} {
+		name := "fg-prune"
+		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
+		if bgPrune {
+			// Match the hive erigon default (FcuBackgroundPrune=true): the prune
+			// runs on the shared pipeline sync in a goroutine after the FCU
+			// releases its semaphore, so it overlaps the next FCU's RunLoop.
+			name = "bg-prune"
+			opts = append(opts, execmoduletester.WithFcuBackgroundPrune())
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			m := execmoduletester.New(t, opts...)
+
+			const chainLen = 9
+			const reorgBackTo = 5
+			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {})
+			require.NoError(t, err)
+			require.Len(t, chainPack.Blocks, chainLen)
+
+			headerAt := func(n uint64) *types.Header { return chainPack.Blocks[n-1].Header() }
+
+			for n := uint64(1); n <= chainLen; n++ {
+				// Insert the block only when it is "produced" (as newPayload would):
+				// later blocks must not exist in the DB during the earlier re-orgs.
+				insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[n-1:n])
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, insRes, "insert block %d", n)
+
+				h := headerAt(n)
+				vr, err := validateChain(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "validate block %d", n)
+				ur, err := updateForkChoice(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, ur.Status, "fcu to canonical block %d", n)
+
+				if n <= reorgBackTo {
+					continue
+				}
+				// Re-org the head back down to block 5.
+				back, err := updateForkChoice(ctx, m.ExecModule, headerAt(reorgBackTo))
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, back.Status, "re-org back to block %d (cycle at %d)", reorgBackTo, n)
+
+				// Re-org the head forward back into the canonical chain (block n).
+				fwd, err := updateForkChoice(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, fwd.Status, "re-org forward back to canonical block %d", n)
+				require.Equalf(t, h.Hash(), fwd.LatestValidHash, "forward re-org should make block %d the head", n)
+			}
+
+			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
+				return nil
+			}))
+		})
+	}
+}
+
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
 	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
