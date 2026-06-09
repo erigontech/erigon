@@ -1114,18 +1114,18 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 	}
 
-	// CodeDomain L2b transparent bypass: many addresses share one codeHash
+	// CodeDomain codeHashToCode transparent bypass: many addresses share one codeHash
 	// (proxies, factory-deployed clones, ERC-20 holder set, OpenZeppelin
 	// templates). Today's addr-keyed cache misses on every fresh address
-	// even when the bytecode is already in the L2b layer. Resolve the
+	// even when the bytecode is already in the codeHashToCode layer. Resolve the
 	// codeHash from the account record (warm in AccountsDomain cache for
-	// any account the EVM has already loaded) and probe L2b before paying
+	// any account the EVM has already loaded) and probe codeHashToCode before paying
 	// the code-file accessor stack cost.
-	var codeEthHash []byte
+	var codeHash []byte
 	if domain == kv.CodeDomain && sd.stateCache != nil {
 		if h := sd.codeHashForAddr(tx, k); len(h) > 0 {
-			codeEthHash = h
-			if cv, ok := sd.stateCache.GetCodeByHash(codeEthHash); ok {
+			codeHash = h
+			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
 				return cv, 0, nil
 			}
 		}
@@ -1147,8 +1147,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// recent-step reads are dropped. (CodeCache addr layers are cleared wholesale
 	// on unwind, so PutCodeWithHash needs no txNum.)
 	if sd.stateCache != nil {
-		if domain == kv.CodeDomain && len(codeEthHash) > 0 && len(v) > 0 {
-			sd.stateCache.PutCodeWithHash(k, v, codeEthHash)
+		if domain == kv.CodeDomain && len(codeHash) > 0 && len(v) > 0 {
+			sd.stateCache.PutCodeWithHash(k, v, codeHash)
 		} else {
 			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 			sd.stateCache.Put(domain, k, v, readTxNum)
@@ -1172,7 +1172,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 //
 // Correctness invariant: the fast path is purely additive. When it cannot
 // answer, the function delegates to GetLatest(CodeDomain, addr) — the
-// authoritative path that hits L1/parent/stateCache/L2b/file in order.
+// authoritative path that hits L1/parent/stateCache/codeHashToCode/file in order.
 // Never short-circuits to (0, false, nil) based on account-record
 // resolution alone; that broke EIP-7002 / EIP-7251 system-contract
 // syscalls (the predeploy has CodeDomain entries but the AccountsDomain
@@ -1188,19 +1188,19 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, 
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
 	if sd.stateCache != nil {
-		if codeEthHash := sd.codeHashForAddr(tx, addr); len(codeEthHash) > 0 {
-			if size, ok := sd.stateCache.GetCodeSizeByHash(codeEthHash); ok {
+		if codeHash := sd.codeHashForAddr(tx, addr); len(codeHash) > 0 {
+			if size, ok := sd.stateCache.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
-			if cv, ok := sd.stateCache.GetCodeByHash(codeEthHash); ok {
-				sd.stateCache.PutCodeSizeByHash(codeEthHash, len(cv))
+			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
+				sd.stateCache.PutCodeSizeByHash(codeHash, len(cv))
 				return len(cv), true, nil
 			}
 		}
 	}
 
 	// Cold path: authoritative read via the normal SD.GetLatest chain.
-	// Populates L1, L2b, and (via PutWithEthHash) the size layer for
+	// Populates L1, codeHashToCode, and (via PutWithCodeHash) the size layer for
 	// future callers.
 	v, _, err := sd.GetLatest(kv.CodeDomain, tx, addr)
 	if err != nil {
@@ -1281,7 +1281,7 @@ func decodeAccountCodeHash(enc []byte) []byte {
 	// with DeserialiseV3. DecodeForStorage is the legacy MDBX bitmask format
 	// with an incompatible binary layout; applied to V3 bytes it silently
 	// misparses and leaves CodeHash empty, so codeHashForAddr returned nil for
-	// every contract and the CodeDomain ethHash bypass never fired.
+	// every contract and the CodeDomain codeHash bypass never fired.
 	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
 		return nil
 	}

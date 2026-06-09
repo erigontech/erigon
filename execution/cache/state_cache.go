@@ -131,47 +131,47 @@ func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 //
 // Use when the caller has the codeHash in hand (post-account-load) — typical
 // for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
-// patterns (proxies, factory clones, ERC-20 holders) share a single L2b
+// patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
 // entry.
-func (c *StateCache) GetCodeByHash(ethHash []byte) ([]byte, bool) {
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return nil, false
 	}
-	return cc.GetByEthHash(ethHash)
+	return cc.GetByCodeHash(codeHash)
 }
 
 // PutCodeWithHash stores code populating both the addr-keyed path and the
-// ethHash-keyed L2b layer. Callers should prefer this over Put when they
+// codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
-func (c *StateCache) PutCodeWithHash(addr, code, ethHash []byte) {
+func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutWithEthHash(addr, common.Copy(code), ethHash)
+	cc.PutWithCodeHash(addr, common.Copy(code), codeHash)
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
 // without loading the bytes. Returns (0, false) when the size-only layer
 // is not populated for this hash.
-func (c *StateCache) GetCodeSizeByHash(ethHash []byte) (int, bool) {
+func (c *StateCache) GetCodeSizeByHash(codeHash []byte) (int, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return 0, false
 	}
-	return cc.GetCodeSizeByEthHash(ethHash)
+	return cc.GetCodeSizeByCodeHash(codeHash)
 }
 
-// PutCodeSizeByHash records the code size for a given ethHash. Useful when
+// PutCodeSizeByHash records the code size for a given codeHash. Useful when
 // the caller has the size in hand (e.g. from an account-domain probe that
 // resolved a sibling addr to the same code) but doesn't have the bytes.
-func (c *StateCache) PutCodeSizeByHash(ethHash []byte, size int) {
+func (c *StateCache) PutCodeSizeByHash(codeHash []byte, size int) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutCodeSizeByEthHash(ethHash, size)
+	cc.PutCodeSizeByCodeHash(codeHash, size)
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr without an

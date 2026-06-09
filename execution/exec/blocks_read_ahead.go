@@ -79,8 +79,8 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 //
 // For the CodeDomain, when the code bytes come back together with the
 // owning account's codeHash (decoded from a preceding AccountsDomain read
-// in the same loop iteration), the wrapper also populates the L2b
-// ethHash→bytes + size-cache layers via PutCodeWithHash. The codeHash
+// in the same loop iteration), the wrapper also populates the codeHashToCode
+// codeHash→bytes + size-cache layers via PutCodeWithHash. The codeHash
 // hint is provided per-iteration via withCodeHashHint().
 type cachePopulatingGetter struct {
 	g            kv.TemporalGetter
@@ -118,11 +118,11 @@ func (cpg *cachePopulatingGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 }
 
 // withCodeHashHint stashes the codeHash so the next CodeDomain read routes
-// through PutCodeWithHash (populating L2b + size cache) instead of a bare
+// through PutCodeWithHash (populating codeHashToCode + size cache) instead of a bare
 // addr-keyed Put. Caller MUST follow this with a single GetLatest(CodeDomain, …)
 // for the matching addr; the hint clears on use.
-func (cpg *cachePopulatingGetter) withCodeHashHint(ethHash []byte) {
-	cpg.codeHashHint = ethHash
+func (cpg *cachePopulatingGetter) withCodeHashHint(codeHash []byte) {
+	cpg.codeHashHint = codeHash
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
@@ -248,8 +248,8 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					acct, _ := stateReader.ReadAccountData(acctChanges.Address)
 					// Warm code if account has code or if there are code changes.
 					// When we already know the codeHash from the account read, hint
-					// the cache-populating getter so the code bytes land in the L2b
-					// (ethHash → bytes) + size layers — not just the addr-keyed L1.
+					// the cache-populating getter so the code bytes land in the codeHashToCode
+					// (codeHash → bytes) + size layers — not just the addr-keyed L1.
 					if acct != nil && !acct.CodeHash.IsEmpty() {
 						if cpg != nil {
 							h := acct.CodeHash.Value()
