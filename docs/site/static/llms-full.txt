@@ -65,7 +65,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [prune mode](../fundamentals/prune-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
 
 | Prune Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
@@ -365,7 +365,7 @@ docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=mi
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
 * `--chain=hoodi` specifies which [network](/fundamentals/supported-networks) to sync
-* `--prune.mode=minimal` tells Erigon to use minimal [Prune Mode](/fundamentals/prune-modes)
+* `--prune.mode=minimal` tells Erigon to use minimal [Pruning Mode](/fundamentals/pruning-modes)
 * `--datadir` tells Erigon where to store data inside the container
 
 ### Linux/macOS
@@ -887,7 +887,7 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 * `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
   * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
-* Add `--prune.mode=minimal` to run minimal [Prune Mode](../../fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Pruning Mode](../../fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
 
@@ -960,7 +960,7 @@ docker compose up
 ## Flag explanation
 
 * `--chain=mainnet` specifies to run on Ethereum mainnet
-* Add `--prune.mode=minimal` to run minimal [Prune Mode](/fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
 * `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -1089,7 +1089,7 @@ docker compose up
 ## Flag explanation
 
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
-* Add `--prune.mode=minimal` to run minimal [Prune Mode](/fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
+* Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
 
@@ -1273,7 +1273,7 @@ To run Erigon with RPC Daemon, TxPool, and other components in a single process 
     ```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
-* Based on the [prune mode](prune-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
+* Based on the [pruning mode](pruning-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
 * `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
