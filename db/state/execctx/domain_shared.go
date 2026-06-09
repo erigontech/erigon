@@ -644,11 +644,11 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
-		sd.logger.Info("[state-cache] SetStateCache skipped",
+		sd.logger.Debug("[state-cache] SetStateCache skipped",
 			"useStateCache", dbg.UseStateCache, "stateCacheNil", stateCache == nil)
 		return
 	}
-	sd.logger.Info("[state-cache] SetStateCache enabled on SD")
+	sd.logger.Debug("[state-cache] SetStateCache enabled on SD")
 	sd.stateCache = stateCache
 }
 
@@ -771,19 +771,19 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	// Update the cache with the bytes about to land in MDBX, atomically
-	// with the flush. FlushWithCallback holds the latestState write lock
-	// for the full window so a concurrent DomainPut cannot interleave
+	// with the flush. The WithFlushCallback path holds the latestState write
+	// lock for the full window so a concurrent DomainPut cannot interleave
 	// between the cache update and the MDBX write — readers see either
 	// the local sd.mem value (during the lock) or the cached/MDBX value
 	// (after release). No window where cache is stale vs MDBX.
 	if sd.branchCache != nil {
-		if err := sd.mem.FlushWithCallback(ctx, tx, kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
+		if err := sd.mem.Flush(ctx, tx, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
 			if len(v) == 0 {
 				sd.branchCache.Invalidate(k)
 				return
 			}
 			sd.branchCache.Put(k, v, uint64(step), sd.txNum, "sd.Flush")
-		}); err != nil {
+		})); err != nil {
 			return err
 		}
 		// Adaptive controller hook: now that the cache reflects this

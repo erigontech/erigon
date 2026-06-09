@@ -517,6 +517,30 @@ type TemporalDebugDB interface {
 	MergeLoop(ctx context.Context) error
 }
 
+// FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by
+// FlushOption values.
+type FlushConfig struct {
+	// DomainCallbacks, if set for a domain, is invoked for each
+	// (key, value, step) tuple in that domain BEFORE the mem-batch is written
+	// to the tx — letting a downstream cache (e.g. the commitment BranchCache)
+	// stay in sync with the flush.
+	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step)
+}
+
+// FlushOption configures a TemporalMemBatch.Flush call.
+type FlushOption func(*FlushConfig)
+
+// WithFlushCallback registers cb to receive every (key, value, step) tuple of
+// the given domain during Flush, ordered before the MDBX write.
+func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step)) FlushOption {
+	return func(c *FlushConfig) {
+		if c.DomainCallbacks == nil {
+			c.DomainCallbacks = make(map[Domain]func(k []byte, v []byte, step Step))
+		}
+		c.DomainCallbacks[domain] = cb
+	}
+}
+
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
@@ -529,8 +553,7 @@ type TemporalMemBatch interface {
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
-	Flush(ctx context.Context, tx RwTx) error
-	FlushWithCallback(ctx context.Context, tx RwTx, domain Domain, cb func(k []byte, v []byte, step Step)) error
+	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)

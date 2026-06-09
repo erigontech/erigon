@@ -562,7 +562,7 @@ func (c *BranchCache) GetWithOrigin(prefix []byte) (data []byte, origin string, 
 	} else if pinnedEntry, pinnedOk := c.pinned.Get(prefix); pinnedOk {
 		entry = pinnedEntry
 	} else {
-		entry, ok = c.tail.Get(prefix)
+		entry, ok = c.tail.Peek(prefix)
 		if !ok {
 			return nil, "", 0, 0, false
 		}
@@ -645,6 +645,11 @@ func (c *BranchCache) Clear() {
 	c.rootMisses.Store(0)
 	c.pinnedHits.Store(0)
 	c.pinnedMisses.Store(0)
+	// Keep the published-counter snapshots in step with the counters they
+	// track, or the next PublishMetrics would compute (0 - lastPublished),
+	// underflow uint64, and emit a spurious delta.
+	c.lastPublishedPinnedHits.Store(0)
+	c.lastPublishedPinnedMisses.Store(0)
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)

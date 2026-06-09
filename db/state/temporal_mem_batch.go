@@ -762,51 +762,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-// FlushWithCallback updates a downstream cache via cb for each
-// (key, value, step) tuple in domain, then flushes the mem-batch to tx.
-// Cache-update is ordered BEFORE the MDBX flush so that during the
-// MDBX write window the cache still holds the entry — a reader that
-// goes (sd write buffer → cache → MDBX) never observes a key missing
-// from all three sources. The MDBX commit provides db-side atomicity
-// independently.
-//
-// Used by SharedDomains.Flush to keep an external BranchCache in sync
-// with commitment-domain writes.
-//
-// cb is called under latestStateLock so the snapshot it sees matches
-// the in-memory state at flush time. Flush itself runs under the same
-// lock to prevent concurrent DomainPut from interleaving with the
-// snapshot/cache-update/flush sequence.
-//
-// If Flush fails, the cache has already been updated for this batch.
-// That's the same invariant the cache maintains for any other write
-// path — values may exist in the cache before they reach disk; a
-// retry of Flush re-applies them.
-func (sd *TemporalMemBatch) FlushWithCallback(
-	ctx context.Context, tx kv.RwTx, domain kv.Domain,
-	cb func(k []byte, v []byte, step kv.Step),
-) error {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
-
-	// dir is unset on entries written via DomainPut/DomainDel (always
-	// default zero); the latest history entry per key is authoritative.
-	// data may be nil/empty for deletes — caller's cb is expected to
-	// distinguish (see SharedDomains.Flush, which Invalidate's on
-	// len(v)==0 and Put's otherwise).
-	for keyStr, history := range sd.domains[domain] {
-		if len(history) == 0 {
-			continue
-		}
-		latest := history[len(history)-1]
-		cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
-	}
-
-	return sd.flushLocked(ctx, tx)
-}
-
-// flushLocked is the body of Flush, factored so FlushWithCallback can
-// run it inside latestStateLock without re-acquiring.
+// flushLocked is the body of Flush, factored so the callback path can run it
+// inside latestStateLock without re-acquiring.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
@@ -830,9 +787,47 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+// Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
+// registered callback is invoked for every (key, value, step) tuple of its
+// domain BEFORE the MDBX write, so a downstream cache (e.g. the commitment
+// BranchCache) stays in sync: during the MDBX write window the cache still
+// holds the entry, so a reader going (sd write buffer → cache → MDBX) never
+// observes a key missing from all three sources. The MDBX commit provides
+// db-side atomicity independently.
+//
+// Callbacks run under latestStateLock so the snapshot they see matches the
+// in-memory state at flush time, and Flush holds the same lock throughout to
+// keep a concurrent DomainPut from interleaving with the
+// snapshot/cache-update/flush sequence.
+//
+// If the flush fails, the cache has already been updated for this batch —
+// the same invariant the cache maintains for any other write path: values may
+// exist in the cache before they reach disk; a retry re-applies them.
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
+
+	if len(opts) > 0 {
+		var cfg kv.FlushConfig
+		for _, opt := range opts {
+			opt(&cfg)
+		}
+		// dir is unset on entries written via DomainPut/DomainDel (always
+		// default zero); the latest history entry per key is authoritative.
+		// data may be nil/empty for deletes — the callback is expected to
+		// distinguish (see SharedDomains.Flush, which Invalidate's on
+		// len(v)==0 and Put's otherwise).
+		for domain, cb := range cfg.DomainCallbacks {
+			for keyStr, history := range sd.domains[domain] {
+				if len(history) == 0 {
+					continue
+				}
+				latest := history[len(history)-1]
+				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
+			}
+		}
+	}
+
 	return sd.flushLocked(ctx, tx)
 }
 
