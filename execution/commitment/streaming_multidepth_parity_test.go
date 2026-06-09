@@ -124,3 +124,18 @@ func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
 		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
 	}
 }
+
+// TestStreaming_FullCollapseParity is the full-deletion variant: block 2 deletes
+// EVERY whale storage slot (embedded among other accounts), so the whale becomes
+// storage-less. Streaming must yield the empty-trie storageRoot for the account
+// (not a zero hash) and match ModeDirect == ModeParallel at every worker count.
+func TestStreaming_FullCollapseParity(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleFullCollapseCorpus()
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+	for _, w := range []int{1, 4, 8} {
+		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
+	}
+}

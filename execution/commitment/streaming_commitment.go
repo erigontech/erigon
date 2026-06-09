@@ -28,6 +28,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -958,6 +959,12 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 	<-sem
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
+	}
+	// Every touched first-nibble subtree collapsed (e.g. all storage deleted): the
+	// account is now storage-less, so its storageRoot is the empty-trie root, not a
+	// zero hash. aggregateStorageRoot returns an empty cell in that case.
+	if sr.IsEmpty() {
+		return empty.RootHash, nil
 	}
 	return sr.hash, nil
 }

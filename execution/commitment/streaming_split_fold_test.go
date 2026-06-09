@@ -124,6 +124,29 @@ func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update
 	return pk, upds, k2, u2
 }
 
+// whaleFullCollapseCorpus is whaleCollapseCorpus's full-deletion variant: block 2
+// touches the account and DELETES every storage slot, so the whale becomes
+// storage-less (storageRoot == emptyRoot). Every first-storage-nibble subtree
+// collapses to empty, exercising the all-children-collapsed path that must yield
+// the empty-trie root rather than a zero hash.
+func whaleFullCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	var addr []byte
+	addr, _, _, _, pk, upds, _ = whaleByNibble(30_000)
+
+	k2 = [][]byte{addr}
+	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	u2[0].Balance.SetUint64(99)
+	u2[0].Nonce = 7
+	for i := range pk {
+		if len(pk[i]) == length.Addr {
+			continue
+		}
+		k2 = append(k2, pk[i])
+		u2 = append(u2, Update{Flags: DeleteUpdate})
+	}
+	return pk, upds, k2, u2
+}
+
 // TestStreaming_StorageCollapseAcrossSplit drives a delete batch that collapses
 // storage branches below the account/storage boundary while the whale is EMBEDDED
 // among thousands of other accounts. Embedding is load-bearing: a single-account
