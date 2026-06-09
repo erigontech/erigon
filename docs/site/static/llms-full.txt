@@ -1373,57 +1373,6 @@ This will execute the clean target in the Makefile, which cleans the `go cache`,
 
 ---
 
-# Prune Modes
-URL: https://docs.erigon.tech/fundamentals/prune-modes
-
-
-Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
-
-| **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
-| --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| * Full Node(Default) | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
-| \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
-| [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the EIP-8252 window                                | Users needing historical block data for research or indexing.                            |
-| [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
-
-By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
-
-In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch.
-
-:::tip
-**\* Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
-
-They are enabled by default for **Minimal** and **Full Node.** They can be activated or deactivated with the flag `--persist.receipts <value>` .
-:::
-
-:::note[Breaking change in v3.5]
-**`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
-
-`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**: if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
-:::
-
-## Archive node
-
-Ethereum's state refers to account balances, contracts, and consensus data. Archive nodes retain all historical state and require more **disk space.** However, Erigon 3 has consistently reduced the [disk space](../get-started/hardware-requirements.mdx#disk-size-and-ram-requirements) requirements for running an archive node, rendering it more affordable and accessible to a broader range of users.
-
-Archive are ideal for extensive research on the blockchain, developers, researchers, and RPC providers requiring a complete history of the state.
-
-## Full node
-
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
-
-We strongly recommend running a Full Node whenever possible, as its reduced disk space requirements make it suitable for the majority of users. By running a Full Node, you directly support the network's **decentralization, resilience, and robustness**, aligning with Ethereum's distributed ethos.
-
-## Minimal node
-
-The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps only recent blocks and the **latest state** — it does not retain state history, so historical state queries are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
-
-## Blocks node
-
-The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users who need complete historical **block and receipt data** — for research, indexing, or block explorers — without paying the disk cost of an archive node's full historical **state**.
-
----
-
 # Architecture
 URL: https://docs.erigon.tech/fundamentals/architecture
 
@@ -1444,7 +1393,7 @@ flowchart TB
         Caplin["Caplin (CL)<br/>embedded by default"]
         Datadir[("datadir<br/>MDBX chaindata<br/>+ .seg snapshots")]
 
-        Caplin -->|new blocks<br/>(Engine API)| Execution
+        Caplin -->|"new blocks<br/>(Engine API)"| Execution
         Sentry -->|tx gossip| TxPool
         Execution --> RPC
 
@@ -1558,6 +1507,365 @@ See [Prune Modes](prune-modes) for the full comparison.
 
 ---
 
+# Database
+URL: https://docs.erigon.tech/fundamentals/database
+
+
+Erigon stores all chain data under a single **datadir**. Understanding what lives where is useful when you size hardware, debug disk-usage issues, or split storage across fast and slow drives.
+
+This page covers the *what* and *where* of Erigon's data. For the *why* — flat KV state, immutable snapshots — see [Architecture](architecture). For operational tuning (symlinks, multi-disk layout), see [Optimizing Storage](optimizing-storage).
+
+## The datadir at a glance
+
+```
+datadir/
+├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
+├── snapshots/        # Historical data as immutable .seg files. Large, cold.
+│   ├── domain/         # Latest value per domain (4 state domains + 2 receipt domains)
+│   ├── history/        # Historical values per domain
+│   ├── idx/            # Inverted indices — search/filter/intersect historical data
+│   └── accessor/       # Random-access indices over history (point lookups only)
+├── txpool/           # Pending transactions. Safe to delete; will repopulate from peers.
+├── nodes/            # p2p peer cache. Safe to delete; will repopulate.
+└── temp/             # External-sort buffers (~100 GB peak). Cleaned at startup.
+```
+
+The split between **`chaindata/`** (mutable) and **`snapshots/`** (immutable) is the central design decision. It is what makes Erigon's archive node 10× smaller than other clients while staying fast.
+
+## Storage engine: MDBX
+
+`chaindata/` is a single [MDBX](https://github.com/erigontech/mdbx-go) key-value store. MDBX is a B+ tree engine derived from LMDB, optimised for read-heavy workloads and predictable memory use.
+
+Properties that matter operationally:
+
+- **No background compaction.** Writes go directly into the B+ tree; there is no compaction thread that can spike CPU mid-RPC-call. This is why Erigon's RPC latency does not degrade under load the way LSM-based engines (LevelDB, RocksDB) can.
+- **Memory-mapped reads.** The OS page cache is the hot data cache. There is no separate per-process cache to tune. Multiple Erigon services on one machine share the same page cache automatically.
+- **Single-writer.** One process holds the write lock; readers are unlimited and lock-free. This is why splitting RPC Daemon out as a separate process for read scaling works cleanly — only one writer ever touches the file.
+
+## Snapshots: immutable history
+
+Older blocks and history are not stored in MDBX. They are written to **`.seg` files** in `snapshots/` and **never modified after creation**.
+
+Once a snapshot file is finalised it is the same bytes on every Erigon node in the world, identified by content hash. This unlocks two things:
+
+- **BitTorrent distribution.** New nodes fetch snapshots from peers in parallel rather than re-executing history from genesis. This is what OtterSync does.
+- **Backup / disaster recovery costs ~10× less.** Most of your datadir is content-addressed and can be re-downloaded from any peer if a disk fails. You only need to back up `chaindata/`.
+
+Snapshots are organised into several subdirectories. The main ones are:
+
+| Directory | What it holds | Access pattern |
+|---|---|---|
+| `snapshots/domain/` | Latest value per (domain, key). 6 domains: the 4 state domains (`account`, `storage`, `code`, `commitment`) plus 2 receipt domains (`receipt`, `rcache`) | Sequential + point lookup |
+| `snapshots/history/` | Every historical value per (domain, key, txn) | Point lookup keyed by transaction |
+| `snapshots/idx/` | Inverted indices over history — answers "which transactions touched key X?" | Search / filter / set intersection |
+| `snapshots/accessor/` | Pre-built random-access indices over history files | Random-touch point reads only |
+
+**Per-transaction granularity.** Erigon 3 indexes history at the **transaction** level, not the block level. This means:
+
+- You can replay a single historical transaction without re-executing its block.
+- If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
+- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **persisted by default** for `full`, `minimal`, and `blocks` modes (toggled with `--persist.receipts`; `archive` nodes skip it by default and re-derive from full state history). When a full receipt isn't cached, it is reconstructed on demand, re-deriving logs by re-execution.
+
+## What does it cost on disk?
+
+Real numbers from a Nov 2024 mainnet archive node:
+
+```sh
+# eth-mainnet — archive — prune.mode=archive
+chaindata           15 GB
+snapshots/accessor 120 GB
+snapshots/domain   300 GB
+snapshots/history  280 GB
+snapshots/idx      430 GB
+snapshots TOTAL    2.3 TB
+```
+
+The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+
+For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
+
+## Why `chaindata/` stays so small
+
+In Erigon 3, `chaindata/` only holds:
+
+- The very latest state values (post-snapshot tip)
+- Recent blocks not yet folded into snapshots
+- Live txpool, peer state, sync stage progress
+
+Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
+
+Deleting `chaindata/` is **recoverable but not free**: it discards the latest mutable state and any recent blocks not yet folded into snapshots. On restart Erigon re-derives state from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip forward from the consensus layer over the Engine API — blocks are no longer pulled from peers over devp2p. Treat it as a resync of the chain tip, not a quick rebuild, and keep a backup if fast recovery matters.
+
+## Tuning knobs
+
+- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
+- **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
+- **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
+- **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
+
+## Safe-to-delete subdirectories
+
+If you need to reclaim space without resyncing from scratch:
+
+| Directory | Effect of deletion |
+|---|---|
+| `txpool/` | Pending transactions lost; pool refills from peers within minutes |
+| `nodes/` | Peer cache lost; reconnects on restart |
+| `temp/` | Cleaned automatically at startup anyway |
+| `chaindata/` | Recoverable, but triggers a resync of the post-snapshot tip from the consensus layer — not instant; keep a backup for fast recovery |
+| `snapshots/` | **Do not delete** — would force a full resync |
+
+## Where to go next
+
+- [Architecture](architecture) — how this storage model fits into staged sync and the flat-KV state design
+- [Optimizing Storage](optimizing-storage) — concrete recipes for splitting the datadir across multiple disks
+- [Hardware Requirements](../get-started/hardware-requirements) — disk-size numbers for each `--prune.mode`
+- [Prune Modes](prune-modes) — choosing what history to keep
+
+---
+
+# Prune Modes
+URL: https://docs.erigon.tech/fundamentals/prune-modes
+
+
+Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+
+| **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
+| --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| * Full Node(Default) | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
+| \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
+| [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the EIP-8252 window                                | Users needing historical block data for research or indexing.                            |
+| [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
+
+By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
+
+In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch.
+
+:::tip
+**\* Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
+
+They are enabled by default for **Minimal** and **Full Node.** They can be activated or deactivated with the flag `--persist.receipts <value>` .
+:::
+
+:::note[Breaking change in v3.5]
+**`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
+
+`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**: if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+:::
+
+## Archive node
+
+Ethereum's state refers to account balances, contracts, and consensus data. Archive nodes retain all historical state and require more **disk space.** However, Erigon 3 has consistently reduced the [disk space](../get-started/hardware-requirements.mdx#disk-size-and-ram-requirements) requirements for running an archive node, rendering it more affordable and accessible to a broader range of users.
+
+Archive are ideal for extensive research on the blockchain, developers, researchers, and RPC providers requiring a complete history of the state.
+
+## Full node
+
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
+
+We strongly recommend running a Full Node whenever possible, as its reduced disk space requirements make it suitable for the majority of users. By running a Full Node, you directly support the network's **decentralization, resilience, and robustness**, aligning with Ethereum's distributed ethos.
+
+## Minimal node
+
+The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps only recent blocks and the **latest state** — it does not retain state history, so historical state queries are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
+
+## Blocks node
+
+The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users who need complete historical **block and receipt data** — for research, indexing, or block explorers — without paying the disk cost of an archive node's full historical **state**.
+
+---
+
+# Snapshots Management
+URL: https://docs.erigon.tech/fundamentals/snapshots-management
+
+
+Erigon stores the majority of its chain data in **snapshot files** (`.seg` segments and associated index files). These immutable, compressed files cover headers, bodies, transactions, and state history. Because snapshots can occupy hundreds of gigabytes, understanding what is on disk — and how much space each category consumes — is essential for capacity planning and node maintenance.
+
+## `seg du` — Disk Usage Report
+
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each pruning mode.
+
+### Syntax
+
+```bash
+erigon seg du [--datadir <path>] [--json] [-v | --verbose]
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--datadir <path>` | Path to the Erigon data directory. Defaults to the standard per-network data directory when omitted. |
+| `--json` | Output results as JSON instead of human-readable text. Useful for scripting or dashboards. |
+| `-v`, `--verbose` | Show a per-domain / per-type subcategory breakdown within each category. |
+
+### Example output (human-readable)
+
+```
+mainnet | full | blocks 0–22.000.000 | steps 0–18.500
+total: 1.2TB (42810 files)
+
+── Breakdown ──────────────────────────────────────────────────
+  domains                 612.0GB      48.8%  18200 files
+  block segments          410.4GB      32.7%  12400 files
+  history                 120.7GB       9.6%   6300 files
+  inverted indices         88.3GB       7.0%   2100 files
+  accessors                21.0GB       1.7%    910 files
+  caplin                    1.2GB       0.1%     90 files
+  other                     0.5GB       0.0%      8 files
+
+── Estimated Size by Node Type ────────────────────────────────
+  archive        1.4TB          —    all blocks       all history
+  blocks         1.3TB    -100.0GB    all blocks       last 262.144
+  full           1.2TB    -200.0GB    last 262.144     last 262.144
+  minimal        1.1TB    -300.0GB    last 100.000     last 100.000
+```
+
+Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
+
+**Header fields explained:**
+
+- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
+- **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
+- **blocks 0–N** — the highest block number across all block segment files.
+- **steps 0–N** — the highest step number across all state files (steps are an internal Erigon unit; one step ≈ a fixed number of blocks, depending on chain activity).
+
+**Breakdown categories:**
+
+The category labels below are exactly what the command prints.
+
+| Category | Contents |
+|----------|----------|
+| `domains` | Current-state domain files (latest accounts, storage, code, commitment). Never pruned, so usually the largest category. |
+| `block segments` | Headers, bodies, and transactions (`.seg` + index files) directly under `snapshots/`. |
+| `history` | State-history snapshots for accounts, storage, code. |
+| `inverted indices` | Inverted indices over state history (enables range lookups). |
+| `accessors` | Accessor index files that speed up state queries. |
+| `caplin` | Consensus-layer (beacon chain) snapshots. |
+| `commitment hist` | Commitment-history files (archive nodes only). |
+| `rcache` | Receipt cache (pre-computed receipts for RPC performance). |
+| `forkable` | Forkable (unwindable) snapshot data. |
+| `other` | Any files with unrecognised extensions (listed inline). |
+
+**Estimates table:** shows how much space the current snapshot set would occupy under each pruning mode, given the files already on disk. The `delta` column is relative to archive (negative = smaller than archive). This lets you compare your current footprint against what other modes would consume without resyncing.
+
+### Example output (verbose, `-v`)
+
+With `--verbose`, each category expands into its domain or type subcategories:
+
+```
+  history                 120.7GB       9.6%   6300 files
+  ├─ accounts          60.3GB      50.0%   3150 files
+  ├─ storage           48.3GB      40.0%   2520 files
+  └─ code              12.1GB      10.0%    630 files
+```
+
+### JSON output (`--json`)
+
+Use `--json` to get a machine-readable object suitable for scripting:
+
+```bash
+erigon seg du --datadir /data/erigon --json | jq '.estimates'
+```
+
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
+
+:::tip
+Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
+:::
+
+---
+
+## Snapshot Types (Pruning Modes)
+
+The snapshot set on disk reflects the node's **pruning mode**. `seg du` automatically detects which mode your current files correspond to. For full details on choosing a pruning mode, see [Pruning Modes](prune-modes).
+
+| Mode | History retained | Transactions retained | Typical use case |
+|------|------------------|-----------------------|------------------|
+| **Archive** | All history from genesis | All blocks | Developers, RPC providers, researchers needing full historical state. |
+| **Full** (default) | Last 262,144 blocks (~36 days, EIP-8252 window) | Last 262,144 blocks | General users, DApp interaction, fastest sync. |
+| **Blocks** | Last 262,144 blocks | All blocks (genesis onward) | Users needing full block/receipt history without full historical state. |
+| **Minimal** | Last 100,000 blocks (~14 days) | Last 100,000 blocks | Solo staking, hardware-constrained setups, maximum privacy. |
+
+The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
+
+---
+
+## Upgrading Snapshots in v3.5
+
+### EIP-8252 retention window change
+
+Erigon v3.5 aligns the **Full** and **Blocks** pruning modes with [EIP-8252](https://github.com/ethereum/EIPs/pull/11601), which defines `REORG_RETENTION_WINDOW = 2^18 = 262,144 blocks` (≈ 36.4 days) as the inactivity-leak-bounded non-finality window. Prior versions used a retention window of **100,000 blocks** (~14 days).
+
+**What this means for existing nodes:**
+
+- **Full mode** changes the most. In v3.4 it kept *all* post-merge block bodies, transactions, and receipts (pruning only pre-merge data); in v3.5 it prunes that block data down to the last **262,144 blocks**. A full node will therefore **stop serving block bodies and receipts older than ~36 days** and will *free* disk space as the older block segments are pruned away. The state-history window, by contrast, *grows* from 100,000 to 262,144 blocks.
+- **Blocks mode** still keeps every block back to genesis; only its **state-history** window widens from 100,000 to 262,144 blocks, so its disk usage rises modestly.
+- On first startup after upgrading to v3.5, Erigon **rewrites the persisted pruning mode automatically** and logs the transition — no operator action is required (the migration shim accepts the full-mode block-pruning change in both directions). Note that **already-pruned block data cannot be recovered**; if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading.
+- Use `seg du` to inspect the resulting on-disk breakdown after the first prune pass.
+
+**Minimal mode is unchanged** — it continues to use a 100,000-block window for both blocks and state and is not subject to EIP-8252 compliance requirements.
+
+### Manual snapshot operations
+
+To migrate snapshots to the latest format, reset them for maximum performance after a major upgrade, or downgrade to an older snapshot format, follow the step-by-step snapshot upgrade and downgrade instructions in the [Upgrading guide](../get-started/installation/upgrading). Those commands are subcommands of `erigon snapshots` (e.g. `erigon snapshots update-to-new-ver-format --datadir /your/datadir`).
+
+:::warning
+Always **back up your `--datadir`** before running snapshot reset, upgrade, or downgrade commands.
+:::
+
+---
+
+# Caplin
+URL: https://docs.erigon.tech/fundamentals/caplin
+
+
+Caplin, the innovative Erigon's embedded Consensus Layer, significantly enhances the performance, efficiency, and reliability of Ethereum infrastructure. Its groundbreaking design minimizes disk usage, facilitating faster transaction processing and bolstering network security. By integrating the consensus layer directly into the EVM-node, Caplin eliminates the need for separate disk storage, thereby reducing system complexity and enhancing overall efficiency.
+
+## Caplin Usage
+
+Caplin is enabled by default, at which point an external consensus layer is no longer needed.
+
+```bash
+./build/bin/erigon
+```
+
+Caplin also has an archive mode for historical states, blocks, and blobs. These can be enabled with the following flags:
+
+* `--caplin.states-archive`: Enables the storage and retrieval of historical state data, allowing access to past states of the blockchain for debugging, analytics, or other use cases.
+* `--caplin.blocks-archive`: Enables the storage of historical block data, making it possible to query or analyze full block history.
+* `--caplin.blobs-archive`: Enables the storage of historical blobs, ensuring access to additional off-chain data that might be required for specific applications.
+
+In addition, Caplin can backfill recent blobs for an op-node or other uses with the new flag:
+
+* `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
+
+### PeerDAS Data Column Retention
+
+For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
+
+* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+
+Caplin can also be used for [block production](../staking/caplin), aka **staking**.
+
+## Beacon API Configuration
+
+When Caplin is running, it exposes a Beacon API that external tools can query. The following flags control the Beacon API server:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
+| `--beacon.api.port` | `5555` | Listening port for the Beacon API |
+| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
+| `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
+| `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
+| `--beacon.api.read.timeout` | `5s` | HTTP server read timeout |
+| `--beacon.api.write.timeout` | `31536000s` (~1 year) | HTTP server write timeout |
+| `--beacon.api.ide.timeout` | `25s` | HTTP server idle timeout (note: flag name is `ide` not `idle` — typo in source) |
+
+---
+
 # Supported Networks
 URL: https://docs.erigon.tech/fundamentals/supported-networks
 
@@ -1600,6 +1908,39 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 :::warning
 \* The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 :::
+
+---
+
+# Layer 2 Networks
+URL: https://docs.erigon.tech/fundamentals/layer-2-networks
+
+
+### Running an Op-Node alongside Erigon
+
+To run an op-node alongside Erigon, follow these steps:
+
+1.  **Start Erigon with Caplin Enabled**: If Caplin is running as the consensus layer (CL), use the `--caplin.blobs-immediate-backfill` flag to ensure the last 18 days of blobs are backfilled, which is critical for proper synchronization with the op-node, assuming you start from a snapshot.
+
+    ```bash
+    ./build/bin/erigon --caplin.blobs-immediate-backfill
+    ```
+2. **Run the Op-Node**: Configure the op-node with the `--l1.trustrpc` flag to trust the Erigon RPC layer as the L1 node. This setup ensures smooth communication and synchronization.
+
+This configuration enables the op-node to function effectively with Erigon serving as both the L1 node and the CL.
+
+### How to run Erigon Nitro for Sepolia (experimental)
+
+To start an Erigon Nitro node, simply use this Docker command:
+
+```shell
+mkdir /disk/datadir && \
+docker run -d -v /disk/datadir/:/home/user/erigon-data/ erigontech/nitro-erigon:main-fe4c973 --torrent.download.rate=10G --prune.mode=archive --l2rpc="http://rpcserver:port --sync.loop.block.limit 100000
+```
+
+* **Arbitrum Sequencer**: We're currently working on adding support for the Arbitrum Sequencer. Until that work is complete, you must point Erigon to an external L2 Arbitrum RPC to get the most recent transactions and blocks. This can be either a pruned Nitro node you operate or a publicly available RPC. Any data beyond that is queried via the configured `l2rpc` during setup and synchronization, so keep this in mind when bringing a node online.
+* **RPC compatibility**: Before declaring full Arbitrum One support, we are targeting complete RPC compatibility with the Nitro node. Please note that the `timeboosted` field will remain unavailable until Sequencer integration is complete.
+
+For more recent versions, please check [https://hub.docker.com/r/erigontech/nitro-erigon/tags](https://hub.docker.com/r/erigontech/nitro-erigon/tags).
 
 ---
 
@@ -1683,89 +2024,6 @@ Bootstrap nodes are used to help new nodes discover other nodes in the network. 
 * `--pprof.port [value]`: pprof HTTP server listening port (default: `6060`)
 * `--metrics.port [value]`: Metrics HTTP server listening port (default: `6061`)
 * `--downloader.api.addr [value]`: Downloader address `<host>:<port>`
-
----
-
-# Layer 2 Networks
-URL: https://docs.erigon.tech/fundamentals/layer-2-networks
-
-
-### Running an Op-Node alongside Erigon
-
-To run an op-node alongside Erigon, follow these steps:
-
-1.  **Start Erigon with Caplin Enabled**: If Caplin is running as the consensus layer (CL), use the `--caplin.blobs-immediate-backfill` flag to ensure the last 18 days of blobs are backfilled, which is critical for proper synchronization with the op-node, assuming you start from a snapshot.
-
-    ```bash
-    ./build/bin/erigon --caplin.blobs-immediate-backfill
-    ```
-2. **Run the Op-Node**: Configure the op-node with the `--l1.trustrpc` flag to trust the Erigon RPC layer as the L1 node. This setup ensures smooth communication and synchronization.
-
-This configuration enables the op-node to function effectively with Erigon serving as both the L1 node and the CL.
-
-### How to run Erigon Nitro for Sepolia (experimental)
-
-To start an Erigon Nitro node, simply use this Docker command:
-
-```shell
-mkdir /disk/datadir && \
-docker run -d -v /disk/datadir/:/home/user/erigon-data/ erigontech/nitro-erigon:main-fe4c973 --torrent.download.rate=10G --prune.mode=archive --l2rpc="http://rpcserver:port --sync.loop.block.limit 100000
-```
-
-* **Arbitrum Sequencer**: We're currently working on adding support for the Arbitrum Sequencer. Until that work is complete, you must point Erigon to an external L2 Arbitrum RPC to get the most recent transactions and blocks. This can be either a pruned Nitro node you operate or a publicly available RPC. Any data beyond that is queried via the configured `l2rpc` during setup and synchronization, so keep this in mind when bringing a node online.
-* **RPC compatibility**: Before declaring full Arbitrum One support, we are targeting complete RPC compatibility with the Nitro node. Please note that the `timeboosted` field will remain unavailable until Sequencer integration is complete.
-
-For more recent versions, please check [https://hub.docker.com/r/erigontech/nitro-erigon/tags](https://hub.docker.com/r/erigontech/nitro-erigon/tags).
-
----
-
-# Caplin
-URL: https://docs.erigon.tech/fundamentals/caplin
-
-
-Caplin, the innovative Erigon's embedded Consensus Layer, significantly enhances the performance, efficiency, and reliability of Ethereum infrastructure. Its groundbreaking design minimizes disk usage, facilitating faster transaction processing and bolstering network security. By integrating the consensus layer directly into the EVM-node, Caplin eliminates the need for separate disk storage, thereby reducing system complexity and enhancing overall efficiency.
-
-## Caplin Usage
-
-Caplin is enabled by default, at which point an external consensus layer is no longer needed.
-
-```bash
-./build/bin/erigon
-```
-
-Caplin also has an archive mode for historical states, blocks, and blobs. These can be enabled with the following flags:
-
-* `--caplin.states-archive`: Enables the storage and retrieval of historical state data, allowing access to past states of the blockchain for debugging, analytics, or other use cases.
-* `--caplin.blocks-archive`: Enables the storage of historical block data, making it possible to query or analyze full block history.
-* `--caplin.blobs-archive`: Enables the storage of historical blobs, ensuring access to additional off-chain data that might be required for specific applications.
-
-In addition, Caplin can backfill recent blobs for an op-node or other uses with the new flag:
-
-* `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
-
-### PeerDAS Data Column Retention
-
-For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
-
-* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
-
-Caplin can also be used for [block production](../staking/caplin), aka **staking**.
-
-## Beacon API Configuration
-
-When Caplin is running, it exposes a Beacon API that external tools can query. The following flags control the Beacon API server:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
-| `--beacon.api.port` | `5555` | Listening port for the Beacon API |
-| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
-| `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
-| `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
-| `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
-| `--beacon.api.read.timeout` | `5s` | HTTP server read timeout |
-| `--beacon.api.write.timeout` | `31536000s` (~1 year) | HTTP server write timeout |
-| `--beacon.api.ide.timeout` | `25s` | HTTP server idle timeout (note: flag name is `ide` not `idle` — typo in source) |
 
 ---
 
@@ -1863,6 +2121,236 @@ echo 1 > /proc/sys/vm/compact_memory
 ```
 
 to help with memory allocation.
+
+---
+
+# Multiple instances / One machine
+URL: https://docs.erigon.tech/fundamentals/multiple-instances
+
+
+Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.
+
+## Required Configuration Flags
+
+To avoid conflicts between instances, you must define **7 essential flags** for each instance:
+
+* `--datadir` - Separate data directory for each instance
+* `--port` - P2P networking port (default: `30303`)
+* `--http.port` - HTTP JSON-RPC port (default: `8545`)
+* `--authrpc.port` - Engine API port (default: `8551`)
+* `--torrent.port` - BitTorrent protocol port (default: `42069`)
+* `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
+* `--mcp.port` - MCP server port (default: `8553`), or `--mcp.disable` to turn it off
+
+## Example Configuration
+
+Here's how to run mainnet and sepolia instances simultaneously:
+
+```bash
+# Mainnet instance
+./build/bin/erigon \
+  --datadir="<your_mainnet_data_path>" \
+  --chain=mainnet \
+  --port=30303 \
+  --http.port=8545 \
+  --authrpc.port=8551 \
+  --torrent.port=42069 \
+  --private.api.addr=127.0.0.1:9090 \
+  --mcp.port=8553 \
+  --http --ws \
+  --http.api=eth,debug,net,trace,web3,erigon
+
+# Sepolia instance
+./build/bin/erigon \
+  --datadir="<your_sepolia_data_path>" \
+  --chain=sepolia \
+  --port=30304 \
+  --http.port=8546 \
+  --authrpc.port=8552 \
+  --torrent.port=42068 \
+  --private.api.addr=127.0.0.1:9091 \
+  --mcp.port=8554 \
+  --http --ws \
+  --http.api=eth,debug,net,trace,web3,erigon
+```
+
+## Docker Compose Multi-Instance Setup
+
+For containerized deployments, the docker-compose configuration shows how services can be orchestrated with proper port isolation:
+
+The compose file demonstrates the port allocation strategy:
+
+* **9090-9094**: Internal gRPC services (execution, Sentry, consensus, Downloader, TxPool)
+* **8545, 8551**: External HTTP APIs
+* **30303, 42069**: P2P networking ports
+
+## Best Practices
+
+### 1. Resource Management
+
+**Memory Considerations:** Erigon uses memory-mapped files (MDBX) where the OS manages page cache. Multiple instances will share the same page cache efficiently, but be aware that:
+
+* Each instance uses \~4GB RAM during genesis sync and \~1GB during normal operation
+* OS page cache can utilize unlimited memory and is shared between instances
+* Memory usage shown by `htop` includes OS page cache and may appear inflated
+
+:::warning
+⚠️ **Disk Performance Warning:** Multiple instances accessing the same disk concurrently will impact performance due to increased random disk access. This is particularly problematic during the "Blocks Execution stage" which performs many random reads. **Avoid running multiple genesis syncs on the same disk.**
+:::
+
+### 2. Database Configuration
+
+For multiple instances, consider adjusting database parameters to reduce resource contention:
+
+```bash
+# Reduce memory-mapped database size limit
+--db.size.limit=512MB
+```
+
+### 3. Network Port Management
+
+**Default Port Allocation:**
+
+| Component | Default Port | Protocol | Purpose                  |
+|-----------|--------------|----------|--------------------------|
+| Engine    | 9090         | TCP      | gRPC Server (Private)    |
+| Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
+| Engine    | 8551         | TCP      | Engine API (Private)     |
+| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
+| RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
+| MCP       | 8553         | TCP      | MCP Server (Private)     |
+
+### 4. Service Separation
+
+Erigon supports modular deployment where components can run as separate processes:
+
+For multiple instances, you can:
+
+* Run each instance with integrated services (default)
+* Separate heavy components like `downloader` or `rpcdaemon` to dedicated processes
+* Use the `--private.api.addr` flag for inter-service communication
+
+### 5. Monitoring and Logging
+
+Configure separate log directories for each instance:
+
+```bash
+# Instance 1
+--log.dir.path=/logs/mainnet
+
+# Instance 2  
+--log.dir.path=/logs/sepolia
+```
+
+For Prometheus monitoring, each instance should expose metrics on different ports.
+
+## Performance Optimization
+
+### Cloud Storage Considerations
+
+If using network-attached storage, apply these optimizations:
+
+```bash
+# Reduce disk latency impact
+export SNAPSHOT_MADV_RND=false
+--db.pagesize=64kb
+
+# For Polygon networks
+--sync.loop.block.limit=10000
+```
+
+### Memory Locking for Performance
+
+For production setups with sufficient RAM, you can lock critical data in memory:
+
+```bash
+# Lock domain snapshots in RAM
+vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
+ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
+```
+
+```markdown
+vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
+ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
+```
+
+If it is failing with "can't allocate memory", try:
+
+```text
+sync && sudo sysctl vm.drop_caches=3
+echo 1 > /proc/sys/vm/compact_memory
+```
+
+:::warning
+⚠️**Warning**: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, **we do not recommend running multiple genesis syncs on the same disk**. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.
+:::
+
+What can be done:
+
+* reduce disk latency (not throughput, not iops)
+  * use latency-critical cloud-drives
+  * or attached-NVMe (at least for initial sync)
+* increase RAM
+* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* Use `--db.pagesize=64kb` (less fragmentation, more IO)
+* Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
+
+```yaml
+# Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+# Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
+
+# Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon
+```
+
+### How RAM is used
+
+Erigon will utilize all available RAM, but this memory will not be directly owned by Erigon's process. Instead, the operating system (OS) will manage this memory. The OS will keep the frequently accessed parts of the database (DB) in RAM. If the OS needs to allocate RAM for other programs or for a second instance of Erigon, it will handle the memory management accordingly. This mechanism is known as PageCache.
+
+Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPC Daemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPC Daemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
+
+```go
+	// These are set to prevent disk and page size churn which can be excessive
+	// when running multiple nodes
+	// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
+	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
+	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
+```
+
+```yaml
+      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
+    ports:
+      - "8551:8551"
+    volumes:
+      - datadir:/home/erigon/.local/share/erigon
+      - ./logdir:/logs
+    user: ${DOCKER_UID}:${DOCKER_GID}
+    restart: unless-stopped
+    mem_swappiness: 0
+
+  erigon-node2:
+    profiles:
+      - second
+    image: erigontech/erigon:$ERIGON_TAG
+    command: |
+      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --staticpeers=$ENODE --log.dir.path=/logs/node2
+```
+
+```yaml
+      - targets:
+          - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
+          - erigon:6061
+          - erigon:6062
+          - 46.149.164.51:6060
+          - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
+          - host.docker.internal:6061
+          - host.docker.internal:6062
+          - 192.168.255.134:6060
+          - 192.168.255.134:6061
+          - 192.168.255.134:6062
+          - 192.168.255.138:6060
+          - 192.168.255.138:6061
+          - 192.168.255.138:6062
+```
 
 ---
 
@@ -2166,353 +2654,6 @@ While the RPC Daemon must be started with these additional options:
 
 ---
 
-# Multiple instances / One machine
-URL: https://docs.erigon.tech/fundamentals/multiple-instances
-
-
-Erigon supports running multiple instances on the same machine by configuring distinct ports and data directories for each instance. Multiple instances are fully supported but require careful configuration to avoid port conflicts and resource contention. The modular architecture allows for flexible deployment patterns, from fully integrated instances to distributed service architectures. The primary consideration is the performance impact from shared disk access, especially during initial synchronization phases.
-
-## Required Configuration Flags
-
-To avoid conflicts between instances, you must define **7 essential flags** for each instance:
-
-* `--datadir` - Separate data directory for each instance
-* `--port` - P2P networking port (default: `30303`)
-* `--http.port` - HTTP JSON-RPC port (default: `8545`)
-* `--authrpc.port` - Engine API port (default: `8551`)
-* `--torrent.port` - BitTorrent protocol port (default: `42069`)
-* `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
-* `--mcp.port` - MCP server port (default: `8553`), or `--mcp.disable` to turn it off
-
-## Example Configuration
-
-Here's how to run mainnet and sepolia instances simultaneously:
-
-```bash
-# Mainnet instance
-./build/bin/erigon \
-  --datadir="<your_mainnet_data_path>" \
-  --chain=mainnet \
-  --port=30303 \
-  --http.port=8545 \
-  --authrpc.port=8551 \
-  --torrent.port=42069 \
-  --private.api.addr=127.0.0.1:9090 \
-  --mcp.port=8553 \
-  --http --ws \
-  --http.api=eth,debug,net,trace,web3,erigon
-
-# Sepolia instance
-./build/bin/erigon \
-  --datadir="<your_sepolia_data_path>" \
-  --chain=sepolia \
-  --port=30304 \
-  --http.port=8546 \
-  --authrpc.port=8552 \
-  --torrent.port=42068 \
-  --private.api.addr=127.0.0.1:9091 \
-  --mcp.port=8554 \
-  --http --ws \
-  --http.api=eth,debug,net,trace,web3,erigon
-```
-
-## Docker Compose Multi-Instance Setup
-
-For containerized deployments, the docker-compose configuration shows how services can be orchestrated with proper port isolation:
-
-The compose file demonstrates the port allocation strategy:
-
-* **9090-9094**: Internal gRPC services (execution, Sentry, consensus, Downloader, TxPool)
-* **8545, 8551**: External HTTP APIs
-* **30303, 42069**: P2P networking ports
-
-## Best Practices
-
-### 1. Resource Management
-
-**Memory Considerations:** Erigon uses memory-mapped files (MDBX) where the OS manages page cache. Multiple instances will share the same page cache efficiently, but be aware that:
-
-* Each instance uses \~4GB RAM during genesis sync and \~1GB during normal operation
-* OS page cache can utilize unlimited memory and is shared between instances
-* Memory usage shown by `htop` includes OS page cache and may appear inflated
-
-:::warning
-⚠️ **Disk Performance Warning:** Multiple instances accessing the same disk concurrently will impact performance due to increased random disk access. This is particularly problematic during the "Blocks Execution stage" which performs many random reads. **Avoid running multiple genesis syncs on the same disk.**
-:::
-
-### 2. Database Configuration
-
-For multiple instances, consider adjusting database parameters to reduce resource contention:
-
-```bash
-# Reduce memory-mapped database size limit
---db.size.limit=512MB
-```
-
-### 3. Network Port Management
-
-**Default Port Allocation:**
-
-| Component | Default Port | Protocol | Purpose                  |
-|-----------|--------------|----------|--------------------------|
-| Engine    | 9090         | TCP      | gRPC Server (Private)    |
-| Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
-| Engine    | 8551         | TCP      | Engine API (Private)     |
-| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
-| RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
-| MCP       | 8553         | TCP      | MCP Server (Private)     |
-
-### 4. Service Separation
-
-Erigon supports modular deployment where components can run as separate processes:
-
-For multiple instances, you can:
-
-* Run each instance with integrated services (default)
-* Separate heavy components like `downloader` or `rpcdaemon` to dedicated processes
-* Use the `--private.api.addr` flag for inter-service communication
-
-### 5. Monitoring and Logging
-
-Configure separate log directories for each instance:
-
-```bash
-# Instance 1
---log.dir.path=/logs/mainnet
-
-# Instance 2  
---log.dir.path=/logs/sepolia
-```
-
-For Prometheus monitoring, each instance should expose metrics on different ports.
-
-## Performance Optimization
-
-### Cloud Storage Considerations
-
-If using network-attached storage, apply these optimizations:
-
-```bash
-# Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
---db.pagesize=64kb
-
-# For Polygon networks
---sync.loop.block.limit=10000
-```
-
-### Memory Locking for Performance
-
-For production setups with sufficient RAM, you can lock critical data in memory:
-
-```bash
-# Lock domain snapshots in RAM
-vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
-ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
-```
-
-```markdown
-vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
-ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
-```
-
-If it is failing with "can't allocate memory", try:
-
-```text
-sync && sudo sysctl vm.drop_caches=3
-echo 1 > /proc/sys/vm/compact_memory
-```
-
-:::warning
-⚠️**Warning**: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, **we do not recommend running multiple genesis syncs on the same disk**. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.
-:::
-
-What can be done:
-
-* reduce disk latency (not throughput, not iops)
-  * use latency-critical cloud-drives
-  * or attached-NVMe (at least for initial sync)
-* increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
-* Use `--db.pagesize=64kb` (less fragmentation, more IO)
-* Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
-
-```yaml
-# Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
-# Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
-
-# Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon
-```
-
-### How RAM is used
-
-Erigon will utilize all available RAM, but this memory will not be directly owned by Erigon's process. Instead, the operating system (OS) will manage this memory. The OS will keep the frequently accessed parts of the database (DB) in RAM. If the OS needs to allocate RAM for other programs or for a second instance of Erigon, it will handle the memory management accordingly. This mechanism is known as PageCache.
-
-Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from having more RAM available, as it can use all of it without needing any reconfiguration. The same PageCache can be shared by other processes running on the same machine, simply by opening the same DB file. For example, if RPC Daemon is started with the `--datadir` option, it will open Erigon's DB and utilize the same PageCache. This means that if data A is already in RAM because it is frequently accessed and RPC Daemon reads it, it will read it from RAM rather than from the disk, leveraging shared memory.
-
-```go
-	// These are set to prevent disk and page size churn which can be excessive
-	// when running multiple nodes
-	// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
-	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
-	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
-```
-
-```yaml
-      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --mine --log.dir.path=/logs/node1
-    ports:
-      - "8551:8551"
-    volumes:
-      - datadir:/home/erigon/.local/share/erigon
-      - ./logdir:/logs
-    user: ${DOCKER_UID}:${DOCKER_GID}
-    restart: unless-stopped
-    mem_swappiness: 0
-
-  erigon-node2:
-    profiles:
-      - second
-    image: erigontech/erigon:$ERIGON_TAG
-    command: |
-      --datadir=/home/erigon/.local/share/erigon --chain=dev --private.api.addr=0.0.0.0:9090 --staticpeers=$ENODE --log.dir.path=/logs/node2
-```
-
-```yaml
-      - targets:
-          - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
-          - erigon:6061
-          - erigon:6062
-          - 46.149.164.51:6060
-          - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
-          - host.docker.internal:6061
-          - host.docker.internal:6062
-          - 192.168.255.134:6060
-          - 192.168.255.134:6061
-          - 192.168.255.134:6062
-          - 192.168.255.138:6060
-          - 192.168.255.138:6061
-          - 192.168.255.138:6062
-```
-
----
-
-# Database
-URL: https://docs.erigon.tech/fundamentals/database
-
-
-Erigon stores all chain data under a single **datadir**. Understanding what lives where is useful when you size hardware, debug disk-usage issues, or split storage across fast and slow drives.
-
-This page covers the *what* and *where* of Erigon's data. For the *why* — flat KV state, immutable snapshots — see [Architecture](architecture). For operational tuning (symlinks, multi-disk layout), see [Optimizing Storage](optimizing-storage).
-
-## The datadir at a glance
-
-```
-datadir/
-├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
-├── snapshots/        # Historical data as immutable .seg files. Large, cold.
-│   ├── domain/         # Latest value per domain (4 state domains + 2 receipt domains)
-│   ├── history/        # Historical values per domain
-│   ├── idx/            # Inverted indices — search/filter/intersect historical data
-│   └── accessor/       # Random-access indices over history (point lookups only)
-├── txpool/           # Pending transactions. Safe to delete; will repopulate from peers.
-├── nodes/            # p2p peer cache. Safe to delete; will repopulate.
-└── temp/             # External-sort buffers (~100 GB peak). Cleaned at startup.
-```
-
-The split between **`chaindata/`** (mutable) and **`snapshots/`** (immutable) is the central design decision. It is what makes Erigon's archive node 10× smaller than other clients while staying fast.
-
-## Storage engine: MDBX
-
-`chaindata/` is a single [MDBX](https://github.com/erigontech/mdbx-go) key-value store. MDBX is a B+ tree engine derived from LMDB, optimised for read-heavy workloads and predictable memory use.
-
-Properties that matter operationally:
-
-- **No background compaction.** Writes go directly into the B+ tree; there is no compaction thread that can spike CPU mid-RPC-call. This is why Erigon's RPC latency does not degrade under load the way LSM-based engines (LevelDB, RocksDB) can.
-- **Memory-mapped reads.** The OS page cache is the hot data cache. There is no separate per-process cache to tune. Multiple Erigon services on one machine share the same page cache automatically.
-- **Single-writer.** One process holds the write lock; readers are unlimited and lock-free. This is why splitting RPC Daemon out as a separate process for read scaling works cleanly — only one writer ever touches the file.
-
-## Snapshots: immutable history
-
-Older blocks and history are not stored in MDBX. They are written to **`.seg` files** in `snapshots/` and **never modified after creation**.
-
-Once a snapshot file is finalised it is the same bytes on every Erigon node in the world, identified by content hash. This unlocks two things:
-
-- **BitTorrent distribution.** New nodes fetch snapshots from peers in parallel rather than re-executing history from genesis. This is what OtterSync does.
-- **Backup / disaster recovery costs ~10× less.** Most of your datadir is content-addressed and can be re-downloaded from any peer if a disk fails. You only need to back up `chaindata/`.
-
-Snapshots are organised into several subdirectories. The main ones are:
-
-| Directory | What it holds | Access pattern |
-|---|---|---|
-| `snapshots/domain/` | Latest value per (domain, key). 6 domains: the 4 state domains (`account`, `storage`, `code`, `commitment`) plus 2 receipt domains (`receipt`, `rcache`) | Sequential + point lookup |
-| `snapshots/history/` | Every historical value per (domain, key, txn) | Point lookup keyed by transaction |
-| `snapshots/idx/` | Inverted indices over history — answers "which transactions touched key X?" | Search / filter / set intersection |
-| `snapshots/accessor/` | Pre-built random-access indices over history files | Random-touch point reads only |
-
-**Per-transaction granularity.** Erigon 3 indexes history at the **transaction** level, not the block level. This means:
-
-- You can replay a single historical transaction without re-executing its block.
-- If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
-- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **persisted by default** for `full`, `minimal`, and `blocks` modes (toggled with `--persist.receipts`; `archive` nodes skip it by default and re-derive from full state history). When a full receipt isn't cached, it is reconstructed on demand, re-deriving logs by re-execution.
-
-## What does it cost on disk?
-
-Real numbers from a Nov 2024 mainnet archive node:
-
-```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
-```
-
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
-
-For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
-
-## Why `chaindata/` stays so small
-
-In Erigon 3, `chaindata/` only holds:
-
-- The very latest state values (post-snapshot tip)
-- Recent blocks not yet folded into snapshots
-- Live txpool, peer state, sync stage progress
-
-Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
-
-Deleting `chaindata/` is **recoverable but not free**: it discards the latest mutable state and any recent blocks not yet folded into snapshots. On restart Erigon re-derives state from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip forward from the consensus layer over the Engine API — blocks are no longer pulled from peers over devp2p. Treat it as a resync of the chain tip, not a quick rebuild, and keep a backup if fast recovery matters.
-
-## Tuning knobs
-
-- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
-- **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
-- **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
-- **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
-
-## Safe-to-delete subdirectories
-
-If you need to reclaim space without resyncing from scratch:
-
-| Directory | Effect of deletion |
-|---|---|
-| `txpool/` | Pending transactions lost; pool refills from peers within minutes |
-| `nodes/` | Peer cache lost; reconnects on restart |
-| `temp/` | Cleaned automatically at startup anyway |
-| `chaindata/` | Recoverable, but triggers a resync of the post-snapshot tip from the consensus layer — not instant; keep a backup for fast recovery |
-| `snapshots/` | **Do not delete** — would force a full resync |
-
-## Where to go next
-
-- [Architecture](architecture) — how this storage model fits into staged sync and the flat-KV state design
-- [Optimizing Storage](optimizing-storage) — concrete recipes for splitting the datadir across multiple disks
-- [Hardware Requirements](../get-started/hardware-requirements) — disk-size numbers for each `--prune.mode`
-- [Prune Modes](prune-modes) — choosing what history to keep
-
----
-
 # MCP Server
 URL: https://docs.erigon.tech/fundamentals/mcp
 
@@ -2807,6 +2948,18 @@ In addition to tools, the MCP server exposes structured **resources** and **prom
 
 ---
 
+# Otterscan
+URL: https://docs.erigon.tech/fundamentals/otterscan
+
+
+Otterscan is an Ethereum block explorer designed to be run locally along with Erigon.
+
+Entirely based on open source code, it is fast and fully private since it works on your local machine. The user interface is intentionally very similar, but with many improvements, to the most popular Ethereum block explorer to make it easy to locate where the information is. Installation and usage instructions
+
+For the installation and usage follow the official documentation at [https://docs.otterscan.io/](https://docs.otterscan.io/).
+
+---
+
 # Creating a dashboard
 URL: https://docs.erigon.tech/fundamentals/creating-a-dashboard
 
@@ -3012,18 +3165,6 @@ If your Docker installation requires the Docker daemon to run as root (which is 
 
 ---
 
-# Otterscan
-URL: https://docs.erigon.tech/fundamentals/otterscan
-
-
-Otterscan is an Ethereum block explorer designed to be run locally along with Erigon.
-
-Entirely based on open source code, it is fast and fully private since it works on your local machine. The user interface is intentionally very similar, but with many improvements, to the most popular Ethereum block explorer to make it easy to locate where the information is. Installation and usage instructions
-
-For the installation and usage follow the official documentation at [https://docs.otterscan.io/](https://docs.otterscan.io/).
-
----
-
 # web3 Wallet
 URL: https://docs.erigon.tech/fundamentals/web3-wallet
 
@@ -3056,147 +3197,6 @@ To configure your local Metamask wallet (browser extension):
   * **Block Explorer URL**: `https://www.etherscan.io` (or any explorer of your choice)
 
 After performing the above steps, you will be able to see the custom network the next time you access the network selector.
-
----
-
-# Snapshots Management
-URL: https://docs.erigon.tech/fundamentals/snapshots-management
-
-
-Erigon stores the majority of its chain data in **snapshot files** (`.seg` segments and associated index files). These immutable, compressed files cover headers, bodies, transactions, and state history. Because snapshots can occupy hundreds of gigabytes, understanding what is on disk — and how much space each category consumes — is essential for capacity planning and node maintenance.
-
-## `seg du` — Disk Usage Report
-
-The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each pruning mode.
-
-### Syntax
-
-```bash
-erigon seg du [--datadir <path>] [--json] [-v | --verbose]
-```
-
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--datadir <path>` | Path to the Erigon data directory. Defaults to the standard per-network data directory when omitted. |
-| `--json` | Output results as JSON instead of human-readable text. Useful for scripting or dashboards. |
-| `-v`, `--verbose` | Show a per-domain / per-type subcategory breakdown within each category. |
-
-### Example output (human-readable)
-
-```
-mainnet | full | blocks 0–22.000.000 | steps 0–18.500
-total: 1.2TB (42810 files)
-
-── Breakdown ──────────────────────────────────────────────────
-  domains                 612.0GB      48.8%  18200 files
-  block segments          410.4GB      32.7%  12400 files
-  history                 120.7GB       9.6%   6300 files
-  inverted indices         88.3GB       7.0%   2100 files
-  accessors                21.0GB       1.7%    910 files
-  caplin                    1.2GB       0.1%     90 files
-  other                     0.5GB       0.0%      8 files
-
-── Estimated Size by Node Type ────────────────────────────────
-  archive        1.4TB          —    all blocks       all history
-  blocks         1.3TB    -100.0GB    all blocks       last 262.144
-  full           1.2TB    -200.0GB    last 262.144     last 262.144
-  minimal        1.1TB    -300.0GB    last 100.000     last 100.000
-```
-
-Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
-
-**Header fields explained:**
-
-- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
-- **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
-- **blocks 0–N** — the highest block number across all block segment files.
-- **steps 0–N** — the highest step number across all state files (steps are an internal Erigon unit; one step ≈ a fixed number of blocks, depending on chain activity).
-
-**Breakdown categories:**
-
-The category labels below are exactly what the command prints.
-
-| Category | Contents |
-|----------|----------|
-| `domains` | Current-state domain files (latest accounts, storage, code, commitment). Never pruned, so usually the largest category. |
-| `block segments` | Headers, bodies, and transactions (`.seg` + index files) directly under `snapshots/`. |
-| `history` | State-history snapshots for accounts, storage, code. |
-| `inverted indices` | Inverted indices over state history (enables range lookups). |
-| `accessors` | Accessor index files that speed up state queries. |
-| `caplin` | Consensus-layer (beacon chain) snapshots. |
-| `commitment hist` | Commitment-history files (archive nodes only). |
-| `rcache` | Receipt cache (pre-computed receipts for RPC performance). |
-| `forkable` | Forkable (unwindable) snapshot data. |
-| `other` | Any files with unrecognised extensions (listed inline). |
-
-**Estimates table:** shows how much space the current snapshot set would occupy under each pruning mode, given the files already on disk. The `delta` column is relative to archive (negative = smaller than archive). This lets you compare your current footprint against what other modes would consume without resyncing.
-
-### Example output (verbose, `-v`)
-
-With `--verbose`, each category expands into its domain or type subcategories:
-
-```
-  history                 120.7GB       9.6%   6300 files
-  ├─ accounts          60.3GB      50.0%   3150 files
-  ├─ storage           48.3GB      40.0%   2520 files
-  └─ code              12.1GB      10.0%    630 files
-```
-
-### JSON output (`--json`)
-
-Use `--json` to get a machine-readable object suitable for scripting:
-
-```bash
-erigon seg du --datadir /data/erigon --json | jq '.estimates'
-```
-
-The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
-
-:::tip
-Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
-:::
-
----
-
-## Snapshot Types (Pruning Modes)
-
-The snapshot set on disk reflects the node's **pruning mode**. `seg du` automatically detects which mode your current files correspond to. For full details on choosing a pruning mode, see [Pruning Modes](prune-modes).
-
-| Mode | History retained | Transactions retained | Typical use case |
-|------|------------------|-----------------------|------------------|
-| **Archive** | All history from genesis | All blocks | Developers, RPC providers, researchers needing full historical state. |
-| **Full** (default) | Last 262,144 blocks (~36 days, EIP-8252 window) | Last 262,144 blocks | General users, DApp interaction, fastest sync. |
-| **Blocks** | Last 262,144 blocks | All blocks (genesis onward) | Users needing full block/receipt history without full historical state. |
-| **Minimal** | Last 100,000 blocks (~14 days) | Last 100,000 blocks | Solo staking, hardware-constrained setups, maximum privacy. |
-
-The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
-
----
-
-## Upgrading Snapshots in v3.5
-
-### EIP-8252 retention window change
-
-Erigon v3.5 aligns the **Full** and **Blocks** pruning modes with [EIP-8252](https://github.com/ethereum/EIPs/pull/11601), which defines `REORG_RETENTION_WINDOW = 2^18 = 262,144 blocks` (≈ 36.4 days) as the inactivity-leak-bounded non-finality window. Prior versions used a retention window of **100,000 blocks** (~14 days).
-
-**What this means for existing nodes:**
-
-- **Full mode** changes the most. In v3.4 it kept *all* post-merge block bodies, transactions, and receipts (pruning only pre-merge data); in v3.5 it prunes that block data down to the last **262,144 blocks**. A full node will therefore **stop serving block bodies and receipts older than ~36 days** and will *free* disk space as the older block segments are pruned away. The state-history window, by contrast, *grows* from 100,000 to 262,144 blocks.
-- **Blocks mode** still keeps every block back to genesis; only its **state-history** window widens from 100,000 to 262,144 blocks, so its disk usage rises modestly.
-- On first startup after upgrading to v3.5, Erigon **rewrites the persisted pruning mode automatically** and logs the transition — no operator action is required (the migration shim accepts the full-mode block-pruning change in both directions). Note that **already-pruned block data cannot be recovered**; if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading.
-- Use `seg du` to inspect the resulting on-disk breakdown after the first prune pass.
-
-**Minimal mode is unchanged** — it continues to use a 100,000-block window for both blocks and state and is not subject to EIP-8252 compliance requirements.
-
-### Manual snapshot operations
-
-To migrate snapshots to the latest format, reset them for maximum performance after a major upgrade, or downgrade to an older snapshot format, follow the step-by-step snapshot upgrade and downgrade instructions in the [Upgrading guide](../get-started/installation/upgrading). Those commands are subcommands of `erigon snapshots` (e.g. `erigon snapshots update-to-new-ver-format --datadir /your/datadir`).
-
-:::warning
-Always **back up your `--datadir`** before running snapshot reset, upgrade, or downgrade commands.
-:::
 
 ---
 

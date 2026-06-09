@@ -1,7 +1,7 @@
 ---
 title: "web3 Wallet"
 description: "Connecting MetaMask and other web3 wallets to a local Erigon node."
-sidebar_position: 20
+sidebar_position: 23
 ---
 
 # web3 Wallet

@@ -1,7 +1,7 @@
 ---
 title: "Architecture"
 description: "How Erigon is built — staged sync, modular processes, flat-DB on MDBX, immutable snapshots, and an embedded consensus layer."
-sidebar_position: 3
+sidebar_position: 2
 ---
 
 # Architecture
@@ -22,7 +22,7 @@ flowchart TB
         Caplin["Caplin (CL)<br/>embedded by default"]
         Datadir[("datadir<br/>MDBX chaindata<br/>+ .seg snapshots")]
 
-        Caplin -->|new blocks<br/>(Engine API)| Execution
+        Caplin -->|"new blocks<br/>(Engine API)"| Execution
         Sentry -->|tx gossip| TxPool
         Execution --> RPC
 

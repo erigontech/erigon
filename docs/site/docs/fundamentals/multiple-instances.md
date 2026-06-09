@@ -1,7 +1,7 @@
 ---
 title: "Multiple instances / One machine"
 description: "Running several Erigon instances on a single machine without conflict."
-sidebar_position: 14
+sidebar_position: 13
 ---
 
 

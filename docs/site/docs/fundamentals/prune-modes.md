@@ -1,7 +1,7 @@
 ---
 title: "Prune Modes"
 description: "Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case."
-sidebar_position: 2
+sidebar_position: 4
 ---
 
 

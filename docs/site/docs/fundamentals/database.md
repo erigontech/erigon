@@ -1,7 +1,7 @@
 ---
 title: "Database"
 description: "How Erigon stores chain data — MDBX engine, datadir layout, snapshot files, and real mainnet sizing numbers."
-sidebar_position: 15
+sidebar_position: 3
 ---
 
 # Database

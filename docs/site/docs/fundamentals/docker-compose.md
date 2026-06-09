@@ -1,7 +1,7 @@
 ---
 title: "Docker Compose"
 description: "Running Erigon and all its modules with Docker Compose."
-sidebar_position: 18
+sidebar_position: 22
 ---
 
 # Docker Compose
