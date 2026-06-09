@@ -151,9 +151,10 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	return attestationIndicies, nil
 }
 
-func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
-	// Update indexed weight store if present: read old value BEFORE overwriting
-	if f.indexedWeightStore != nil {
+func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage, maintainIndexedVotes bool) {
+	// The indexed weight store is only read by GLOAS get_head; maintaining it on
+	// the pre-GLOAS path is wasted per-vote work under the fork-choice lock.
+	if maintainIndexedVotes && f.indexedWeightStore != nil {
 		if oldMessage, has := f.latestMessages.get(int(index)); has && oldMessage != (LatestMessage{}) {
 			f.indexedWeightStore.RemoveVote(index, oldMessage.Root)
 		}
@@ -161,8 +162,7 @@ func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) 
 
 	f.latestMessages.set(int(index), message)
 
-	// Add new vote to index (balance looked up internally)
-	if f.indexedWeightStore != nil {
+	if maintainIndexedVotes && f.indexedWeightStore != nil {
 		f.indexedWeightStore.IndexVote(index, message)
 	}
 }
@@ -225,7 +225,7 @@ func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
 				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
 				Slot:  slot, // Set slot for GLOAS compatibility at fork boundary
-			})
+			}, false)
 		}
 	}
 }
@@ -251,7 +251,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Slot:           slot,
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
-			})
+			}, true)
 		}
 	}
 }
