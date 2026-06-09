@@ -213,12 +213,6 @@ func (f *ForkChoiceStore) headWeightStore(cs *checkpointState) WeightStore {
 	return f.indexedWeightStore
 }
 
-// GetIndexedWeightStore returns the indexed WeightStore for optimized GLOAS weight calculation.
-// Returns nil if not initialized.
-func (f *ForkChoiceStore) GetIndexedWeightStore() *indexedWeightStore {
-	return f.indexedWeightStore
-}
-
 // ComputeWeightsWithAuxState computes weights for all blocks using an auxiliary state.
 // This is used during head selection when we have a cached state available.
 // [New in Gloas:EIP7732] Uses WeightStore for weight calculation.

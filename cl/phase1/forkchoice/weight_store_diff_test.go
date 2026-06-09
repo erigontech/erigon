@@ -151,7 +151,9 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
 	f := buildExAnteStore(b)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	cs, _ := f.getCheckpointState(justified)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(b, err)
+	require.NotNil(b, cs)
 	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
 
 	b.Run("indexed", func(b *testing.B) {
