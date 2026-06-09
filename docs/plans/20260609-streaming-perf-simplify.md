@@ -30,14 +30,21 @@ Profile: `prometheus.counter.Inc` 3.4% + `Metrics.Updates` 1.2%.
 
 **Files:** `hex_patricia_hashed.go`, `metrics.go`
 
-- [ ] The 3.4% is the **global** prometheus counters `mxTrieStateLoadRate.Inc()` /
+- [x] The 3.4% is the **global** prometheus counters `mxTrieStateLoadRate.Inc()` /
       `mxTrieStateSkipRate.Inc()` called per key (`hex_patricia_hashed.go:373,378,
       1005,1095,1173,1249`). Coalesce them into per-Process accumulate-then-single-Add,
       preserving the emitted totals (they are process-wide; one Add per Process keeps
-      the value).
-- [ ] Also move the per-worker `Metrics` atomics (`metrics.go` `loadAccount.Add`
-      etc.) / `Metrics.Updates` off the per-key path the same way.
-- [ ] Parity green; benchmark shows the metrics cost gone, roots byte-identical.
+      the value). Done: removed the 6 per-key `.Inc()`; `flushTrieStateRates()`
+      publishes the monotonic `hadToLoad`/`skippedLoad` atomics' delta to the
+      prometheus counters once per Process (mutex-guarded, exact, race-safe).
+- [x] Also move the per-worker `Metrics` atomics (`metrics.go` `loadAccount.Add`
+      etc.) / `Metrics.Updates` off the per-key path the same way. Done: per-key path
+      bumps non-atomic `*N` fields; `flushHot()` folds them into the atomics before
+      any read (AsValues/logMetrics/Values), zeroed in Reset.
+- [x] Parity green; benchmark shows the metrics cost gone, roots byte-identical.
+      `TestStreaming_*Parity`, `TestStreaming_StorageCollapseAcrossSplit`,
+      `TestVerifyParallel*` green `-race -count=3` at workers 1/4/8; `after.prof`
+      `-top` shows zero prometheus/Metrics frames.
 
 ### Task 2: Cut per-fold allocations (GC) — do NOT rebuild the arena
 

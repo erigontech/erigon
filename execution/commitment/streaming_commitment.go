@@ -304,6 +304,7 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	flushTrieStateRates()
 	sc.endBlock()
 	return rh, nil
 }
