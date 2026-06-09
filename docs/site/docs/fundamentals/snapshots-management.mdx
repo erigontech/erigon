@@ -1,0 +1,159 @@
+---
+title: "Snapshots Management"
+description: "Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats."
+sidebar_position: 6
+---
+
+# Snapshots Management
+
+Erigon stores the majority of its chain data in **snapshot files** (`.seg` segments and associated index files). These immutable, compressed files cover headers, bodies, transactions, and state history. Because snapshots can occupy hundreds of gigabytes, understanding what is on disk — and how much space each category consumes — is essential for capacity planning and node maintenance.
+
+## `seg du` — Disk Usage Report
+
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each prune mode.
+
+### Syntax
+
+```bash
+erigon seg du --datadir <path> [--json] [-v | --verbose]
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--datadir <path>` | Path to the Erigon data directory (required). |
+| `--json` | Output results as JSON instead of human-readable text. Useful for scripting or dashboards. |
+| `-v`, `--verbose` | Show a per-domain / per-type subcategory breakdown within each category. |
+
+### Example output (human-readable)
+
+```
+mainnet | full | blocks 0–22,000,000 | steps 0–18,500
+
+total: 1.23 TiB (42,810 files)
+
+── Breakdown ──────────────────────────────────────────────────
+  blocks                  850.4 GiB      69.2%  28,400 files
+  history                 210.7 GiB      17.1%  11,300 files
+  inverted-index           88.3 GiB       7.2%   2,100 files
+  accessors                52.1 GiB       4.2%     910 files
+  commit-history           21.0 GiB       1.7%     100 files
+  other                     0.5 GiB       0.0%       0 files
+
+── Estimated Size by Node Type ────────────────────────────────
+  archive        1.30 TiB          —    all blocks     all history
+  full           1.23 TiB    −70 GiB    last 262,144   last 262,144
+  blocks         1.27 TiB    −30 GiB    all blocks     last 262,144
+  minimal        1.15 TiB   −150 GiB    last 100,000   last 100,000
+```
+
+**Header fields explained:**
+
+- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
+- **Mode** — the configured prune mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
+- **blocks 0–N** — the highest block number across all block segment files.
+- **steps 0–N** — the highest step number across all state files (steps are an internal Erigon unit; one step ≈ a fixed number of blocks, depending on chain activity).
+
+**Breakdown categories:**
+
+| Category | Contents |
+|----------|----------|
+| `blocks` | Headers, bodies, and transactions (`.seg` + index files). |
+| `history` | State-history snapshots for accounts, storage, code. |
+| `inverted-index` | Inverted indices over state history (enables range lookups). |
+| `accessors` | Accessor index files that speed up state queries. |
+| `commit-history` | Commitment-history files (archive nodes only). |
+| `rcache` | Receipt cache (pre-computed receipts for RPC performance). |
+| `other` | Any files with unrecognised extensions (listed inline). |
+
+**Estimates table:** shows how much space the current snapshot set would occupy under each prune mode, given the files already on disk. The `delta` column is relative to archive (negative = smaller than archive). This lets you compare your current footprint against what other modes would consume without resyncing.
+
+### Example output (verbose, `-v`)
+
+With `--verbose`, each category expands into its domain or type subcategories:
+
+```
+  history                 210.7 GiB      17.1%  11,300 files
+  ├─ account          105.3 GiB      50.0%   5,650 files
+  ├─ storage           84.3 GiB      40.0%   4,520 files
+  └─ code              21.1 GiB      10.0%   1,130 files
+```
+
+### JSON output (`--json`)
+
+Use `--json` to get a machine-readable object suitable for scripting:
+
+```bash
+erigon seg du --datadir /data/erigon --json | jq '.estimates'
+```
+
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `estimates`.
+
+:::tip
+Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
+:::
+
+---
+
+## Snapshot Types (Prune Modes)
+
+The snapshot set on disk reflects the node's **prune mode**. `seg du` automatically detects which mode your current files correspond to. For full details on choosing a prune mode, see [Prune Modes](prune-modes).
+
+| Mode | History retained | Transactions retained | Typical use case |
+|------|------------------|-----------------------|------------------|
+| **Archive** | All history from genesis | All blocks | Developers, RPC providers, researchers needing full historical state. |
+| **Full** (default) | Last 262,144 blocks (~36 days, EIP-8252 window) | Last 262,144 blocks | General users, DApp interaction, fastest sync. |
+| **Blocks** | Last 262,144 blocks | All blocks (genesis onward) | Users needing full block/receipt history without full historical state. |
+| **Minimal** | Last 100,000 blocks (~14 days) | Last 100,000 blocks | Solo staking, hardware-constrained setups, maximum privacy. |
+
+The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
+
+---
+
+## Upgrading Snapshots in v3.5
+
+### EIP-8252 retention window change
+
+Erigon v3.5 aligns the **Full** and **Blocks** prune modes with [EIP-8252](https://github.com/ethereum/EIPs/pull/11601), which defines `REORG_RETENTION_WINDOW = 2^18 = 262,144 blocks` (≈ 36.4 days) as the inactivity-leak-bounded non-finality window. Prior versions used a retention window of **100,000 blocks** (~14 days).
+
+**What this means for existing nodes:**
+
+- Nodes previously running in **Full** or **Blocks** mode now retain a larger history window (262,144 blocks instead of 100,000).
+- On first startup after upgrading to v3.5, Erigon **automatically migrates** your snapshot configuration — no manual intervention is required for most setups.
+- Disk usage for Full and Blocks nodes will increase slightly over time as the larger retention window fills in. Use `seg du` to monitor the change.
+
+**Minimal mode is unchanged** — it continues to use a 100,000-block window and is not subject to EIP-8252 compliance requirements.
+
+### Manual snapshot operations
+
+If you want to migrate to the latest snapshot format or reset after an upgrade:
+
+**Optional upgrade to new format:**
+```bash
+erigon update-to-new-ver-format --datadir /your/datadir
+```
+Updates snapshots to be compatible with the latest version. Faster than a full reset, but does not provide the full benefits of freshly-generated snapshots.
+
+**Full reset (maximum performance):**
+```bash
+erigon snapshots reset --datadir /your/datadir
+```
+Removes all old snapshots that have had performance improvements. After this, Erigon re-downloads the new snapshots on next startup. Choose this for maximum performance after a major version upgrade.
+
+:::warning
+Always **back up your `--datadir`** before running snapshot reset or upgrade commands.
+:::
+
+### Downgrading from v3.1+ to v3.0
+
+If you need to roll back from a v3.1+ snapshot format to v3.0:
+
+1. Confirm you are still on a v3.1.x binary: `erigon --version`.
+2. Reset to the old format: `erigon --datadir /your/datadir reset-to-old-ver-format`.
+3. Check out the desired v3.0 tag: `git checkout v3.0.x`.
+4. Start the old binary.
+
+:::warning
+This removes incompatible v3.1 snapshot files because they are not backward-compatible with v3.0.
+:::
