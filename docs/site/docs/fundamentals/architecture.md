@@ -125,11 +125,11 @@ Erigon 3 has one sync pipeline. The user-facing choice is *what to retain after 
 | `blocks` | All blocks, but no state history | Full block/receipt history without archive-size state |
 | `minimal` | Latest state only (shortest block window) | Solo stakers, constrained hardware |
 
-See [Pruning Modes](prune-modes) for the full comparison.
+See [Prune Modes](prune-modes) for the full comparison.
 
 ## Where to go next
 
 - [Database](database) — datadir layout, MDBX internals, mainnet sizing
 - [Modules](modules) — running RPC Daemon, TxPool, Sentry, Downloader as separate processes
-- [Pruning Modes](prune-modes) — choosing what history to keep
+- [Prune Modes](prune-modes) — choosing what history to keep
 - [Optimizing Storage](optimizing-storage) — splitting datadir across fast and slow disks
