@@ -1,5 +1,19 @@
 # Task 2 attempt findings — streaming deep-collapse fold
 
+> **CORRECTION (supersedes the "context-dependent / unfixable" conclusion below).**
+> The "DECISIVE DIAGNOSIS" point 5 — that the correct whale storage root is
+> context-dependent (embedded ≠ whale-only) and therefore unfixable by an
+> embedding-insensitive fold — is **WRONG**. It used the *whale-only* incremental
+> result as ground truth, but that result is a degenerate single-account-root
+> artifact: measured directly, `seq` whale-only incremental (`11732ba1`) ≠ a fresh
+> single-block build of the same surviving state (`94741c75`), whereas `seq`
+> EMBEDDED incremental == fresh (`d6c4a67e`). The embedded target is well-defined
+> and `ModeParallel` reaches it with a flat per-first-nibble fold. The fix IS
+> achievable — see `20260609-streaming-collapse-fold-fix.md`. The genuinely useful
+> parts of this doc are the implementation pieces ("What was implemented", the
+> `childPrefix` mount, `forceFullBranch`, the merge-order hazard) — reuse those.
+
+
 Status: **not solved**. A full implementation attempt was reverted (it regressed
 `TestStreaming_StorageCollapseAcrossSplit`, which must stay green). This records
 what was tried, what worked, and the exact wall hit, so the next attempt does not
