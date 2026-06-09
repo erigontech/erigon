@@ -749,7 +749,7 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 
 ### Snapshots Upgrade Options
 
-* `erigon update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
+* `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
 * `erigon snapshots reset --datadir /your/datadir`: this command removes all old snapshots that have had performance improvements.
 
 Choose `upgrade` for a quicker process, or `reset` for maximum performance. If you choose `reset`, you'll need to wait for the new snapshots to download once Erigon starts.
@@ -777,7 +777,7 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 :::
 
 1. Make sure that you're running Erigon on 3.1.x version, use `erigon --version`.
-2. Run `erigon --datadir ../your/datadir reset-to-old-ver-format` to reset your snapshots to old format.
+2. Run `erigon snapshots reset-to-old-ver-format --datadir /your/datadir` to reset your snapshots to old format.
 3. `git checkout v3.0.x` to checkout to preferred `3.0` version. For example now latest: `git checkout v3.0.15`
 4. Run your old version of Erigon.
 
@@ -1739,31 +1739,33 @@ erigon seg du --datadir <path> [--json] [-v | --verbose]
 
 | Flag | Description |
 |------|-------------|
-| `--datadir <path>` | Path to the Erigon data directory (required). |
+| `--datadir <path>` | Path to the Erigon data directory. Defaults to the standard per-network data directory when omitted. |
 | `--json` | Output results as JSON instead of human-readable text. Useful for scripting or dashboards. |
 | `-v`, `--verbose` | Show a per-domain / per-type subcategory breakdown within each category. |
 
 ### Example output (human-readable)
 
 ```
-mainnet | full | blocks 0–22,000,000 | steps 0–18,500
-
-total: 1.23 TiB (42,810 files)
+mainnet | full | blocks 0–22.000.000 | steps 0–18.500
+total: 1.2TB (42810 files)
 
 ── Breakdown ──────────────────────────────────────────────────
-  blocks                  850.4 GiB      69.2%  28,400 files
-  history                 210.7 GiB      17.1%  11,300 files
-  inverted-index           88.3 GiB       7.2%   2,100 files
-  accessors                52.1 GiB       4.2%     910 files
-  commit-history           21.0 GiB       1.7%     100 files
-  other                     0.5 GiB       0.0%       0 files
+  domains                 612.0GB      48.8%  18200 files
+  block segments          410.4GB      32.7%  12400 files
+  history                 120.7GB       9.6%   6300 files
+  inverted indices         88.3GB       7.0%   2100 files
+  accessors                21.0GB       1.7%    910 files
+  caplin                    1.2GB       0.1%     90 files
+  other                     0.5GB       0.0%      8 files
 
 ── Estimated Size by Node Type ────────────────────────────────
-  archive        1.30 TiB          —    all blocks     all history
-  full           1.23 TiB    −70 GiB    last 262,144   last 262,144
-  blocks         1.27 TiB    −30 GiB    all blocks     last 262,144
-  minimal        1.15 TiB   −150 GiB    last 100,000   last 100,000
+  archive        1.3TB          —    all blocks       all history
+  full           1.2TB     -70.0GB    last 262.144     last 262.144
+  blocks         1.3TB     -30.0GB    all blocks       last 262.144
+  minimal        1.1TB    -150.0GB    last 100.000     last 100.000
 ```
+
+Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
 
 **Header fields explained:**
 
@@ -1774,14 +1776,19 @@ total: 1.23 TiB (42,810 files)
 
 **Breakdown categories:**
 
+The category labels below are exactly what the command prints.
+
 | Category | Contents |
 |----------|----------|
-| `blocks` | Headers, bodies, and transactions (`.seg` + index files). |
+| `domains` | Current-state domain files (latest accounts, storage, code, commitment). Never pruned, so usually the largest category. |
+| `block segments` | Headers, bodies, and transactions (`.seg` + index files) directly under `snapshots/`. |
 | `history` | State-history snapshots for accounts, storage, code. |
-| `inverted-index` | Inverted indices over state history (enables range lookups). |
+| `inverted indices` | Inverted indices over state history (enables range lookups). |
 | `accessors` | Accessor index files that speed up state queries. |
-| `commit-history` | Commitment-history files (archive nodes only). |
+| `caplin` | Consensus-layer (beacon chain) snapshots. |
+| `commitment hist` | Commitment-history files (archive nodes only). |
 | `rcache` | Receipt cache (pre-computed receipts for RPC performance). |
+| `forkable` | Forkable (unwindable) snapshot data. |
 | `other` | Any files with unrecognised extensions (listed inline). |
 
 **Estimates table:** shows how much space the current snapshot set would occupy under each prune mode, given the files already on disk. The `delta` column is relative to archive (negative = smaller than archive). This lets you compare your current footprint against what other modes would consume without resyncing.
@@ -1791,10 +1798,10 @@ total: 1.23 TiB (42,810 files)
 With `--verbose`, each category expands into its domain or type subcategories:
 
 ```
-  history                 210.7 GiB      17.1%  11,300 files
-  ├─ account          105.3 GiB      50.0%   5,650 files
-  ├─ storage           84.3 GiB      40.0%   4,520 files
-  └─ code              21.1 GiB      10.0%   1,130 files
+  history                 120.7GB       9.6%   6300 files
+  ├─ accounts          60.3GB      50.0%   3150 files
+  ├─ storage           48.3GB      40.0%   2520 files
+  └─ code              12.1GB      10.0%    630 files
 ```
 
 ### JSON output (`--json`)
@@ -1805,7 +1812,7 @@ Use `--json` to get a machine-readable object suitable for scripting:
 erigon seg du --datadir /data/erigon --json | jq '.estimates'
 ```
 
-The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `estimates`.
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
 
 :::tip
 Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
@@ -1844,35 +1851,10 @@ Erigon v3.5 aligns the **Full** and **Blocks** prune modes with [EIP-8252](https
 
 ### Manual snapshot operations
 
-If you want to migrate to the latest snapshot format or reset after an upgrade:
-
-**Optional upgrade to new format:**
-```bash
-erigon update-to-new-ver-format --datadir /your/datadir
-```
-Updates snapshots to be compatible with the latest version. Faster than a full reset, but does not provide the full benefits of freshly-generated snapshots.
-
-**Full reset (maximum performance):**
-```bash
-erigon snapshots reset --datadir /your/datadir
-```
-Removes all old snapshots that have had performance improvements. After this, Erigon re-downloads the new snapshots on next startup. Choose this for maximum performance after a major version upgrade.
+To migrate snapshots to the latest format, reset them for maximum performance after a major upgrade, or downgrade to an older snapshot format, follow the step-by-step snapshot upgrade and downgrade instructions in the [Upgrading guide](../get-started/installation/upgrading). Those commands are subcommands of `erigon snapshots` (e.g. `erigon snapshots update-to-new-ver-format --datadir /your/datadir`).
 
 :::warning
-Always **back up your `--datadir`** before running snapshot reset or upgrade commands.
-:::
-
-### Downgrading from v3.1+ to v3.0
-
-If you need to roll back from a v3.1+ snapshot format to v3.0:
-
-1. Confirm you are still on a v3.1.x binary: `erigon --version`.
-2. Reset to the old format: `erigon --datadir /your/datadir reset-to-old-ver-format`.
-3. Check out the desired v3.0 tag: `git checkout v3.0.x`.
-4. Start the old binary.
-
-:::warning
-This removes incompatible v3.1 snapshot files because they are not backward-compatible with v3.0.
+Always **back up your `--datadir`** before running snapshot reset, upgrade, or downgrade commands.
 :::
 
 ---
