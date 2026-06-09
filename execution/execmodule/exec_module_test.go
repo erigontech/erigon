@@ -360,9 +360,9 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 		name := "fg-prune"
 		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
 		if bgPrune {
-			// Match the hive erigon default (FcuBackgroundPrune=true): the prune
-			// runs on the shared pipeline sync in a goroutine after the FCU
-			// releases its semaphore, so it overlaps the next FCU's RunLoop.
+			// Match the hive erigon default (FcuBackgroundPrune=true): the
+			// background prune shares the pipeline sync with the next FCU's
+			// RunLoop, which is the access the fix serializes via the semaphore.
 			name = "bg-prune"
 			opts = append(opts, execmoduletester.WithFcuBackgroundPrune())
 		}
@@ -408,6 +408,9 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 				require.Equalf(t, h.Hash(), fwd.LatestValidHash, "forward re-org should make block %d the head", n)
 			}
 
+			// Let the last FCU's foreground commit and background prune settle
+			// before reading the committed head.
+			m.ExecModule.WaitIdle(ctx)
 			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
 				return nil
