@@ -80,19 +80,32 @@ Profile: ~28% in `cond_wait`/`usleep`/`cond_signal`/`atomic`; cores idle (sync-b
 
 **Files:** `streaming_commitment.go`, `streaming_split_fold.go`
 
-- [ ] Map the fan-out: `errgroup` + `sem` channel + `workerPool` Get/Put per storage
+- [x] Map the fan-out: `errgroup` + `sem` channel + `workerPool` Get/Put per storage
       subtree (`storageRootLocal`, `foldPresentSplits`). Note the double coordination
-      (`sem` and `errgroup`) and pool churn.
-- [ ] **Load-bearing invariant to preserve:** one fold = one disjoint subtree prefix
+      (`sem` and `errgroup`) and pool churn. Done: `foldPresentSplits` already uses a
+      single `errgroup.WithContext` + `SetLimit(numWorkers)` + pooled workers — clean.
+      `storageRootLocal` carried the double coordination: a `sem` channel bounding
+      concurrency AND a separate unlimited `errgroup`, plus a dead `sem<-`/`<-sem`
+      guard around the post-`Wait()` `aggregateStorageRoot` (the sem is fully drained
+      once `g.Wait()` returns, so it guarded nothing). Pool churn is sync.Pool
+      Get/Put — the right tool, left as-is.
+- [x] **Load-bearing invariant to preserve:** one fold = one disjoint subtree prefix
       (`storageRootLocal`'s write-isolation comment) — concurrent folds write only
       their own prefix to the shared ctx, so a collapse self-flush never races another
       fold. Any worker-model change must keep this; `-race` will NOT catch a logical
       double-apply, so validate specifically against `TestStreaming_MultiDepthCollapseParity`
-      and `TestStreaming_StorageCollapseAcrossSplit`.
-- [ ] If a simpler equivalent preserves that invariant + parity (e.g. one bounded
+      and `TestStreaming_StorageCollapseAcrossSplit`. Done: each `g.Go` body still folds
+      exactly one first-nibble subtree into its own `childPrefix` — invariant untouched;
+      both named collapse-parity tests green `-race -count=3`.
+- [x] If a simpler equivalent preserves that invariant + parity (e.g. one bounded
       pool/queue instead of errgroup+sem, or batching small first-nibbles), apply it.
       **Otherwise leave the model unchanged — it is correct — and add one line saying
-      why.** Do not trade correctness for CPU.
+      why.** Do not trade correctness for CPU. Done: dropped the `sem` channel in
+      `storageRootLocal` for `g.SetLimit(sc.numWorkers)` — the same bound, matching
+      `foldPresentSplits`, with fewer parked goroutines and no dead post-`Wait` guard.
+      `foldPresentSplits` was already single-mechanism, so left unchanged. Roots
+      byte-identical; full `TestStreaming|TestVerifyParallel|TestDeepFold` suite green
+      `-race -count=3` at the in-test worker counts; `make lint` clean.
 
 ### Task 4: Simplify — dead code, comments, tests
 

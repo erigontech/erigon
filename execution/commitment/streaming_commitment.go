@@ -926,8 +926,8 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 	var children [16]cell
 	present := node.bitmap
 
-	sem := make(chan struct{}, sc.numWorkers)
 	var g errgroup.Group
+	g.SetLimit(sc.numWorkers)
 	childIdx := 0
 	for bm := node.bitmap; bm != 0; {
 		nib := int(bits.TrailingZeros16(bm))
@@ -939,8 +939,6 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		childPrefix = append(childPrefix, ch.ext...)
 		group := collectStorageNibbleKeys(ch, childPrefix)
 		g.Go(func() error {
-			sem <- struct{}{}
-			defer func() { <-sem }()
 			w, release := sc.newStorageWorker()
 			c, err := foldStorageLeaf(w, childPrefix, group)
 			if err == nil {
@@ -966,7 +964,6 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		return common.Hash{}, err
 	}
 
-	sem <- struct{}{}
 	w, release := sc.newStorageWorker()
 	sr, err := aggregateStorageRoot(w, path, &children, present)
 	if err == nil {
@@ -975,7 +972,6 @@ func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixN
 		}
 	}
 	release()
-	<-sem
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
 	}
