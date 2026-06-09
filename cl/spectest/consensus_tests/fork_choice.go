@@ -71,9 +71,11 @@ func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, c
 
 func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
-func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, bool) error { return nil }
+func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, [][]byte, bool) error {
+	return nil
+}
 
-func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block) error { return nil }
+func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
 
 func (forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, error) {
 	return nil, nil

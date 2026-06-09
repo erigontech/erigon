@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/stretchr/testify/require"
@@ -169,6 +170,32 @@ func Test_VersionMoreThanCurrent(t *testing.T) {
 
 	delFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.idx")
 	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+}
+
+// A pre-GLOAS datadir registers the GLOAS (EIP-7732) state tables but has no
+// files for them. Publishable must tolerate fully-empty registered tables and
+// must not depend on map iteration order (the empty tables must not poison the
+// last-file-to reference of the present ones).
+func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
+	emptyTables := []string{
+		kv.Builders, kv.BuildersDump,
+		kv.BuilderPendingWithdrawals, kv.BuilderPendingWithdrawalsDump,
+		kv.PayloadExpectedWithdrawals, kv.PayloadExpectedWithdrawalsDump,
+		kv.ExecutionPayloadAvailabilityTable, kv.BuilderPendingPaymentsTable,
+		kv.PtcWindowTable, kv.LatestExecutionPayloadBidTable,
+	}
+	ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
+	dirs := datadir.New(t.TempDir())
+	touchFiles(t, dirs, ranges)
+	for _, table := range emptyTables {
+		for _, r := range ranges {
+			delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, table))
+			delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, table))
+		}
+	}
+	for i := 0; i < 30; i++ {
+		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true))
+	}
 }
 
 type snapRange struct {
