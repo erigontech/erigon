@@ -1,0 +1,34 @@
+name: Warm Kurtosis CL Image Cache
+
+# Warms the third-party (CL + kurtosis infra) image cache that the kurtosis
+# assertoor matrix restores. That matrix is skipped on cache-warming runs, so
+# the cache is never written to the default branch — and merge_group runs,
+# which can only restore caches from the default branch, miss it and pull every
+# image from Docker Hub. The cache is keyed on the pinned versions in
+# test-kurtosis-assertoor.yml, so warm it on a paths change to that file; the
+# daily schedule repopulates it if it is LRU-evicted between version bumps.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - '.github/workflows/test-kurtosis-assertoor.yml'
+  schedule:
+    - cron: '27 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    uses: ./.github/workflows/test-kurtosis-assertoor.yml
+    with:
+      cl-images-only: true
+    secrets: inherit
