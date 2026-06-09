@@ -69,6 +69,7 @@ type ForkChoiceStorageMock struct {
 	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
 	Blocks                    map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                 map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	VerifiedPayloads          map[common.Hash]bool
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -82,6 +83,7 @@ type ForkChoiceStorageMock struct {
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
+	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
 	// [New in Gloas:EIP7732] Execution payload gas limit by execution block hash
 	ExecutionPayloadGasLimitMap map[common.Hash]uint64
 }
@@ -213,6 +215,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		SyncContributionPool:        makeSyncContributionPoolMock(t),
 		MockPeerDas:                 mockPeerDas,
 		ExecutionPayloadStatusMap:   make(map[common.Hash]execution_client.PayloadStatus),
+		PayloadStatusByRootMap:      make(map[common.Hash]execution_client.PayloadStatus),
 		ExecutionPayloadGasLimitMap: make(map[common.Hash]uint64),
 	}
 }
@@ -426,6 +429,13 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 	return ok
 }
 
+func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
+	if f.VerifiedPayloads == nil {
+		return false
+	}
+	return f.VerifiedPayloads[blockRoot]
+}
+
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	return f.Envelopes[blockRoot], nil
 }
@@ -527,6 +537,11 @@ func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64V
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
 	status, ok := f.ExecutionPayloadStatusMap[executionBlockHash]
+	return status, ok
+}
+
+func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := f.PayloadStatusByRootMap[blockRoot]
 	return status, ok
 }
 
