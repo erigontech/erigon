@@ -20,9 +20,10 @@ package httpreqresp
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"time"
@@ -30,13 +31,95 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 )
 
 const (
 	ResponseCodeHeader = "Reqresp-Response-Code"
 	PeerIdHeader       = "Reqresp-Peer-Id"
 	TopicHeader        = "Reqresp-Topic"
+	// MaxResponseBytesHeader carries the caller's upper bound on the response body size,
+	// used to size the response-body cap. Absent or 0 falls back to the tight single-object cap.
+	MaxResponseBytesHeader = "Reqresp-Max-Response-Bytes"
 )
+
+const (
+	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MaxChunkSize it sets the absolute
+	// multi-chunk ceiling (maxMultiChunkResponse).
+	maxResponseChunks = 1024
+	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
+	// goodbye, light-client singles), whose responses are at most tens of KiB.
+	maxSingleObjectResponse = 1024 * 1024
+)
+
+// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the backstop a
+// caller-supplied multi-chunk budget is clamped to, so a miscomputed or overflowed budget can't make
+// the handler stream more than a spec-maximal response.
+var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), maxResponseChunks)
+
+// ErrResponseTooLarge is surfaced by the response body when a peer's response exceeds the per-topic
+// size cap. Callers treat it as a peer failure rather than a valid (truncated) response.
+var ErrResponseTooLarge = errors.New("reqresp: response exceeds size cap")
+
+// maxResponseBodySize is the byte ceiling the caller may read for a response on the given topic.
+// Single-object protocols, and any request that arrives without a caller budget (an empty request,
+// or a multi-chunk caller that failed to size one), get the tight single-object cap — never the
+// multi-GiB ceiling, so a missing budget surfaces as ErrResponseTooLarge rather than an OOM. A
+// multi-chunk caller that does supply a budget gets it, clamped to maxMultiChunkResponse.
+func maxResponseBodySize(topic string, maxBytes uint64) uint64 {
+	if maxBytes == 0 || !communication.IsMultiChunkProtocol(topic) {
+		return maxSingleObjectResponse
+	}
+	if maxBytes < maxMultiChunkResponse {
+		return maxBytes
+	}
+	return maxMultiChunkResponse
+}
+
+// maxBytesReader streams up to its limit and then returns ErrResponseTooLarge instead of truncating
+// at EOF, so an over-cap response is rejected explicitly rather than silently accepted. It mirrors
+// net/http.MaxBytesReader without the ResponseWriter coupling.
+type maxBytesReader struct {
+	r   io.Reader
+	n   int64 // bytes still allowed
+	err error
+}
+
+func newMaxBytesReader(r io.Reader, limit int64) *maxBytesReader {
+	return &maxBytesReader{r: r, n: limit}
+}
+
+func (m *maxBytesReader) Read(p []byte) (int, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	// Read at most one byte past the remaining allowance — enough to tell "fits" from "too large".
+	if int64(len(p))-1 > m.n {
+		p = p[:m.n+1]
+	}
+	n, err := m.r.Read(p)
+	if int64(n) <= m.n {
+		m.n -= int64(n)
+		m.err = err
+		return n, err
+	}
+	n = int(m.n)
+	m.n = 0
+	m.err = ErrResponseTooLarge
+	return n, m.err
+}
+
+// streamBody is the response body Do hands back for a successful request: it reads through the
+// size cap and closes the libp2p stream when the caller closes the body.
+type streamBody struct {
+	io.Reader // the capped reader over the stream
+	io.Closer // the stream
+}
 
 // Do performs an http request against the http handler.
 // NOTE: this is actually very similar to the http.RoundTripper interface... maybe we should investigate using that.
@@ -47,24 +130,101 @@ the following headers have meaning when passed in to the request:
 		REQRESP-PEER-ID - the peer id to target for the request
 		REQRESP-TOPIC - the topic to request with
 		REQRESP-EXPECTED-CHUNKS - this is an integer, which will be multiplied by 10 to calculate the amount of seconds the peer has to respond with all the data
+		REQRESP-FALLBACK-BODY - hex-encoded request body to send if the peer negotiates a non-preferred protocol
+		Reqresp-Max-Response-Bytes - caller's upper bound on the response body size; sizes the per-topic response cap
 */
-func Do(handler http.Handler, r *http.Request) (resp *http.Response, err error) {
-	// TODO: there potentially extra alloc here (responses are bufferd)
-	// is that a big deal? not sure. maybe can reuse these buffers since they are read once (and known when close) if so
-	ok := make(chan struct{})
+func Do(handler http.Handler, r *http.Request) (*http.Response, error) {
+	resultCh := make(chan *http.Response, 1)
 	go func() {
-		res := httptest.NewRecorder()
-		handler.ServeHTTP(res, r)
-		// linter does not know we are passing the resposne through channel.
-		// nolint: bodyclose
-		resp = res.Result()
-		close(ok)
+		w := &captureWriter{}
+		// Publish the response as the goroutine unwinds, so a handler panic becomes a 500 rather
+		// than crashing the process. The handler's deferred stream.Close runs first, so no stream leaks.
+		defer func() {
+			if rec := recover(); rec != nil {
+				w = &captureWriter{}
+				http.Error(w, fmt.Sprintf("reqresp: handler panic: %v", rec), http.StatusInternalServerError)
+			}
+			resultCh <- w.result() //nolint:bodyclose
+		}()
+		handler.ServeHTTP(w, r)
 	}()
 	select {
-	case <-ok:
+	case resp := <-resultCh:
 		return resp, nil
 	case <-r.Context().Done():
+		// The handler may still publish a response whose body owns a live stream; close it once
+		// it arrives so the stream isn't leaked.
+		go func() {
+			if resp := <-resultCh; resp != nil && resp.Body != nil {
+				resp.Body.Close()
+			}
+		}()
 		return nil, r.Context().Err()
+	}
+}
+
+// captureWriter records a handler's status, headers and either a small buffered body (error
+// responses written via http.Error) or a streaming body handed off for a successful response.
+type captureWriter struct {
+	header        http.Header
+	body          []byte
+	streamingBody io.ReadCloser
+	code          int
+	wroteHeader   bool
+}
+
+func (w *captureWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *captureWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.code = code
+		w.wroteHeader = true
+	}
+}
+
+func (w *captureWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.body = append(w.body, b...)
+	return len(b), nil
+}
+
+// setStreamingBody hands a live response body off to Do without buffering it; the body owns its
+// underlying resources and closes them on Close.
+func (w *captureWriter) setStreamingBody(body io.ReadCloser) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.streamingBody = body
+}
+
+func (w *captureWriter) result() *http.Response {
+	code := w.code
+	if code == 0 {
+		code = http.StatusOK
+	}
+	header := w.header
+	if header == nil {
+		header = make(http.Header)
+	}
+	body := w.streamingBody
+	contentLength := int64(-1)
+	if body == nil {
+		body = io.NopCloser(bytes.NewReader(w.body))
+		contentLength = int64(len(w.body))
+	}
+	return &http.Response{
+		StatusCode:    code,
+		Status:        strconv.Itoa(code) + " " + http.StatusText(code),
+		Header:        header,
+		Body:          body,
+		ContentLength: contentLength,
 	}
 }
 
@@ -76,6 +236,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		topic := r.Header.Get("REQRESP-TOPIC")
 		chunkCount := r.Header.Get("REQRESP-EXPECTED-CHUNKS")
 		chunks, _ := strconv.Atoi(chunkCount)
+		maxBytes, _ := strconv.ParseUint(r.Header.Get(MaxResponseBytesHeader), 10, 64)
 		// some sanity checking on chunks
 		if chunks < 1 {
 			chunks = 1
@@ -104,7 +265,14 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		defer stream.Close()
+		// The successful path hands the stream off to the response body, which closes it; on every
+		// other path this deferred close releases it.
+		streamTransferred := false
+		defer func() {
+			if !streamTransferred {
+				stream.Close()
+			}
+		}()
 		// Update topic to the actually negotiated protocol so callers know which version was used.
 		topic = string(stream.Protocol())
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
@@ -141,22 +309,28 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
 			return
 		}
-		// this is not necessary, but seems like the right thing to do
+		// The streaming hand-off needs the *captureWriter that Do supplies; a different writer means
+		// the handler was invoked outside Do and can't carry a streaming body.
+		cw, ok := w.(*captureWriter)
+		if !ok {
+			http.Error(w, "reqresp: handler must be invoked via httpreqresp.Do", http.StatusInternalServerError)
+			return
+		}
+		// Success path: these headers (incl. the snappy encoding) describe the body we stream back,
+		// so they are set only here, not on the error responses above.
 		w.Header().Set("CONTENT-TYPE", "application/octet-stream")
 		w.Header().Set("CONTENT-ENCODING", "snappy/stream")
-		// add the response code & headers
-		w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(code[0])))
 		w.Header().Set("REQRESP-PEER-ID", peerIdBase58)
 		w.Header().Set("REQRESP-TOPIC", topic)
+		w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(code[0])))
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
 		// this is technically incorrect, and more aggressive than the network might like.
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
-		// copy the data now to the stream
-		// the first write to w will call code 200, so we do not need to
-		_, err = io.Copy(w, stream)
-		if err != nil {
-			http.Error(w, "Reading Stream Response: "+err.Error(), http.StatusBadRequest)
-			return
-		}
+		// Stream the response through a per-topic size cap instead of buffering it: a compliant
+		// response passes through untouched, a flood is bounded at the cap and the caller sees
+		// ErrResponseTooLarge.
+		limit := int64(maxResponseBodySize(topic, maxBytes))
+		cw.setStreamingBody(&streamBody{Reader: newMaxBytesReader(stream, limit), Closer: stream})
+		streamTransferred = true
 	}
 }

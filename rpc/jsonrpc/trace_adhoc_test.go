@@ -588,6 +588,32 @@ func TestRawTransactionAllTraceTypes(t *testing.T) {
 	require.NotNil(t, result.VmTrace, "VmTrace must be initialised")
 }
 
+func TestParseOeTracerConfigRejectsCustomTracer(t *testing.T) {
+	tracer := "callTracer"
+	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &tracer})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "trace_*")
+	require.Contains(t, err.Error(), "debug_*")
+}
+
+func TestParseOeTracerConfigToleratesEmptyTracer(t *testing.T) {
+	empty := ""
+	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &empty})
+	require.NoError(t, err)
+}
+
+func TestTraceCallRejectsCustomTracer(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	tracer := "callTracer"
+	var latest = rpc.LatestBlockNumber
+	_, err := api.Call(context.Background(), TraceCallParam{}, []string{TraceTypeTrace}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &config.TraceConfig{Tracer: &tracer})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "trace_*")
+	require.Contains(t, err.Error(), "debug_*")
+}
+
 func TestRawTransactionInvalidType(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})

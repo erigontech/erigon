@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,4 +33,21 @@ func TestDrainPendingELPayloadsReleasesLargeBackingArray(t *testing.T) {
 	payloads := f.DrainPendingELPayloads()
 	require.Len(t, payloads, pendingELPayloadsShrinkCap+1)
 	require.Nil(t, f.pendingELPayloads)
+}
+
+func TestPendingELPayloadsDeduplicateByEnvelopeRoot(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: root,
+		},
+	}
+
+	f.addPendingELPayload(&cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}}, envelope)
+	f.addPendingELPayload(&cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 2}}, envelope)
+
+	payloads := f.DrainPendingELPayloads()
+	require.Len(t, payloads, 1)
+	require.Equal(t, uint64(1), payloads[0].Block.Block.Slot)
 }

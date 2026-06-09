@@ -11,7 +11,11 @@ defaults:
 jobs:
   tests-mac-linux:
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-24.04
@@ -51,7 +55,6 @@ jobs:
         id: erigon
         with:
           submodules: true
-          lfs: tests
           cleanup-space: true
           ramdisk: true
 

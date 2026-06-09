@@ -253,8 +253,9 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		rewardAction.RewardType = rewardKindToString(r.Kind)
 		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
 		tr.Action = rewardAction
+		blockHash := block.Hash()
 		tr.BlockHash = &common.Hash{}
-		copy(tr.BlockHash[:], block.Hash().Bytes())
+		copy(tr.BlockHash[:], blockHash[:])
 		tr.BlockNumber = new(uint64)
 		*tr.BlockNumber = block.NumberU64()
 		tr.Type = rewardTraceType
@@ -272,7 +273,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesFromIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -283,7 +284,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesToIdx, addr.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -514,7 +515,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				rewardAction.Value.ToInt().Set(minerReward.ToBig())
 				tr.Action = rewardAction
 				tr.BlockHash = &common.Hash{}
-				copy(tr.BlockHash[:], lastBlockHash.Bytes())
+				copy(tr.BlockHash[:], lastBlockHash[:])
 				tr.BlockNumber = new(uint64)
 				*tr.BlockNumber = blockNum
 				tr.Type = rewardTraceType
