@@ -355,6 +355,95 @@ func TestWipeWritableShadowPast_ClearsMultipleStepDupsOfSameKey(t *testing.T) {
 	}
 }
 
+// TestWipeWritableShadowPast_NonAligned_DeletionBeforeLastTxNumLeavesTombstone
+// pins the exact case live-reproduced on hoodi 2026-06-09: a key
+// written in a LOWER step (its value frozen into a step-N-1 .kv-like
+// position in the shadow), then DELETED earlier in the boundary step,
+// then RESTORED to a non-zero value LATER in the same step past
+// lastTxNum. After WipeWritableShadowPast, GetLatest must return nil
+// (because the deletion at txnum<=lastTxNum is the as-of state), not
+// the lower-step value.
+//
+// Without the fix, applyReplay deletes the boundary-step entry (which
+// reflects the late restore) but skips writing a tombstone when the
+// as-of-lastTxNum value is empty. GetLatest then falls through to the
+// lower-step entry (or, in production, the lower-step .kv file) and
+// returns the wrong (stale, pre-deletion) value.
+//
+// Setup (stepSize=8 → step 0 = txnums 0-7, step 1 = txnums 8-15):
+//   - txnum 0 (step 0): write nonce=1 — the "lower-step value" that
+//     becomes the unwanted fall-through if the tombstone is missing.
+//   - txnum 9 (step 1, ≤ lastTxNum=11): DomainDel — the SSTORE-to-zero
+//     that should be the as-of state at lastTxNum.
+//   - txnum 13 (step 1, > lastTxNum): write nonce=2 — the restore that
+//     the wipe must undo.
+//
+// Action: WipeWritableShadowPast(lastTxNum=11). Non-aligned cut
+// ((11+1) % 8 == 4 ≠ 0), so boundary-step diff-replay runs.
+//
+// Assertion: post-wipe GetLatest returns nil (account is in the
+// "deleted" state matching the as-of-lastTxNum view). A non-empty
+// result means a tombstone is missing from the boundary step and the
+// fall-through to step 0 surfaces the stale pre-deletion nonce=1.
+func TestWipeWritableShadowPast_NonAligned_DeletionBeforeLastTxNumLeavesTombstone(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	addr := [20]byte{0xCA, 0xFE}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+
+		writeAcc := func(txNum, nonce uint64) {
+			acc := accounts.Account{
+				Nonce:    nonce,
+				Balance:  *uint256.NewInt(nonce * 100),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			domains.SetTxNum(txNum)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], buf, txNum, nil))
+		}
+		delAcc := func(txNum uint64) {
+			domains.SetTxNum(txNum)
+			require.NoError(t, domains.DomainDel(kv.AccountsDomain, rwTx, addr[:], txNum, nil))
+		}
+
+		writeAcc(0, 1)  // step 0: nonce=1 — the lower-step "shadow" value
+		delAcc(9)       // step 1, ≤ lastTxNum=11: DELETE the account
+		writeAcc(13, 2) // step 1, > lastTxNum=11: restore as nonce=2
+
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 11))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		raw := getLatestAccount(t, roTx, addr)
+		require.Empty(t, raw,
+			"post-wipe GetLatest must be empty: the SSTORE-to-zero at txnum 9 (≤ lastTxNum=11) is the as-of state; a non-empty result means applyReplay deleted the boundary-step entry but skipped writing a tombstone, letting the step-0 value (nonce=1) leak through")
+	}
+}
+
 // newWipeTestDB constructs a temporal DB + aggregator sized for fast
 // wipe tests. Mirrors testDbAndAggregatorv3 from squeeze_test.go but
 // exported in this file so wipe tests have a self-contained fixture.

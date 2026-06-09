@@ -271,14 +271,31 @@ func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte,
 	if len(keys) != len(targets) {
 		return fmt.Errorf("applyReplay: keys (%d) and targets (%d) length mismatch", len(keys), len(targets))
 	}
+	// Each key in `keys` was changed at some txnum in (lastTxNum,
+	// boundaryStepEnd) per collectKeysChangedInRange's input. Existence
+	// in that range implies the key has prior history (the SSTORE that
+	// produced the in-range record had a previous value). When the
+	// as-of-lastTxNum target is empty, that means the key was in a
+	// "deleted" state at lastTxNum — we MUST write a tombstone at the
+	// boundary step so GetLatest sees the deletion instead of falling
+	// through to a lower-step (.kv file) value that's already been
+	// superseded. Live-reproduced on hoodi 2026-06-09: SSTORE-to-zero
+	// at txnum ≤ lastTxNum followed by a later restore past lastTxNum
+	// — the late restore gets wiped, the tombstone is what reflects
+	// the as-of state.
 	if d.LargeValues {
 		for i, k := range keys {
 			fullKey := make([]byte, 0, len(k)+8)
 			fullKey = append(fullKey, k...)
 			fullKey = append(fullKey, stepBytes[:]...)
 			if len(targets[i]) == 0 {
-				if err := tx.Delete(d.ValuesTable, fullKey); err != nil {
-					return fmt.Errorf("Delete(%s, fullKey=%x): %w", d.ValuesTable, fullKey, err)
+				// Write tombstone (empty value at the boundary step)
+				// rather than deleting the row outright. tx.Put with an
+				// empty value lands a present-but-empty entry that
+				// GetLatest reads as "deleted at this step", masking the
+				// lower-step value.
+				if err := tx.Put(d.ValuesTable, fullKey, nil); err != nil {
+					return fmt.Errorf("Put tombstone(%s, fullKey=%x): %w", d.ValuesTable, fullKey, err)
 				}
 				continue
 			}
@@ -306,6 +323,14 @@ func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte,
 		}
 
 		if len(targets[i]) == 0 {
+			// Write tombstone — value is just the 8-byte stepBytes
+			// prefix with no payload, mirroring forward exec's
+			// DomainDel → addValue(k, nil, step) encoding. Without
+			// this Put, GetLatest falls through to a lower-step .kv
+			// file's value, surfacing stale pre-deletion state.
+			if perr := c.Put(k, stepBytes[:]); perr != nil {
+				return fmt.Errorf("Put tombstone(%s, key=%x): %w", d.ValuesTable, k, perr)
+			}
 			continue
 		}
 
