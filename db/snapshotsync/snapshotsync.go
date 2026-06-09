@@ -399,7 +399,13 @@ func SyncSnapshots(
 		if !headerchain {
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
 			if snapDir != "" {
-				if missing := ReconcilePreverifiedAgainstDisk(snapCfg.Preverified.Items, snapDir); len(missing) > 0 {
+				// Apply the prune-mode filter so we don't re-request
+				// files that this node legitimately doesn't need
+				// (state-history under minimal mode, pre-merge
+				// transactions, etc). Same filter the
+				// bootstrap-from-preverified path uses, kept in lockstep.
+				items := FilterPreverifiedByPruneMode(snapCfg.Preverified.Items, cc, prune)
+				if missing := ReconcilePreverifiedAgainstDisk(items, snapDir); len(missing) > 0 {
 					log.Info(fmt.Sprintf("[%s] local preverified: %d advertised file(s) missing from disk; requesting download", logPrefix, len(missing)),
 						"first", missing[0].Name)
 					reqs := make([]services.DownloadRequest, 0, len(missing))
