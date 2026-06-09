@@ -354,6 +354,12 @@ func unblackListFilesBySubstring(blackList map[string]struct{}, strs ...string) 
 
 // SyncSnapshots - Check snapshot states, determine what needs to be requested from the downloader
 // then wait for downloads to complete.
+//
+// snapDir is the absolute path of the snapshot directory. Used by the
+// local-preverified branch to reconcile preverified.toml against
+// actual on-disk files — see [ReconcilePreverifiedAgainstDisk]. Empty
+// string disables the reconciliation (the legacy behaviour: trust the
+// manifest verbatim).
 func SyncSnapshots(
 	ctx context.Context,
 	logPrefix, task string,
@@ -366,6 +372,7 @@ func SyncSnapshots(
 	snapshotDownloader downloader.Client,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
+	snapDir string,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
@@ -373,9 +380,37 @@ func SyncSnapshots(
 	snapCfg := snapcfg.KnownCfgOrDevnet(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
-		// This belongs higher up the call chain.
+		// Local-preverified: preverified.toml is the authoritative
+		// list of files for this datadir. Don't re-pull a fresh
+		// manifest from webseeds; that's what "local" means. But DO
+		// cross-check the advertised list against actual on-disk files
+		// — a silently-failed download leaves the manifest claiming a
+		// file that's not there, and downstream consumers
+		// (DeriveManifestTips → Caplin's canonical-block-tip) treat
+		// the advertisement as ground truth and walk past the gap.
+		//
+		// Reconciliation queues a re-download for any preverified
+		// entry missing from disk. The downloader's existing retry
+		// loop drives them to completion.
+		//
+		// snapDir == "" disables reconciliation — used by call sites
+		// that haven't yet plumbed dirs.Snap through (test paths,
+		// degenerate configs).
 		if !headerchain {
 			log.Info(fmt.Sprintf("[%s] Skipping SyncSnapshots, local preverified. Use snapshots reset to resync", logPrefix))
+			if snapDir != "" {
+				if missing := ReconcilePreverifiedAgainstDisk(snapCfg.Preverified.Items, snapDir); len(missing) > 0 {
+					log.Info(fmt.Sprintf("[%s] local preverified: %d advertised file(s) missing from disk; requesting download", logPrefix, len(missing)),
+						"first", missing[0].Name)
+					reqs := make([]services.DownloadRequest, 0, len(missing))
+					for _, m := range missing {
+						reqs = append(reqs, services.DownloadRequest{Path: m.Name, TorrentHash: m.Hash})
+					}
+					if err := RequestSnapshotsDownload(ctx, reqs, snapshotDownloader, "reconcile-missing"); err != nil {
+						log.Warn(fmt.Sprintf("[%s] reconcile-missing download failed (will retry on next launch)", logPrefix), "err", err)
+					}
+				}
+			}
 		}
 	} else {
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
