@@ -645,15 +645,33 @@ func childForNib(root *prefixNode, nib byte) (*prefixNode, bool) {
 	return root.children[idx], true
 }
 
+// keyArena copies walk-path nibbles into chunked backing buffers so each
+// collected key gets a stable slice without one allocation per key. A new chunk
+// is allocated only when the next key would not fit the current one, so prior
+// slices never move.
+type keyArena struct{ buf []byte }
+
+const keyArenaChunk = 64 * 1024
+
+func (a *keyArena) copy(hk []byte) []byte {
+	if len(hk) > cap(a.buf)-len(a.buf) {
+		a.buf = make([]byte, 0, max(keyArenaChunk, len(hk)))
+	}
+	start := len(a.buf)
+	a.buf = append(a.buf, hk...)
+	return a.buf[start:len(a.buf):len(a.buf)]
+}
+
 // collectSplitKeys walks a split's subtree in sorted order, copying each key's
 // hashed nibbles off the reused walk path; plainKey/update stay referenced.
 func collectSplitKeys(child *prefixNode, nib byte) []touchedKey {
 	out := make([]touchedKey, 0, child.subtreeCount)
+	var arena keyArena
 	path := make([]byte, 0, 144)
 	path = append(path, nib)
 	path = append(path, child.ext...)
 	_ = dfsSubtree(child, path, func(hk, pk []byte, upd *Update) error {
-		out = append(out, touchedKey{hk: append([]byte(nil), hk...), pk: pk, upd: upd})
+		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
 		return nil
 	})
 	return out
@@ -999,8 +1017,9 @@ func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
 // concurrentStorageRoot's live walk byte-for-byte.
 func collectStorageNibbleKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
+	var arena keyArena
 	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
-		out = append(out, touchedKey{hk: append([]byte(nil), hk...), pk: pk, upd: upd})
+		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
 		return nil
 	})
 	return out

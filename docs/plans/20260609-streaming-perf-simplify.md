@@ -52,18 +52,27 @@ Profile: ~30% in `madvise`/`mallocgc`/GC; 13.7M allocs/op.
 
 **Files:** `streaming_commitment.go`, `streaming_deep_fold.go`
 
-- [ ] The prefix-trie arena already exists and resets per block (`prefixArena`/
+- [x] The prefix-trie arena already exists and resets per block (`prefixArena`/
       `allocNode`/`resetArena` in `prefix_trie.go`, `prefixTrie.Reset()` at
       `endBlock`). **Leave it** — its slab pointer-stability is load-bearing for
-      `*prefixNode` refs. Do not rebuild it.
-- [ ] Aim at the real allocators: per-key key copies in `collectSplitKeys` /
+      `*prefixNode` refs. Do not rebuild it. Done: untouched.
+- [x] Aim at the real allocators: per-key key copies in `collectSplitKeys` /
       `collectStorageNibbleKeys` (`append([]byte(nil), hk...)` per touched key) and
       the `touchedKey` slices themselves; the per-call `make([]byte, 0, 144)` path /
       `childPrefix` slices in `storageRootLocal` / `foldSplit`. Reuse pooled scratch
-      instead of per-call allocation.
-- [ ] Verify deferred updates are already pooled (`deferredUpdatePool`); reuse, don't
-      re-pool.
-- [ ] Parity + `-race -count=3`; allocs/op drops materially; roots byte-identical.
+      instead of per-call allocation. Done: added a chunked `keyArena` (64KB chunks,
+      new chunk only when the next key won't fit so prior slices never move) so both
+      collect funcs replace one `append([]byte(nil), hk...)` per key with O(bytes/64KB)
+      chunk allocs. The `make([]byte,0,144)`/`childPrefix`/`accPrefix` slices are
+      ≤16-per-account and absent from the alloc profile, so left as-is per KISS.
+- [x] Verify deferred updates are already pooled (`deferredUpdatePool`); reuse, don't
+      re-pool. Done: `get/putDeferredUpdate` use the pool; `foldSplit`/`storageRootLocal`
+      reuse via `TakeDeferredUpdates`/`appendDeferred`, no re-pool added.
+- [x] Parity + `-race -count=3`; allocs/op drops materially; roots byte-identical.
+      Done: `TestStreaming_*Parity`, `StorageCollapseAcrossSplit`, `TestVerifyParallel*`
+      green `-race -count=3` (roots byte-identical to ModeParallel). 1M-whale benchmark
+      allocs/op 13.82M → 12.92M (~900K per-key copies eliminated; remaining allocs are
+      benchmark update-builder/MockState harness + the load-bearing prefix-trie arena).
 
 ### Task 3: Goroutine coordination — investigate, simplify only if a clean equivalent exists
 
