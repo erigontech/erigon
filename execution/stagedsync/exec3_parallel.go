@@ -737,9 +737,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 func (pe *parallelExecutor) LogExecution() {
 	pe.progress.LogExecution(pe.rs.StateV3, pe)
-	if stateCache := pe.doms.GetStateCache(); stateCache != nil {
-		stateCache.PrintStatsAndReset()
-	}
+	pe.doms.PrintCacheStats()
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}

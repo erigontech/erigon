@@ -705,6 +705,13 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 			}
 		}
 	}
+	// Invalidate the state cache for everything above the unwind point. txNum/epoch
+	// based and diffset-free (see StateCache.Unwind), so it runs unconditionally —
+	// independent of whether changesets were generated for the unwound range, which
+	// they are not below the reorg window. Matches the domain overlay's maxtx prune.
+	if sd.stateCache != nil {
+		sd.stateCache.Unwind(txNumUnwindTo)
+	}
 }
 
 func (sd *SharedDomains) Trace() bool {
@@ -777,9 +784,13 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 }
 
-// GetStateCache returns the StateCache, or nil if not set.
-func (sd *SharedDomains) GetStateCache() *cache.StateCache {
-	return sd.stateCache
+// PrintCacheStats logs the state cache hit/miss counters and resets them.
+// No-op when the cache is disabled. The cache is an SD-internal detail, so
+// callers observe it through SD rather than reaching for the cache directly.
+func (sd *SharedDomains) PrintCacheStats() {
+	if sd.stateCache != nil {
+		sd.stateCache.PrintStatsAndReset()
+	}
 }
 
 // ProbeReadLayers samples each independent state layer (this SD's mem,
@@ -1291,9 +1302,25 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
 	if len(addr) == 0 {
 		return nil
 	}
-	// Nethermind-style addr → codeHash LRU. Skip the full AccountsDomain
-	// chain when the codeHash for this addr is already known. The zero
-	// hash sentinel means "no code or missing account" (negative cache).
+	// In-batch state is authoritative and MUST win over any cache. sd.mem /
+	// parent.mem hold this batch's uncommitted account writes (a 7702 set/clear,
+	// a selfdestruct); the addr→codeHash LRU is invalidated only on flush, so
+	// consulting it first would return a codeHash stale relative to those writes
+	// — diverging from the mem-routed code read and yielding a codeHash with no
+	// code (EIP-3607 "sender not an eoa" on re-exec). Route mem-first; the LRU is
+	// a committed-state layer that may only answer once mem has missed.
+	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
+		return decodeAccountCodeHash(v)
+	}
+	if sd.parent != nil {
+		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
+			return decodeAccountCodeHash(v)
+		}
+	}
+
+	// Below mem: the Nethermind-style addr → codeHash LRU caches committed state
+	// (flush-invalidated). The zero-hash sentinel means "no code / missing
+	// account" (negative cache).
 	if sd.stateCache != nil {
 		if h, ok := sd.stateCache.GetAddrCodeHash(addr); ok {
 			if h == ([32]byte{}) {
@@ -1303,15 +1330,9 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
 		}
 	}
 
+	// Resolve from the committed layers (stateCache → MDBX/files) and populate
+	// the LRU. mem is intentionally not consulted here — it was checked above.
 	resolve := func() []byte {
-		if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
-			return decodeAccountCodeHash(v)
-		}
-		if sd.parent != nil {
-			if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
-				return decodeAccountCodeHash(v)
-			}
-		}
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
 				return decodeAccountCodeHash(v)

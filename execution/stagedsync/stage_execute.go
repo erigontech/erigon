@@ -212,13 +212,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	// Invalidate the state cache for everything above the unwind point. txNum/epoch
-	// based and diffset-free (see StateCache.Unwind), so it runs unconditionally —
-	// independent of whether changesets were generated for the unwound range, which
-	// they are not below the reorg window. Matches the domain overlay's maxtx prune.
-	if stateCache := doms.GetStateCache(); stateCache != nil {
-		stateCache.Unwind(txNum)
-	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}

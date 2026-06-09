@@ -104,9 +104,10 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	defer sd.Close()
 
 	// Wire the shared state cache so unwindExec3 invalidates it (epoch bump +
-	// floor lower). Without this, GetStateCache() returns nil during the unwind,
-	// the cache keeps pre-unwind values, and the next FCU re-execution reads them
-	// and computes a stale state root (BadBlock). Mirrors ValidateChain/forkchoice.
+	// floor lower). Without this, the SD has no cache attached during the unwind,
+	// so sd.Unwind's invalidation is a no-op, the cache keeps pre-unwind values,
+	// and the next FCU re-execution reads them and computes a stale state root
+	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
 
 	// Set the unwind point and run the unwind

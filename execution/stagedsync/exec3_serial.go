@@ -82,8 +82,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation)
 	}
 
-	stateCache := se.doms.GetStateCache() // for periodic PrintStatsAndReset only
-
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum)
 		changeSet := &changeset.StateChangeSet{}
@@ -253,7 +251,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"txNum", inputTxNum,
 				"commitment", times.ComputeCommitment,
 			)
-			stateCache.PrintStatsAndReset()
+			se.doms.PrintCacheStats()
 			if isBatchFull && blockNum != maxBlockNum {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
@@ -275,7 +273,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 		}
 	}
-	stateCache.PrintStatsAndReset()
+	se.doms.PrintCacheStats()
 
 	return b.HeaderNoCopy(), rwTx, nil
 }
