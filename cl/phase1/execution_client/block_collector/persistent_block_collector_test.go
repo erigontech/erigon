@@ -364,3 +364,66 @@ func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
 	require.Len(t, h.fcuHeads, 1, "with all blocks in a single sub-batch, only the final FCU fires")
 	require.Equal(t, blockHash(last), h.fcuHeads[0])
 }
+
+// TestPruneSkipsWhenElHeadIsZero pins the wedge live-reproduced on
+// hoodi 2026-06-09 first-launch: preverified bootstrap completes (EL
+// snapshot files cover blocks 0 → 2,973,999) but no FCU has fired
+// yet, so engine.CurrentHeader returns the genesis-block header with
+// Number=0. Caplin's PersistentBlockCollector holds beacon blocks at
+// numbers 2,974,000+ (its lowest cached row past the snapshot tip).
+//
+// Pre-fix behaviour: pruneStaleCachedBlocks computed elHead=0,
+// firstPast=2,974,000, decided Case C (gap from elHead) and **wiped
+// all 9,919 cached blocks**, leaving Caplin to re-download them via
+// ForwardSync on a slow 60-slot/13-min cadence. End result: head
+// stayed at 2,973,999 until a manual restart unstuck things.
+//
+// Post-fix: pruneStaleCachedBlocks returns early when elHead == 0,
+// letting Flush call InsertBlocks normally. The EL's snapshot files
+// resolve the parent (2,973,999) for block 2,974,000, the insert
+// succeeds, and the chain progresses.
+//
+// Test setup: CurrentHeader returns a genesis-block header (Number=0).
+// Add 3 cached blocks at high numbers (chained off a placeholder
+// parent, since the test EL never actually verifies). Flush must
+// insert all 3 — not wipe them via prune.
+func TestPruneSkipsWhenElHeadIsZero(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+
+	var inserted []*types.Block
+	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
+	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blocks []*types.Block, _ bool) error {
+			inserted = append(inserted, blocks...)
+			return nil
+		}).AnyTimes()
+	// The crux of the test: CurrentHeader returns a genesis header
+	// (Number=0). Pre-fix this triggered the Case C prune-everything path.
+	genesisHeader := &types.Header{Number: *uint256.NewInt(0)}
+	engine.EXPECT().CurrentHeader(gomock.Any()).Return(genesisHeader, nil).AnyTimes()
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+
+	persistDir := filepath.Join(t.TempDir(), "collector")
+	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
+	require.NotNil(t, c)
+	t.Cleanup(func() { _ = c.Close() })
+
+	// Cached blocks far above elHead=0 (the preverified-bootstrap shape).
+	// The test EL stubs InsertBlocks so parent lookup never runs.
+	b1 := makeBeaconBlock(t, 2_974_000, 'a', common.HexToHash("0xdeadbeef"))
+	b2 := makeBeaconBlock(t, 2_974_001, 'a', blockHash(b1))
+	b3 := makeBeaconBlock(t, 2_974_002, 'a', blockHash(b2))
+	for _, bb := range []*cltypes.BeaconBlock{b1, b2, b3} {
+		require.NoError(t, c.AddBlock(bb))
+	}
+
+	require.NoError(t, c.Flush(t.Context()))
+
+	insertedNums := make([]uint64, len(inserted))
+	for i, b := range inserted {
+		insertedNums[i] = b.NumberU64()
+	}
+	require.Equal(t, []uint64{2_974_000, 2_974_001, 2_974_002}, insertedNums,
+		"with elHead=0 (pre-FCU genesis), prune must not wipe blocks. A non-3-length result means Case C fired and deleted the cached payload, reproducing the first-launch wedge.")
+}

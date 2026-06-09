@@ -457,6 +457,18 @@ func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) e
 		return nil
 	}
 	elHead := currentHeader.Number.Uint64()
+	if elHead == 0 {
+		// EL is reporting its head at genesis (block 0). This happens
+		// during preverified bootstrap before the first FCU has fired:
+		// CurrentHeader returns the genesis header even though the EL's
+		// snapshot files cover blocks up to a far higher tip. Pruning
+		// here would treat every cached beacon block (typically at
+		// blocks 2.9M+) as "past elHead with a gap" and wipe the
+		// entire historical-download payload before InsertBlocks gets
+		// a chance to feed it to the EL. Skip; let the first FCU
+		// advance the head before we make any prune decisions.
+		return nil
+	}
 	cutoff := make([]byte, 8)
 	binary.BigEndian.PutUint64(cutoff, elHead+1)
 
