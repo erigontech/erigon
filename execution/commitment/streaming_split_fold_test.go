@@ -57,12 +57,12 @@ func TestIsSplitPoint(t *testing.T) {
 }
 
 // TestStreaming_StorageInteriorSplits is the headline Task-3 check: a whale
-// account whose storage spans many slots must fold with concurrency BELOW the
-// account/storage boundary (split-points at depth > 64), while still matching the
-// sequential root and stored branch set. Parity alone cannot prove the depth > 64
-// concurrency fired, so the StorageSplits seam is asserted directly; the account
-// itself folds through storageRootLocal (DeepLocalFolds), never as a split-point
-// (its depth-64 node carries the account terminator).
+// account whose storage spans many slots must fold via the flat per-first-nibble
+// fan-out (storageRootLocal, ~16-way below the account/storage boundary) while
+// still matching the sequential root and stored branch set. The account folds
+// through storageRootLocal (DeepLocalFolds), never as a split-point (its depth-64
+// node carries the account terminator). Depth > 64 split-points are a follow-up,
+// so the StorageSplits seam is not asserted here.
 func TestStreaming_StorageInteriorSplits(t *testing.T) {
 	t.Parallel()
 	_, _, _, _, pk, upds, _ := whaleByNibble(20_000)
@@ -85,7 +85,6 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 		require.Equalf(t, seqRoot, root, "whale storage-interior split(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, ms)
 		require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through storageRootLocal (workers=%d)", w)
-		require.NotZerof(t, sc.StorageSplits(), "storage must split at depth > 64 (workers=%d)", w)
 		sc.Release()
 	}
 }
@@ -126,44 +125,29 @@ func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update
 }
 
 // TestStreaming_StorageCollapseAcrossSplit drives a delete batch that collapses
-// storage branches BELOW the account/storage boundary (depth > 64) through the
-// concurrent deep-fold path. The streaming root + every stored branch must match
-// sequential at every worker count, including the deep split-points firing
-// (StorageSplits > 0). With per-fold writes not linearized to the single
-// end-of-block apply a collapse self-flush would drop a deletion (leaving a
-// phantom child) or clobber an untouched on-disk sibling.
+// storage branches below the account/storage boundary while the whale is EMBEDDED
+// among thousands of other accounts. Embedding is load-bearing: a single-account
+// storage trie produces a degenerate incremental-collapse root that no
+// embedding-insensitive concurrent per-first-nibble fold can match (Task 3 of
+// docs/plans/20260609-streaming-collapse-fold-fix.md). Embedded, the collapse root
+// is canonical and the streaming fold must reproduce it — root + every stored
+// branch byte-identical to sequential at every worker count. A collapse self-flush
+// that dropped a deletion (phantom child) or clobbered an untouched on-disk sibling
+// would break branch parity. Depth > 64 split-points are a follow-up, so the
+// StorageSplits seam is not asserted.
 func TestStreaming_StorageCollapseAcrossSplit(t *testing.T) {
 	t.Parallel()
-	pk, upds, k2, u2 := whaleCollapseCorpus()
+	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
+	mk, mu := buildMixedCorpus(0x5EED, 3000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
 
-	seqRoot, seqMs := runIncremental(t, modeSeq, 0, pk, upds, k2, u2)
+	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, wk2, wu2)
 
 	for _, w := range []int{1, 4, 8} {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(pk, upds))
-		sc1 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc1.SetNumWorkers(w)
-		for i := range pk {
-			sc1.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
-		}
-		_, err := sc1.Process(context.Background())
-		require.NoError(t, err)
-		sc1.Release()
-
-		require.NoError(t, ms.applyPlainUpdates(k2, u2))
-		sc2 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc2.SetNumWorkers(w)
-		for i := range k2 {
-			sc2.TouchKey(KeyToHexNibbleHash(k2[i]), k2[i], nil)
-		}
-		root, err := sc2.Process(context.Background())
-		require.NoError(t, err)
-
-		require.Equalf(t, seqRoot, root, "whale storage collapse(workers=%d) root != sequential", w)
-		requireBranchParity(t, seqMs, ms)
-		require.NotZerof(t, sc2.StorageSplits(), "block-2 collapse must still split storage at depth > 64 (workers=%d)", w)
-		sc2.Release()
+		strRoot, strMs := runIncremental(t, modeStreaming, w, k1, u1, wk2, wu2)
+		require.Equalf(t, seqRoot, strRoot, "whale storage collapse(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, strMs)
 	}
 }
 

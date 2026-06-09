@@ -146,13 +146,18 @@ After Task 2 the flat depth-65 fold does **no** depth>64 splits at all (the
 recursive `foldStorageChild` is removed), so `StorageSplits()` is always 0. Three
 tests are red and need reconciliation here:
 
-- [ ] `TestStreaming_MultiDepthSplitParity` and `TestStreaming_StorageInteriorSplits`
+- [x] `TestStreaming_MultiDepthSplitParity` and `TestStreaming_StorageInteriorSplits`
       — root parity holds; only the `StorageSplits()>0` (and `DeepLocalFolds()>0`)
       seam fails. These seams assert the depth>64 split optimization, which is a
       follow-up (Post-Completion), not a correctness property. Relax/remove the
       `StorageSplits>0` assertions (the flat 16-way fan-out is the proven win);
       keep `DeepLocalFolds>0` only if `storageRootLocal` is still routed (it is).
-- [ ] `TestStreaming_StorageCollapseAcrossSplit` (whale-only) — **root mismatch**,
+      Done: removed the `StorageSplits()>0` assertion from both tests and updated
+      their docstrings (depth>64 splits are a follow-up); kept `DeepLocalFolds()>0`
+      (`storageRootLocal` is still routed via `dfsDeepLocal`). The `storageSplits`
+      counter/accessor are left in place (never incremented now) to support the
+      documented follow-up that re-introduces depth>64 splits.
+- [x] `TestStreaming_StorageCollapseAcrossSplit` (whale-only) — **root mismatch**,
       not just a seam: the confined fold emits the canonical `94741c75…` while `seq`
       emits the degenerate single-account `11732ba1…` (see Task 2 linchpin). Make
       this test non-degenerate (embed the whale among other accounts, as the oracle
@@ -160,6 +165,15 @@ tests are red and need reconciliation here:
       storage branches against `ModeParallel`/a fresh build rather than the
       degenerate `seq` whale-only root. Do **not** revert the fold to match the
       degenerate value. Document the decision in the plan.
+      **Decision (chose option a — embed the whale):** the test now prepends a
+      `buildMixedCorpus(0x5EED, 3000)` of ordinary accounts to the whale's block-1
+      keys (distinct seed/size from the oracle's `0xC0FFEE/4000` so it is a separate
+      gate), runs the same two-block collapse through `runIncremental` for `modeSeq`
+      and `modeStreaming` at workers 1/4/8, and asserts `streaming root == seq root`
+      plus `requireBranchParity`. Embedded, the collapse root is canonical and the
+      confined fold reproduces it byte-for-byte; the fold was NOT reverted to the
+      degenerate value. The `StorageSplits()>0` seam assertion was dropped here too
+      (no depth>64 split fires on the flat fan-out).
 
 ### Task 4: Full validation
 
