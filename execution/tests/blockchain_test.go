@@ -1230,7 +1230,9 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	t.Parallel()
 	// Generate the original common chain segment and the two competing forks
 
-	m, m2 := execmoduletester.New(t), execmoduletester.New(t)
+	// The competitor fork reorgs ~2*triesInMemory blocks deep — beyond
+	// MaxReorgDepth, so the inserting node needs changesets for every block.
+	m, m2 := execmoduletester.New(t), execmoduletester.New(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 
 	shared, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1317,8 +1319,9 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("generate fork: %v", err)
 	}
 
-	// Import the canonical chain
-	m2 := execmoduletester.New(t)
+	// Import the canonical chain. The fork branches at block 11 — far beyond
+	// MaxReorgDepth — so the inserting node needs changesets for every block.
+	m2 := execmoduletester.New(t, execmoduletester.WithAlwaysGenerateChangesets(true))
 
 	if err := m2.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)

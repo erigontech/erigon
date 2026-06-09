@@ -388,8 +388,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
-
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
@@ -1000,11 +998,11 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	var accessLists map[common.Hash][]byte
+	var bals [][]byte
 	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
-		accessLists = map[common.Hash][]byte{block.Hash(): blockAccessListBytes}
+		bals = [][]byte{blockAccessListBytes}
 	}
-	if err := e.chainRW.InsertBlocksAndWaitWithAccessLists(ctx, []*types.Block{block}, accessLists); err != nil {
+	if err := e.chainRW.InsertBlocksAndWait(ctx, []*types.Block{block}, bals); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,

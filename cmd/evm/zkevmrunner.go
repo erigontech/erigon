@@ -106,24 +106,6 @@ func zkevmTestCmd(ctx *cli.Context) error {
 func newZkevmFailMatcher() *testutil.TestMatcher {
 	tm := new(testutil.TestMatcher)
 
-	// zkevm@v0.4.0 charges EIP-8037 AUTH_BASE state gas on EIP-7702 clears of an
-	// undelegated authority; current spec refunds it, so the fixtures' expected gas
-	// is stale and block import diverges. https://github.com/erigontech/erigon/issues/21563
-	const staleAuthBaseGas = "stale zkevm@v0.4.0 EIP-7702 AUTH_BASE gas, see #21563"
-	for _, p := range []string{
-		`delegation_clearing\.json/.*undelegated_account`,
-		`delegation_clearing_and_set\.json/.*undelegated_account`,
-		`delegation_clearing_tx_to\.json/.*undelegated_account`,
-		`double_auth\.json/.*first_delegation_DelegationTo\.RESET`,
-		`valid_tx_invalid_auth_signature\.json/.*s=SECP256K1N_OVER_2(-1)?\]`,
-		`tx_to_beacon_root_contract\.json/.*tx_type_4`,
-		`blobhash_gas_cost\.json/.*tx_type_4`,
-		`blobhash_opcode_contexts_tx_types\.json/.*tx_type_4`,
-		`bal_7702_null_address_delegation_no_code_change`,
-	} {
-		tm.Fails(p, staleAuthBaseGas)
-	}
-
 	// The eip8025_optional_proofs witness_validation_* fixtures are stateless-verifier
 	// negative tests storing a deliberately mutated executionWitness, so producer
 	// comparison always diverges until a stateless-verify consumer mode exists.

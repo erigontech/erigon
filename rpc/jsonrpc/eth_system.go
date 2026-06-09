@@ -53,8 +53,8 @@ const deleteStrategyWindow = "window"
 // The field is omitted when data is kept indefinitely (archive nodes, or
 // KeepPostMergeBlocksPruneMode which uses chain-specific history expiry).
 type DeleteStrategy struct {
-	Type            string `json:"type"`
-	RetentionBlocks uint64 `json:"retentionBlocks"`
+	Type            string         `json:"type"`
+	RetentionBlocks hexutil.Uint64 `json:"retentionBlocks"`
 }
 
 // CapabilityField describes availability of a data category: when Disabled is true the node
@@ -125,8 +125,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
 		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
-			rb := uint64(d)
-			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: rb}
+			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: hexutil.Uint64(d)}
 		}
 		return f
 	}

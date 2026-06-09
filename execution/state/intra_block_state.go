@@ -372,6 +372,8 @@ func (sdb *IntraBlockState) Reset() {
 	// references are dropped, while the next execution lazily allocates fresh ones.
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0

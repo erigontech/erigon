@@ -25,7 +25,9 @@ import (
 	"math/bits"
 	"math/rand"
 	"sort"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -46,6 +48,425 @@ func (n *noopPatriciaContext) TxNum() uint64                            { return
 
 func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
+}
+
+// gatedPatriciaContext is a mock PatriciaContext with a controllable in-flight window:
+// sleep+descend keep a worker re-reading its arena-backed key across batch boundaries,
+// while entered/release gate a worker inside Branch for deterministic ordering.
+type gatedPatriciaContext struct {
+	sleep    time.Duration
+	descend  bool
+	entered  chan struct{}
+	release  chan struct{}
+	gateDone atomic.Bool
+}
+
+func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	// Gate only the first Branch call so a released worker can't wedge re-sending to entered.
+	if (g.entered != nil || g.release != nil) && !g.gateDone.Swap(true) {
+		if g.entered != nil {
+			g.entered <- struct{}{}
+		}
+		if g.release != nil {
+			<-g.release
+		}
+	}
+	if g.sleep > 0 {
+		time.Sleep(g.sleep)
+	}
+	if g.descend {
+		// touch map + bitmap 0x0001 (child nibble 0) + fieldBits 0x00: warmupKey
+		// descends on nibble 0, re-reading hashedKey at every level.
+		return []byte{0, 0, 0, 1, 0, 0}, 0, nil
+	}
+	return []byte{0, 0, 0, 0}, 0, nil
+}
+
+func (g *gatedPatriciaContext) PutBranch(prefix, data, prevData []byte) error { return nil }
+func (g *gatedPatriciaContext) Account(plainKey []byte) (*Update, error)      { return nil, nil }
+func (g *gatedPatriciaContext) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
+func (g *gatedPatriciaContext) TxNum() uint64                                 { return 0 }
+
+// slowCtxFactory makes the first worker a slow straggler that holds one key across many
+// batch resets while the rest run fast, so the producer's arena reset races its in-flight reads.
+func slowCtxFactory(stall time.Duration) TrieContextFactory {
+	var n atomic.Int32
+	return func() (PatriciaContext, func()) {
+		if n.Add(1) == 1 {
+			return &gatedPatriciaContext{sleep: stall, descend: true}, nil
+		}
+		return &gatedPatriciaContext{}, nil
+	}
+}
+
+// gatedCtxFactory returns a factory whose contexts signal entered then block on
+// release inside Branch, for deterministic single-worker ordering tests.
+func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
+	return func() (PatriciaContext, func()) {
+		return &gatedPatriciaContext{entered: entered, release: release}, nil
+	}
+}
+
+// genNibbleKeys produces n unique keyLen-byte keys whose every byte is a valid nibble
+// (0x00-0x0F), with the index encoded in the trailing nibbles so keys are distinct.
+func genNibbleKeys(n, keyLen int) [][]byte {
+	keys := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		k := make([]byte, keyLen)
+		v := i
+		for j := keyLen - 1; j >= 0; j-- {
+			k[j] = byte(v & 0x0F)
+			v >>= 4
+		}
+		keys[i] = k
+	}
+	return keys
+}
+
+// TestHashSort_WarmupArenaNoRace reproduces the arena data race: at a batch boundary HashSort
+// resets a buffer while warmup workers still read key slices aliasing it. -race is the signal.
+func TestHashSort_WarmupArenaNoRace(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 20_000 // two batches: one in-loop arena reset mid-stream plus the final batch
+	const keyLen = 64
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+			require.EqualValues(t, numKeys, ut.Size())
+
+			ctx := context.Background()
+			warmuper := NewWarmuper(ctx, WarmupConfig{
+				Enabled: true,
+				// Large per-level stall keeps the straggler in-flight across the arena reset.
+				CtxFactory: slowCtxFactory(2 * time.Millisecond),
+				NumWorkers: 4,
+				MaxDepth:   64,
+				LogPrefix:  "test",
+			})
+			warmuper.Start()
+
+			visited := 0
+			err := ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+				visited++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, numKeys, visited)
+			require.NoError(t, warmuper.Wait())
+		})
+	}
+}
+
+// TestHashSort_NilWarmuper exercises the nil-warmuper batch-boundary path (the else branch
+// that resets the arena directly), crossing the in-loop reset for both modes.
+func TestHashSort_NilWarmuper(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 20_000
+	const keyLen = 64
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+			require.EqualValues(t, numKeys, ut.Size())
+
+			visited := 0
+			err := ut.HashSort(context.Background(), nil, func(hk, pk []byte, _ *Update) error {
+				visited++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, numKeys, visited)
+		})
+	}
+}
+
+// TestHashSort_WarmupLap crosses ≥3 batch boundaries (K=2) so a ring slot is reused while a slow
+// straggler still holds a key from that slot's previous generation; the producer must block in
+// WaitBufferFree until it drains. -race is the signal.
+func TestHashSort_WarmupLap(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 30_000 // three batch boundaries → gen reaches 3, so each ring slot is reused
+	const keyLen = 64
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+			require.EqualValues(t, numKeys, ut.Size())
+
+			ctx := context.Background()
+			warmuper := NewWarmuper(ctx, WarmupConfig{
+				Enabled:    true,
+				CtxFactory: slowCtxFactory(2 * time.Millisecond),
+				NumWorkers: 4,
+				MaxDepth:   64,
+				LogPrefix:  "test",
+			})
+			warmuper.Start()
+
+			visited := 0
+			err := ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+				visited++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, numKeys, visited)
+			// gen advances once per batch boundary; ≥3 means at least one ring slot was
+			// reused (lapped) — the path WaitBufferFree guards.
+			require.GreaterOrEqual(t, ut.gen, uint64(3))
+			require.NoError(t, warmuper.Wait())
+		})
+	}
+}
+
+// gatedStragglerFactory makes the first worker block inside Branch on release (holding its
+// first key) while every other worker runs fast, so exactly one ring slot stays occupied.
+func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
+	var n atomic.Int32
+	return func() (PatriciaContext, func()) {
+		if n.Add(1) == 1 {
+			return &gatedPatriciaContext{entered: entered, release: release}, nil
+		}
+		return &gatedPatriciaContext{}, nil
+	}
+}
+
+// TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant cancels the context during a boundary
+// WaitBufferFree while a straggler pins the slot, asserting the curArena == gen % arenaRingSize
+// invariant survives the error return.
+func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 30_000 // ≥3 batch boundaries so a ring slot is reused (lapped)
+	const keyLen = 64
+	const lapFnCall = 2 * hashSortBatchSize // fn calls for gen 0 + gen 1, completing right before boundary 2
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			warmuper := NewWarmuper(ctx, WarmupConfig{
+				Enabled:    true,
+				CtxFactory: gatedStragglerFactory(entered, release),
+				NumWorkers: 4,
+				MaxDepth:   64,
+				LogPrefix:  "test",
+			})
+			warmuper.Start()
+			defer warmuper.CloseAndWait()
+			defer close(release)
+
+			// fn runs only on the producer goroutine, so this counter is race-free. Signaling at
+			// lapFnCall (right before the gen++/WaitBufferFree block) makes the cancel land inside the wait.
+			fnCalls := 0
+			reachedLap := make(chan struct{})
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- ut.HashSort(ctx, warmuper, func(hk, pk []byte, _ *Update) error {
+					fnCalls++
+					if fnCalls == lapFnCall {
+						close(reachedLap)
+					}
+					return nil
+				})
+			}()
+
+			<-entered // the straggler holds a gen-0 key, pinning slot 0
+			require.GreaterOrEqual(t, warmuper.outstanding[0].Load(), int64(1))
+
+			<-reachedLap // batch-2 fn-loop done; producer heads into WaitBufferFree(0), which slot 0 pins
+			cancel()
+
+			select {
+			case err := <-errCh:
+				require.Error(t, err)
+			case <-time.After(2 * time.Second):
+				t.Fatal("HashSort did not return after cancellation")
+			}
+
+			require.Equal(t, int(ut.gen%arenaRingSize), ut.curArena)
+		})
+	}
+}
+
+// TestUpdates_ArenaAlloc verifies that sequential allocations within a ring buffer return
+// non-overlapping sub-slices, and that an over-capacity request falls back to an independent
+// allocation that leaves prior sub-slices intact.
+func TestUpdates_ArenaAlloc(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
+	ut.arenaEnsureCap(16)
+
+	a := ut.arenaAlloc([]byte("aaaa"))
+	b := ut.arenaAlloc([]byte("bbbb"))
+	require.Equal(t, []byte("aaaa"), a)
+	require.Equal(t, []byte("bbbb"), b)
+
+	// Sub-slices are contiguous and non-overlapping within the same buffer.
+	require.Equal(t, &ut.arenas[ut.curArena][0], &a[0])
+	require.Equal(t, &ut.arenas[ut.curArena][4], &b[0])
+
+	// Mutating the second slice must not touch the first.
+	b[0] = 'X'
+	require.Equal(t, []byte("aaaa"), a)
+
+	// Over-capacity request falls back to an independent allocation; prior slices stay valid.
+	big := ut.arenaAlloc(bytes.Repeat([]byte("z"), 32))
+	require.Equal(t, bytes.Repeat([]byte("z"), 32), big)
+	require.Equal(t, []byte("aaaa"), a)
+	require.Equal(t, []byte("Xbbb"), b)
+	// The fallback slice is not backed by the current ring buffer.
+	require.NotEqual(t, &ut.arenas[ut.curArena][0], &big[0])
+}
+
+// TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone verifies that WaitBufferFree
+// blocks while a warm item for the slot's generation is still in-flight, and returns
+// once that item completes (slot drains to zero).
+func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	warmuper := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	warmuper.Start()
+	defer func() { require.NoError(t, warmuper.Wait()) }()
+
+	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
+	<-entered // worker is now inside Branch, key for gen 0 in-flight
+	require.Equal(t, int64(1), warmuper.outstanding[0].Load())
+
+	done := make(chan struct{})
+	go func() {
+		_ = warmuper.WaitBufferFree(0)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("WaitBufferFree returned while a gen-0 item is still in-flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release) // let the worker finish
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitBufferFree did not return after the straggler drained")
+	}
+	require.Equal(t, int64(0), warmuper.outstanding[0].Load())
+}
+
+// TestWarmuper_WaitBufferFree_UnblocksOnCancel verifies a producer parked in WaitBufferFree wakes
+// and returns the context error when the warmuper is canceled while a counted item is stuck.
+func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	warmuper := NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	warmuper.Start()
+	defer warmuper.CloseAndWait()
+	defer close(release)
+
+	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
+	<-entered // worker is inside Branch holding the gen-0 item; slot 0 counter is 1
+	require.Equal(t, int64(1), warmuper.outstanding[0].Load())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- warmuper.WaitBufferFree(0) }()
+
+	select {
+	case <-errCh:
+		t.Fatal("WaitBufferFree returned before cancellation while the slot is in-flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitBufferFree did not return after the context was canceled")
+	}
+}
+
+// TestWarmuper_WaitBufferFree_FastPath verifies WaitBufferFree returns immediately when
+// the slot is already drained.
+func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
+	t.Parallel()
+
+	warmuper := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	warmuper.Start()
+	defer func() { require.NoError(t, warmuper.Wait()) }()
+
+	done := make(chan struct{})
+	go func() {
+		_ = warmuper.WaitBufferFree(0)
+		_ = warmuper.WaitBufferFree(1)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitBufferFree did not fast-path return on an already-drained slot")
+	}
 }
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {

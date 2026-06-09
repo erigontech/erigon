@@ -8,6 +8,10 @@ on:
         description: "Compile test binaries only; skip test execution (for cache warming runs)"
         type: boolean
         default: false
+      scan-only:
+        description: "Reuse the coverage artifact from this commit's merge-queue run instead of running tests (for post-merge branch scans)"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -34,11 +38,58 @@ jobs:
           cleanup-space: true
           ramdisk: true
 
+      # The merge queue fast-forwards the target branch to the already-tested
+      # merge commit, so the pushed SHA equals a merge-queue run's head SHA and
+      # that run's coverage artifact corresponds to this commit exactly.
+      - name: Locate merge-queue coverage artifact
+        id: coverage-artifact
+        if: inputs.scan-only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=false
+          run_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=merge_group" \
+            --jq '[.workflow_runs[] | select(.path == ".github/workflows/ci-gate.yml")][0].id // empty' 2>/dev/null) || run_id=""
+          if [ -n "$run_id" ]; then
+            count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?name=sonar-coverage" \
+              --jq '[.artifacts[] | select(.expired | not)] | length' 2>/dev/null) || count=0
+            if [ "${count:-0}" -gt 0 ]; then
+              found=true
+            fi
+          fi
+          if [ "$found" = "false" ]; then
+            echo "::warning::No merge-queue coverage artifact for ${GITHUB_SHA}; running tests with coverage in this run"
+          fi
+          {
+            echo "found=$found"
+            echo "run_id=$run_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download merge-queue coverage artifact
+        if: inputs.scan-only && steps.coverage-artifact.outputs.found == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: sonar-coverage
+          run-id: ${{ steps.coverage-artifact.outputs.run_id }}
+          github-token: ${{ github.token }}
+
       - name: Run tests with coverage
-        if: '!inputs.cache-warming-only'
+        if: "!inputs.cache-warming-only && (!inputs.scan-only || steps.coverage-artifact.outputs.found != 'true')"
         env:
           SKIP_FLAKY_TESTS: 'true'
         run: make test-sonar-coverage
+
+      # Merge-queue runs produce the coverage profile but leave the scan to the
+      # push-triggered SonarCloud Branch Scan workflow, which submits branch
+      # analyses one at a time so SonarCloud never rejects them as out of order.
+      - name: Upload coverage artifact for the post-merge scan
+        if: "!inputs.cache-warming-only && github.event_name == 'merge_group'"
+        uses: actions/upload-artifact@v7
+        with:
+          name: sonar-coverage
+          path: coverage-test-all.out
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Build test binaries (cache warming)
         if: inputs.cache-warming-only
@@ -99,7 +150,7 @@ jobs:
       # otherwise download from scanner.sonarcloud.io (a 403-prone CDN);
       # if the image ever drops it, the scanner falls back to downloading.
       - name: Use preinstalled JDK for SonarCloud scanner
-        if: '!inputs.cache-warming-only'
+        if: "!inputs.cache-warming-only && github.event_name != 'merge_group'"
         run: |
           if [ -n "${JAVA_HOME_21_X64}" ] && [ -x "${JAVA_HOME_21_X64}/bin/java" ]; then
             echo "SONAR_SCANNER_SKIP_JRE_PROVISIONING=true" >> "$GITHUB_ENV"
@@ -111,7 +162,7 @@ jobs:
       # scanner.sonarcloud.io. A miss (engine version rotated since the last
       # base-branch push) falls back to downloading plus the retry below.
       - name: Restore SonarCloud scanner engine cache
-        if: '!inputs.cache-warming-only'
+        if: "!inputs.cache-warming-only && github.event_name != 'merge_group'"
         uses: actions/cache/restore@v5
         with:
           path: ~/.sonar/cache
@@ -123,7 +174,7 @@ jobs:
       # rides out short blips instead of failing the gate.
       - name: SonarCloud scan
         id: scan
-        if: '!inputs.cache-warming-only'
+        if: "!inputs.cache-warming-only && github.event_name != 'merge_group'"
         continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@v8
         env:
@@ -131,11 +182,11 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Wait before SonarCloud scan retry
-        if: "!inputs.cache-warming-only && steps.scan.outcome == 'failure'"
+        if: steps.scan.outcome == 'failure'
         run: sleep 90
 
       - name: SonarCloud scan (retry)
-        if: "!inputs.cache-warming-only && steps.scan.outcome == 'failure'"
+        if: steps.scan.outcome == 'failure'
         uses: SonarSource/sonarqube-scan-action@v8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

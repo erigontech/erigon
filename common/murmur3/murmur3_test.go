@@ -14,13 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package recsplit
+package murmur3
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
-	"github.com/spaolacci/murmur3"
+	libmurmur3 "github.com/spaolacci/murmur3"
 )
 
 // Reference vectors from the source library (spaolacci/murmur3 murmur_test.go),
@@ -50,18 +51,18 @@ var murmurRefVectors = []struct {
 func TestMurmur128RefVectors(t *testing.T) {
 	for _, v := range murmurRefVectors {
 		key := []byte(v.s)
-		if h1, h2 := murmur128WithSeed(key, v.seed); h1 != v.h1 || h2 != v.h2 {
+		if h1, h2 := Sum128WithSeed(key, v.seed); h1 != v.h1 || h2 != v.h2 {
 			t.Errorf("key %q seed %d: got (%x,%x) want (%x,%x)", v.s, v.seed, h1, h2, v.h1, v.h2)
 		}
 		for split := 0; split <= len(key); split++ {
-			if h1, h2 := murmur128PairWithSeed(key[:split], key[split:], v.seed); h1 != v.h1 || h2 != v.h2 {
+			if h1, h2 := Sum128PairWithSeed(key[:split], key[split:], v.seed); h1 != v.h1 || h2 != v.h2 {
 				t.Errorf("key %q seed %d split %d: got (%x,%x) want (%x,%x)", v.s, v.seed, split, h1, h2, v.h1, v.h2)
 			}
 		}
 	}
 }
 
-// murmur128PairWithSeed(k1, k2) must equal hashing the concatenation k1||k2
+// Sum128PairWithSeed(k1, k2) must equal hashing the concatenation k1||k2
 func TestMurmur128PairEquivalence(t *testing.T) {
 	rnd := rand.New(rand.NewSource(43))
 	for len1 := 0; len1 <= 40; len1++ {
@@ -72,8 +73,8 @@ func TestMurmur128PairEquivalence(t *testing.T) {
 			rnd.Read(key2)
 			seed := rnd.Uint32()
 			concat := append(append([]byte{}, key1...), key2...)
-			wantHi, wantLo := murmur3.Sum128WithSeed(concat, seed)
-			gotHi, gotLo := murmur128PairWithSeed(key1, key2, seed)
+			wantHi, wantLo := libmurmur3.Sum128WithSeed(concat, seed)
+			gotHi, gotLo := Sum128PairWithSeed(key1, key2, seed)
 			if gotHi != wantHi || gotLo != wantLo {
 				t.Fatalf("mismatch len1=%d len2=%d seed=%d: got (%x,%x) want (%x,%x)",
 					len1, len2, seed, gotHi, gotLo, wantHi, wantLo)
@@ -82,7 +83,34 @@ func TestMurmur128PairEquivalence(t *testing.T) {
 	}
 }
 
-// murmur128WithSeed must be bit-identical to the library used to build existing index files
+// Key lengths match real index keys: 8=txnum, 20=address, 32=hash, 52=addr+slot, 80=commitment path
+var murmurBenchSizes = []int{8, 20, 32, 52, 80, 128}
+
+func BenchmarkMurmur128(b *testing.B) {
+	rnd := rand.New(rand.NewSource(44))
+	for _, size := range murmurBenchSizes {
+		key := make([]byte, size)
+		rnd.Read(key)
+		b.Run(fmt.Sprintf("port/len%d", size), func(b *testing.B) {
+			var sink uint64
+			for b.Loop() {
+				h1, _ := Sum128WithSeed(key, 42)
+				sink = h1
+			}
+			_ = sink
+		})
+		b.Run(fmt.Sprintf("library/len%d", size), func(b *testing.B) {
+			var sink uint64
+			for b.Loop() {
+				h1, _ := libmurmur3.Sum128WithSeed(key, 42)
+				sink = h1
+			}
+			_ = sink
+		})
+	}
+}
+
+// Sum128WithSeed must be bit-identical to the library used to build existing index files
 func TestMurmur128Equivalence(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 	for length := 0; length <= 130; length++ {
@@ -90,8 +118,8 @@ func TestMurmur128Equivalence(t *testing.T) {
 			key := make([]byte, length)
 			rnd.Read(key)
 			seed := rnd.Uint32()
-			wantHi, wantLo := murmur3.Sum128WithSeed(key, seed)
-			gotHi, gotLo := murmur128WithSeed(key, seed)
+			wantHi, wantLo := libmurmur3.Sum128WithSeed(key, seed)
+			gotHi, gotLo := Sum128WithSeed(key, seed)
 			if gotHi != wantHi || gotLo != wantLo {
 				t.Fatalf("mismatch len=%d seed=%d key=%x: got (%x,%x) want (%x,%x)",
 					length, seed, key, gotHi, gotLo, wantHi, wantLo)
