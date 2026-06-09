@@ -77,7 +77,7 @@ snapshots TOTAL    2.3 TB
 
 The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
 
-For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
+For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
 ## Why `chaindata/` stays so small
 
@@ -115,4 +115,4 @@ If you need to reclaim space without resyncing from scratch:
 - [Architecture](architecture) — how this storage model fits into staged sync and the flat-KV state design
 - [Optimizing Storage](optimizing-storage) — concrete recipes for splitting the datadir across multiple disks
 - [Hardware Requirements](../get-started/hardware-requirements) — disk-size numbers for each `--prune.mode`
-- [Prune Modes](prune-modes) — choosing what history to keep
+- [Pruning Modes](prune-modes) — choosing what history to keep
