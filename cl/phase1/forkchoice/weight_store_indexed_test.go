@@ -76,3 +76,24 @@ func TestGloasMaintainsIndexedWeightStore(t *testing.T) {
 	require.Len(t, f.indexedWeightStore.directVotes[att.Data.BeaconBlockRoot], 3,
 		"GLOAS path must index votes for the voted root")
 }
+
+// RemoveVote compacts the target validator out of the root's vote list in place
+// (no per-call allocation), keeps the other voters, and drops the root once empty.
+func TestRemoveVoteCompactsInPlace(t *testing.T) {
+	w := newIndexedWeightStoreTestStore().indexedWeightStore
+	root := common.HexToHash("0xabc")
+	w.IndexVote(1, LatestMessage{Root: root})
+	w.IndexVote(2, LatestMessage{Root: root})
+	w.IndexVote(3, LatestMessage{Root: root})
+	require.Len(t, w.directVotes[root], 3)
+
+	w.RemoveVote(2, root)
+	got := w.directVotes[root]
+	require.Len(t, got, 2)
+	require.ElementsMatch(t, []uint64{1, 3}, []uint64{got[0].ValidatorIndex, got[1].ValidatorIndex})
+
+	w.RemoveVote(1, root)
+	w.RemoveVote(3, root)
+	_, ok := w.directVotes[root]
+	require.False(t, ok, "root entry must be deleted once its last vote is removed")
+}

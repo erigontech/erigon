@@ -100,17 +100,19 @@ func (w *indexedWeightStore) RemoveVote(validatorIndex uint64, oldRoot common.Ha
 	defer w.mu.Unlock()
 
 	if entries, ok := w.directVotes[oldRoot]; ok {
-		// Filter out this validator's entry
-		filtered := make([]VoteEntry, 0, len(entries))
+		// Compact the validator's entry out in place; a fresh slice per call is a
+		// hot allocation on the GLOAS vote path (RemoveVote runs per attestation).
+		n := 0
 		for _, e := range entries {
 			if e.ValidatorIndex != validatorIndex {
-				filtered = append(filtered, e)
+				entries[n] = e
+				n++
 			}
 		}
-		if len(filtered) == 0 {
+		if n == 0 {
 			delete(w.directVotes, oldRoot)
 		} else {
-			w.directVotes[oldRoot] = filtered
+			w.directVotes[oldRoot] = entries[:n]
 		}
 	}
 
