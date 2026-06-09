@@ -505,13 +505,42 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	return mxsKVGet[name][level]
 }
 
+func kveiReadMetric(name kv.Domain, level int) metrics.Summary {
+	if level > 4 {
+		level = 5
+	}
+	return mxsKVEI[name][level]
+}
+
+func btnavReadMetric(name kv.Domain, level int) metrics.Summary {
+	if level > 4 {
+		level = 5
+	}
+	return mxsBtNav[name][level]
+}
+
+func kvvalReadMetric(name kv.Domain, level int) metrics.Summary {
+	if level > 4 {
+		level = 5
+	}
+	return mxsKVVal[name][level]
+}
+
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
-		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
+		var pt *btindex.PhaseTimings
+		if dbg.KVReadLevelledMetrics {
+			pt = &btindex.PhaseTimings{}
+		}
+		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i), pt)
+		if pt != nil {
+			btnavReadMetric(dt.name, i).Observe(pt.Nav.Seconds())
+			kvvalReadMetric(dt.name, i).Observe(pt.Val.Seconds())
+		}
 		if err != nil || !ok {
 			return nil, false, 0, err
 		}
@@ -1322,7 +1351,17 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
 			if dt.files[i].src.existence != nil {
-				if !dt.files[i].src.existence.ContainsHash(hi) {
+				if dbg.KVReadLevelledMetrics {
+					kt := time.Now()
+					contains := dt.files[i].src.existence.ContainsHash(hi)
+					kveiReadMetric(dt.name, i).ObserveDuration(kt)
+					if !contains {
+						if traceGetLatest == dt.name {
+							fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, dt.files[i].src.existence.FileName)
+						}
+						continue
+					}
+				} else if !dt.files[i].src.existence.ContainsHash(hi) {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, dt.files[i].src.existence.FileName)
 					}

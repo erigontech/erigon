@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
@@ -120,4 +122,34 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="rcache"}`),
 		},
 	}
+
+	// Per (domain, level) split of a state read into its three phases:
+	//   kvei_get  - existence (bloom) filter probe
+	//   btnav_get - BTree navigation (pivot search + in-file key compares)
+	//   kvval_get - value fetch from the .kv
+	mxsKVEI  = newLevelledSummaries("kvei_get")
+	mxsBtNav = newLevelledSummaries("btnav_get")
+	mxsKVVal = newLevelledSummaries("kvval_get")
 )
+
+var kvLevelNames = []string{"L0", "L1", "L2", "L3", "L4", "recent"}
+
+func newLevelledSummaries(metric string) [kv.DomainLen][]metrics.Summary {
+	domNames := map[kv.Domain]string{
+		kv.AccountsDomain:   "account",
+		kv.StorageDomain:    "storage",
+		kv.CodeDomain:       "code",
+		kv.CommitmentDomain: "commitment",
+		kv.ReceiptDomain:    "receipt",
+		kv.RCacheDomain:     "rcache",
+	}
+	var out [kv.DomainLen][]metrics.Summary
+	for d, dn := range domNames {
+		arr := make([]metrics.Summary, len(kvLevelNames))
+		for li, lv := range kvLevelNames {
+			arr[li] = metrics.GetOrCreateSummary(fmt.Sprintf("%s{level=%q,domain=%q}", metric, lv, dn))
+		}
+		out[d] = arr
+	}
+	return out
+}

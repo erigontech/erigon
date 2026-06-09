@@ -341,7 +341,32 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 // Get: returns for exact given key, value and offset in file where key starts
 // If given key is nil, returns first key
 // If no exact match found, returns nil values
-func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
+// PhaseTimings accumulates the time spent navigating the BTree vs fetching the
+// value, when passed non-nil to Get. Caller-owned (per-goroutine), no locking.
+type PhaseTimings struct {
+	Nav time.Duration
+	Val time.Duration
+}
+
+func (b *BpsTree) Get(g *seg.Reader, key []byte, pt *PhaseTimings) (v []byte, ok bool, offset uint64, err error) {
+	var t0 time.Time
+	var valDur time.Duration
+	if pt != nil {
+		t0 = time.Now()
+		defer func() {
+			pt.Nav += time.Since(t0) - valDur
+			pt.Val += valDur
+		}()
+	}
+	readVal := func() {
+		if pt == nil {
+			v, _ = g.Next(nil)
+			return
+		}
+		tv := time.Now()
+		v, _ = g.Next(nil)
+		valDur += time.Since(tv)
+	}
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
@@ -378,7 +403,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				l++
 				continue
 			}
-			v, _ = g.Next(nil)
+			readVal()
 			offset = b.offt.Get(m)
 			return v, true, offset, nil
 		}
@@ -388,7 +413,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
-			v, _ = g.Next(nil)
+			readVal()
 			return v, true, b.offt.Get(m), nil
 		} else if cmp < 0 {
 			r = m
@@ -410,11 +435,12 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if !g.HasNext() {
 		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
-	v, _ = g.Next(nil)
+	readVal()
 	return v, true, b.offt.Get(l), nil
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
+func (b *BpsTree) NodeCount() int                  { return len(b.mx) }
 func (b *BpsTree) Distances() (map[int]int, error) {
 	distances := map[int]int{}
 	var prev = -1

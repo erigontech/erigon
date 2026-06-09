@@ -90,7 +90,7 @@ func BenchmarkBpsTreeGet(t *testing.B) {
 	t.ReportAllocs()
 	for t.Loop() {
 		k := keys[rng.Intn(len(keys))]
-		_, v, _, ok, err := bt.Get(k, getter)
+		_, v, _, ok, err := bt.Get(k, getter, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +183,7 @@ func BenchmarkBpsTreeGetReal(t *testing.B) {
 	t.ReportAllocs()
 	for t.Loop() {
 		k := keys[rng.Intn(len(keys))]
-		_, v, _, ok, err := bt.Get(k, getter)
+		_, v, _, ok, err := bt.Get(k, getter, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
