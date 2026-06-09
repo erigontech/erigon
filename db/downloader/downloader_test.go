@@ -83,15 +83,17 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 			}
 		}
 	}()
+	// Stop the reader on every exit path, including a require failure (Goexit).
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
 
 	for i := range 64 {
 		name := fmt.Sprintf("v1-%06d-%06d-headers.seg", i, i+1)
 		ih := snaptype.Hex2InfoHash(fmt.Sprintf("%040x", i+1))
 		require.NoError(t, d.testStartSingleDownloadNoWait(ctx, ih, name))
 	}
-
-	close(stop)
-	wg.Wait()
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
