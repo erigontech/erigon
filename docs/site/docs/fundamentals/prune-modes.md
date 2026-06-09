@@ -1,13 +1,13 @@
 ---
-title: "Prune Modes"
-description: "Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case."
+title: "Pruning Modes"
+description: "Full, minimal, blocks, and archive pruning modes explained — choose the right mode for your use case."
 sidebar_position: 2
 ---
 
 
-# Prune Modes
+# Pruning Modes
 
-Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four pruning modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
