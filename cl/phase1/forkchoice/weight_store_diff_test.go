@@ -120,6 +120,11 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cs)
 
+	// Mirror the production contract: getCheckpointState runs outside the lock,
+	// the scoring pass (headWeightStore + queries) holds f.mu.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	full := NewWeightStore(f)    // trusted O(V) full-scan oracle
 	idx := f.headWeightStore(cs) // incremental index under test
 
