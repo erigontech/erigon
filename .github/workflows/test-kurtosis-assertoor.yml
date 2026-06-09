@@ -82,6 +82,61 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # The matrix below populates the docker-cl-* cache, but it is skipped on
+  # cache-warming runs, so the default branch never receives that cache —
+  # leaving merge_group runs (which can only restore it from the default
+  # branch) to pull every third-party image from Docker Hub. Warm it here.
+  warm-third-party-images:
+    if: ${{ inputs.cache-warming-only }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conditional Docker Login
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          !github.event.pull_request.head.repo.fork
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+
+      - name: Restore cached third-party containers
+        id: cache-cl-images
+        uses: actions/cache@v5
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+
+      - name: Pull third-party containers and save to cache
+        if: steps.cache-cl-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${LIGHTHOUSE_IMAGE}"
+          pull "${TEKU_IMAGE}"
+          pull "${ASSERTOOR_IMAGE}"
+          pull "kurtosistech/engine:${KURTOSIS_VERSION}"
+          pull "kurtosistech/core:${KURTOSIS_VERSION}"
+          pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
+          pull "${KURTOSIS_VECTOR_IMAGE}"
+          pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
+          docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
+          docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
+          docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
+          docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
+          docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+
   assertoor_test:
     name: assertoor_${{ matrix.suite }}_${{ matrix.exec_mode }}_test
     needs: build-erigon-image
