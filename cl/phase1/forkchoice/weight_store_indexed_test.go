@@ -102,6 +102,8 @@ func TestRemoveVoteCompactsInPlace(t *testing.T) {
 // thereafter, so repeated head computations cannot double-count a vote.
 func TestSeedFromLatestMessagesIsIdempotent(t *testing.T) {
 	f := newIndexedWeightStoreTestStore()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	w := f.indexedWeightStore
 	root := common.HexToHash("0xabc")
 	f.latestMessages.set(0, LatestMessage{Root: root, Slot: 1})
