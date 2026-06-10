@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types"
@@ -40,16 +41,16 @@ func (r *balFoldReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]b
 	}
 	switch d {
 	case kv.AccountsDomain:
-		if len(plainKey) == 20 {
+		if len(plainKey) == length.Addr {
 			addr := accounts.InternAddress(common.BytesToAddress(plainKey))
 			if acc, ok := r.cs.accounts[addr]; ok && acc.dirty {
 				return r.cs.encodeFinalAccount(acc), step, nil
 			}
 		}
 	case kv.StorageDomain:
-		if len(plainKey) == 20+32 {
-			addr := accounts.InternAddress(common.BytesToAddress(plainKey[:20]))
-			slot := accounts.InternKey(common.BytesToHash(plainKey[20:]))
+		if len(plainKey) == length.Addr+length.Hash {
+			addr := accounts.InternAddress(common.BytesToAddress(plainKey[:length.Addr]))
+			slot := accounts.InternKey(common.BytesToHash(plainKey[length.Addr:]))
 			if dirty, ok := r.cs.storageDirty[addr]; ok && dirty[slot] {
 				v := r.cs.storageState[addr][slot]
 				if v.IsZero() {

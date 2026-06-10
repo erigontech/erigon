@@ -1565,7 +1565,7 @@ type blockResult struct {
 	lastTxNum       uint64
 	complete        bool
 	isPartial       bool
-	balSeeded       bool // a balSeed was dispatched for this block
+	balSeeded       bool
 	ApplyCount      int
 	TxIO            *state.VersionedIO
 	Receipts        types.Receipts
@@ -2176,9 +2176,7 @@ type blockExecutor struct {
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
-	// balSeeded is true when a balSeed was dispatched for this block, so the
-	// apply loop sends a balConfirm after post-execution validation passes.
-	balSeeded bool
+	balSeeded   bool
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
