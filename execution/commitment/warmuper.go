@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// Warmer branch-read outcome counters. Hit: branchFromCacheOrDB returned
+// Warmer branch-read outcome counters. Hit: the branch read returned
 // >= 4 bytes; Empty: returned nothing or unparseable. Used to size the
 // value of bypassing the xorfilter in this call path.
 var (
@@ -116,11 +116,6 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	return w
 }
 
-func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
-	branchData, _, err := trieCtx.Branch(prefix)
-	return branchData, err
-}
-
 // Start initializes and starts the warmup workers.
 func (w *Warmuper) Start() {
 	if w.started.Swap(true) {
@@ -174,7 +169,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		prefix := nibbles.HexToCompact(hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
-		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
+		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)

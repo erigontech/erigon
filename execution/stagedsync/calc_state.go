@@ -82,18 +82,18 @@ type calcState struct {
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
-	// lazyLoadErr captures the first error encountered during ensureAccount /
-	// ensureStorage. Sticky — never cleared — so the calculator can fail the
-	// next compute instead of silently producing wrong updates from a missing
-	// baseline. Surface via LazyLoadErr().
+	// lazyLoadErr captures the first error encountered during ensureAccount.
+	// Sticky — never cleared — so the calculator can fail the next compute
+	// instead of silently producing wrong updates from a missing baseline.
+	// Surface via LazyLoadErr().
 	lazyLoadErr error
 
 	logger    log.Logger
 	logPrefix string
 }
 
-// LazyLoadErr returns the first error encountered during ensureAccount /
-// ensureStorage lazy-loads, or nil. The calculator must check this before
+// LazyLoadErr returns the first error encountered during ensureAccount
+// lazy-loads, or nil. The calculator must check this before
 // computing — a missing baseline yields a wrong trie root that is hard to
 // attribute back to the original I/O error.
 func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
@@ -137,36 +137,6 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	}
 	cs.accounts[addr] = acc
 	return acc
-}
-
-// ensureStorage returns the storage value, lazy-loading from domain on first touch.
-func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKey) uint256.Int {
-	slots, ok := cs.storageState[addr]
-	if !ok {
-		slots = make(map[accounts.StorageKey]uint256.Int)
-		cs.storageState[addr] = slots
-	}
-	if val, ok := slots[key]; ok {
-		return val
-	}
-
-	var val uint256.Int
-	if cs.domainReader != nil {
-		v, found, err := cs.domainReader.ReadAccountStorage(addr, key)
-		if err != nil {
-			// See ensureAccount: sticky so the next compute fails fast.
-			if cs.lazyLoadErr == nil {
-				cs.lazyLoadErr = fmt.Errorf("ensureStorage(%x/%x): %w", addr.Value(), key.Value(), err)
-			}
-			if cs.logger != nil {
-				cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: lazy-load ReadAccountStorage failed", "addr", addr, "key", key, "err", err)
-			}
-		} else if found {
-			val = v
-		}
-	}
-	slots[key] = val
-	return val
 }
 
 // ApplyWrites updates the local state with all writes from a TX result.
@@ -299,9 +269,9 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			// The previous slot value is irrelevant here: the next line
 			// overwrites it with the EVM-write value, and the only
 			// downstream consumer (FlushToUpdates) reads exactly the
-			// value we set. Skip the ensureStorage lazy-load — it
-			// triggers a cold .ef GetAsOf seek per first-touched slot
-			// (~5,910 wasted seeks per SSTORE-bloat block) and discards
+			// value we set. Skip lazy-loading the prior slot value — it
+			// would trigger a cold .ef GetAsOf seek per first-touched slot
+			// (~5,910 wasted seeks per SSTORE-bloat block) and discard
 			// the loaded value. Initialize just the inner map.
 			slots := cs.storageState[w.Address]
 			if slots == nil {

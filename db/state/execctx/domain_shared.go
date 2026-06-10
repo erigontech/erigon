@@ -839,8 +839,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
 	// bytes are held in sd.mem above, so a cache hit here is always
-	// equivalent to reading from MDBX. Cleared by sd.Flush so a new MDBX
-	// state never coexists with stale cache entries.
+	// equivalent to reading from MDBX. Refreshed per-key by sd.Flush and
+	// evicted by txN watermark on unwind, so a cache hit never coexists
+	// with a newer MDBX state.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cstep, ok := sd.branchCache.Get(k); ok {
 			return cv, kv.Step(cstep), nil
@@ -848,9 +849,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	var readTxN uint64
+	var txNKnown bool
 	switch aggTx := tx.AggTx().(type) {
 	case MeteredGetterWithTxN:
 		v, step, readTxN, _, err = aggTx.MeteredGetLatestWithTxN(domain, k, tx, maxStep, &sd.metrics, start)
+		txNKnown = true
 	case MeteredGetter:
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
 	default:
@@ -864,7 +867,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
 	}
-	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
+	// Only cache a branch when the read's txN is known: a txN=0 entry would
+	// be treated as immortal by UnwindTo, so skip the Put rather than insert
+	// an entry that can never be unwind-evicted.
+	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
 		sd.branchCache.Put(k, v, uint64(step), readTxN, "sd.GetLatest")
 	}
 

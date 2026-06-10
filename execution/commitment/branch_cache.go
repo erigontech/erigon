@@ -111,9 +111,7 @@ func isCommitmentStateKey(prefix []byte) bool {
 //     readers. Caller calls MarkDirty BEFORE producing the new bytes, then
 //     Put AFTER the canonical-store write succeeds. This is the
 //     deferred-encoding-friendly alternative to inline invalidation
-//     (motivated by the prototype investigation that found inline
-//     invalidate is incompatible with deferred encoding — see
-//     agentspecs/commitment-cache-prototype-dev-context.md).
+//     (inline invalidate is incompatible with deferred encoding).
 //
 //  3. Decoded cells returned by GetDecoded MUST NOT be mutated. The
 //     *[16]cell pointer aliases entry-owned storage and is shared across
@@ -143,8 +141,7 @@ func isCommitmentStateKey(prefix []byte) bool {
 //
 // # Concurrency contract — what future parallel fold work must preserve
 //
-// Stage F (parallel tree-reduce fold), described in
-// agentspecs/trie-data-pipeline-complexity-tax.md, would change condition
+// A future parallel tree-reduce fold would change condition
 // 2 above: the parent fold (incl. root) would no longer be a single
 // post-Wait sequential pass. Multiple goroutines would compute parent
 // branches in parallel as their children complete. This MUST not violate
