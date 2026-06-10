@@ -99,3 +99,32 @@ func TestTransactionsSSZ_DecodeSSZ_MaxTransactionsPerPayload(t *testing.T) {
 		t.Fatalf("expected ErrTooBigList, got %v", err)
 	}
 }
+
+func TestTransactionsSSZ_DecodeSSZ_CustomMaxTransactionsPerPayload(t *testing.T) {
+	const maxTransactions = 2
+	firstOffset := uint32((maxTransactions + 1) * 4)
+	buf := make([]byte, firstOffset)
+	ssz.EncodeOffset(buf[:4], firstOffset)
+
+	txs := NewTransactionsSSZWithLimits(maxTransactions, clparams.MaxBytesPerTransactionDefault)
+	err := txs.DecodeSSZ(buf, 0)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ssz.ErrTooBigList) {
+		t.Fatalf("expected ErrTooBigList, got %v", err)
+	}
+}
+
+func TestTransactionsSSZ_DecodeSSZ_CustomMaxBytesPerTransaction(t *testing.T) {
+	buf := []byte{0x04, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC}
+
+	txs := NewTransactionsSSZWithLimits(clparams.MaxTransactionsPerPayloadDefault, 2)
+	err := txs.DecodeSSZ(buf, 0)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ssz.ErrTooBigList) {
+		t.Fatalf("expected ErrTooBigList, got %v", err)
+	}
+}
