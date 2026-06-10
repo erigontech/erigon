@@ -26,6 +26,10 @@ on:
         description: "Compile test binaries only; skip test execution (for cache warming runs)"
         type: boolean
         default: false
+      cl-images-only:
+        description: "Only warm the third-party CL/kurtosis image cache; skip the build and tests"
+        type: boolean
+        default: false
 
 jobs:
   # Build the erigon image once for the whole matrix. The matrix below has
@@ -37,7 +41,7 @@ jobs:
   # the image as a run-scoped artifact.
   build-erigon-image:
     name: build-erigon-image
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
+    if: ${{ !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     steps:
       - name: Fast checkout git repository
@@ -61,6 +65,22 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build erigon Docker image (with BuildKit layer cache)
+        id: build_erigon_image
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current-base
+          build-args: |
+            BINARIES=erigon caplin
+          cache-from: type=gha,scope=kurtosis-erigon-build
+          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      # docker/build-push-action has no retry input; retry once so a transient
+      # Docker Hub / GHA-cache failure doesn't fail an otherwise-good build.
+      - name: Retry erigon Docker image build on transient failure
+        if: steps.build_erigon_image.outcome == 'failure'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -82,12 +102,75 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # Warms the docker-cl-* cache on the default branch (where merge_group runs
+  # restore it) via a dedicated workflow on a paths filter + daily schedule —
+  # the cache only changes when the pinned image versions in this file change.
+  # lookup-only makes it a no-op when the cache already exists.
+  warm-third-party-images:
+    if: ${{ inputs.cl-images-only }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conditional Docker Login
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          !github.event.pull_request.head.repo.fork
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+
+      - name: Check whether third-party containers are already cached
+        id: cache-cl-images
+        uses: actions/cache/restore@v5
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+          lookup-only: true
+
+      - name: Pull third-party containers
+        if: steps.cache-cl-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${LIGHTHOUSE_IMAGE}"
+          pull "${TEKU_IMAGE}"
+          pull "${ASSERTOOR_IMAGE}"
+          pull "kurtosistech/engine:${KURTOSIS_VERSION}"
+          pull "kurtosistech/core:${KURTOSIS_VERSION}"
+          pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
+          pull "${KURTOSIS_VECTOR_IMAGE}"
+          pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
+          docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
+          docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
+          docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
+          docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
+          docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+
+      - name: Save third-party containers to cache
+        if: steps.cache-cl-images.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+
   assertoor_test:
     name: assertoor_${{ matrix.suite }}_${{ matrix.exec_mode }}_test
     needs: build-erigon-image
     # On cache-warming runs build-erigon-image alone warms the kurtosis image
     # cache; there's nothing for the matrix to do (the test step is skipped).
-    if: ${{ !inputs.cache-warming-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
+    if: ${{ !inputs.cache-warming-only && !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
