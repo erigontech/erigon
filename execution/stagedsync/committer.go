@@ -116,6 +116,35 @@ type commitmentCalculator struct {
 	// so no pre-window branch deltas leak into a window block's changeset.
 	perBlockFrom uint64
 
+	// --- speculative BAL commitment (dbg.SpeculativeBALCommitment) ---
+	// balActive gates every BAL-speculative branch; when false the calculator
+	// behaves exactly as the txResult-driven path.
+	balActive bool
+	// balConfirm carries per-block "execution confirmed the BAL" signals from
+	// the apply loop on a dedicated channel, so confirms aren't head-of-line
+	// blocked behind buffered txResults in cc.in. Closed by the apply loop on
+	// exit, which lets the calculator abandon any unconfirmed (invalid-block)
+	// folds and shut down.
+	balConfirm chan balConfirm
+	// balReader reads block N's pre-state for BAL folds, kept separate from
+	// asOfReader (which serves cc.state's txResult/fallback lazy-loads).
+	balReader *asOfStateReader
+	// lastConfirmedBlock is the highest block whose apply-loop validation has
+	// completed; a block is folded speculatively only once its predecessor is
+	// confirmed — the one-block-deep speculation invariant (the in-memory trie
+	// must not advance past an unconfirmed block). The exec loop seeds only
+	// single-block batches, so at tip the predecessor is the committed state
+	// and this always holds; a block whose predecessor is not yet confirmed
+	// falls back to the txResult path rather than stashing.
+	lastConfirmedBlock uint64
+	// heldFolds holds folded-but-unconfirmed results, keyed by block; an entry
+	// is removed once its block is confirmed.
+	heldFolds map[uint64]*balFold
+	// balFolded marks every block driven by the BAL fold (kept after confirm)
+	// so the txResult/blockResult handlers keep skipping it even after its
+	// heldFolds entry is cleared.
+	balFolded map[uint64]bool
+
 	wg   sync.WaitGroup
 	done chan struct{}
 }
@@ -130,6 +159,8 @@ func newCommitmentCalculator(
 	perBlockFrom uint64,
 	in chan applyResult,
 	out chan commitmentResult,
+	balConfirm chan balConfirm,
+	lastConfirmedBlock uint64,
 ) (*commitmentCalculator, error) {
 	// Create the calculator's own Updates buffer in ModeUpdate.
 	// ModeUpdate stores actual values (balance, nonce, storage) in the btree,
@@ -158,6 +189,7 @@ func newCommitmentCalculator(
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
+	balActive := dbg.SpeculativeBALCommitment && balConfirm != nil
 	return &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,
@@ -171,6 +203,12 @@ func newCommitmentCalculator(
 		out:                  out,
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
+		balActive:            balActive,
+		balConfirm:           balConfirm,
+		balReader:            &asOfStateReader{sd: doms, roTx: roTx, txNum: 0},
+		lastConfirmedBlock:   lastConfirmedBlock,
+		heldFolds:            map[uint64]*balFold{},
+		balFolded:            map[uint64]bool{},
 		done:                 make(chan struct{}),
 	}, nil
 }
@@ -200,16 +238,28 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	// must process ALL buffered items before exiting.
 	// Context cancellation is handled by the exec loop which closes
 	// cc.in after stopping.
-	for result := range cc.in {
-		cc.handleMessage(ctx, result)
+	if !cc.balActive {
+		for result := range cc.in {
+			cc.handleMessage(ctx, result)
+		}
+		return
 	}
+	cc.balLoop(ctx)
 }
 
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
+	case *balSeed:
+		cc.foldSeed(ctx, r)
+
 	case *txResult:
+		if cc.balActive && cc.balFolded[r.blockNum] {
+			// BAL-folded block: commitment comes from the fold, not these
+			// writes. Skip accumulation — cc.state is unused for this block.
+			return
+		}
 		// Accumulate writes in the calculator's local state.
 		// Values are lazy-loaded from domain on first touch, then
 		// overwritten by each TX's writes. At block boundary,
@@ -252,6 +302,14 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 		// Track the latest block boundary.
 		cc.lastBlockResult = r
+
+		if cc.balActive && cc.balFolded[r.BlockNum] {
+			// The fold already ran at balSeed; its root is published at
+			// confirm. Clear cc.state's per-block dirty flags so a later
+			// fallback block doesn't re-emit this block's keys.
+			cc.state.ResetBlockFlags()
+			return
+		}
 
 		// Break logic: in per-block mode, compute at every block boundary.
 		// Skip the first block if it's a partial block (resumed mid-block).

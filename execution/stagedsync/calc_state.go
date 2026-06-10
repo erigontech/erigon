@@ -25,12 +25,18 @@ type calcAccountState struct {
 	dirty bool
 }
 
+// calcStateReader is the read surface calcState needs from its backing
+// reader (satisfied by *asOfStateReader and by test mocks).
+type calcStateReader interface {
+	Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
+}
+
 // calcDomainReader provides lazy-load reads for calcState using the
 // asOfStateReader. This ensures all reads (both lazy-load and trie
 // fold/unfold sibling reads) go through the same GetAsOf path,
 // seeing state at the calculator's txNum.
 type calcDomainReader struct {
-	reader *asOfStateReader
+	reader calcStateReader
 }
 
 func (r *calcDomainReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
@@ -98,7 +104,7 @@ type calcState struct {
 // attribute back to the original I/O error.
 func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
 
-func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) *calcState {
+func newCalcState(reader calcStateReader, logger log.Logger, logPrefix string) *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
@@ -308,6 +314,22 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc.dirty = true
 		}
 	}
+}
+
+// setBALStorage records a slot's block-final value from the BAL and marks it
+// dirty. Unlike the StoragePath case in ApplyWrites it skips the baseline
+// lazy-load: the BAL value is authoritative and overwrites it anyway.
+func (cs *calcState) setBALStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	slots, ok := cs.storageState[addr]
+	if !ok {
+		slots = make(map[accounts.StorageKey]uint256.Int)
+		cs.storageState[addr] = slots
+	}
+	slots[key] = val
+	if cs.storageDirty[addr] == nil {
+		cs.storageDirty[addr] = make(map[accounts.StorageKey]bool)
+	}
+	cs.storageDirty[addr][key] = true
 }
 
 // FlushToUpdates writes the accumulated dirty state to a commitment.Updates

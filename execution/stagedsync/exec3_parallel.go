@@ -96,6 +96,7 @@ type parallelExecutor struct {
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
+	startBlockNum   uint64 // first block of the batch; with maxBlockNum identifies single-block (tip) batches for speculative BAL commitment
 	// reachedMaxBlock is set by the exec loop when it exits cleanly because
 	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
 	// as opposed to sizeEst > batchLimit (more work pending). The apply loop
@@ -253,6 +254,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
 	pe.maxBlockNum = maxBlockNum
+	pe.startBlockNum = startBlockNum
+
+	// Speculative BAL commitment: the apply loop signals per-block validation
+	// success to the calculator on this dedicated channel. Created only when
+	// the feature is enabled; the calculator treats a nil channel as "off".
+	var balConfirmCh chan balConfirm
+	if dbg.SpeculativeBALCommitment {
+		balConfirmCh = make(chan balConfirm, 64)
+	}
 
 	// Configure changeset capture and seed the initial accumulator BEFORE
 	// the exec loop / executeBlocks goroutines start touching sd.mem. The
@@ -270,7 +280,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// the batch and flushes them all into one block's changeset, which fails
 	// on subsequent reorgs.
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, rootResults)
+	var lastConfirmedBlock uint64
+	if startBlockNum > 0 {
+		lastConfirmedBlock = startBlockNum - 1
+	}
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, rootResults, balConfirmCh, lastConfirmedBlock)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -294,6 +308,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
+		// Closing balConfirmCh on exit lets the calculator abandon any
+		// unconfirmed speculative fold (the block is being discarded) and
+		// shut down — see commitmentCalculator.balLoop.
+		if balConfirmCh != nil {
+			defer close(balConfirmCh)
+		}
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
@@ -612,6 +632,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							return err
+						}
+					}
+
+					// Execution confirmed the BAL: release the calculator's
+					// speculative fold for this block (flush + root check). Sent
+					// only for seeded blocks; ProcessBAL failure returns above,
+					// so the fold is dropped on the calculator's confirm-close.
+					if balConfirmCh != nil && applyResult.balSeeded {
+						select {
+						case balConfirmCh <- balConfirm{blockNum: applyResult.BlockNum}:
+						case <-ctx.Done():
 						}
 					}
 
@@ -1164,12 +1195,58 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
+		if pe.maybeSeedBAL(ctx, execRequest) {
+			scheduleable.balSeeded = true
+		}
 		pe.blockExecMetrics.BlockCount.Add(1)
 		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe)
 	}
 
 	return nil
+}
+
+// maybeSeedBAL sends a balSeed to the calculator when speculative BAL
+// commitment applies to this block: feature enabled, a single-block (tip)
+// batch, a BAL is present, post-Amsterdam, non-genesis, and a full
+// (non-resumed) block. It must run before scheduleExecution so the seed
+// precedes the block's txResults on commitResults. Returns true when sent.
+func (pe *parallelExecutor) maybeSeedBAL(ctx context.Context, execRequest *execRequest) bool {
+	if !dbg.SpeculativeBALCommitment || pe.commitResultsCh == nil {
+		return false
+	}
+	// Single-block batch only: keeps the in-memory trie one-block-deep, which
+	// is where tip processing lives and where BALs are delivered.
+	if pe.startBlockNum != pe.maxBlockNum {
+		return false
+	}
+	if execRequest.blockNum == 0 || len(execRequest.accessList) == 0 || len(execRequest.tasks) == 0 {
+		return false
+	}
+	first := execRequest.tasks[0]
+	// A non-(-1) first txIndex means the batch resumed mid-block; the fold's
+	// pre-state pinning would be wrong, so leave it to the txResult path.
+	if first.Version().TxIndex != -1 {
+		return false
+	}
+	if !pe.cfg.chainConfig.IsAmsterdam(first.BlockTime()) {
+		return false
+	}
+	last := execRequest.tasks[len(execRequest.tasks)-1]
+	seed := &balSeed{
+		blockNum:   execRequest.blockNum,
+		blockHash:  execRequest.blockHash,
+		stateRoot:  first.BlockRoot(),
+		firstTxNum: first.Version().TxNum,
+		lastTxNum:  last.Version().TxNum,
+		accessList: execRequest.accessList,
+	}
+	select {
+	case pe.commitResultsCh <- seed:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // applyLoopMissingBlocks returns the blockNums in txResultBlocks that
@@ -1488,6 +1565,7 @@ type blockResult struct {
 	lastTxNum       uint64
 	complete        bool
 	isPartial       bool
+	balSeeded       bool // a balSeed was dispatched for this block
 	ApplyCount      int
 	TxIO            *state.VersionedIO
 	Receipts        types.Receipts
@@ -2098,6 +2176,9 @@ type blockExecutor struct {
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
+	// balSeeded is true when a balSeed was dispatched for this block, so the
+	// apply loop sends a balConfirm after post-execution validation passes.
+	balSeeded bool
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
@@ -2860,6 +2941,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			lastTxNum:       txTask.Version().TxNum,
 			complete:        true,
 			isPartial:       isPartial,
+			balSeeded:       be.balSeeded,
 			ApplyCount:      be.applyCount,
 			TxIO:            be.blockIO,
 			Receipts:        receipts,

@@ -110,12 +110,17 @@ var (
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
-	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
-	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead             = EnvBool("READ_AHEAD", true)
+	// SpeculativeBALCommitment overlaps the state-commitment fold of block N
+	// with execution of N at chain tip by seeding the calculator from the
+	// block's EIP-7928 BAL. Off by default; the post-execution txResult path
+	// is used otherwise.
+	SpeculativeBALCommitment = EnvBool("SPECULATIVE_BAL_COMMITMENT", false)
+	BatchCommitments         = EnvBool("BATCH_COMMITMENTS", true)
+	CaplinEfficientReorg     = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies        = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache            = EnvBool("USE_STATE_CACHE", true)
+	AssertStateCache         = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead                = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -151,13 +156,14 @@ func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 // CLI-override setters for the performance toggles that also have env-var
 // twins. The env var sets the initial value at package init; the CLI layer
 // calls these at node startup only when the user explicitly set the flag.
-func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
-func SetUseStateCache(b bool)           { UseStateCache = b }
-func SetReadAhead(b bool)               { ReadAhead = b }
-func SetExec3Workers(n int)             { Exec3Workers = n }
-func SetNoPrune(b bool)                 { noPrune = b }
-func SetNoMerge(b bool)                 { noMerge = b }
-func SetNoBackgroundMaintenance(b bool) { noBackgroundE3Build = b }
+func SetIgnoreBAL(b bool)                { IgnoreBAL = b }
+func SetSpeculativeBALCommitment(b bool) { SpeculativeBALCommitment = b }
+func SetUseStateCache(b bool)            { UseStateCache = b }
+func SetReadAhead(b bool)                { ReadAhead = b }
+func SetExec3Workers(n int)              { Exec3Workers = n }
+func SetNoPrune(b bool)                  { noPrune = b }
+func SetNoMerge(b bool)                  { noMerge = b }
+func SetNoBackgroundMaintenance(b bool)  { noBackgroundE3Build = b }
 
 var (
 	dirtySace     uint64

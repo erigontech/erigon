@@ -686,6 +686,15 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	return txNum, blockNum, nil
 }
 
+// StoreCommitmentState encodes the current in-memory trie state and writes it
+// to the commitment domain through the currently-installed changeset
+// accumulator. Used by the speculative-BAL path to persist block N's
+// commitment marker at confirmation time — when the fold ran earlier with
+// saveState disabled because N's changeset did not yet exist.
+func (sdc *SharedDomainsCommitmentContext) StoreCommitmentState(tx kv.TemporalTx, blockNum, txNum uint64) error {
+	return sdc.encodeAndStoreCommitmentState(sdc.trieContext(tx, blockNum, txNum), blockNum, txNum)
+}
+
 // encodes current trie state and saves it in SharedDomains
 func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieContext *TrieContext, blockNum, txNum uint64) error {
 	if trieContext == nil {
