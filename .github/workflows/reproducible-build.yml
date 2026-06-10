@@ -23,6 +23,8 @@ jobs:
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: reproducible-build
 
       - name: Build all
         run: make all
