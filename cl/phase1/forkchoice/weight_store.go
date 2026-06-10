@@ -200,11 +200,6 @@ type WeightStoreReader interface {
 	GetWeight(node ForkChoiceNode) uint64
 }
 
-// GetWeightStore returns a WeightStore for the ForkChoiceStore.
-func (f *ForkChoiceStore) GetWeightStore() WeightStore {
-	return NewWeightStore(f)
-}
-
 // headWeightStore returns the incremental indexed weight store for a head
 // computation, with cs supplying fresh validator balances and active/slashed
 // status. It seeds the index from latestMessages on first use. The caller must

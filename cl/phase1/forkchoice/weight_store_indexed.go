@@ -49,9 +49,6 @@ type indexedWeightStore struct {
 	// current scoring pass; set via setCheckpointState before each head walk.
 	checkpointState *checkpointState
 
-	// version tracks changes to invalidate the index
-	version uint64
-
 	// seeded is set once the index has imported the full latestMessages snapshot.
 	seeded bool
 
@@ -76,7 +73,6 @@ func (w *indexedWeightStore) IndexVote(validatorIndex uint64, message LatestMess
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.indexVoteLocked(validatorIndex, message)
-	w.version++
 }
 
 // indexVoteLocked appends a vote to its target root's list. Caller holds w.mu.
@@ -115,7 +111,6 @@ func (w *indexedWeightStore) seedFromLatestMessages() {
 		}
 		w.indexVoteLocked(uint64(i), msg)
 	}
-	w.version++
 }
 
 // RemoveVote removes a validator's vote from the index.
@@ -141,8 +136,6 @@ func (w *indexedWeightStore) RemoveVote(validatorIndex uint64, oldRoot common.Ha
 			w.directVotes[oldRoot] = entries[:n]
 		}
 	}
-
-	w.version++
 }
 
 // pruneFinalized drops indexed votes whose target block is finalized away
@@ -155,16 +148,6 @@ func (w *indexedWeightStore) pruneFinalized(finalizedSlot uint64) {
 			delete(w.directVotes, root)
 		}
 	}
-	w.version++
-}
-
-// Invalidate clears the entire index. Call when major state changes occur.
-func (w *indexedWeightStore) Invalidate() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.directVotes = make(map[common.Hash][]VoteEntry)
-	w.version++
 }
 
 // GetWeight returns the weight for a ForkChoiceNode using the indexed votes.
