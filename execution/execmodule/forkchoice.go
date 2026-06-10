@@ -517,8 +517,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	headNum := fcuHeader.Number.Uint64()
 	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
 
+	// Snapshot reconciliation: when the prior mode-B unwind trimmed
+	// snapshot files, signal this cycle as the FirstCycle so OtterSync
+	// runs DownloadAndIndexSnapshotsIfNeed → ReconcilePreverifiedAgainstDisk
+	// and re-fetches the trimmed files. takeSnapshotReconcileSignal is
+	// atomic Swap, so the flag is consumed exactly once.
+	firstCycle := e.pipelineExecutor.takeSnapshotReconcileSignal()
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
+		FirstCycle:   firstCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			// Chain tip (!initialCycle): no in-loop work — post-RunLoop path
 			// handles flush+commit+prune.

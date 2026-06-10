@@ -94,6 +94,14 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	if err := e.unwinder.FinalizeUnwind(); err != nil {
 		e.logger.Warn("SetHead mode B: FinalizeUnwind returned an error (tx already committed)", "err", err, "targetBlock", targetBlock)
 	}
+	// Mode B trims snapshot files past the unwind target; the next FCU
+	// cycle must run OtterSync's reconciliation pass to re-download
+	// them. Without this signal the trimmed-file gap is permanent until
+	// the next process restart (OtterSync's
+	// DownloadAndIndexSnapshotsIfNeed is otherwise gated on
+	// IsFirstCycle — see stage_snapshots.go).
+	e.pipelineExecutor.SignalSnapshotReconcileNeeded()
+	e.publishUnwindCompleted(targetBlock, currentHead)
 	return nil
 }
 

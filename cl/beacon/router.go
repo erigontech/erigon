@@ -34,7 +34,11 @@ type LayeredBeaconHandler struct {
 	ArchiveApi *handler.ApiHandler
 }
 
-func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
+// ListenAndServe runs the beacon API HTTP server until ctx is cancelled.
+// On cancel it calls server.Shutdown so the TCP listener is released
+// before returning — required for CaplinService.Restart to be able to
+// rebind the same port on relaunch.
+func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
 	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
 	if err != nil {
 		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
@@ -74,10 +78,22 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		WriteTimeout: routerCfg.WriteTimeout,
 	}
 
-	if err := server.Serve(listener); err != nil {
+	// Wire ctx cancellation to a graceful Shutdown so the listener is
+	// released cleanly. Without this, CaplinService.Restart would fail
+	// to rebind this port on the second launch.
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Warn("[Beacon API] Shutdown returned error", "err", err)
+		}
+	}()
+
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
 		return err
 	}
-	log.Info("[Beacon API] Listening", "addr", routerCfg.Address)
+	log.Info("[Beacon API] stopped", "addr", routerCfg.Address)
 	return nil
 }

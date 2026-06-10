@@ -48,6 +48,7 @@ type ServerConfig struct {
 }
 
 func createSentinel(
+	ctx context.Context,
 	cfg *sentinel.SentinelConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
@@ -60,7 +61,7 @@ func createSentinel(
 	initialStatus *cltypes.Status,
 	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
-		context.Background(),
+		ctx,
 		cfg,
 		ethClock,
 		blockReader,
@@ -89,7 +90,13 @@ func createSentinel(
 	return sent, localNode, nil
 }
 
+// StartSentinelService starts the sentinel + gRPC serving stack. ctx
+// drives shutdown: on cancel the sentinel's libp2p host is closed and
+// the gRPC server is gracefully stopped so their listener ports are
+// released. Required for CaplinService.Restart to bind them again on
+// relaunch.
 func StartSentinelService(
+	ctx context.Context,
 	cfg *sentinel.SentinelConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
@@ -101,8 +108,8 @@ func StartSentinelService(
 	PeerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
-	ctx := context.Background()
 	sent, localNode, err := createSentinel(
+		ctx,
 		cfg,
 		blockReader,
 		blobStorage,
@@ -120,26 +127,33 @@ func StartSentinelService(
 	}
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	server := NewSentinelServer(ctx, sent, logger)
-	go StartServe(server, srvCfg, srvCfg.Creds)
+	go StartServe(ctx, server, srvCfg, srvCfg.Creds, sent)
 
 	return direct.NewSentinelClientDirect(server), localNode, nil
 }
 
+// StartServe runs the gRPC serving loop until ctx is cancelled. On
+// cancel it calls Sentinel.Stop (releases the libp2p host + its TCP
+// listener) and gRPCserver.GracefulStop (releases the gRPC port).
 func StartServe(
+	ctx context.Context,
 	server *SentinelServer,
 	srvCfg *ServerConfig,
 	creds credentials.TransportCredentials,
+	sent *sentinel.Sentinel,
 ) {
 	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 		return
 	}
-	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	//go server.ListenToGossip()
-	// Regiser our server as a gRPC server
 	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	go func() {
+		<-ctx.Done()
+		sent.Stop()
+		gRPCserver.GracefulStop()
+	}()
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}

@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -124,7 +123,11 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 	paths := make([]string, 0, len(toRemove))
 	for _, e := range toRemove {
 		names = append(names, e.Name)
-		paths = append(paths, filepath.Join(p.snapDir, e.Name))
+		// Resolve against the kind subdir (domain/, history/, …);
+		// FileEntry.Name is the bare basename but the file on disk
+		// lives wherever the downloader wrote it. Same fix as
+		// [[provider_unwind_state_regen_wire.go]] / [[flow/orchestrator.go:70]].
+		paths = append(paths, snapshot.ResolveExistingPath(p.snapDir, e.Name))
 	}
 
 	// Stage the FS / inventory / downloader / republish ops for

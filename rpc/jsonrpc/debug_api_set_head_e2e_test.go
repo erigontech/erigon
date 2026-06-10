@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
@@ -1111,4 +1113,234 @@ func TestSetHead_E2E_ModeB_SequentialUnwinds_NonAligned(t *testing.T) {
 		require.Equal(t, t2, latest)
 	}
 	assertNoBlockDataPastTarget(t, m, t2)
+}
+
+// captureBus is a stub event bus that records every flow.UnwindCompleted
+// publish. Used by the post-condition tests below to assert that
+// ExecModule.SetHead emits the CL-rewind signal.
+type captureBus struct {
+	mu     sync.Mutex
+	events []flow.UnwindCompleted
+}
+
+func (b *captureBus) Publish(payload ...interface{}) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, p := range payload {
+		if e, ok := p.(flow.UnwindCompleted); ok {
+			b.events = append(b.events, e)
+		}
+	}
+	return 0
+}
+
+func (b *captureBus) snapshot() []flow.UnwindCompleted {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]flow.UnwindCompleted, len(b.events))
+	copy(out, b.events)
+	return out
+}
+
+// TestSetHead_E2E_PublishesUnwindCompleted pins the CL-pointer
+// post-condition required for the mode-B unwind soak: every successful
+// SetHead (mode A in this test — within-diffset incremental) must emit
+// a flow.UnwindCompleted event so the CL component
+// (node/components/caplin) can rewind Caplin's in-memory anchors. The
+// soak's iter-1 wedge on 2026-06-09 had no such event — the EL
+// unwound but Caplin's highestSeen stayed at the pre-unwind slot,
+// infinite-looping FCUs for blocks the EL no longer had. See
+// docs/plans/20260609-mode-b-cl-rewind-gap.md.
+func TestSetHead_E2E_PublishesUnwindCompleted(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+	)
+	ctx := m.Ctx
+
+	bus := &captureBus{}
+	m.ExecModule.SetEventBus(bus)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	tipBlock := canonicalHead(t, m)
+	require.Equal(t, uint64(8), tipBlock)
+
+	api := newSetHeadE2EAPI(t, m)
+	const targetBlock uint64 = 5
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(targetBlock)))
+
+	events := bus.snapshot()
+	require.Len(t, events, 1, "exactly one flow.UnwindCompleted must publish per SetHead")
+	require.Equal(t, targetBlock, events[0].ToBlock, "ToBlock must equal the SetHead target")
+	require.Equal(t, tipBlock, events[0].TipBlock, "TipBlock must be the pre-unwind EL head — the CL slot-estimate ratio depends on it")
+}
+
+// TestSetHead_E2E_NoEventOnNoOp guards a subtle case: SetHead returns
+// nil without publishing when targetBlock == currentHead (the early-out
+// at set_head.go:77). Publishing a no-op event would trigger a spurious
+// CL rewind for a setHead that didn't actually unwind anything.
+func TestSetHead_E2E_NoEventOnNoOp(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+	)
+	ctx := m.Ctx
+
+	bus := &captureBus{}
+	m.ExecModule.SetEventBus(bus)
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	tipBlock := canonicalHead(t, m)
+
+	api := newSetHeadE2EAPI(t, m)
+	// SetHead to current head = no-op.
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(tipBlock)))
+
+	require.Empty(t, bus.snapshot(),
+		"no-op SetHead (target == currentHead) must NOT publish flow.UnwindCompleted")
+}
+
+// TestSetHead_E2E_RejectsBeyondWSWindow pins the hard constraint: a
+// SetHead target whose depth exceeds the configured WS-window cap is
+// rejected before any side effects. Operator gets an actionable error
+// instead of an unwind Caplin can't recover from.
+func TestSetHead_E2E_RejectsBeyondWSWindow(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+	)
+	ctx := m.Ctx
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	tipBlock := canonicalHead(t, m)
+	require.Equal(t, uint64(8), tipBlock)
+
+	// Cap depth at 2 blocks; observe what happens at depth 3 and depth 2.
+	m.ExecModule.SetSetHeadMaxDepthBlocks(2)
+	api := newSetHeadE2EAPI(t, m)
+
+	// Depth 3: target=5, current=8, 8-5=3 > cap → reject with the
+	// weak-subjectivity error.
+	err = api.SetHead(ctx, hexutil.Uint64(5))
+	require.Error(t, err, "depth 3 must be rejected against a cap of 2")
+	require.Contains(t, err.Error(), "weak-subjectivity",
+		"reject error must name the constraint so the operator knows what to do")
+	require.Equal(t, uint64(8), canonicalHead(t, m),
+		"head must NOT move when the cap rejects the request")
+
+	// Depth 2: target=6, current=8, 8-6=2 == cap → accepted.
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(6)),
+		"depth exactly equal to cap must be accepted (cap is strict-greater-than)")
+	require.Equal(t, uint64(6), canonicalHead(t, m),
+		"head must have moved to the target when SetHead is accepted")
+}
+
+// TestSetHead_E2E_WSWindowZeroDisablesCheck pins the harness/test path:
+// when the cap is unset (zero), the check is bypassed entirely. Without
+// this, every existing test would have to know about the cap.
+func TestSetHead_E2E_WSWindowZeroDisablesCheck(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+	)
+	ctx := m.Ctx
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+
+	// Cap explicitly NOT set → SetSetHeadMaxDepthBlocks(0) explicit (also the zero value).
+	m.ExecModule.SetSetHeadMaxDepthBlocks(0)
+	api := newSetHeadE2EAPI(t, m)
+
+	// Target 1 = depth 7. Would be rejected if the cap were small;
+	// with cap=0 the check is disabled and SetHead proceeds.
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(1)),
+		"with cap=0 the check must be disabled regardless of depth")
 }

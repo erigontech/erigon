@@ -96,6 +96,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
+	caplincomp "github.com/erigontech/erigon/node/components/caplin"
 	manifestexchange "github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
@@ -207,6 +208,10 @@ type Ethereum struct {
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
+	// caplinService owns the in-process Caplin goroutine lifecycle so
+	// the CL flow-orchestrator can Restart it on flow.UnwindCompleted.
+	// Nil when InternalCL is off or the network has no embedded support.
+	caplinService *caplincomp.CaplinService
 
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
@@ -808,8 +813,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// to the same bus so the chain
 	//   sentry PeerEvent → manifest_exchange (fetches peer chain.toml.v2)
 	//     → flow.PeerManifestReceived → orchestrator → InitialStateReady
-	// closes on real peer events.
-	if bus := backend.components.Storage.Bus(); bus != nil {
+	// closes on real peer events. The bus itself is now always-init
+	// (the CL component subscribes regardless of orchestrator mode);
+	// gate the orchestrator chain on the LifecycleDrivenByStorage flag.
+	if bus := backend.components.Storage.Bus(); bus != nil && config.Snapshot.LifecycleDrivenByStorage {
 		if err := backend.sentryProvider.BindBus(bus); err != nil {
 			return nil, fmt.Errorf("sentry BindBus: %w", err)
 		}
@@ -1728,6 +1735,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
+		// Install the SetHead WS-window cap. Below this depth, peers
+		// aren't required to serve the data and Caplin can't reanchor
+		// via restart. See docs/plans/20260609-mode-b-cl-rewind-gap.md.
+		if _, beaconCfg := clparams.GetConfigsByNetwork(config.CaplinConfig.NetworkId); beaconCfg != nil {
+			wsBlocks := beaconCfg.MinEpochsForBlockRequests() * beaconCfg.SlotsPerEpoch
+			backend.execModule.SetSetHeadMaxDepthBlocks(wsBlocks)
+			logger.Info("[caplin-component] SetHead depth capped at WS window",
+				"blocks", wsBlocks, "epochs", beaconCfg.MinEpochsForBlockRequests())
+		}
 		if config.CaplinConfig.EnableEngineAPI {
 			executionEngine, err = executionclient.NewExecutionClientEngineLocal(
 				engineBackendRPC,
@@ -1740,36 +1756,48 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return nil, err
 			}
 		}
-		go func() {
-			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			// Pass storage's BlockHeadersReady channel so Caplin waits
-			// for the tip *-headers.seg to be readable before starting
-			// its clstages loop — see provider.watchTipHeaderForOpenSegments.
-			// Nil-safe: when storage isn't running its orchestrator the
-			// channel is nil and Caplin starts immediately (legacy path).
-			// localBlockTipFn: query the storage component's Inventory
-			// for the highest contiguous Local block, so Caplin's
-			// canonical-block-tip stop bound reflects what's actually
-			// on disk rather than what preverified.toml advertises.
-			// Nil-safe: Inventory is nil for non-storage-driven
-			// configurations; RunCaplinService falls back to
-			// DeriveManifestTips in that case.
-			var localBlockTipFn func() uint64
-			if backend.components.Storage != nil && backend.components.Storage.Inventory != nil {
-				inv := backend.components.Storage.Inventory
-				localBlockTipFn = func() uint64 {
-					view := inv.View()
-					defer view.Close()
-					return view.LocalBlockTip()
-				}
+		eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
+		// localBlockTipFn: query the storage component's Inventory for
+		// the highest contiguous Local block, so Caplin's canonical-
+		// block-tip stop bound reflects what's actually on disk rather
+		// than what preverified.toml advertises. Nil-safe: Inventory is
+		// nil for non-storage-driven configurations; RunCaplinService
+		// falls back to DeriveManifestTips in that case.
+		var localBlockTipFn func() uint64
+		if backend.components.Storage != nil && backend.components.Storage.Inventory != nil {
+			inv := backend.components.Storage.Inventory
+			localBlockTipFn = func() uint64 {
+				view := inv.View()
+				defer view.Close()
+				return view.LocalBlockTip()
 			}
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady, localBlockTipFn); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error("could not start caplin", "err", err)
-				}
+		}
+		// Construct the CL flow-orchestrator component once. It
+		// survives across CaplinService restarts: bus subscription is
+		// one-shot, but the Restarter target gets re-pointed at the
+		// service each restart. Nil-safe: when no storage bus is
+		// available (test/dev paths), CL restart on user-initiated
+		// SetHead will not fire and SetHead's publish is a no-op.
+		caplinProvider := caplincomp.NewProvider(logger)
+		if storageBus := backend.components.Storage.Bus(); storageBus != nil {
+			if err := caplinProvider.BindBus(storageBus); err != nil {
+				return nil, fmt.Errorf("caplin component BindBus: %w", err)
 			}
-			ctxCancel()
-		}()
+			backend.execModule.SetEventBus(storageBus)
+			logger.Info("[caplin-component] wired and subscribed to flow.UnwindCompleted")
+		} else {
+			logger.Warn("[caplin-component] storage bus is nil; CL restart on user-initiated SetHead will NOT fire")
+		}
+		// LaunchFn closes over RunCaplinService's args so the service
+		// can spawn fresh Caplin goroutines without re-collecting them.
+		launchCaplin := func(launchCtx context.Context) error {
+			return caplin1.RunCaplinService(launchCtx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady, localBlockTipFn)
+		}
+		backend.caplinService = caplincomp.NewCaplinService(ctx, dirs, launchCaplin, ctxCancel, logger)
+		caplinProvider.SetRestarter(backend.caplinService)
+		if err := backend.caplinService.Start(); err != nil {
+			return nil, fmt.Errorf("caplin service start: %w", err)
+		}
 		// Start embedded dev validator if configured.
 		if config.CaplinConfig.DevValidatorSeed != "" {
 			go func() {
@@ -2213,6 +2241,11 @@ func (s *Ethereum) Start() error {
 // Stop implements node.Service, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	// Drain Caplin first so its in-flight goroutines release the CL DB
+	// before sentry teardown closes the underlying handles.
+	if s.caplinService != nil {
+		s.caplinService.Stop()
+	}
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
 	if s.unsubscribeEthstat != nil {

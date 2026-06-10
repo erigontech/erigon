@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 )
 
 func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
@@ -51,10 +52,40 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 // SetHead rewinds the local chain to the specified block number by unwinding
 // all staged sync stages. This is the core implementation used by debug_setHead.
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
-	acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer acquireCancel()
-	if err := e.semaphore.Acquire(acquireCtx, 1); err != nil {
-		return fmt.Errorf("execution module is busy: %w", err)
+	// Wait for any in-flight execution to drain BEFORE acquiring the
+	// semaphore. Holding the semaphore during the wait would block
+	// UpdateForkChoice, which is the only path that clears
+	// e.currentContext — a classic deadlock: SetHead waits for
+	// currentContext to clear; FCU can't clear it because SetHead
+	// holds the semaphore it needs. With the wait-then-acquire order,
+	// an in-flight newPayload+FCU cycle completes naturally and we
+	// acquire cleanly.
+	if err := e.waitForQuiescence(ctx); err != nil {
+		return err
+	}
+
+	// Acquire the semaphore. A new newPayload may slip in during the
+	// gap between quiescence detection and acquire — re-check under
+	// the semaphore. With it held, no new payloads/FCUs can start; we
+	// only need to wait for any one in flight to drain.
+	for {
+		acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
+		err := e.semaphore.Acquire(acquireCtx, 1)
+		acquireCancel()
+		if err != nil {
+			return fmt.Errorf("execution module is busy: %w", err)
+		}
+		e.lock.RLock()
+		quiescent := e.currentContext == nil
+		e.lock.RUnlock()
+		if quiescent {
+			break
+		}
+		// Lost the race — release so FCU can clear, then wait again.
+		e.semaphore.Release(1)
+		if err := e.waitForQuiescence(ctx); err != nil {
+			return err
+		}
 	}
 	defer e.semaphore.Release(1)
 
@@ -76,6 +107,15 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 
 	if targetBlock == currentHead {
 		return nil // already at the target
+	}
+
+	// Hard constraint: cannot setHead beyond the consensus
+	// weak-subjectivity window. Below WS, peers aren't required to
+	// serve the data and Caplin's restart-based reanchor cannot
+	// converge.
+	if e.setHeadMaxDepthBlocks > 0 && (currentHead-targetBlock) > e.setHeadMaxDepthBlocks {
+		return fmt.Errorf("setHead target %d is %d blocks below head %d; exceeds the consensus weak-subjectivity window of %d blocks — Caplin cannot reanchor that deep",
+			targetBlock, currentHead-targetBlock, currentHead, e.setHeadMaxDepthBlocks)
 	}
 
 	// Check if we can unwind that far back. minUnwindableBlock is the
@@ -166,5 +206,19 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)
+	e.publishUnwindCompleted(targetBlock, currentHead)
 	return nil
+}
+
+// publishUnwindCompleted broadcasts flow.UnwindCompleted to the storage
+// bus so the CL component can rewind Caplin's in-memory anchors. The
+// publish is best-effort: nil bus (harness/test paths) and any bus
+// implementation failures are silent — the EL unwind already committed
+// and the operator can restart the node to recover if the CL doesn't
+// catch up. See docs/plans/20260609-mode-b-cl-rewind-gap.md.
+func (e *ExecModule) publishUnwindCompleted(toBlock, tipBlock uint64) {
+	if e.eventBus == nil {
+		return
+	}
+	e.eventBus.Publish(flow.UnwindCompleted{ToBlock: toBlock, TipBlock: tipBlock})
 }

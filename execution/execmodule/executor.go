@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -62,6 +63,16 @@ type PipelineExecutor struct {
 	// wiring (backend.go) after the storage Provider's Initialize.
 	// nil → no wait (legacy mode, non-V2 paths).
 	initialStateReady <-chan struct{}
+
+	// pendingSnapshotReconcile is set by the mode-B unwind path after
+	// it has trimmed snapshot files. The next RunLoop reads + clears it
+	// and passes FirstCycle=true to Sync.Run so OtterSync's
+	// DownloadAndIndexSnapshotsIfNeed (gated on IsFirstCycle in
+	// stage_snapshots.go) re-runs ReconcilePreverifiedAgainstDisk and
+	// re-fetches the trimmed files. Without this signal a mid-life
+	// mode-B unwind leaves a permanent snapshot gap — OtterSync's
+	// reconciliation only runs on the very first cycle of the process.
+	pendingSnapshotReconcile atomic.Bool
 }
 
 // SetInitialStateReady installs the orchestrator's "post-download work
@@ -72,6 +83,20 @@ type PipelineExecutor struct {
 // wires this in backend.go after storage.Initialize.
 func (pe *PipelineExecutor) SetInitialStateReady(ch <-chan struct{}) {
 	pe.initialStateReady = ch
+}
+
+// SignalSnapshotReconcileNeeded marks the next RunLoop cycle as
+// requiring a snapshot reconciliation pass. Called by the mode-B
+// unwind path after it trims snapshot files. Idempotent.
+func (pe *PipelineExecutor) SignalSnapshotReconcileNeeded() {
+	pe.pendingSnapshotReconcile.Store(true)
+}
+
+// takeSnapshotReconcileSignal atomically reads and clears the pending
+// flag. The caller passes the returned value as FirstCycle to the next
+// Sync.Run so OtterSync's DownloadAndIndexSnapshotsIfNeed runs.
+func (pe *PipelineExecutor) takeSnapshotReconcileSignal() bool {
+	return pe.pendingSnapshotReconcile.Swap(false)
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil

@@ -852,6 +852,18 @@ func (p *Provider) Initialize(deps Deps) error {
 		}
 	}
 
+	// Bus + worker pool always initialize, regardless of
+	// LifecycleDrivenByStorage. The bus is the cross-component event
+	// substrate (storage publishes flow events, downloader/CL/manifest
+	// components subscribe). The lifecycle-driver-only gating below
+	// only covers the orchestrator pieces that consume the bus; the
+	// bus itself must exist for non-orchestrator subscribers (e.g. the
+	// CL component reacting to flow.UnwindCompleted on user-initiated
+	// SetHead) regardless of which mode storage is in. See
+	// docs/plans/20260609-mode-b-cl-rewind-gap.md.
+	p.eventPool = workerpool.New(runtime.NumCPU())
+	p.eventBus = event.NewEventBus(execPoolAdapter{p.eventPool})
+
 	if deps.Inventory != nil && config.Snapshot.LifecycleDrivenByStorage {
 		builder := &productionIndexBuilder{
 			blockRetire:  p.BlockRetire,
@@ -963,13 +975,10 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
 		}
 
-		// Real worker pool, not nil: async subscribers (downloader's
-		// onDownloadRequested via SubscribeAsync, auto-publish) call
-		// bus.execPool.Exec — a nil pool panics the moment the first
-		// DownloadRequested fires. Sized to NumCPU like the framework's
-		// root bus and the integration harness.
-		p.eventPool = workerpool.New(runtime.NumCPU())
-		p.eventBus = event.NewEventBus(execPoolAdapter{p.eventPool})
+		// Bus + worker pool are initialised earlier in this Initialize
+		// (above the LifecycleDrivenByStorage gate) so non-orchestrator
+		// subscribers (e.g. the CL component) can attach regardless of
+		// mode. Below uses the already-constructed p.eventBus.
 		p.InitialStateReady = flow.InitialStateReadyChannel(p.eventBus)
 		// BlockHeadersReady channel closes when the storage component
 		// publishes flow.BlockHeadersReady (see

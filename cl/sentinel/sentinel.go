@@ -198,8 +198,16 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 }
 
 func (s *Sentinel) Stop() {
-	//s.listener.Close()
-	//s.subManager.Close()
+	// Close all owned listeners so a subsequent CaplinService.Restart
+	// can rebind the same ports. The discv5 listener owns the UDP port,
+	// the libp2p host owns the TCP+QUIC listeners, and the gossip
+	// manager owns the pubsub goroutines.
+	if s.listener != nil {
+		s.listener.Close()
+	}
+	if s.subManager != nil {
+		s.subManager.Close()
+	}
 	s.p2p.Host().Close()
 }
 

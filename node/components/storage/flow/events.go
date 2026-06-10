@@ -419,6 +419,24 @@ type CanonicalHeadRewound struct {
 	ToBlock uint64
 }
 
+// UnwindCompleted signals that a user-initiated EL unwind has finished
+// committing — typically via debug_setHead (mode A or mode B) or
+// fork-from. It is the EL→CL scope seam: the EL has dropped state past
+// ToBlock and the CL must demote any in-memory state (highestSeen,
+// finalized checkpoint, persisted block-collector queue) that refers
+// to blocks above ToBlock. Without this, the CL keeps pushing FCUs for
+// blocks the EL no longer has and recovery never starts. See
+// docs/plans/20260609-mode-b-cl-rewind-gap.md.
+//
+// TipBlock is the EL head block at the moment SetHead began, captured
+// pre-unwind so subscribers can derive a slot estimate via the ratio
+// `slotEstimate = ToBlock * cfg.forkChoice.HighestSeen() / TipBlock`
+// without re-querying the (now-partially-unwound) state.
+type UnwindCompleted struct {
+	ToBlock  uint64
+	TipBlock uint64
+}
+
 // RestartBegin signals that the storage Provider is about to drain its
 // inventory and rescan disk — typically because an external mutation
 // (adoption cutover renamed files into place; fork-from utility

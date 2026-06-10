@@ -250,6 +250,33 @@ type ExecModule struct {
 	// holding a SharedDomains context and mode B's waitForQuiescence
 	// times out at 2 minutes.
 	adminUnwindInProgress atomic.Bool
+
+	// eventBus is the storage-flow event bus, set by backend.go via
+	// SetEventBus during component wiring. SetHead publishes
+	// flow.UnwindCompleted on it after a successful unwind commit so
+	// the CL component (node/components/caplin) can restart Caplin
+	// against the post-unwind EL head. Optional: harness/test paths
+	// leave it nil and SetHead skips the publish. See
+	// docs/plans/20260609-mode-b-cl-rewind-gap.md.
+	eventBus eventBus
+
+	// setHeadMaxDepthBlocks is the hard upper bound on how far back
+	// SetHead is allowed to unwind, in EL blocks. Beyond it, Caplin
+	// cannot reanchor (the consensus weak-subjectivity window bounds
+	// what peers are required to serve), so the operator gets an
+	// actionable error instead of a silent CL wedge. Set by backend.go
+	// from the active beacon config. Zero = disabled (test/harness
+	// paths that don't run Caplin).
+	setHeadMaxDepthBlocks uint64
+}
+
+// eventBus is the publishing surface SetHead needs. Declared as a
+// narrow interface so this package doesn't import node/app/event (a
+// downstream package). The signature matches node/app/event.EventBus's
+// Publish method (variadic, returns subscriber count) verbatim so a
+// real bus satisfies it without an adapter.
+type eventBus interface {
+	Publish(payload ...interface{}) int
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
@@ -695,6 +722,24 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 // tx.Commit (success) or on every early return (failure).
 func (e *ExecModule) IsAdminUnwindInProgress() bool {
 	return e.adminUnwindInProgress.Load()
+}
+
+// SetEventBus wires the storage-flow event bus into ExecModule so
+// SetHead can publish flow.UnwindCompleted after a successful unwind.
+// Called from backend.go during component construction, after the bus
+// is built. Passing nil is a no-op (harness/test paths that don't run
+// the bus). See docs/plans/20260609-mode-b-cl-rewind-gap.md.
+func (e *ExecModule) SetEventBus(bus eventBus) {
+	e.eventBus = bus
+}
+
+// SetSetHeadMaxDepthBlocks installs the WS-window cap. Called from
+// backend.go during component wiring once the active beacon config is
+// known (max-depth = MinEpochsForBlockRequests * SlotsPerEpoch). Zero
+// disables the check (harness/test paths). See
+// docs/plans/20260609-mode-b-cl-rewind-gap.md.
+func (e *ExecModule) SetSetHeadMaxDepthBlocks(blocks uint64) {
+	e.setHeadMaxDepthBlocks = blocks
 }
 
 func (e *ExecModule) Ready(ctx context.Context) (bool, error) {

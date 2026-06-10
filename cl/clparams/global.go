@@ -12,11 +12,12 @@ func InitGlobalStaticConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
 	if ccfg == nil {
 		panic("cannot initialize globalCaplinConfig with nil")
 	}
+	// Idempotent: CaplinService.Restart re-enters RunCaplinService
+	// which calls this again. The config is process-wide and the
+	// network doesn't change between runs of the same Caplin, so it's
+	// safe to skip silently on subsequent calls.
 	if globalCaplinConfig != nil {
-		panic("globalConfig already initialized")
-	}
-	if globalBeaconConfig != nil {
-		panic("globalBeaconConfig already initialized")
+		return
 	}
 	globalBeaconConfig = bcfg
 	globalCaplinConfig = ccfg

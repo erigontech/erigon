@@ -87,6 +87,23 @@ func (c *Cfg) SetBlockSnapshotTipFn(fn func() uint64) {
 	c.blockSnapshotTipFn = fn
 }
 
+// Close releases per-Cfg owned resources whose lifetime is bound to a
+// single Caplin runtime invocation. Today: the persistent block
+// collector's MDBX env. CaplinService.Restart relies on this close
+// completing synchronously before the prior goroutine returns — see
+// the [[NewPersistentBlockCollector]] note. Idempotent; safe to call
+// from a defer even when ClStagesCfg construction failed downstream.
+func (c *Cfg) Close() {
+	if c == nil {
+		return
+	}
+	if c.blockCollector != nil {
+		if err := c.blockCollector.Close(); err != nil {
+			log.Warn("[Caplin] blockCollector close failed", "err", err)
+		}
+	}
+}
+
 type Args struct {
 	peers uint64
 
@@ -149,7 +166,7 @@ func ClStagesCfg(
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
+		blockCollector:          block_collector.NewPersistentBlockCollector(ctx, log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
 		attestationDataProducer: attestationDataProducer,
 	}
 }

@@ -35,6 +35,11 @@ type BlockCollector interface {
 	AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	Flush(ctx context.Context) error
 	HasBlock(blockNumber uint64) bool
+	// Close releases the collector's underlying storage. Implementations
+	// MUST close synchronously so callers waiting for teardown (e.g.
+	// CaplinService.Restart) don't race a stale MDBX env lock against
+	// the next instance's open. Idempotent.
+	Close() error
 }
 
 // serializes block value

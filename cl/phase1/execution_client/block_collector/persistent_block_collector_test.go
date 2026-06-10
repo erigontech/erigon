@@ -107,7 +107,7 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 		}).AnyTimes()
 
 	persistDir := filepath.Join(t.TempDir(), "collector")
-	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
+	c := NewPersistentBlockCollector(t.Context(), log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
 	require.NotNil(t, c)
 	t.Cleanup(func() { _ = c.Close() })
 
@@ -405,7 +405,7 @@ func TestPruneSkipsWhenElHeadIsZero(t *testing.T) {
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 	persistDir := filepath.Join(t.TempDir(), "collector")
-	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
+	c := NewPersistentBlockCollector(t.Context(), log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
 	require.NotNil(t, c)
 	t.Cleanup(func() { _ = c.Close() })
 
@@ -426,4 +426,101 @@ func TestPruneSkipsWhenElHeadIsZero(t *testing.T) {
 	}
 	require.Equal(t, []uint64{2_974_000, 2_974_001, 2_974_002}, insertedNums,
 		"with elHead=0 (pre-FCU genesis), prune must not wipe blocks. A non-3-length result means Case C fired and deleted the cached payload, reproducing the first-launch wedge.")
+}
+
+// pruneCaseCTestHarness builds a flushTestHarness pointing at elHead =
+// `elHead`. CurrentHeader and FrozenBlocks are stubbed so the prune
+// path runs without triggering insertion side effects.
+func pruneCaseCTestHarness(t *testing.T, elHead uint64) *flushTestHarness {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+
+	h := &flushTestHarness{}
+	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
+	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blocks []*types.Block, _ bool) error {
+			h.inserted = append(h.inserted, blocks...)
+			return nil
+		}).AnyTimes()
+	header := &types.Header{Number: *uint256.NewInt(elHead)}
+	engine.EXPECT().CurrentHeader(gomock.Any()).Return(header, nil).AnyTimes()
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			h.fcuHeads = append(h.fcuHeads, head)
+			return nil, nil
+		}).AnyTimes()
+
+	persistDir := filepath.Join(t.TempDir(), "collector")
+	c := NewPersistentBlockCollector(t.Context(), log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
+	require.NotNil(t, c)
+	t.Cleanup(func() { _ = c.Close() })
+	h.collector = c
+	return h
+}
+
+// TestPruneCaseC_FCUNudgePreservesCache pins the new gap-prune
+// semantics: when there's a gap between elHead and the lowest cached
+// block, prune fires ONE FCU at the lowest cached block's hash and
+// KEEPS the cached payload. The previous behaviour (unconditional
+// delete on Case C) stranded EL forever behind the cache during
+// mode-B unwind recovery.
+func TestPruneCaseC_FCUNudgePreservesCache(t *testing.T) {
+	const elHead = uint64(100)
+	h := pruneCaseCTestHarness(t, elHead)
+
+	// Cached blocks at 200, 201, 202 — gap of 99 from elHead.
+	b1 := makeBeaconBlock(t, 200, 'a', common.HexToHash("0xdead"))
+	b2 := makeBeaconBlock(t, 201, 'a', blockHash(b1))
+	b3 := makeBeaconBlock(t, 202, 'a', blockHash(b2))
+	for _, bb := range []*cltypes.BeaconBlock{b1, b2, b3} {
+		require.NoError(t, h.collector.AddBlock(bb))
+	}
+
+	require.NoError(t, h.collector.pruneStaleCachedBlocks(t.Context()))
+
+	// Cache must survive — none of the three rows deleted.
+	require.Equal(t, 3, countRowsAtOrAbove(t, h.collector.db, 200),
+		"Case C must keep cached rows so EL can catch up to them via Execution stage; pre-fix this was 0 (unconditional delete)")
+
+	// Exactly one FCU fired, targeting the lowest cached block.
+	require.Len(t, h.fcuHeads, 1, "Case C must fire exactly one FCU nudge per prune cycle")
+	require.Equal(t, blockHash(b1), h.fcuHeads[0],
+		"FCU target must be the lowest cached block's hash so engineapi initialCycle drives Execution forward to it")
+}
+
+// TestPruneCaseC_TrimsCacheTailPastMaxAhead pins the upper-bound
+// guard: if the cache grows past firstPast + caseCMaxCachedAhead (EL
+// not catching up), the tail is trimmed to bound memory growth.
+func TestPruneCaseC_TrimsCacheTailPastMaxAhead(t *testing.T) {
+	const elHead = uint64(100)
+	// Use a tiny cap for the test so we don't have to add 16k+ blocks.
+	origMax := caseCMaxCachedAhead
+	caseCMaxCachedAhead = 3
+	t.Cleanup(func() { caseCMaxCachedAhead = origMax })
+
+	h := pruneCaseCTestHarness(t, elHead)
+
+	// 6 cached blocks at 200..205. With cap=3, blocks 200,201,202,203
+	// are kept (firstPast=200, trimAt=200+3=203 inclusive on Seek);
+	// blocks 204,205 trimmed.
+	var prev common.Hash = common.HexToHash("0xdead")
+	for n := uint64(200); n <= 205; n++ {
+		bb := makeBeaconBlock(t, n, 'a', prev)
+		require.NoError(t, h.collector.AddBlock(bb))
+		prev = blockHash(bb)
+	}
+
+	require.NoError(t, h.collector.pruneStaleCachedBlocks(t.Context()))
+
+	// firstPast + cap = 200 + 3 = 203 is the trim threshold; the Seek
+	// hits 203 first and deletes everything from there onward.
+	// Expected survivors: 200, 201, 202 (3 rows).
+	require.Equal(t, 3, countRowsAtOrAbove(t, h.collector.db, 200),
+		"trim cap must keep exactly cap blocks: 200..(200+cap-1)")
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 203),
+		"rows past firstPast + cap must be trimmed (cap=3 means rows ≥ 203 deleted)")
+
+	// FCU still fires at the lowest cached block.
+	require.Len(t, h.fcuHeads, 1)
 }

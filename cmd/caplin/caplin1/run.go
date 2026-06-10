@@ -450,7 +450,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
-	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,
 			Port:               int(config.CaplinDiscoveryPort),
@@ -664,7 +664,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 		)
-		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
+		go beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
 		}, config.BeaconAPIRouter)
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
@@ -678,7 +678,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		beaconConfig,
 		state,
 		engine,
-		//gossipManager,
 		forkChoice,
 		indexDB,
 		csn,
@@ -691,6 +690,12 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		attestationProducer,
 		peerDas,
 	)
+	// Synchronous teardown of per-invocation Cfg-owned resources (the
+	// persistent block collector's MDBX env). Without this the
+	// historical async-close-on-ctx-Done pattern races the next
+	// CaplinService.Restart's reopen, surfacing as nil PBC pointers in
+	// the relaunched goroutine.
+	defer stageCfg.Close()
 
 	// Wire the canonical block-tip provider so the
 	// DownloadHistoricalBlocks stage stops backward-walking at a

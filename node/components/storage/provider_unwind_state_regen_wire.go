@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -111,7 +110,15 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// regenerate for this domain.
 			continue
 		}
-		oldPath := filepath.Join(p.snapDir, boundary.Name)
+		// Inventory FileEntry.Name is the bare basename; resolve
+		// against the kind subdir (domain/) where the downloader writes
+		// the file in production. Plain filepath.Join(snapDir, name)
+		// only finds files in the legacy flat-layout case and is the
+		// reason a fresh hoodi datadir wedges mid-life mode-B setHead
+		// with "open old <snapDir>/v2.0-accounts.272-273.kv: no such
+		// file or directory" — see [[flow/orchestrator.go:70]] for the
+		// same fix in the validation-chain entrypoint.
+		oldPath := snapshot.ResolveExistingPath(p.snapDir, boundary.Name)
 		compression := p.Aggregator.DomainCompression(kvDomain)
 
 		var anchor []byte

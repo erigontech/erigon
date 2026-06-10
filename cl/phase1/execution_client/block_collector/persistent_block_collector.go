@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -49,41 +51,72 @@ type PersistentBlockCollector struct {
 	mu sync.Mutex
 }
 
+// openMaxRetries / openRetryDelay tolerate the brief window after a
+// CaplinService.Restart during which the prior goroutine's async
+// db.Close has not yet released the MDBX env lock. mdbx returns
+// "resource temporarily unavailable" while the lock is held; retrying
+// covers the common case without requiring cross-goroutine lifecycle
+// synchronization at the call site. 30s is a generous upper bound:
+// in practice the prior close completes in under 5s once any
+// in-flight cursors / transactions wind down. If we exhaust the
+// budget, the old goroutine is genuinely stuck — log loudly so the
+// operator can investigate rather than silently retrying forever.
+const (
+	openMaxRetries = 30
+	openRetryDelay = 1 * time.Second
+)
+
 func openPersistentDB(ctx context.Context, logger log.Logger, persistDir string) (kv.RwDB, error) {
-	return mdbx.New(kv.Label(dbcfg.CaplinDB), logger).
-		Path(persistDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				kv.Headers: kv.TableCfgItem{},
-			}
-		}).
-		GrowthStep(16 * datasize.MB).
-		MapSize(1 * datasize.TB).
-		Open(ctx)
+	var lastErr error
+	for attempt := 0; attempt < openMaxRetries; attempt++ {
+		db, err := mdbx.New(kv.Label(dbcfg.CaplinDB), logger).
+			Path(persistDir).
+			WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+				return kv.TableCfg{
+					kv.Headers: kv.TableCfgItem{},
+				}
+			}).
+			GrowthStep(16 * datasize.MB).
+			MapSize(1 * datasize.TB).
+			Open(ctx)
+		if err == nil {
+			return db, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "resource temporarily unavailable") {
+			return nil, err
+		}
+		logger.Warn("[PersistentBlockCollector] MDBX env locked by prior instance; retrying", "attempt", attempt+1, "path", persistDir)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(openRetryDelay):
+		}
+	}
+	return nil, lastErr
 }
 
 // NewPersistentBlockCollector creates a new persistent block collector
-// that stores blocks in an MDBX database at the given directory
+// that stores blocks in an MDBX database at the given directory. The
+// MDBX handle is released ONLY by the explicit Close() method; the
+// caller is responsible for invoking Close before its ctx-bound
+// goroutine returns. This is load-bearing for CaplinService.Restart:
+// the prior goroutine MUST release the env lock before the new
+// goroutine reopens the same path, and a synchronous Close on the
+// teardown path is the only way to guarantee that ordering (the
+// previous async <-ctx.Done() pattern raced the relaunch's open).
 func NewPersistentBlockCollector(
+	ctx context.Context,
 	logger log.Logger,
 	engine execution_client.ExecutionEngine,
 	beaconChainCfg *clparams.BeaconChainConfig,
 	persistDir string,
 ) *PersistentBlockCollector {
-	ctx := context.Background()
 	db, err := openPersistentDB(ctx, logger, persistDir)
 	if err != nil {
 		logger.Error("[PersistentBlockCollector] Failed to open database", "err", err, "path", persistDir)
 		return nil
 	}
-
-	go func() {
-		<-ctx.Done()
-		if db != nil {
-			db.Close()
-		}
-	}()
-
 	return &PersistentBlockCollector{
 		db:             db,
 		persistDir:     persistDir,
@@ -428,22 +461,34 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil
 }
 
-// pruneStaleCachedBlocks deletes rows in p.db whose block number is
-// strictly greater than the EL's current head AND unreachable from it —
-// i.e. only when a gap exists between elHead and the lowest cached entry.
-// A contiguous chain starting at elHead+1 is insertable and preserved.
-//
-// Three cases on the entry seeked to (elHead+1):
+// caseCMaxCachedAhead bounds how many blocks past the lowest cached
+// entry the gap-prune keeps in the cache while waiting for EL to catch
+// up via the snapshot-backed Execution stage. Anything beyond is
+// dropped to prevent unbounded growth if EL never catches up. Sized to
+// comfortably cover typical mode-B unwind soak depths (≤ 90k blocks
+// gap) without exhausting memory (~1 GB at ~100 KB/block). Declared as
+// a var so tests can override.
+var caseCMaxCachedAhead uint64 = 16384
+
+// pruneStaleCachedBlocks reconciles the cached beacon-block queue against
+// the EL's current head. Three cases on the entry seeked to (elHead+1):
 //
 //	A. No cached row past elHead → nothing to do.
-//	B. Lowest cached row is exactly elHead+1 → contiguous; keep it.
-//	C. Lowest cached row is > elHead+1 → gap; delete everything past elHead
-//	   (their parent TDs were wiped by mode-B's Provider.Unwind, or were
-//	   never written; InsertBlocks would loop on parent-not-found).
+//	B. Lowest cached row is exactly elHead+1 → contiguous; insertable.
+//	C. Lowest cached row is > elHead+1 → gap.
 //
-// See the call site in Flush for the rationale;
-// docs/caplin-componentization-requirements.md captures the architectural
-// follow-up where this stop-gap is replaced by a storage-bus subscription.
+// Case C fires a single ForkChoiceUpdate at the lowest cached block's
+// hash and KEEPS the cache. Erigon's engineapi HandleForkChoice resolves
+// the hash via the snapshot-backed BlockReader (the blocks above the
+// post-unwind EL head live in snapshot files after a mode-B unwind)
+// and, when headNum > finishProgressBefore by more than the
+// smallBlockJumpThreshold, runs the Execution stage forward from elHead
+// through the snapshot-backed blocks. On the next Flush the gap has
+// closed (or shrunk past Case-B) and InsertBlocks proceeds normally.
+//
+// An upper-bound trim deletes cached entries past firstPast +
+// caseCMaxCachedAhead so the queue can't grow without bound if EL never
+// catches up.
 //
 // Idempotent and cheap on the steady-state path (Case A returns
 // immediately after one cursor Seek; Case B does one comparison).
@@ -472,8 +517,11 @@ func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) e
 	cutoff := make([]byte, 8)
 	binary.BigEndian.PutUint64(cutoff, elHead+1)
 
-	var pruned int
-	var firstPast uint64
+	var (
+		firstPast    uint64
+		trimmedTail  int
+		lowestCached *types.Block
+	)
 	if err := p.db.Update(ctx, func(tx kv.RwTx) error {
 		cursor, err := tx.RwCursor(kv.Headers)
 		if err != nil {
@@ -481,7 +529,7 @@ func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) e
 		}
 		defer cursor.Close()
 
-		k, _, err := cursor.Seek(cutoff)
+		k, v, err := cursor.Seek(cutoff)
 		if err != nil {
 			return err
 		}
@@ -495,23 +543,44 @@ func (p *PersistentBlockCollector) pruneStaleCachedBlocks(ctx context.Context) e
 		if firstPast == elHead+1 {
 			return nil // case B: contiguous from elHead, insertable
 		}
-		// case C: gap detected, delete from cursor forward
-		for ; k != nil; k, _, err = cursor.Next() {
+		// case C: gap detected.
+		// Decode the lowest cached block — its hash is the FCU target.
+		block, decErr := p.decodeBlock(v)
+		if decErr != nil {
+			return fmt.Errorf("pruneStaleCachedBlocks: decode lowest cached block: %w", decErr)
+		}
+		lowestCached = block
+		// Trim the tail past firstPast + caseCMaxCachedAhead to bound
+		// memory growth while EL catches up.
+		trimAt := firstPast + caseCMaxCachedAhead
+		trimCutoff := make([]byte, 8)
+		binary.BigEndian.PutUint64(trimCutoff, trimAt)
+		k2, _, err := cursor.Seek(trimCutoff)
+		if err != nil {
+			return err
+		}
+		for ; k2 != nil; k2, _, err = cursor.Next() {
 			if err != nil {
 				return err
 			}
 			if err := cursor.DeleteCurrent(); err != nil {
 				return err
 			}
-			pruned++
+			trimmedTail++
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	if pruned > 0 {
-		p.logger.Info("[BlockCollector] pruned unreachable cached blocks (gap from EL head)",
-			"elHead", elHead, "firstPast", firstPast, "pruned", pruned)
+	if lowestCached != nil {
+		gap := firstPast - elHead
+		p.logger.Info("[BlockCollector] gap-prune Case C: FCU nudge",
+			"elHead", elHead, "firstPast", firstPast, "gap", gap,
+			"trimmedTail", trimmedTail, "trimAt", firstPast+caseCMaxCachedAhead)
+		// Fire FCU at the lowest cached block's hash so EL's
+		// engineapi initialCycle path runs the Execution stage
+		// forward through snapshot-backed blocks until the gap closes.
+		p.doForkChoiceUpdate(ctx, lowestCached)
 	}
 	return nil
 }
