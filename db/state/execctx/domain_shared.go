@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -950,7 +951,13 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.CodeDomain, k)
 					} else {
-						sd.stateCache.Put(kv.CodeDomain, k, v, txNum)
+						// Validated committed code: populate the addr layer AND the
+						// content-addressed codeHash->code map, with codeHash=keccak(v)
+						// (consistent by construction). This is the ONLY path that
+						// writes the code cache — reads never populate it (speculative
+						// code lives in the version map), so the shared map can only
+						// ever hold validated, self-consistent entries.
+						sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v))
 					}
 				}
 			}
@@ -1226,8 +1233,18 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// recent-step reads are dropped. (CodeCache addr layers are cleared wholesale
 	// on unwind, so PutCodeWithHash needs no txNum.)
 	if sd.stateCache != nil {
-		if domain == kv.CodeDomain && len(codeHash) > 0 && len(v) > 0 {
-			sd.stateCache.PutCodeWithHash(k, v, codeHash)
+		if domain == kv.CodeDomain {
+			if len(v) > 0 {
+				// This SD getter is the single place that populates the code cache
+				// on a read. Key the content-addressed entry by the code's OWN hash,
+				// keccak(v) — NEVER a separately-read account codeHash, which under
+				// parallel exec can be a skewed/cross-account value and would poison
+				// the shared codeHash->code map for every account sharing that hash
+				// (surfacing as a wrong-forwarder gas divergence). keccak(v) makes
+				// every cached entry self-consistent, so a skewed account read can
+				// never produce a bad entry.
+				sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v))
+			}
 		} else {
 			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 			sd.stateCache.Put(domain, k, v, readTxNum)
