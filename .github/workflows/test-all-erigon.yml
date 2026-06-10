@@ -57,6 +57,7 @@ jobs:
           submodules: true
           cleanup-space: true
           ramdisk: true
+          cache-namespace: test-all-erigon
 
       - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
