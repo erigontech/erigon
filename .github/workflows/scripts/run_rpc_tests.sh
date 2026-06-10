@@ -138,7 +138,7 @@ make rpc_int
 
 retries=0
 while true; do
-   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee -a "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then
