@@ -2229,8 +2229,6 @@ Flags for configuring the Sentry component.
 * `--sentinel.bootnodes value`: Comma-separated enode URLs for P2P discovery bootstrap for the sentinel.
 * `--sentinel.staticpeers value`: Connects to comma-separated consensus static peers.
 
-Here is the rewritten and merged Downloader section, combining the two original sections and ensuring consistent formatting:
-
 ### Downloader and Synchronization
 
 These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
