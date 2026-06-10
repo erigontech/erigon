@@ -44,9 +44,8 @@ type commitComputeRequest struct{}
 //   - Per-block mode (!BatchCommitments): computes at every blockResult.
 //     Used at chain tip or when shouldGenerateChangesets is true.
 //
-// The calculator owns its own commitment.Updates buffer. Writes from the
-// execLoop flow through VersionedWrites.TouchUpdates() which calls
-// TouchPlainKeyDirect() — no serialization round-trip.
+// The calculator owns its own commitment.Updates buffer, fed one aggregated
+// update per dirty key by calcState.FlushToUpdates — no serialization round-trip.
 //
 // It reads values from sd.mem (shared with the execLoop) via GetLatest.
 // The execLoop's Flush writes to sd.mem before sending the blockResult,

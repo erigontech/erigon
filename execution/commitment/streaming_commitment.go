@@ -187,7 +187,7 @@ func (sc *StreamingCommitter) TakeDeferredUpdates() []*DeferredBranchUpdate {
 // nibble, so they dirty the account's split with no separate mapping.
 func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Update) {
 	sc.trieMu.Lock()
-	sc.trie.Insert(hashedKey, plainKey, update)
+	isNew := sc.trie.Insert(hashedKey, plainKey, update)
 	if len(hashedKey) == 0 {
 		sc.trieMu.Unlock()
 		return
@@ -201,7 +201,9 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 	s.mu.Lock()
 	s.dirty = true
 	s.gen++
-	s.keyCount++
+	if isNew {
+		s.keyCount++
+	}
 	enqueue := sc.started.Load() && !s.queued && sc.shouldEagerFold(s)
 	if enqueue {
 		s.queued = true

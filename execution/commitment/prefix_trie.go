@@ -106,8 +106,9 @@ func childIndex(n *prefixNode, nib byte) (int, bool) {
 // prefixTrie is a path-compressed nibble trie. Insert is sequential — concurrent
 // callers must serialize themselves.
 type prefixTrie struct {
-	root  *prefixNode
-	arena *prefixArena
+	root    *prefixNode
+	arena   *prefixArena
+	visited []*prefixNode // Insert scratch: path nodes pending a subtreeCount bump
 }
 
 func newPrefixTrie() *prefixTrie {
@@ -136,14 +137,21 @@ func commonPrefixLen(a, b []byte) int {
 
 // Insert adds hashedKey (in nibble form) to the trie and records plainKey on the
 // node where the key terminates, along with an optional carried value (update;
-// nil means the fold re-reads it from ctx). Each call bumps subtreeCount on every
-// node along the traversal path — duplicate inserts therefore increase counts but
-// allocate no new nodes. plainKey backing must stay stable for the trie's lifetime.
-func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) {
+// nil means the fold re-reads it from ctx). Re-inserting an existing key merges
+// the carried updates per-field copy-on-write (a snapshot holding the old update
+// stays intact) and leaves subtree counts unchanged; isNew reports whether the
+// key was new. plainKey backing must stay stable for the trie's lifetime.
+func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew bool) {
 	node := t.root
 	keyOffset := 0
+	t.visited = t.visited[:0]
+	bumpPath := func() {
+		for _, n := range t.visited {
+			n.subtreeCount++
+		}
+	}
 	for {
-		node.subtreeCount++
+		t.visited = append(t.visited, node)
 
 		remain := hashedKey[keyOffset:]
 		m := commonPrefixLen(remain, node.ext)
@@ -153,7 +161,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) {
 			oldExt := node.ext
 			oldBitmap := node.bitmap
 			oldChildren := node.children
-			oldSubtreeCount := node.subtreeCount - 1
+			oldSubtreeCount := node.subtreeCount
 
 			oldChild := t.arena.allocNode()
 			oldChild.ext = oldExt[m+1:]
@@ -174,7 +182,8 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) {
 				node.children = []*prefixNode{oldChild}
 				node.plainKey = plainKey
 				node.update = update
-				return
+				bumpPath()
+				return true
 			}
 
 			newLeaf := t.arena.allocNode()
@@ -191,16 +200,31 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) {
 			} else {
 				node.children = []*prefixNode{newLeaf, oldChild}
 			}
-			return
+			bumpPath()
+			return true
 		}
 
 		// Full match on node.ext.
 		keyOffset += m
 		if keyOffset == len(hashedKey) {
 			// Key terminates exactly at this node.
+			if node.plainKey != nil {
+				if update != nil {
+					merged := &Update{}
+					if node.update != nil {
+						*merged = *node.update
+						merged.Merge(update)
+					} else {
+						*merged = *update
+					}
+					node.update = merged
+				}
+				return false
+			}
 			node.plainKey = plainKey
 			node.update = update
-			return
+			bumpPath()
+			return true
 		}
 
 		nib := hashedKey[keyOffset]
@@ -215,7 +239,8 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) {
 			node.children = append(node.children, nil)
 			copy(node.children[idx+1:], node.children[idx:])
 			node.children[idx] = newLeaf
-			return
+			bumpPath()
+			return true
 		}
 		keyOffset++
 		node = node.children[idx]

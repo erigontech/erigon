@@ -1795,19 +1795,21 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		keyBytes := common.ToBytesZeroCopy(key)
+		hashedKey := t.hasher(keyBytes)
+		// Carry the value so the parallel fold uses it directly instead of
+		// re-reading account/storage from ctx (which lags cc.state). A re-touch
+		// merges into the stored update via the trie's Insert, like ModeUpdate.
+		u := new(Update)
+		*u = *update
+		ik := keyBytes
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
-			// Carry the value so the parallel fold uses it directly instead of
-			// re-reading account/storage from ctx (which lags cc.state).
-			u := new(Update)
-			*u = *update
-			ik := t.parallel.internKey(keyBytes)
-			t.parallel.Insert(hashedKey, ik, u)
-			if t.streaming && t.streamer != nil {
-				t.streamer.TouchKey(hashedKey, ik, u)
-			}
+			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = struct{}{}
+		}
+		t.parallel.Insert(hashedKey, ik, u)
+		if t.streaming && t.streamer != nil {
+			t.streamer.TouchKey(hashedKey, ik, u)
 		}
 	default:
 	}

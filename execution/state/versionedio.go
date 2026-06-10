@@ -514,13 +514,8 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 type VersionedWrites []*VersionedWrite
 
 // TouchUpdates feeds VersionedWrites directly to a commitment.Updates buffer
-// via TouchPlainKeyDirect. Each VersionedWrite maps to a single Update with
-// the appropriate key and flags. The Updates buffer handles per-key merging
-// (same address gets accumulated flags from BalancePath, NoncePath, etc.).
-//
-// This is used by the commitment calculator to process writes received via
-// the fan-out channel. No serialization/deserialization — the values pass
-// through as-is.
+// via TouchPlainKeyDirect, one partial Update per write. The buffer merges
+// per key (ModeUpdate and ModeParallel both accumulate flags additively).
 func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 	for _, w := range writes {
 		if w.Val == nil {
