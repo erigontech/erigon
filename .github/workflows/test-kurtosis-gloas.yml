@@ -15,6 +15,8 @@ env:
   KURTOSIS_FLUENTBIT_IMAGE: "fluent/fluent-bit:4.0.0"
   # Engine-bootstrap helpers (logs-aggregator healthcheck, reverse proxy,
   # volume init) — also dictated by the Kurtosis release; sync when bumping.
+  # curl-jq is untagged upstream, so the cache intentionally serves the
+  # `latest` digest from the last warm rather than tracking live `latest`.
   # Without these cached, `kurtosis engine start` still needs Docker Hub and
   # dies on registry outages despite all the caching above.
   KURTOSIS_CURL_JQ_IMAGE: "badouralix/curl-jq:latest"
