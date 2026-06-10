@@ -97,3 +97,20 @@ func TestRemoveVoteCompactsInPlace(t *testing.T) {
 	_, ok := w.directVotes[root]
 	require.False(t, ok, "root entry must be deleted once its last vote is removed")
 }
+
+// seedFromLatestMessages imports every latestMessage once and is a no-op
+// thereafter, so repeated head computations cannot double-count a vote.
+func TestSeedFromLatestMessagesIsIdempotent(t *testing.T) {
+	f := newIndexedWeightStoreTestStore()
+	w := f.indexedWeightStore
+	root := common.HexToHash("0xabc")
+	f.latestMessages.set(0, LatestMessage{Root: root, Slot: 1})
+	f.latestMessages.set(1, LatestMessage{Root: root, Slot: 2})
+	require.Empty(t, w.directVotes, "index starts cold")
+
+	w.seedFromLatestMessages()
+	require.Len(t, w.directVotes[root], 2, "seed mirrors latestMessages")
+
+	w.seedFromLatestMessages()
+	require.Len(t, w.directVotes[root], 2, "second seed must be a no-op")
+}

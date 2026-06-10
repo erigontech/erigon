@@ -52,6 +52,9 @@ type indexedWeightStore struct {
 	// version tracks changes to invalidate the index
 	version uint64
 
+	// seeded is set once the index has imported the full latestMessages snapshot.
+	seeded bool
+
 	mu sync.RWMutex
 }
 
@@ -72,15 +75,17 @@ func NewIndexedWeightStore(f *ForkChoiceStore) *indexedWeightStore {
 func (w *indexedWeightStore) IndexVote(validatorIndex uint64, message LatestMessage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.indexVoteLocked(validatorIndex, message)
+	w.version++
+}
 
-	entry := VoteEntry{
+// indexVoteLocked appends a vote to its target root's list. Caller holds w.mu.
+func (w *indexedWeightStore) indexVoteLocked(validatorIndex uint64, message LatestMessage) {
+	w.directVotes[message.Root] = append(w.directVotes[message.Root], VoteEntry{
 		ValidatorIndex: validatorIndex,
 		Slot:           message.Slot,
 		PayloadPresent: message.PayloadPresent,
-	}
-
-	w.directVotes[message.Root] = append(w.directVotes[message.Root], entry)
-	w.version++
+	})
 }
 
 // setCheckpointState sets the checkpoint state from which GetAttestationScore /
@@ -90,6 +95,27 @@ func (w *indexedWeightStore) setCheckpointState(cs *checkpointState) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.checkpointState = cs
+}
+
+// seedFromLatestMessages imports the full latestMessages vote set into the index
+// once, so a GLOAS head computation isn't missing votes cast before index
+// maintenance began. No-op after the first call; caller must hold f.mu.
+func (w *indexedWeightStore) seedFromLatestMessages() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.seeded {
+		return
+	}
+	w.seeded = true
+	w.directVotes = make(map[common.Hash][]VoteEntry)
+	for i := 0; i < w.f.latestMessages.latestMessagesCount(); i++ {
+		msg, has := w.f.latestMessages.get(i)
+		if !has || msg == (LatestMessage{}) {
+			continue
+		}
+		w.indexVoteLocked(uint64(i), msg)
+	}
+	w.version++
 }
 
 // RemoveVote removes a validator's vote from the index.

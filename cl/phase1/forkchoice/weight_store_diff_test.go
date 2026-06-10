@@ -60,8 +60,9 @@ var diffBlockd4Enc []byte
 var diffAttEnc []byte
 
 // buildExAnteStore reconstructs the ex-ante fork-choice scenario with an
-// attestation processed, so both f.latestMessages and the indexed weight store
-// are populated.
+// attestation processed. f.latestMessages is populated; the index is left cold
+// (maintenance is GLOAS-gated and the fixtures are pre-GLOAS), and
+// headWeightStore seeds it from latestMessages on first use.
 func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	tb.Helper()
 	ctx := context.Background()
@@ -97,15 +98,6 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	require.NoError(tb, err)
 	require.NoError(tb, sd.OnHeadState(s0))
 	require.NoError(tb, store.OnAttestation(att, false, false))
-	// Indexed-vote maintenance is gated to the GLOAS vote path, so the pre-GLOAS
-	// fixtures above fill latestMessages but not the index. Mirror latestMessages
-	// into the index directly so the differential check scores the index against
-	// the full-scan store over the same votes.
-	for i := 0; i < store.latestMessages.latestMessagesCount(); i++ {
-		if msg, has := store.latestMessages.get(i); has && msg != (LatestMessage{}) {
-			store.indexedWeightStore.IndexVote(uint64(i), msg)
-		}
-	}
 	return store
 }
 
@@ -114,6 +106,8 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 // for every node in the filtered block tree, given the same checkpoint state.
 func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 	f := buildExAnteStore(t)
+	require.Empty(t, f.indexedWeightStore.directVotes,
+		"index must start cold (maintenance is GLOAS-gated); the seed is what fills it")
 
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	cs, err := f.getCheckpointState(justified)
@@ -126,7 +120,8 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 	defer f.mu.Unlock()
 
 	full := NewWeightStore(f)    // trusted O(V) full-scan oracle
-	idx := f.headWeightStore(cs) // incremental index under test
+	idx := f.headWeightStore(cs) // seeds the cold index from latestMessages
+	require.NotEmpty(t, f.indexedWeightStore.directVotes, "headWeightStore must seed the index")
 
 	blocks := f.getFilteredBlockTree(justified.Root)
 	require.NotEmpty(t, blocks)
