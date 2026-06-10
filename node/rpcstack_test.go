@@ -538,3 +538,34 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		return limiter.(*wsConnectionLimiter).count.Load() == 0
 	}, 2*time.Second, time.Millisecond)
 }
+
+// TestWebsocketMismatchedPath verifies that WebSocket upgrade requests with WS enabled
+// but with a path that does not match the prefix return HTTP 404.
+func TestWebsocketMismatchedPath(t *testing.T) {
+	srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{
+		Origins: []string{"*"},
+		prefix:  "/ws",
+	})
+	defer srv.stop()
+
+	// 1. Upgrade request on non-matching path should return HTTP 404
+	urlInvalid := fmt.Sprintf("ws://%v/wrong", srv.listenAddr())
+	_, respInvalid, errInvalid := websocket.Dial(context.Background(), urlInvalid, nil)
+	require.Error(t, errInvalid)
+	require.NotNil(t, respInvalid)
+	defer respInvalid.Body.Close()
+	assert.Equal(t, http.StatusNotFound, respInvalid.StatusCode)
+
+	// 2. Upgrade request on matching path should proceed and not return 404
+	urlValid := fmt.Sprintf("ws://%v/ws", srv.listenAddr())
+	conn, respValid, err := websocket.Dial(context.Background(), urlValid, nil)
+	if err == nil {
+		conn.Close(websocket.StatusNormalClosure, "")
+	} else {
+		if respValid != nil {
+			defer respValid.Body.Close()
+			assert.NotEqual(t, http.StatusNotFound, respValid.StatusCode)
+		}
+	}
+}
+
