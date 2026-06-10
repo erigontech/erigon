@@ -348,12 +348,6 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// .bt stays resident on the validation hot path. The cost equation
 	// changed when storage moved to snapshots; the call wasn't re-priced.
 	commitment.RecordHasStorageMiss()
-	if dbg.EnvBool("SKIP_EIP684_HASPREFIX", false) {
-		// CORRECTNESS-BROKEN. Bench scaffold only — quantifies the
-		// .bt-resident cost by short-circuiting the scan. With the gate
-		// on, two CREATEs to the same address will both succeed.
-		return false, nil
-	}
 	result, err := sdb.stateReader.HasStorage(addr)
 	return result, err
 }
