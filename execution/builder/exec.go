@@ -26,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -218,16 +217,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	block, err := ba.AssembleBlock(stateReader, ibs, tx, logger)
 	if err != nil {
 		return err
-	}
-
-	header := block.HeaderNoCopy()
-
-	if execCfg.ChainConfig().IsPrague(header.Time) {
-		hash := empty.RequestsHash
-		if len(current.Requests) > 0 {
-			hash = *current.Requests.Hash()
-		}
-		header.RequestsHash = &hash
 	}
 
 	blockHeight := block.NumberU64()

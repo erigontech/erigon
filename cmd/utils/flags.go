@@ -2043,145 +2043,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			SetDNSDiscoveryDefaults(cfg, chainspec.Mainnet)
 		}
 	case networkname.Dev:
-		seed := ctx.String(DevValidatorSeedFlag.Name)
-		validatorCount := ctx.Int(DevValidatorCountFlag.Name)
-		if validatorCount == 0 {
-			validatorCount = 64
-		}
-
-		// Derive the signer key for the dev account.
-		signerKey, signerAddr, err := devgenesis.DeriveSignerKey(seed)
-		if err != nil {
-			Fatalf("Failed to derive dev signer key: %v", err)
-		}
-		_ = signerKey // available for future use (e.g., auto-funding txs)
-		logger.Info("Using PoS dev mode",
-			"seed", seed,
-			"validators", validatorCount,
-			"signer", signerAddr.Hex(),
-		)
-
-		// Build PoS EL genesis (TTD=0, post-merge from genesis).
-		cfg.Genesis = chainspec.DeveloperGenesisBlock()
-		// Ensure the derived signer address is pre-funded.
-		if cfg.Genesis.Alloc == nil {
-			cfg.Genesis.Alloc = make(types.GenesisAlloc)
-		}
-		if _, ok := cfg.Genesis.Alloc[signerAddr]; !ok {
-			cfg.Genesis.Alloc[signerAddr] = types.GenesisAccount{
-				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
-			}
-		}
-		cfg.Genesis.Config.TerminalTotalDifficulty = uint256.NewInt(0)
-		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
-		zero := uint64(0)
-		cfg.Genesis.Config.ShanghaiTime = &zero
-		cfg.Genesis.Config.CancunTime = &zero
-		cfg.Genesis.Config.PragueTime = &zero
-		cfg.Genesis.Config.OsakaTime = &zero
-
-		// Prague system contracts (EIP-7002 withdrawal requests, EIP-7251
-		// consolidation requests, EIP-2935 history storage). Without these
-		// the EL fails block finalization with "Empty Code at ...Address".
-		cfg.Genesis.Alloc[common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")] = types.GenesisAccount{
-			Balance: new(big.Int),
-			Nonce:   1,
-			Code:    common.FromHex("0x3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500"),
-		}
-		cfg.Genesis.Alloc[common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")] = types.GenesisAccount{
-			Balance: new(big.Int),
-			Nonce:   1,
-			Code:    common.FromHex("0x3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd"),
-			Storage: map[common.Hash]common.Hash{common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
-		}
-		cfg.Genesis.Alloc[common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")] = types.GenesisAccount{
-			Balance: new(big.Int),
-			Nonce:   1,
-			Code:    common.FromHex("0x3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd"),
-			Storage: map[common.Hash]common.Hash{common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
-		}
-
-		// Configure embedded Caplin + dev validator.
-		cfg.InternalCL = true
-		cfg.CaplinConfig.DevValidatorSeed = seed
-		cfg.CaplinConfig.DevValidatorCount = validatorCount
-		// Enable Beacon API for dev mode — the embedded dev validator
-		// calls /eth/v1/beacon/genesis, /eth/v1/validator/duties/*, etc.
-		cfg.CaplinConfig.BeaconAPIRouter.Active = true
-		cfg.CaplinConfig.BeaconAPIRouter.Beacon = true
-		cfg.CaplinConfig.BeaconAPIRouter.Node = true
-		cfg.CaplinConfig.BeaconAPIRouter.Validator = true
-		cfg.CaplinConfig.BeaconAPIRouter.Config = true
-		cfg.CaplinConfig.BeaconAPIRouter.Events = true
-		if cfg.CaplinConfig.BeaconAPIRouter.Address == "" {
-			cfg.CaplinConfig.BeaconAPIRouter.Address = "127.0.0.1:5555"
-		}
-
-		// Build beacon genesis state and write to temp file for Caplin.
-		beaconCfg := clparams.MainnetBeaconConfig
-		clparams.ApplyMinimalPreset(&beaconCfg)
-		// Enable all forks from genesis (PoS from block 0).
-		beaconCfg.AltairForkEpoch = 0
-		beaconCfg.BellatrixForkEpoch = 0
-		beaconCfg.CapellaForkEpoch = 0
-		beaconCfg.DenebForkEpoch = 0
-		beaconCfg.ElectraForkEpoch = 0
-		beaconCfg.FuluForkEpoch = 0
-		slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
-		if slotTime < 2 {
-			slotTime = 2
-		}
-		beaconCfg.SecondsPerSlot = slotTime
-		beaconCfg.InitializeForkSchedule()
-		genesisTime := uint64(time.Now().Unix())
-		// Compute the EL genesis block hash so the beacon state's Eth1Data
-		// matches the actual chain genesis.
-		elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
-		if err != nil {
-			Fatalf("Failed to compute dev EL genesis hash: %v", err)
-		}
-		elGenesisHash := elGenesisBlock.Hash()
-		beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
-		if err != nil {
-			Fatalf("Failed to build dev beacon genesis: %v", err)
-		}
-		// Write beacon config and genesis state to temp files.
-		tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
-			Fatalf("Failed to create dev beacon dir: %v", err)
-		}
-		stateSSZ, err := beaconState.EncodeSSZ(nil)
-		if err != nil {
-			Fatalf("Failed to encode dev genesis state: %v", err)
-		}
-		genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
-		if err := os.WriteFile(genesisStatePath, stateSSZ, 0644); err != nil {
-			Fatalf("Failed to write dev genesis state: %v", err)
-		}
-
-		// Write beacon config YAML with all forks enabled from genesis.
-		// All known fork epochs are listed explicitly so that Caplin's
-		// CustomConfig (which falls back to minimal preset defaults for
-		// missing fields) activates every fork at epoch 0.
-		configPath := filepath.Join(tmpDir, "config.yaml")
-		configYAML := fmt.Sprintf(
-			"PRESET_BASE: minimal\n"+
-				"MIN_GENESIS_TIME: %d\n"+
-				"SECONDS_PER_SLOT: %d\n"+
-				"ALTAIR_FORK_EPOCH: 0\n"+
-				"BELLATRIX_FORK_EPOCH: 0\n"+
-				"CAPELLA_FORK_EPOCH: 0\n"+
-				"DENEB_FORK_EPOCH: 0\n"+
-				"ELECTRA_FORK_EPOCH: 0\n"+
-				"FULU_FORK_EPOCH: 0\n"+
-				"TERMINAL_TOTAL_DIFFICULTY: 0\n",
-			genesisTime, beaconCfg.SecondsPerSlot)
-		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
-			Fatalf("Failed to write dev beacon config: %v", err)
-		}
-
-		cfg.CaplinConfig.CustomConfigPath = configPath
-		cfg.CaplinConfig.CustomGenesisStatePath = genesisStatePath
+		setDevnetEthConfig(ctx, cfg, logger)
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
@@ -2260,6 +2122,118 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
+}
+
+// setDevnetEthConfig configures PoS dev mode (--chain dev): embedded Caplin with
+// dev validators producing Fusaka blocks from genesis.
+func setDevnetEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	seed := ctx.String(DevValidatorSeedFlag.Name)
+	validatorCount := ctx.Int(DevValidatorCountFlag.Name)
+	if validatorCount == 0 {
+		validatorCount = 64
+	}
+
+	// Derive the signer key for the dev account.
+	signerKey, signerAddr, err := devgenesis.DeriveSignerKey(seed)
+	if err != nil {
+		Fatalf("Failed to derive dev signer key: %v", err)
+	}
+	_ = signerKey // available for future use (e.g., auto-funding txs)
+	logger.Info("Using PoS dev mode",
+		"seed", seed,
+		"validators", validatorCount,
+		"signer", signerAddr.Hex(),
+	)
+
+	cfg.Genesis = chainspec.DeveloperGenesisBlock()
+	// Ensure the derived signer address is pre-funded.
+	if _, ok := cfg.Genesis.Alloc[signerAddr]; !ok {
+		cfg.Genesis.Alloc[signerAddr] = types.GenesisAccount{
+			Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
+		}
+	}
+
+	// Configure embedded Caplin + dev validator.
+	cfg.InternalCL = true
+	cfg.CaplinConfig.DevValidatorSeed = seed
+	cfg.CaplinConfig.DevValidatorCount = validatorCount
+	// Enable Beacon API for dev mode — the embedded dev validator
+	// calls /eth/v1/beacon/genesis, /eth/v1/validator/duties/*, etc.
+	cfg.CaplinConfig.BeaconAPIRouter.Active = true
+	cfg.CaplinConfig.BeaconAPIRouter.Beacon = true
+	cfg.CaplinConfig.BeaconAPIRouter.Node = true
+	cfg.CaplinConfig.BeaconAPIRouter.Validator = true
+	cfg.CaplinConfig.BeaconAPIRouter.Config = true
+	cfg.CaplinConfig.BeaconAPIRouter.Events = true
+	if cfg.CaplinConfig.BeaconAPIRouter.Address == "" {
+		cfg.CaplinConfig.BeaconAPIRouter.Address = "127.0.0.1:5555"
+	}
+
+	// Build beacon genesis state and write to temp file for Caplin.
+	beaconCfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&beaconCfg)
+	// Enable all forks from genesis (PoS from block 0).
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
+	if slotTime < 2 {
+		slotTime = 2
+	}
+	beaconCfg.SecondsPerSlot = slotTime
+	beaconCfg.InitializeForkSchedule()
+	genesisTime := uint64(time.Now().Unix())
+	// Compute the EL genesis block hash so the beacon state's Eth1Data
+	// matches the actual chain genesis.
+	elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	if err != nil {
+		Fatalf("Failed to compute dev EL genesis hash: %v", err)
+	}
+	elGenesisHash := elGenesisBlock.Hash()
+	beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
+	if err != nil {
+		Fatalf("Failed to build dev beacon genesis: %v", err)
+	}
+	// Write beacon config and genesis state to temp files.
+	tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		Fatalf("Failed to create dev beacon dir: %v", err)
+	}
+	stateSSZ, err := beaconState.EncodeSSZ(nil)
+	if err != nil {
+		Fatalf("Failed to encode dev genesis state: %v", err)
+	}
+	genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
+	if err := os.WriteFile(genesisStatePath, stateSSZ, 0644); err != nil {
+		Fatalf("Failed to write dev genesis state: %v", err)
+	}
+
+	// Write beacon config YAML with all forks enabled from genesis.
+	// All known fork epochs are listed explicitly so that Caplin's
+	// CustomConfig (which falls back to minimal preset defaults for
+	// missing fields) activates every fork at epoch 0.
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configYAML := fmt.Sprintf(
+		"PRESET_BASE: minimal\n"+
+			"MIN_GENESIS_TIME: %d\n"+
+			"SECONDS_PER_SLOT: %d\n"+
+			"ALTAIR_FORK_EPOCH: 0\n"+
+			"BELLATRIX_FORK_EPOCH: 0\n"+
+			"CAPELLA_FORK_EPOCH: 0\n"+
+			"DENEB_FORK_EPOCH: 0\n"+
+			"ELECTRA_FORK_EPOCH: 0\n"+
+			"FULU_FORK_EPOCH: 0\n"+
+			"TERMINAL_TOTAL_DIFFICULTY: 0\n",
+		genesisTime, beaconCfg.SecondsPerSlot)
+	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+		Fatalf("Failed to write dev beacon config: %v", err)
+	}
+
+	cfg.CaplinConfig.CustomConfigPath = configPath
+	cfg.CaplinConfig.CustomGenesisStatePath = genesisStatePath
 }
 
 // Convenience type for optional flag value representing a rate limit that should print nicely for
