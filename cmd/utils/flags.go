@@ -470,11 +470,6 @@ var (
 		Value: 200,
 	}
 
-	HTTPPathPrefixFlag = cli.StringFlag{
-		Name:  "http.rpcprefix",
-		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
-		Value: "",
-	}
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
 		Usage: "Enable TLS handshake",
@@ -516,11 +511,6 @@ var (
 	WSAllowedOriginsFlag = cli.StringFlag{
 		Name:  "ws.origins",
 		Usage: "Origins from which to accept websockets requests",
-		Value: "",
-	}
-	WSPathPrefixFlag = cli.StringFlag{
-		Name:  "ws.rpcprefix",
-		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
 	}
 	WSSubscribeLogsChannelSize = cli.IntFlag{
