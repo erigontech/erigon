@@ -140,7 +140,7 @@ func TestStreaming_RandomOrderParity(t *testing.T) {
 // touched storage exceeds deepStorageThreshold, alongside many small accounts)
 // through TouchKey in randomized order and asserts root + every stored branch
 // match sequential. This exercises foldSplit's big-storage path
-// (concurrentStorageRoot) and the account-leaf storageRoot/CodeHash assembly.
+// (foldStorageRoot) and the account-leaf storageRoot/CodeHash assembly.
 func TestStreaming_DeepBranchParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildBigAccountCorpus(15_000)
@@ -161,7 +161,7 @@ func TestStreaming_DeepBranchParity(t *testing.T) {
 }
 
 // TestStreaming_DeepLocalWalkUsed proves the deep big-storage fold now runs
-// through the streaming-local walk (dfsDeepLocal/storageRootLocal) rather than
+// through the streaming-local walk (the deep storage fan-out) rather than
 // parallel_mount.go: the committer's DeepLocalFolds counter must fire and the
 // root must still match sequential. This is the Task-2 isolation gate.
 func TestStreaming_DeepLocalWalkUsed(t *testing.T) {

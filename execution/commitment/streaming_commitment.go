@@ -28,7 +28,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -59,13 +58,10 @@ func (s *splitState) reusable() bool { return s.folded && !s.dirty }
 // background-folded; tiny splits just fold at Process, avoiding micro-fold overhead.
 const defaultEagerFold = 256
 
-// shouldEagerFold is the re-fold coalescing gate. A dirtied split is eligible for
-// an eager background fold only once its touched-key count has at least doubled
-// since its last fold (and cleared the floor). This forces geometric growth in
-// fold sizes — ~log2(N) folds, O(N) total re-fold work — instead of the O(N^2)
-// thrash that fold-on-every-touch causes for whale accounts whose storage streams
-// in. Process always folds the final state regardless, so correctness is
-// unaffected; only wasted eager work changes. Callers hold s.mu.
+// shouldEagerFold gates eager background folds: re-fold only once the split's
+// key count has at least doubled since its last fold (and cleared the floor),
+// keeping total re-fold work linear instead of fold-on-every-touch quadratic.
+// Callers hold s.mu.
 func (sc *StreamingCommitter) shouldEagerFold(s *splitState) bool {
 	return s.keyCount >= sc.eagerFloor && s.keyCount >= 2*s.lastFoldedSize
 }
@@ -74,15 +70,10 @@ func (sc *StreamingCommitter) shouldEagerFold(s *splitState) bool {
 // seam: a low floor makes small-corpus scheduler tests exercise eager folds.
 func (sc *StreamingCommitter) SetEagerFold(n uint64) { sc.eagerFloor = n }
 
-// StreamingCommitter overlaps commitment fold work with block execution. It owns
-// a persistent prefix trie of touched keys (Insert is order-independent) and,
-// per top-nibble split point, the state needed to (re-)fold that subtree.
-//
-// Process folds every dirty split statelessly — mount a pooled worker on a
-// freshly unfolded base, replay the split's keys in sorted order via an in-order
-// prefix-trie walk, fold to a cell — then stitches the cells into the base row
-// and folds to the root. It reuses the proven mount/fold engine verbatim; the
-// only new logic is orchestration.
+// StreamingCommitter overlaps commitment fold work with block execution. It
+// owns a persistent prefix trie of touched keys and, per top-nibble split, the
+// state to (re-)fold that subtree; Process folds dirty splits on the mount/fold
+// engine, stitches the cells into the base row, and folds to the root.
 type StreamingCommitter struct {
 	trieCtxFactory TrieContextFactory
 	cfg            TrieConfig
@@ -118,9 +109,8 @@ type StreamingCommitter struct {
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
 
-	// deepLocalFolds counts big-storage accounts folded through the
-	// streaming-local deep walk (dfsDeepLocal) — a test seam proving the
-	// streaming path no longer routes through parallel_mount.go's deep fan-out.
+	// deepLocalFolds counts big-storage accounts folded through the deep
+	// storage fan-out — a test seam proving promotion happened.
 	deepLocalFolds atomic.Uint64
 
 	// rootCell + flags snapshot the base trie's terminal root after a successful
@@ -191,14 +181,10 @@ func (sc *StreamingCommitter) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	return d
 }
 
-// TouchKey records a touched key. hashedKey is in nibble form; plainKey and
-// update backing must stay stable until Process (or the next Reset). update may
-// be nil, in which case the fold re-reads the value from ctx. Insert is
-// order-independent, so callers may touch keys in execution order.
-// A storage-slot touch carries a 128-nibble key whose first nibble is the top
-// nibble of the owning account's hash, so it routes to and dirties the account's
-// split here — the storageRoot cross-dependency (an account leaf embeds its
-// storageRoot) needs no separate mapping.
+// TouchKey records a touched key. hashedKey is in nibble form; plainKey/update
+// backing must stay stable until Process, and a nil update makes the fold
+// re-read the value from ctx. Storage keys share the owning account's top
+// nibble, so they dirty the account's split with no separate mapping.
 func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Update) {
 	sc.trieMu.Lock()
 	sc.trie.Insert(hashedKey, plainKey, update)
@@ -341,45 +327,40 @@ func (sc *StreamingCommitter) PromoteRootInto(tmpl *HexPatriciaHashed) bool {
 	return true
 }
 
-// newProcessBase builds the per-Process base trie: a fresh deferring
-// HexPatriciaHashed unfolded one level at the root so its row 0 carries every
-// on-disk top-nibble sibling the split cells stitch into. The returned cleanup
-// releases the base and the context. root may be nil/empty (no touches).
+// newProcessBase builds the per-Process base trie, unfolded at the root unless
+// the prefix trie is empty (no touches). The returned cleanup releases the base
+// and its context.
 func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaHashed, func(), *prefixNode, error) {
+	root := sc.trie.root
+	if root == nil || root.subtreeCount == 0 {
+		base, cleanup := sc.newBaseTrie()
+		return base, cleanup, root, nil
+	}
+	if len(root.ext) != 0 {
+		return nil, nil, nil, fmt.Errorf("StreamingCommitter: root.ext len %d not yet supported", len(root.ext))
+	}
+	base, cleanup, err := sc.buildBase(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return base, cleanup, root, nil
+}
+
+// newBaseTrie constructs a fresh deferring base trie and a cleanup releasing it
+// together with its context.
+func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
 	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	bctx, bclean := sc.trieCtxFactory()
-	cleanup := func() {
+	base.ResetContext(bctx)
+	base.SetTrace(sc.trace)
+	base.branchEncoder.setDeferUpdates(true)
+	base.SetLeaveDeferredForCaller(true)
+	return base, func() {
 		base.Release()
 		if bclean != nil {
 			bclean()
 		}
 	}
-	base.ResetContext(bctx)
-	base.SetTrace(sc.trace)
-	base.branchEncoder.setDeferUpdates(true)
-	base.SetLeaveDeferredForCaller(true)
-
-	root := sc.trie.root
-	if root == nil || root.subtreeCount == 0 {
-		return base, cleanup, root, nil
-	}
-	if len(root.ext) != 0 {
-		cleanup()
-		return nil, nil, nil, fmt.Errorf("StreamingCommitter: root.ext len %d not yet supported", len(root.ext))
-	}
-
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			cleanup()
-			return nil, nil, nil, err
-		}
-		if err := base.unfold(zero, u); err != nil {
-			cleanup()
-			return nil, nil, nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
-		}
-	}
-	return base, cleanup, root, nil
 }
 
 // processBase returns the base trie Process folds and stitches into. When the
@@ -398,23 +379,10 @@ func (sc *StreamingCommitter) processBase(ctx context.Context) (*HexPatriciaHash
 	return sc.newProcessBase(ctx)
 }
 
-// buildBase builds a base trie unfolded one level at the on-disk root so its row
-// 0 carries every top-nibble sibling the split cells stitch into. Unlike
-// newProcessBase it unfolds unconditionally (the scheduler builds it before any
-// touch arrives), so it never short-circuits on an empty prefix trie.
+// buildBase builds a base trie unfolded one level at the on-disk root so its
+// row 0 carries every top-nibble sibling the split cells stitch into.
 func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed, func(), error) {
-	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
-	bctx, bclean := sc.trieCtxFactory()
-	cleanup := func() {
-		base.Release()
-		if bclean != nil {
-			bclean()
-		}
-	}
-	base.ResetContext(bctx)
-	base.SetTrace(sc.trace)
-	base.branchEncoder.setDeferUpdates(true)
-	base.SetLeaveDeferredForCaller(true)
+	base, cleanup := sc.newBaseTrie()
 
 	zero := []byte{0}
 	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
@@ -513,12 +481,9 @@ type touchedKey struct {
 	upd *Update
 }
 
-// foldSplitBg folds one split in the background: snapshot its keys under a brief
-// read-lock (so TouchKey's Insert can proceed concurrently), fold them on a
-// pooled worker against an isolating overlay ctx, then CAS the result into the
-// split only if no touch bumped its gen meanwhile. A self-flush (collapse) is
-// discarded and left for Process to fold against the real ctx — re-folding a
-// collapsed split mid-block would double-apply.
+// foldSplitBg folds one split in the background against an isolating overlay,
+// installing the result only if no touch bumped the split's gen meanwhile; a
+// self-flush (collapse) is discarded for Process to fold against the real ctx.
 func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 	sc.trieMu.RLock()
 	root := sc.trie.root
@@ -591,13 +556,9 @@ func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 	sc.enqueue(nib)
 }
 
-// foldKeys folds a snapshotted split's keys on a pooled worker mounted on the
-// persistent base, replaying them in sorted (snapshot) order. The worker's ctx is
-// an overlay that discards branch writes, so the engine's mid-fold self-flush
-// (readBranchAndCheckForFlushing on a collapse) never mutates the real store; the
-// returned flushed flag reports whether that happened. Big-storage accounts fold
-// sequentially here (the deep fan-out is a Process-time path); the cell is
-// byte-identical either way.
+// foldKeys folds a snapshotted split's keys on a pooled worker whose overlay
+// ctx discards branch writes; the returned flushed flag reports a mid-fold
+// self-flush (collapse), whose result the caller must discard.
 func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*DeferredBranchUpdate, bool, error) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(sc.base, int(nib))
@@ -641,9 +602,7 @@ func childForNib(root *prefixNode, nib byte) (*prefixNode, bool) {
 }
 
 // keyArena copies walk-path nibbles into chunked backing buffers so each
-// collected key gets a stable slice without one allocation per key. A new chunk
-// is allocated only when the next key would not fit the current one, so prior
-// slices never move.
+// collected key gets a stable slice without one allocation per key.
 type keyArena struct{ buf []byte }
 
 const keyArenaChunk = 64 * 1024
@@ -660,23 +619,15 @@ func (a *keyArena) copy(hk []byte) []byte {
 // collectSplitKeys walks a split's subtree in sorted order, copying each key's
 // hashed nibbles off the reused walk path; plainKey/update stay referenced.
 func collectSplitKeys(child *prefixNode, nib byte) []touchedKey {
-	out := make([]touchedKey, 0, child.subtreeCount)
-	var arena keyArena
 	path := make([]byte, 0, 144)
 	path = append(path, nib)
 	path = append(path, child.ext...)
-	_ = dfsSubtree(child, path, func(hk, pk []byte, upd *Update) error {
-		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
-		return nil
-	})
-	return out
+	return collectSubtreeKeys(child, path)
 }
 
-// overlayContext wraps a real PatriciaContext for a background fold: reads fall
-// through (a self-flushed prefix re-reads its just-written value so the worker
-// stays self-consistent) but writes never reach the real store. flushed records
-// whether the engine self-flushed mid-fold, signalling a collapse whose result
-// must be discarded.
+// overlayContext isolates a background fold: reads fall through (a self-flushed
+// prefix re-reads its own write), writes never reach the real store, and flushed
+// records a mid-fold self-flush whose result must be discarded.
 type overlayContext struct {
 	base    PatriciaContext
 	writes  map[string][]byte
@@ -742,15 +693,10 @@ func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPa
 	return present, nil
 }
 
-// foldDirtySplits re-folds every touched split once, replacing each split's cell
-// and deferred set, without the committer merging to the root or applying
-// anything to the store. Repeated calls are re-fold-invariant ONLY while no
-// touched branch collapses: the engine self-flushes a pending prefix to ctx when
-// it re-reads it mid-fold (readBranchAndCheckForFlushing), which a delete-driven
-// collapse triggers, so a second fold would read that mutated branch as prev and
-// double-apply. The Task-4 scheduler must isolate or gate such re-folds; until
-// then this exists so tests can exercise the invariant in the collapse-free
-// regime, where mid-block folds never write.
+// foldDirtySplits re-folds every touched split without merging to the root or
+// writing to the store. Repeated calls are re-fold-invariant only while no
+// touched branch collapses (a collapse self-flushes mid-fold, so a second fold
+// would double-apply).
 func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
 	if sc.trieCtxFactory == nil {
 		return errors.New("StreamingCommitter.foldDirtySplits requires a TrieContextFactory")
@@ -767,10 +713,9 @@ func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
 	return err
 }
 
-// stitchSplitCells drops each folded split cell back into the base row at its
-// top-nibble slot, stripping the leading extension nibble a hash-only sub-branch
-// carries (the row slot already implies it) and leaving a leaf's key tail
-// intact — the proven mount stitch.
+// stitchSplitCells drops each folded split cell into the base row at its
+// top-nibble slot, stripping the leading extension nibble of a hash-only
+// sub-branch (the slot implies it) while leaving a leaf's key tail intact.
 func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
 	for nib := range 16 {
 		if !present[nib] {
@@ -794,11 +739,9 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 	}
 }
 
-// foldSplit re-folds one top-nibble subtree statelessly: mount a pooled worker
-// on the unfolded base, replay the split's keys in sorted (in-order) prefix-trie
-// order via the streaming-local deep walk (a big-storage account's storage fans
-// out concurrently through storageRootLocal), fold to the split cell — never to the root —
-// and capture the fold's deferred branch updates into s, replacing any prior set.
+// foldSplit re-folds one top-nibble subtree statelessly on a worker mounted at
+// the unfolded base — to the split cell, never the root — replacing the split's
+// cell and deferred set.
 func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
@@ -816,7 +759,14 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path := make([]byte, 0, 144)
 	path = append(path, ni)
 	path = append(path, child.ext...)
-	if err := sc.dfsDeepLocal(ctx, w, &pu, child, path); err != nil {
+	deepStorageRoot := func(n *prefixNode, pth []byte) (common.Hash, error) {
+		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth)
+		if err == nil {
+			sc.deepLocalFolds.Add(1)
+		}
+		return sr, err
+	}
+	if err := dfsSubtreeDeep(w, child, path, deepStorageRoot); err != nil {
 		w.resetForReuse()
 		sc.workerPool.Put(w)
 		for _, upd := range pu.deferredCombined {
@@ -852,163 +802,15 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	return nil
 }
 
-// DeepLocalFolds reports how many big-storage accounts the streaming-local deep
-// walk folded — a test seam proving the deep path no longer calls parallel_mount.
+// DeepLocalFolds reports how many big-storage accounts the streaming path
+// deep-folded — a test seam proving promotion happened.
 func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds.Load() }
 
-// dfsDeepLocal is the streaming-local copy of ParallelPatriciaHashed.dfsSubtreeDeep:
-// it walks a mount worker's subtree and, at a big-storage account whose touched
-// storage crosses deepStorageThreshold, folds that account's storage via
-// storageRootLocal and injects the resulting storageRoot into the account leaf
-// rather than streaming the storage. parallel_mount.go is untouched.
-func (sc *StreamingCommitter) dfsDeepLocal(ctx context.Context, w *HexPatriciaHashed, pu *parallelUpdate, node *prefixNode, path []byte) error {
-	if node == nil {
-		return nil
-	}
-	if node.plainKey != nil {
-		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
-			return err
-		}
-	} else if node.bitmap == 0 {
-		return errors.New("StreamingCommitter: trie leaf without a plainKey")
-	}
-
-	if len(path) == 64 {
-		if node.plainKey != nil && bits.OnesCount16(node.bitmap) >= 2 &&
-			node.subtreeCount > deepStorageThreshold {
-			sr, err := sc.storageRootLocal(pu, node, path)
-			if err != nil {
-				return fmt.Errorf("storageRootLocal: %w", err)
-			}
-			setAccountStorageRoot(w, path, sr)
-			sc.deepLocalFolds.Add(1)
-			return nil
-		}
-	}
-
-	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
-		nib := byte(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
-		base := len(path)
-		path = append(path, nib)
-		path = append(path, child.ext...)
-		if err := sc.dfsDeepLocal(ctx, w, pu, child, path); err != nil {
-			return err
-		}
-		path = path[:base]
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-	return nil
-}
-
-// storageRootLocal folds an account's storage subtree concurrently and returns its
-// hash (the account's storageRoot). Each first-storage-nibble subtree folds
-// independently in its own worker mounted at the nibble's depth-65 prefix
-// (foldStorageLeaf), unfolding the on-disk branch there so an incremental collapse
-// preserves that subtree's untouched on-disk interior siblings; aggregateStorageRoot
-// then stitches the storage-root branch. This yields the canonical, embedding-
-// independent storageRoot (matching ModeDirect/ModeParallel for the embedded case).
-// path is the 64-nibble account hash.
-func (sc *StreamingCommitter) storageRootLocal(pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
-	accPrefix := append([]byte(nil), path...)
-	var children [16]cell
-	present := node.bitmap
-
-	var g errgroup.Group
-	g.SetLimit(sc.numWorkers)
-	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
-		nib := int(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
-		ni, ch := nib, child
-		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(ch.ext))
-		copy(childPrefix, accPrefix)
-		childPrefix = append(childPrefix, byte(ni))
-		childPrefix = append(childPrefix, ch.ext...)
-		group := collectStorageNibbleKeys(ch, childPrefix)
-		g.Go(func() error {
-			w, release := sc.newStorageWorker()
-			c, err := foldStorageLeaf(w, childPrefix, group)
-			if err == nil {
-				if d := w.TakeDeferredUpdates(); len(d) > 0 {
-					pu.appendDeferred(d)
-				}
-			}
-			release()
-			if err != nil {
-				return fmt.Errorf("storage nibble[%x] fold: %w", ni, err)
-			}
-			if len(ch.ext) > 0 && !c.IsEmpty() {
-				copy(c.extension[:], ch.ext)
-				c.extLen = int16(len(ch.ext))
-			}
-			children[ni] = c
-			return nil
-		})
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-	if err := g.Wait(); err != nil {
-		return common.Hash{}, err
-	}
-
-	w, release := sc.newStorageWorker()
-	sr, err := aggregateStorageRoot(w, path, &children, present)
-	if err == nil {
-		if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
-			pu.appendDeferred(deferred)
-		}
-	}
-	release()
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
-	}
-	// Every touched first-nibble subtree collapsed (e.g. all storage deleted): the
-	// account is now storage-less, so its storageRoot is the empty-trie root, not a
-	// zero hash. aggregateStorageRoot returns an empty cell in that case.
-	if sr.IsEmpty() {
-		return empty.RootHash, nil
-	}
-	return sr.hash, nil
-}
-
-// newStorageWorker yields a pooled trie worker set up for a deferring storage
-// fold and a release that drains it back to the pool (resetForReuse + Put) and
-// frees its context. Concurrent storage folds operate on disjoint subtree
-// prefixes, so a collapse-driven mid-fold self-flush writes only this subtree's
-// own branches to the shared (lock-guarded) ctx — never a prefix another fold is
-// also writing — and the authoritative branch state still flows out via
-// TakeDeferredUpdates for the single end-of-block apply.
+// newStorageWorker is the concurrent-storage-fold worker source. Disjoint
+// subtree prefixes keep a collapse-driven mid-fold self-flush from racing
+// another fold's writes.
 func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
-	w := sc.workerPool.Get().(*HexPatriciaHashed)
-	wctx, cleanup := sc.trieCtxFactory()
-	w.ResetContext(wctx)
-	w.SetTrace(sc.trace)
-	w.branchEncoder.setDeferUpdates(true)
-	w.SetLeaveDeferredForCaller(true)
-	return w, func() {
-		w.resetForReuse()
-		sc.workerPool.Put(w)
-		if cleanup != nil {
-			cleanup()
-		}
-	}
-}
-
-// collectStorageNibbleKeys walks one first-storage-nibble subtree in sorted order,
-// copying each key's hashed nibbles off the reused walk path; plainKey/update stay
-// referenced. The fold replays them in this (dfsSubtree) order, matching
-// concurrentStorageRoot's live walk byte-for-byte.
-func collectStorageNibbleKeys(node *prefixNode, path []byte) []touchedKey {
-	out := make([]touchedKey, 0, node.subtreeCount)
-	var arena keyArena
-	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
-		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
-		return nil
-	})
-	return out
+	return newDeferredStorageWorker(&sc.workerPool, sc.trieCtxFactory, sc.trace)
 }
 
 // dropSplitDeferred returns every split's staged deferred branch updates to the
@@ -1068,14 +870,9 @@ func (sc *StreamingCommitter) applyDeferred(deferred []*DeferredBranchUpdate) er
 	return nil
 }
 
-// applyDeferredGuarded applies deferred branch updates, collapsing any prefix
-// emitted by more than one fold set (a per-split set colliding with the merge's
-// bottom row). The apply context may be write-only — the concurrent factory
-// routes PutBranch to a drain-later collector that Branch cannot read — so a
-// colliding prefix's later update is merged against the earlier update's encoded
-// result held in an in-memory overlay, not a re-read of ctx. Bare
-// ApplyDeferredBranchUpdates does not dedup, so the collision-free slice (the
-// common case) takes its parallel fast path.
+// applyDeferredGuarded applies deferred branch updates, pre-merging any prefix
+// emitted by more than one fold set in memory — the apply context may be
+// write-only, so a colliding update cannot re-read its predecessor from ctx.
 func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate, numWorkers int) error {
 	if !hasDuplicatePrefix(deferred) {
 		_, err := ApplyDeferredBranchUpdates(deferred, numWorkers, ctx.PutBranch)

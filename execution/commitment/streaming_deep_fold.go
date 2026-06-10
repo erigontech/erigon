@@ -16,7 +16,19 @@
 
 package commitment
 
-import "github.com/erigontech/erigon/execution/commitment/nibbles"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/bits"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+)
 
 // foldChildSubtree folds one subtree's collected keys in a standalone worker
 // mounted from the trie root and returns its cell at the deepest shared depth,
@@ -129,4 +141,150 @@ func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKe
 		}
 	}
 	return w.grid[0][col], nil
+}
+
+// isDeepStorageAccount reports whether node is an account leaf at depth 64 whose
+// touched storage is large and forked enough to fold concurrently.
+func isDeepStorageAccount(node *prefixNode, depth int) bool {
+	return depth == 64 && node.plainKey != nil &&
+		bits.OnesCount16(node.bitmap) >= 2 && node.subtreeCount > deepStorageThreshold
+}
+
+// dfsSubtreeDeep walks node's subtree like dfsSubtree, applying each key to w,
+// but at a big-storage account it injects storageRoot's result into the account
+// leaf instead of streaming the slots.
+func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte) (common.Hash, error)) error {
+	if node == nil {
+		return nil
+	}
+	if node.plainKey != nil {
+		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
+			return err
+		}
+	} else if node.bitmap == 0 {
+		return errors.New("commitment: trie leaf without a plainKey")
+	}
+
+	if isDeepStorageAccount(node, len(path)) {
+		sr, err := storageRoot(node, path)
+		if err != nil {
+			return fmt.Errorf("storageRoot: %w", err)
+		}
+		setAccountStorageRoot(w, path, sr)
+		return nil
+	}
+
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := byte(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		base := len(path)
+		path = append(path, nib)
+		path = append(path, child.ext...)
+		if err := dfsSubtreeDeep(w, child, path, storageRoot); err != nil {
+			return err
+		}
+		path = path[:base]
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return nil
+}
+
+// foldStorageRoot folds each first-storage-nibble subtree of one account in its
+// own worker (foldStorageLeaf), aggregates the storage branch, and returns the
+// account's storageRoot; an all-collapsed aggregate yields the empty-trie root.
+func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
+	accPrefix := append([]byte(nil), path...)
+	var children [16]cell
+	present := node.bitmap
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(numWorkers)
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := int(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		ni, ch := nib, child
+		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(ch.ext))
+		copy(childPrefix, accPrefix)
+		childPrefix = append(childPrefix, byte(ni))
+		childPrefix = append(childPrefix, ch.ext...)
+		group := collectSubtreeKeys(ch, childPrefix)
+		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+			w, release := newWorker()
+			c, err := foldStorageLeaf(w, childPrefix, group)
+			if err == nil {
+				if d := w.TakeDeferredUpdates(); len(d) > 0 {
+					pu.appendDeferred(d)
+				}
+			}
+			release()
+			if err != nil {
+				return fmt.Errorf("storage nibble[%x] fold: %w", ni, err)
+			}
+			if len(ch.ext) > 0 && !c.IsEmpty() {
+				copy(c.extension[:], ch.ext)
+				c.extLen = int16(len(ch.ext))
+			}
+			children[ni] = c
+			return nil
+		})
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	if err := g.Wait(); err != nil {
+		return common.Hash{}, err
+	}
+
+	w, release := newWorker()
+	sr, err := aggregateStorageRoot(w, path, &children, present)
+	if err == nil {
+		if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
+			pu.appendDeferred(deferred)
+		}
+	}
+	release()
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
+	}
+	// All touched first-nibble subtrees collapsed: the account is storage-less,
+	// so its storageRoot is the empty-trie root, not a zero hash.
+	if sr.IsEmpty() {
+		return empty.RootHash, nil
+	}
+	return sr.hash, nil
+}
+
+// newDeferredStorageWorker yields a pooled trie worker set up for a deferring
+// storage fold and a release that drains it back to the pool and frees its context.
+func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, trace bool) (*HexPatriciaHashed, func()) {
+	w := pool.Get().(*HexPatriciaHashed)
+	wctx, cleanup := factory()
+	w.ResetContext(wctx)
+	w.SetTrace(trace)
+	w.branchEncoder.setDeferUpdates(true)
+	w.SetLeaveDeferredForCaller(true)
+	return w, func() {
+		w.resetForReuse()
+		pool.Put(w)
+		if cleanup != nil {
+			cleanup()
+		}
+	}
+}
+
+// collectSubtreeKeys walks a subtree in sorted order, copying each key's hashed
+// nibbles off the reused walk path; plainKey/update stay referenced.
+func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
+	out := make([]touchedKey, 0, node.subtreeCount)
+	var arena keyArena
+	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
+		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
+		return nil
+	})
+	return out
 }

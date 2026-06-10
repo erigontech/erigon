@@ -28,9 +28,9 @@ import (
 
 // TestStreaming_StorageInteriorSplits is the headline Task-3 check: a whale
 // account whose storage spans many slots must fold via the flat per-first-nibble
-// fan-out (storageRootLocal, ~16-way below the account/storage boundary) while
+// fan-out (foldStorageRoot, ~16-way below the account/storage boundary) while
 // still matching the sequential root and stored branch set. The account folds
-// through storageRootLocal (DeepLocalFolds), never as a split-point (its depth-64
+// through foldStorageRoot (DeepLocalFolds), never as a split-point (its depth-64
 // node carries the account terminator).
 func TestStreaming_StorageInteriorSplits(t *testing.T) {
 	t.Parallel()
@@ -53,7 +53,7 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 
 		require.Equalf(t, seqRoot, root, "whale storage-interior split(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, ms)
-		require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through storageRootLocal (workers=%d)", w)
+		require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through foldStorageRoot (workers=%d)", w)
 		sc.Release()
 	}
 }
@@ -63,7 +63,7 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 // many slots. Block 2 (k2/u2) touches the account and rewrites a SUBSET of the
 // slots — a third deleted, a third updated, a third left untouched on disk — so
 // the block-2 fold still crosses deepStorageThreshold (routing through
-// storageRootLocal's split fan-out) while the deletes collapse interior storage
+// foldStorageRoot's split fan-out) while the deletes collapse interior storage
 // branches AND untouched on-disk siblings must be preserved across the fold. That
 // untouched-sibling read is what makes the engine self-flush mid-fold; the fold
 // must write only deferred (applied once at end of block) and stay parity-clean.
