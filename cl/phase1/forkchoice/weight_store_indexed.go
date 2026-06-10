@@ -139,7 +139,9 @@ func (w *indexedWeightStore) RemoveVote(validatorIndex uint64, oldRoot common.Ha
 }
 
 // pruneFinalized drops indexed votes whose target block is finalized away
-// (slot at or below finalizedSlot) or no longer in the fork graph.
+// (slot at or below finalizedSlot) or no longer in the fork graph. A missing
+// header implies the root was pruned, since votes are only recorded for roots
+// present in the fork graph.
 func (w *indexedWeightStore) pruneFinalized(finalizedSlot uint64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
