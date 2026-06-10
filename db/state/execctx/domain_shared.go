@@ -747,7 +747,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				sd.branchCache.Invalidate(k)
 				return
 			}
-			sd.branchCache.Put(k, v, uint64(step), sd.txNum, "sd.Flush")
+			sd.branchCache.Put(k, v, uint64(step), sd.txNum)
 		})); err != nil {
 			return err
 		}
@@ -871,7 +871,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// be treated as immortal by UnwindTo, so skip the Put rather than insert
 	// an entry that can never be unwind-evicted.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
-		sd.branchCache.Put(k, v, uint64(step), readTxN, "sd.GetLatest")
+		sd.branchCache.Put(k, v, uint64(step), readTxN)
 	}
 
 	return v, step, nil

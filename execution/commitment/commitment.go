@@ -571,13 +571,6 @@ func (be *BranchEncoder) CollectUpdate(
 	var prev []byte
 	var err error
 
-	// MarkDirty BEFORE encode so any concurrent PutIfClean for this prefix
-	// skips — preventing a stale read from overwriting our canonical write.
-	// See branch_cache.go's Concurrency Contract.
-	if be.branchCache != nil {
-		be.branchCache.MarkDirty(prefix)
-	}
-
 	prev, _, err = ctx.Branch(prefix)
 	if err != nil {
 		return err
@@ -639,13 +632,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
-	}
-
-	// MarkDirty as in CollectUpdate — the deferred write happens later via
-	// ApplyDeferredBranchUpdates but the cache must skip concurrent
-	// PutIfClean writers in the interim.
-	if be.branchCache != nil {
-		be.branchCache.MarkDirty(prefix)
 	}
 
 	prev, _, err := ctx.Branch(prefix)

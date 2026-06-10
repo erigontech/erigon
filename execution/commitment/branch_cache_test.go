@@ -31,8 +31,8 @@ func TestBranchCache_RootPinning(t *testing.T) {
 
 	rootKey := []byte{0x00} // compact-encoded empty nibble path = root branch
 	deepKey := []byte{0x12, 0x34, 0x56}
-	c.Put(rootKey, []byte("root-data"), 0, 0, "test")
-	c.Put(deepKey, []byte("deep-data"), 0, 0, "test")
+	c.Put(rootKey, []byte("root-data"), 0, 0)
+	c.Put(deepKey, []byte("deep-data"), 0, 0)
 
 	// Root reads should increment rootHits, not tailHits
 	got, _, ok := c.Get(rootKey)
@@ -55,11 +55,11 @@ func TestBranchCache_RootPinning(t *testing.T) {
 func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	c := NewBranchCache(10) // very small tail
 	rootKey := []byte{0x00}
-	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, 0, "test")
+	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, 0)
 
 	// Stuff the tail well past capacity
 	for i := 0; i < 100; i++ {
-		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, 0, "test")
+		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, 0)
 	}
 
 	// Root must still be there
@@ -71,67 +71,13 @@ func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	require.LessOrEqual(t, c.tail.Len(), 10, "tail should respect LRU capacity")
 }
 
-// TestBranchCache_DirtyFlag verifies PutIfClean refuses overwrite of a
-// dirty entry, while Put unconditionally replaces (and the new entry
-// starts clean).
-func TestBranchCache_DirtyFlag(t *testing.T) {
-	c := NewBranchCache(100)
-	key := []byte{0x12, 0x34}
-
-	require.True(t, c.PutIfClean(key, []byte("v1"), 0, 0, "test"))
-	c.MarkDirty(key)
-
-	require.False(t, c.PutIfClean(key, []byte("v2"), 0, 0, "test"), "PutIfClean must refuse dirty entry")
-	got, _, _ := c.Get(key)
-	require.Equal(t, []byte("v1"), got, "dirty entry's data preserved")
-
-	// Unconditional Put replaces
-	c.Put(key, []byte("v3"), 0, 0, "test")
-	got, _, _ = c.Get(key)
-	require.Equal(t, []byte("v3"), got)
-
-	// New entry is clean
-	require.True(t, c.PutIfClean(key, []byte("v4"), 0, 0, "test"))
-}
-
-// TestBranchCache_GetDecoded verifies the lazy-decode read path for a
-// real encoded branch (round-trip with BranchEncoder).
-func TestBranchCache_GetDecoded(t *testing.T) {
-	c := NewBranchCache(100)
-
-	row, bm := generateCellRow(t, 16)
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(t, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(t, err)
-
-	prefix := []byte{0x12, 0x34}
-	c.Put(prefix, enc, 0, 0, "test")
-
-	// First decoded-read decodes lazily
-	bitmap, cells, ok := c.GetDecoded(prefix)
-	require.True(t, ok)
-	require.Equal(t, bm, bitmap)
-	require.NotNil(t, cells)
-
-	// Second call returns same cells pointer
-	_, cells2, ok := c.GetDecoded(prefix)
-	require.True(t, ok)
-	require.Same(t, cells, cells2, "decoded form cached and reused")
-
-	// Encoded form unchanged after decoded reads
-	encGot, _, ok := c.Get(prefix)
-	require.True(t, ok)
-	require.Equal(t, []byte(enc), encGot)
-}
-
 // TestBranchCache_Invalidate removes entries from both tiers.
 func TestBranchCache_Invalidate(t *testing.T) {
 	c := NewBranchCache(100)
 	rootKey := []byte{0x00}
 	deepKey := []byte{0x12, 0x34}
-	c.Put(rootKey, []byte("r"), 0, 0, "test")
-	c.Put(deepKey, []byte("d"), 0, 0, "test")
+	c.Put(rootKey, []byte("r"), 0, 0)
+	c.Put(deepKey, []byte("d"), 0, 0)
 
 	c.Invalidate(rootKey)
 	_, _, ok := c.Get(rootKey)
@@ -145,8 +91,8 @@ func TestBranchCache_Invalidate(t *testing.T) {
 // TestBranchCache_Clear empties everything and resets stats.
 func TestBranchCache_Clear(t *testing.T) {
 	c := NewBranchCache(100)
-	c.Put([]byte{0x00}, []byte("r"), 0, 0, "test")
-	c.Put([]byte{0x12}, []byte("d"), 0, 0, "test")
+	c.Put([]byte{0x00}, []byte("r"), 0, 0)
+	c.Put([]byte{0x12}, []byte("d"), 0, 0)
 	_, _, _ = c.Get([]byte{0x00})
 	_, _, _ = c.Get([]byte{0x12})
 
@@ -166,8 +112,8 @@ func TestBranchCache_Clear(t *testing.T) {
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {
 	c := NewBranchCache(100)
-	c.Put([]byte{0x00}, []byte("rrr"), 0, 0, "test")
-	c.Put([]byte{0x12, 0x34}, []byte("ddd"), 0, 0, "test")
+	c.Put([]byte{0x00}, []byte("rrr"), 0, 0)
+	c.Put([]byte{0x12, 0x34}, []byte("ddd"), 0, 0)
 	_, _, _ = c.Get([]byte{0x00})
 	_, _, _ = c.Get([]byte{0x12, 0x34})
 	_, _, _ = c.Get([]byte{0xff}) // tail miss
@@ -194,11 +140,11 @@ func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
 	tailKeyEvict := []byte{0xa0, 0xb1}
 
 	// txN=50 entries — these should survive a watermark of 60.
-	c.Put(rootKey, []byte("root-keep"), 0, 50, "test")
-	c.Put(tailKeyKeep, []byte("tail-keep"), 0, 50, "test")
+	c.Put(rootKey, []byte("root-keep"), 0, 50)
+	c.Put(tailKeyKeep, []byte("tail-keep"), 0, 50)
 
 	// txN=100 tail entry — should be evicted at watermark=60.
-	c.Put(tailKeyEvict, []byte("tail-evict"), 0, 100, "test")
+	c.Put(tailKeyEvict, []byte("tail-evict"), 0, 100)
 
 	evicted := c.UnwindTo(60)
 	require.Equal(t, 1, evicted, "only the txN=100 tail entry should be evicted")
@@ -219,8 +165,8 @@ func TestBranchCache_UnwindTo_EvictsAcrossAllTiers(t *testing.T) {
 	rootKey := []byte{0x00}
 	tailKey := []byte{0xa0, 0xb0}
 
-	c.Put(rootKey, []byte("root"), 0, 100, "test")
-	c.Put(tailKey, []byte("tail"), 0, 100, "test")
+	c.Put(rootKey, []byte("root"), 0, 100)
+	c.Put(tailKey, []byte("tail"), 0, 100)
 
 	evicted := c.UnwindTo(50)
 	require.Equal(t, 2, evicted, "every entry with txN > watermark must be evicted")
@@ -239,8 +185,8 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 
 	atKey := []byte{0xa0, 0xb0}
 	aboveKey := []byte{0xa0, 0xb1}
-	c.Put(atKey, []byte("at"), 0, 100, "test")
-	c.Put(aboveKey, []byte("above"), 0, 101, "test")
+	c.Put(atKey, []byte("at"), 0, 100)
+	c.Put(aboveKey, []byte("above"), 0, 101)
 
 	evicted := c.UnwindTo(100)
 	require.Equal(t, 1, evicted, "only the txN=101 entry must be evicted; txN=100 stays")
@@ -249,26 +195,4 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 	require.True(t, ok, "entry at txN==watermark must survive")
 	_, _, ok = c.Get(aboveKey)
 	require.False(t, ok, "entry at txN>watermark must be evicted")
-}
-
-// TestBranchCache_PutIfClean_DoesNotCountAsMiss verifies that the
-// write-path dirty check does not bump miss counters — write traffic
-// must not masquerade as read-miss pressure.
-func TestBranchCache_PutIfClean_DoesNotCountAsMiss(t *testing.T) {
-	c := NewBranchCache(100)
-
-	key := []byte{0x12, 0x34}
-	// PutIfClean on a cold prefix must succeed without bumping the tail
-	// miss counter (it's a write, not a read).
-	require.True(t, c.PutIfClean(key, []byte("v1"), 0, 0, "test"))
-	require.Equal(t, uint64(0), c.tailMisses.Load(), "PutIfClean must not bump tail miss counter")
-
-	// MarkDirty on a different cold prefix: also write-path, also must not count.
-	c.MarkDirty([]byte{0xff, 0xee})
-	require.Equal(t, uint64(0), c.tailMisses.Load(), "MarkDirty must not bump tail miss counter")
-
-	// A real read miss should still count.
-	_, _, ok := c.Get([]byte{0xaa, 0xbb})
-	require.False(t, ok)
-	require.Equal(t, uint64(1), c.tailMisses.Load(), "Get on cold prefix must bump tail miss counter")
 }
