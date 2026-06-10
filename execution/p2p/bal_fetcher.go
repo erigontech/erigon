@@ -149,6 +149,7 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 	}
 	out, badPeer, err := validateBALResponse(reqs, response)
 	if badPeer {
+		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
 		f.penalize(ctx, peerId)
 	}
 	return out, err
