@@ -390,25 +390,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}
 
 		// processCommit runs handleCommitResult and defers ErrWrongTrieRoot
-		// instead of returning it. Other commitment errors stay fast-fail.
-		// The deferred root error is surfaced only after applyResults
-		// closes, so any block-validation error that fires for the same or
-		// a later block first returns from the applyResults branch with
-		// ErrInvalidBlock — matching serial's "validation precedes
-		// commitment" ordering and keeping eest's error categorisation
-		// honest.
+		// instead of returning it so a later applyResult carrying
+		// ErrInvalidBlock can supersede it (EEST error categorisation).
+		// Other commitment errors stay fast-fail. The first
+		// ErrWrongTrieRoot also cancels the executor so the exec loop
+		// stops dispatching further blocks on top of a state we already
+		// know is wrong — drain semantics are preserved by the apply
+		// loop continuing until applyResults closes.
 		processCommit := func(cr commitmentResult) error {
-			err := handleCommitResult(cr)
-			if err == nil {
-				return nil
-			}
-			if errors.Is(err, ErrWrongTrieRoot) {
-				if deferredRootErr == nil {
-					deferredRootErr = err
-				}
-				return nil
-			}
-			return err
+			return processCommitErr(handleCommitResult(cr), executorCancel, &deferredRootErr)
 		}
 
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
@@ -1203,6 +1193,27 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 // downstream OCC consumers.
 func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
 	return valid && cntInvalid == 0
+}
+
+// processCommitErr decides what the apply loop's commit-handler call site
+// should do with the err returned by handleCommitResult. ErrWrongTrieRoot is
+// stashed in *deferredRootErr (so a later applyResult carrying
+// ErrInvalidBlock can supersede it) and cancel() is invoked once on the
+// first occurrence so the exec loop stops dispatching further blocks on top
+// of a state we already know is wrong. Any other err is returned as-is for
+// fast-fail.
+func processCommitErr(err error, cancel context.CancelFunc, deferredRootErr *error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrWrongTrieRoot) {
+		if *deferredRootErr == nil {
+			*deferredRootErr = err
+			cancel()
+		}
+		return nil
+	}
+	return err
 }
 
 // execLoopExitDecision is the result of evaluating the exec-loop's
