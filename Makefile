@@ -17,12 +17,15 @@ DOCKER_BINARIES ?= "erigon"
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
 
-# Use git tag value for "release/" branches only. Otherwise it make no sense.
-ifeq (,$(findstring release/,$(GIT_BRANCH)))
-  GIT_TAG	:= .
-endif
+# GIT_TAG is the exact release tag at HEAD (e.g. v3.5.0) when building from a
+# tagged release, and empty otherwise. It is build provenance only; the
+# advertised version comes from db/version (see NodeVersion). Earlier this used
+# `git describe`, which on an untagged branch anchored to an unrelated older
+# tag and produced a misleading value. The grep allowlist keeps untrusted tag
+# names (git refs permit shell metacharacters) out of the -ldflags shell line.
+# Override via the environment.
+GIT_TAG    ?= $(shell git tag --points-at HEAD --list 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$' | head -n 1)
 
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
