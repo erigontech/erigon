@@ -39,7 +39,7 @@ Before committing, always verify changes with: `make lint && make erigon integra
 
 ```bash
 ./build/bin/erigon --datadir=./data --chain=mainnet
-./build/bin/erigon --datadir=dev --chain=dev --beacon.api=beacon,validator,node,config  # PoS dev mode
+./build/bin/erigon --datadir=dev --chain=dev  # PoS dev mode
 ```
 
 ## Test-Driven Development
