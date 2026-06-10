@@ -1,15 +1,15 @@
 ---
-title: "Prune Modes"
-description: "Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case."
+title: "Pruning Modes"
+description: "Full, minimal, blocks, and archive pruning modes explained — choose the right mode for your use case."
 sidebar_position: 4
 ---
 
 
-# Prune Modes
+# Pruning Modes
 
-Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four pruning modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
-| **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
+| **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | <p>* <a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
 | \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |

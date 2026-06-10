@@ -23,11 +23,11 @@
 
 ## Fundamentals
 
-- [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, prune modes, database internals, and node configuration.
+- [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, pruning modes, database internals, and node configuration.
 - [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
 - [Architecture](https://docs.erigon.tech/fundamentals/architecture): How Erigon is built — staged sync, modular processes, flat-DB on MDBX, immutable snapshots, and an embedded consensus layer.
 - [Database](https://docs.erigon.tech/fundamentals/database): How Erigon stores chain data — MDBX engine, datadir layout, snapshot files, and real mainnet sizing numbers.
-- [Prune Modes](https://docs.erigon.tech/fundamentals/prune-modes): Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case.
+- [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes): Full, minimal, blocks, and archive pruning modes explained — choose the right mode for your use case.
 - [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats.
 - [Caplin](https://docs.erigon.tech/fundamentals/caplin): Erigon's built-in consensus layer — run a full node without an external CL client.
 - [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
