@@ -1205,6 +1205,16 @@ func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
 	return valid && cntInvalid == 0
 }
 
+// wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
+// preserving the real origErr as OriginError instead of the zero-value an
+// inline type-assertion would substitute on the failure branch.
+func wrapAsExecAbort(origErr error, depTxIndex int) error {
+	if _, ok := origErr.(protocol.ErrExecAbortError); ok {
+		return origErr
+	}
+	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
+}
+
 // execLoopExitDecision is the result of evaluating the exec-loop's
 // per-blockResult exit conditions. Values are ordered by precedence:
 // later conditions only matter if no earlier one fired.
@@ -1944,9 +1954,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
-		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
-			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
-		}
+		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
 	}
 
 	if result.Err != nil {
