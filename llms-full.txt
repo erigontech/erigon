@@ -1738,7 +1738,7 @@ The category labels below are exactly what the command prints.
 
 | Category | Contents |
 |----------|----------|
-| `domains` | Current-state domain files (latest accounts, storage, code, commitment). Never pruned, so usually the largest category. |
+| `domains` | Current-state domain files (latest accounts, storage, code, commitment). Never pruned, so typically the largest category on pruned (full / minimal) nodes; on an archive node, `block segments` dominate. |
 | `block segments` | Headers, bodies, and transactions (`.seg` + index files) directly under `snapshots/`. |
 | `history` | State-history snapshots for accounts, storage, code. |
 | `inverted indices` | Inverted indices over state history (enables range lookups). |
