@@ -217,7 +217,9 @@ func (h *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ws != nil && isWebsocket(r) {
 		if checkPath(r, h.wsConfig.prefix) {
 			ws.ServeHTTP(w, r)
+			return
 		}
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	// if http-rpc is enabled, try to serve request
