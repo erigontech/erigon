@@ -108,7 +108,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `false`
 * `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
-* `--snap.p2p-manifest` (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via ENR instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
+* `--snap.p2p-manifest` *(New in v3.5)* (experimental): Decentralized snapshot discovery — peers advertise their `chain.toml` manifest via ENR instead of the centralized `preverified.toml`. Opt-in; requires a compatible peer network.
   * Default: `false`
 * `--snap.chaintoml-url value` *(New in v3.5)*: Fetch the preverified `chain.toml` directly from this URL instead of the default R2/GitHub CDN. Precedence: the `ERIGON_REMOTE_PREVERIFIED` environment variable (path to a local override file) wins over this URL and the default CDN; a local `preverified.toml` in the datadir also takes precedence — delete it to re-fetch from the URL.
   * Default: `""` (uses the built-in CDN)
@@ -429,6 +429,10 @@ Flags for configuring the parallel block execution engine.
   * Default: `false`
 * `--exec.no-background-maintenance`: Suppress background state-aggregator and E2 block-snapshot retirement goroutines so execution is not perturbed by housekeeping work. Equivalent to `NO_BACKGROUND_E3_BUILD=true`. Diagnostic / focused-performance-testing use only — NOT an operational setting.
   * Default: `false`
+* `--exec.batched-io`: Enable BAL-driven I/O optimisations — read-ahead pre-warming of the DB page cache (`READ_AHEAD=true`) and version-map pre-population from BAL hints (`IGNORE_BAL=false`). Disable for cold-read or non-BAL scheduling performance measurements.
+  * Default: `true`
+* `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
+  * Default: `true`
 
 ### Caplin (Consensus Layer)
 

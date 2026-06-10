@@ -34,6 +34,7 @@
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
+- [NAT](https://docs.erigon.tech/fundamentals/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
 - [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks): OS-level tuning, memory settings, and tips to maximize sync throughput.
 - [Multiple instances / One machine](https://docs.erigon.tech/fundamentals/multiple-instances): Running several Erigon instances on a single machine without conflict.
@@ -46,7 +47,6 @@
 - [Creating a dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard): Prometheus metrics export and Grafana dashboard setup for node monitoring.
 - [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose): Running Erigon and all its modules with Docker Compose.
 - [web3 Wallet](https://docs.erigon.tech/fundamentals/web3-wallet): Connecting MetaMask and other web3 wallets to a local Erigon node.
-- [NAT](https://docs.erigon.tech/fundamentals/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
 - [Modules](https://docs.erigon.tech/fundamentals/modules): Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool.
 - [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon): The RPCdaemon module: serving JSON-RPC requests as a separate, remoteable process.
 - [TxPool](https://docs.erigon.tech/fundamentals/modules/txpool): The txpool module: managing the pending transaction pool as a standalone service.

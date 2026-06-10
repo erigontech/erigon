@@ -22,14 +22,14 @@ erigon seg du [--datadir <path>] [--json] [-v | --verbose]
 
 | Flag | Description |
 |------|-------------|
-| `--datadir <path>` | Path to the Erigon data directory. Defaults to the standard per-network data directory when omitted. |
+| `--datadir <path>` | Path to the Erigon data directory. Defaults to Erigon's standard data directory (`paths.DefaultDataDir()`, OS-specific) when omitted. `seg du` has no `--chain` flag, so this default is chain-agnostic. |
 | `--json` | Output results as JSON instead of human-readable text. Useful for scripting or dashboards. |
 | `-v`, `--verbose` | Show a per-domain / per-type subcategory breakdown within each category. |
 
 ### Example output (human-readable)
 
 ```
-mainnet | full | blocks 0–22.000.000 | steps 0–18.500
+mainnet | archive | blocks 0–22.000.000 | steps 0–7.000
 total: 1.2TB (42810 files)
 
 ── Breakdown ──────────────────────────────────────────────────
@@ -42,20 +42,22 @@ total: 1.2TB (42810 files)
   other                     0.5GB       0.0%      8 files
 
 ── Estimated Size by Node Type ────────────────────────────────
-  archive        1.4TB          —    all blocks       all history
-  blocks         1.3TB    -100.0GB    all blocks       last 262.144
-  full           1.2TB    -200.0GB    last 262.144     last 262.144
-  minimal        1.1TB    -300.0GB    last 100.000     last 100.000
+  archive        1.2TB          —    all blocks       all history
+  full           1.0TB    -200.0GB    last 262.144     last 262.144
+  blocks         1.1TB    -100.0GB    all blocks       last 262.144
+  minimal        0.9TB    -300.0GB    last 100.000     last 100.000
 ```
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
+
+The estimator only sums files already on disk, so the **archive** row always equals the current total and no node-type estimate can exceed it. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are always printed in the fixed order `archive → full → blocks → minimal`.
 
 **Header fields explained:**
 
 - **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
 - **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
 - **blocks 0–N** — the highest block number across all block segment files.
-- **steps 0–N** — the highest step number across all state files (steps are an internal Erigon unit; one step ≈ a fixed number of blocks, depending on chain activity).
+- **steps 0–N** — the highest step number across all state files. A step is an internal Erigon unit covering a fixed number of *transactions* (`config3.DefaultStepSize` = 390,625 txNums), so the number of blocks per step varies with chain activity.
 
 **Breakdown categories:**
 

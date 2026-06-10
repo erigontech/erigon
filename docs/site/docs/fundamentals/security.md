@@ -1,7 +1,7 @@
 ---
 title: "Security"
 description: "Firewall rules, API exposure best practices, and hardening recommendations."
-sidebar_position: 15
+sidebar_position: 16
 ---
 
 # Security

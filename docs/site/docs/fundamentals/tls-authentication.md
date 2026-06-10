@@ -1,7 +1,7 @@
 ---
 title: "TLS Authentication"
 description: "Mutual TLS setup for securing gRPC and RPC daemon endpoints."
-sidebar_position: 17
+sidebar_position: 18
 ---
 
 

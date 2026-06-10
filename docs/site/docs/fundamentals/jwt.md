@@ -1,7 +1,7 @@
 ---
 title: "JWT Secret"
 description: "Generating and configuring the JWT secret for Engine API communication."
-sidebar_position: 16
+sidebar_position: 17
 ---
 
 
