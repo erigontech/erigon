@@ -1,6 +1,6 @@
 ---
 title: "CLI Reference"
-sidebar_position: 3
+sidebar_position: 7
 description: "Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings."
 ---
 
@@ -155,7 +155,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
   * Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
   * Default: `30303, 30304, 30305, 30306, 30307`
-* `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/configuring-erigon/nat) for more details).
+* `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
@@ -421,7 +421,8 @@ Flags for configuring Fork Choice Update behavior.
 Flags for configuring the parallel block execution engine.
 
 * `--exec.workers value`: Number of parallel block-execution workers (equivalent to the `EXEC3_WORKERS` env var). Overridden by `--exec.serial`.
-  * Default: half the number of CPU cores — the other half is reserved for snapshot build/merge/prune.
+  * Default: the number of CPU cores (inherited from the `EXEC3_WORKERS` default when the flag is not set).
+  * Note: `erigon --help` describes this flag's default as "half the number of CPU cores". That value is not actually applied — when `--exec.workers` is omitted, Erigon uses `EXEC3_WORKERS`, which defaults to the full CPU-core count. The flag-help text is a known inconsistency in the binary.
 * `--exec.serial` *(New in v3.5)*: Force serial execution by clamping the parallel executor to a single worker. Wins over `--exec.workers` and `EXEC3_WORKERS` — use to disable parallelism for diagnostics or like-for-like baseline comparisons.
   * Default: `false`
 * `--exec.no-prune` *(New in v3.5)*: Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.
