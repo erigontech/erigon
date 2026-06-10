@@ -13,6 +13,15 @@ env:
   KURTOSIS_VERSION: "1.15.2"
   KURTOSIS_VECTOR_IMAGE: "timberio/vector:0.45.0-debian"
   KURTOSIS_FLUENTBIT_IMAGE: "fluent/fluent-bit:4.0.0"
+  # Engine-bootstrap helpers (logs-aggregator healthcheck, reverse proxy,
+  # volume init) — also dictated by the Kurtosis release; sync when bumping.
+  # curl-jq is untagged upstream, so the cache intentionally serves the
+  # `latest` digest from the last warm rather than tracking live `latest`.
+  # Without these cached, `kurtosis engine start` still needs Docker Hub and
+  # dies on registry outages despite all the caching above.
+  KURTOSIS_CURL_JQ_IMAGE: "badouralix/curl-jq:latest"
+  KURTOSIS_TRAEFIK_IMAGE: "traefik:2.10.6"
+  KURTOSIS_ALPINE_IMAGE: "alpine:3.17"
 
 on:
   pull_request:
@@ -69,7 +78,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -91,6 +100,9 @@ jobs:
           pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
           pull "${KURTOSIS_VECTOR_IMAGE}"
           pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          pull "${KURTOSIS_CURL_JQ_IMAGE}"
+          pull "${KURTOSIS_TRAEFIK_IMAGE}"
+          pull "${KURTOSIS_ALPINE_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
@@ -98,13 +110,16 @@ jobs:
           docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
           docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
           docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+          docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
+          docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
+          docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
 
   gloas_test:
     name: gloas_${{ matrix.suite }}_test
@@ -146,7 +161,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
@@ -158,6 +173,9 @@ jobs:
           docker load -i /tmp/docker-cache/kurtosis-expander.tar
           docker load -i /tmp/docker-cache/vector.tar
           docker load -i /tmp/docker-cache/fluentbit.tar
+          docker load -i /tmp/docker-cache/curl-jq.tar
+          docker load -i /tmp/docker-cache/traefik.tar
+          docker load -i /tmp/docker-cache/alpine.tar
 
       - name: Pull third-party containers and save to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
@@ -178,6 +196,9 @@ jobs:
           pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
           pull "${KURTOSIS_VECTOR_IMAGE}"
           pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          pull "${KURTOSIS_CURL_JQ_IMAGE}"
+          pull "${KURTOSIS_TRAEFIK_IMAGE}"
+          pull "${KURTOSIS_ALPINE_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
@@ -185,13 +206,16 @@ jobs:
           docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
           docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
           docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+          docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
+          docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
+          docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: actions/cache/save@v5
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
 
       - name: Install Kurtosis CLI and start engine
         # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
