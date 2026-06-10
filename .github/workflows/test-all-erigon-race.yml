@@ -74,6 +74,7 @@ jobs:
           cleanup-space: true
           build-cache-extra-key: ${{ matrix.test-group }}
           ramdisk: true
+          cache-namespace: test-all-erigon-race
 
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
