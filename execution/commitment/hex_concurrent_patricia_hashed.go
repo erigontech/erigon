@@ -2,8 +2,10 @@ package commitment
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sync"
 	"time"
 
@@ -350,12 +352,23 @@ func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 		}
 		if len(zeroPrefixBranch) > 4 { // tm+am+cells
 			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
-			// fmt.Printf("use concurrent next\n")
 			return true, nil
 		}
-		// fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
+		// When all keys under nibble 0 share the same second nibble, the Patricia
+		// trie compresses the path via an extension and no branch is stored at the
+		// nibble-0 prefix. Fall back to the root branch: if it has 3+ children the
+		// trie is spread enough to benefit from parallel commitment.
+		rootBranch, _, err := p.root.ctx.Branch(nibbles.HexToCompact([]byte{}))
+		if err != nil {
+			return false, fmt.Errorf("checking root branch failed: %w", err)
+		}
+		if len(rootBranch) >= 4 {
+			afterMap := binary.BigEndian.Uint16(rootBranch[2:4])
+			if bits.OnesCount16(afterMap) > 2 {
+				return true, nil
+			}
+		}
 	}
-	// fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
 	return false, nil
 }
 
