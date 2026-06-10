@@ -156,17 +156,19 @@ func TestWebsocketOrigins(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		url := startWSServer(t, common.CliString2Array(tc.spec))
-		for _, origin := range tc.expOk {
-			if err := wsRequest(t, url, origin); err != nil {
-				t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
+		t.Run(tc.spec, func(t *testing.T) {
+			url := startWSServer(t, common.CliString2Array(tc.spec))
+			for _, origin := range tc.expOk {
+				if err := wsRequest(t, url, origin); err != nil {
+					t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
+				}
 			}
-		}
-		for _, origin := range tc.expFail {
-			if err := wsRequest(t, url, origin); err == nil {
-				t.Errorf("spec '%v', origin '%v': expected not to allow,  got ok", tc.spec, origin)
+			for _, origin := range tc.expFail {
+				if err := wsRequest(t, url, origin); err == nil {
+					t.Errorf("spec '%v', origin '%v': expected not to allow,  got ok", tc.spec, origin)
+				}
 			}
-		}
+		})
 	}
 }
 
