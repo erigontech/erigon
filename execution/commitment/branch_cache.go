@@ -30,7 +30,7 @@ import (
 // checkpoint (txNum / blockNum / encoded root state) is stored. It is NOT a
 // trie branch: it changes every block, so it must never enter the
 // BranchCache — serving a stale checkpoint restores the trie to the wrong
-// state and corrupts the computed root. BranchCache.Put/Get/PinEntry reject
+// state and corrupts the computed root. BranchCache.Put/Get reject
 // it by construction so no caller can pollute the cache with it.
 var KeyCommitmentState = []byte("state")
 
@@ -167,28 +167,19 @@ func isCommitmentStateKey(prefix []byte) bool {
 // spaces. Re-read the partitioning code in
 // hex_concurrent_patricia_hashed.go and confirm.
 type BranchCache struct {
-	// Pinned tier — single slot for the root branch. Atomic-pointer
-	// access so no lock is needed for the hot read path.
+	// Root tier — single slot for the root branch (always hottest, always
+	// present). Atomic-pointer access so no lock is needed for the hot
+	// read path.
 	root atomic.Pointer[branchCacheEntry]
-
-	// Pinned-prefix tier — explicit per-prefix pin via PinEntry. Used
-	// for hot-contract storage-trunk preload (the "storage root trunk
-	// cache for big accounts" path). Entries here NEVER evict — sized
-	// by the preload policy, not by an LRU. Writes to pinned prefixes
-	// (via Put/SD.Flush) update the entry in place rather than displace
-	// it, so cross-block correctness is maintained without losing the
-	// pin. Lookup checks this tier between root and tail.
-	pinned *maphash.Map[*branchCacheEntry]
 
 	// LRU tail — bounded entries, evicts oldest when full. maphash.LRU
 	// wraps hashicorp/golang-lru/v2 which is thread-safe internally.
 	tail *maphash.LRU[*branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().
-	rootHits, rootMisses     atomic.Uint64
-	pinnedHits, pinnedMisses atomic.Uint64
-	tailHits, tailMisses     atomic.Uint64
-	bytesServed              atomic.Uint64
+	rootHits, rootMisses atomic.Uint64
+	tailHits, tailMisses atomic.Uint64
+	bytesServed          atomic.Uint64
 
 	// Divergence counter — incremented by RecordDivergence when a caller
 	// detects that a cache-served value disagrees with the canonical
@@ -204,36 +195,6 @@ type BranchCache struct {
 	// origin label and timestamp to identify which write produced the
 	// stale bytes.
 	writeSeq atomic.Uint64
-
-	// onMiss is an optional hook fired when lookup misses all three
-	// tiers (root, pinned, LRU). Used by the adaptive trunk-pin
-	// controller to attribute miss pressure per-contract and decide
-	// promotions. Stored as atomic.Pointer so registration is
-	// lock-free and the hot read path skips the dereference cleanly
-	// when no callback is installed.
-	onMiss atomic.Pointer[MissCallback]
-
-	// Last-published Prometheus counter snapshots. PublishMetrics
-	// emits the delta between current and last so the monotonic
-	// counters track real activity per Flush, not snapshot absolutes.
-	lastPublishedPinnedHits   atomic.Uint64
-	lastPublishedPinnedMisses atomic.Uint64
-
-	// preloadClaimed is set the first time TryClaimPreload is called.
-	// Used by the trunk-preload trigger (PIN_CONTRACT_TRUNKS hook in
-	// SharedDomains construction) so the preload goroutine fires
-	// exactly once per cache lifetime, even though many SharedDomains
-	// instances may be created over a process's lifetime.
-	preloadClaimed atomic.Bool
-}
-
-// TryClaimPreload returns true the first time it's called on a given
-// BranchCache instance, false on every subsequent call. Used by the
-// trunk-preload trigger to ensure the preload goroutine runs exactly
-// once per cache (process-lifetime), regardless of how many
-// SharedDomains instances are constructed.
-func (c *BranchCache) TryClaimPreload() bool {
-	return c.preloadClaimed.CompareAndSwap(false, true)
 }
 
 type branchCacheEntry struct {
@@ -306,8 +267,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		panic(fmt.Sprintf("BranchCache: NewLRU: %s", err))
 	}
 	return &BranchCache{
-		tail:   tail,
-		pinned: maphash.NewMap[*branchCacheEntry](),
+		tail: tail,
 	}
 }
 
@@ -324,21 +284,14 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		entry := c.root.Load()
 		if entry == nil {
 			c.rootMisses.Add(1)
-			c.fireOnMiss(prefix)
 			return nil, false
 		}
 		c.rootHits.Add(1)
 		return entry, true
 	}
-	if entry, ok := c.pinned.Get(prefix); ok {
-		c.pinnedHits.Add(1)
-		return entry, true
-	}
-	c.pinnedMisses.Add(1)
 	entry, ok := c.tail.Get(prefix)
 	if !ok {
 		c.tailMisses.Add(1)
-		c.fireOnMiss(prefix)
 		return nil, false
 	}
 	c.tailHits.Add(1)
@@ -346,26 +299,13 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 }
 
 // peek is the write-path equivalent of lookup: same tier walk, but does
-// not bump hit/miss counters and does not fire the onMiss callback.
-// Used by PutIfClean / MarkDirty so write traffic doesn't masquerade as
-// read-miss pressure for the adaptive pin controller.
+// not bump hit/miss counters. Used by PutIfClean / MarkDirty.
 func (c *BranchCache) peek(prefix []byte) (*branchCacheEntry, bool) {
 	if isRootPrefix(prefix) {
 		entry := c.root.Load()
 		return entry, entry != nil
 	}
-	if entry, ok := c.pinned.Get(prefix); ok {
-		return entry, true
-	}
 	return c.tail.Get(prefix)
-}
-
-// fireOnMiss invokes the registered miss callback (if any). Hot path —
-// the no-callback case is a single atomic load and a nil check.
-func (c *BranchCache) fireOnMiss(prefix []byte) {
-	if cb := c.onMiss.Load(); cb != nil {
-		(*cb)(prefix)
-	}
 }
 
 func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
@@ -373,90 +313,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
-	// If this prefix is pinned, update the pinned entry in place rather
-	// than route to the LRU tail. Keeps the pin alive across the
-	// SD.Flush invalidate+Put cycle that refreshes branch values every
-	// block — without this, every Put would silently lose the pin.
-	if _, ok := c.pinned.Get(prefix); ok {
-		c.pinned.Set(prefix, entry)
-		return
-	}
 	c.tail.Set(prefix, entry)
-}
-
-// PinEntry inserts or replaces a pinned cache entry for prefix. Pinned
-// entries are never evicted by the LRU and survive across blocks
-// (subject to Put updates from SD.Flush refreshing the bytes). Use for
-// eager preload of hot prefixes — e.g. the storage-trunk of big
-// contracts under PIN_CONTRACT_TRUNKS. Data is copied; safe to mutate
-// the input after the call. UnwindTo still evicts pinned entries when
-// txN > watermark — pinning protects against capacity pressure, not
-// correctness.
-func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64, origin string) {
-	if isCommitmentStateKey(prefix) {
-		return
-	}
-	dataCopy := make([]byte, len(data))
-	copy(dataCopy, data)
-	c.pinned.Set(prefix, &branchCacheEntry{
-		data:           dataCopy,
-		step:           step,
-		txN:            txN,
-		writeSeq:       c.writeSeq.Add(1),
-		origin:         origin,
-		writeTimeNanos: time.Now().UnixNano(),
-	})
-}
-
-// PinnedCount returns the number of currently pinned entries. Useful
-// for observability of the preload policy and eviction sanity (pinned
-// entries are never evicted; this counter is monotonic over a
-// PreloadContractTrunk run).
-func (c *BranchCache) PinnedCount() int {
-	return c.pinned.Len()
-}
-
-// MissCallback is invoked when lookup misses ALL three tiers (root,
-// pinned, LRU tail). Called on the hot read path; implementations
-// must be lock-free or short and not block.
-type MissCallback func(prefix []byte)
-
-// SetMissCallback installs a hook fired on every triple-miss. Pass
-// nil to clear. Used by the adaptive controller to attribute miss
-// pressure per contract; the cache itself does no per-contract
-// bookkeeping. Replaces any prior callback atomically.
-func (c *BranchCache) SetMissCallback(cb MissCallback) {
-	if cb == nil {
-		c.onMiss.Store(nil)
-		return
-	}
-	c.onMiss.Store(&cb)
-}
-
-// ContractHashFromPrefix extracts the 32-byte contract hash from a
-// commitment-trunk prefix. Returns (hash, true) if the prefix is a
-// storage-trunk prefix (depth >= 64, encoded as hex-prefix compact with
-// the contract's 64-nibble keccak prefix), or (_, false) for shorter
-// prefixes (account-trie branches at depth < 64).
-//
-// Hex-prefix encoding (see nibbles.HexToCompact): bit 4 of byte 0 is the
-// odd-length flag. When set, the first nibble of the path lives in the
-// low nibble of byte 0 and the remaining nibbles are packed 2-per-byte
-// in buf[1:]; reading prefix[1:33] directly mis-attributes the hash by
-// one nibble. Decoding via the high/low-nibble split here handles both
-// parities.
-func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
-	if len(prefix) < 33 {
-		return hash, false
-	}
-	if prefix[0]&0x10 == 0 {
-		copy(hash[:], prefix[1:33])
-		return hash, true
-	}
-	for i := 0; i < 32; i++ {
-		hash[i] = ((prefix[i] & 0x0f) << 4) | (prefix[i+1] >> 4)
-	}
-	return hash, true
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
@@ -559,8 +416,6 @@ func (c *BranchCache) GetWithOrigin(prefix []byte) (data []byte, origin string, 
 	var entry *branchCacheEntry
 	if isRootPrefix(prefix) {
 		entry = c.root.Load()
-	} else if pinnedEntry, pinnedOk := c.pinned.Get(prefix); pinnedOk {
-		entry = pinnedEntry
 	} else {
 		entry, ok = c.tail.Peek(prefix)
 		if !ok {
@@ -589,23 +444,16 @@ func (c *BranchCache) MarkDirty(prefix []byte) {
 // holds it. Use when the caller knows the canonical store has changed
 // and the cached entry should not be served at all (vs MarkDirty which
 // keeps the entry but blocks PutIfClean overwrites).
-//
-// Pinned-tier note: Invalidate does delete from the pinned tier. The
-// usual lifecycle for pinned entries is in-place refresh via Put on
-// SD.Flush (so pin survives every-block writes); Invalidate is the
-// escape hatch for events where the pinned bytes must be discarded
-// outright (unwind, fork-validation reset, manual demotion).
 func (c *BranchCache) Invalidate(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return
 	}
-	c.pinned.Delete(prefix)
 	c.tail.Delete(prefix)
 }
 
 // UnwindTo evicts every cache entry whose txN > maxValidTxN across
-// root, pinned, and LRU tail. Returns the number of entries evicted.
+// the root slot and LRU tail. Returns the number of entries evicted.
 // Safe to call alongside concurrent reads; a Put racing with the scan
 // may insert an entry the scan already passed, but the next UnwindTo
 // will catch it.
@@ -614,13 +462,6 @@ func (c *BranchCache) UnwindTo(maxValidTxN uint64) (evicted int) {
 		c.root.Store(nil)
 		evicted++
 	}
-	c.pinned.Range(func(hash uint64, entry *branchCacheEntry) bool {
-		if entry != nil && entry.txN > maxValidTxN {
-			c.pinned.DeleteByHash(hash)
-			evicted++
-		}
-		return true
-	})
 	c.tail.Range(func(hash uint64, entry *branchCacheEntry) bool {
 		if entry != nil && entry.txN > maxValidTxN {
 			c.tail.DeleteByHash(hash)
@@ -632,24 +473,14 @@ func (c *BranchCache) UnwindTo(maxValidTxN uint64) (evicted int) {
 }
 
 // Clear empties the cache and resets stats counters across ALL tiers
-// (root, pinned, LRU tail). Use on Reset / fork-validation paths to
+// (root slot, LRU tail). Use on Reset / fork-validation paths to
 // ensure stale entries from one trie root are not served against a
-// different root. After Clear, the pinned tier is empty; callers
-// using trunk preload need to re-issue PreloadContractTrunk to
-// repopulate it.
+// different root.
 func (c *BranchCache) Clear() {
 	c.root.Store(nil)
-	c.pinned = maphash.NewMap[*branchCacheEntry]()
 	c.tail.Purge()
 	c.rootHits.Store(0)
 	c.rootMisses.Store(0)
-	c.pinnedHits.Store(0)
-	c.pinnedMisses.Store(0)
-	// Keep the published-counter snapshots in step with the counters they
-	// track, or the next PublishMetrics would compute (0 - lastPublished),
-	// underflow uint64, and emit a spurious delta.
-	c.lastPublishedPinnedHits.Store(0)
-	c.lastPublishedPinnedMisses.Store(0)
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
@@ -713,7 +544,6 @@ func (c *BranchCache) Fingerprint() uint64 {
 // per-Process log lines can compose them.
 func (c *BranchCache) Stats() string {
 	rh, rm := c.rootHits.Load(), c.rootMisses.Load()
-	ph, pm := c.pinnedHits.Load(), c.pinnedMisses.Load()
 	th, tm := c.tailHits.Load(), c.tailMisses.Load()
 	bb := c.bytesServed.Load()
 	pct := func(hit, miss uint64) float64 {
@@ -724,20 +554,12 @@ func (c *BranchCache) Stats() string {
 		return 100.0 * float64(hit) / float64(total)
 	}
 	return fmt.Sprintf(
-		"branch-cache root hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | divergences=%d",
+		"branch-cache root hit=%d miss=%d (%.1f%%) | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | divergences=%d",
 		rh, rm, pct(rh, rm),
-		ph, pm, pct(ph, pm), c.pinned.Len(),
 		th, tm, pct(th, tm), c.tail.Len(),
 		float64(bb)/1024/1024,
 		c.verifyDivergences.Load(),
 	)
-}
-
-// PinnedStats returns the pinned-tier hit/miss/entries counters. Used
-// by the cache-fp log to expose pin effectiveness for the trunk-pin
-// prototype debug.
-func (c *BranchCache) PinnedStats() (hits, misses uint64, entries int) {
-	return c.pinnedHits.Load(), c.pinnedMisses.Load(), c.pinned.Len()
 }
 
 // VerifyDivergences returns the number of cache-vs-canonical divergences

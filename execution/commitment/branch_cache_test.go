@@ -18,12 +18,9 @@ package commitment
 
 import (
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TestBranchCache_RootPinning verifies the root branch lands in the pinned
@@ -178,9 +175,6 @@ func TestBranchCache_Stats(t *testing.T) {
 	s := c.Stats()
 	for _, want := range []string{
 		"root hit=1 miss=0",
-		"tail hit=1 miss=1",
-		// Pinned tier added; tail still has 1 entry (the deep Put),
-		// pinned tier remains empty in this test.
 		"tail hit=1 miss=1 (50.0%) entries=1",
 	} {
 		require.Contains(t, s, want, "Stats output: %s", s)
@@ -190,19 +184,17 @@ func TestBranchCache_Stats(t *testing.T) {
 }
 
 // TestBranchCache_UnwindTo_EvictsByTxNWatermark verifies that UnwindTo
-// evicts every entry whose txN > watermark across root + pinned + tail
-// tiers, and that entries with txN <= watermark survive untouched.
+// evicts every entry whose txN > watermark across the root slot and tail
+// tier, and that entries with txN <= watermark survive untouched.
 func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
-	pinnedKey := []byte{0x12, 0x34, 0x56}
 	tailKeyKeep := []byte{0xa0, 0xb0}
 	tailKeyEvict := []byte{0xa0, 0xb1}
 
-	// txN=50 entries in every tier — these should survive a watermark of 60.
+	// txN=50 entries — these should survive a watermark of 60.
 	c.Put(rootKey, []byte("root-keep"), 0, 50, "test")
-	c.PinEntry(pinnedKey, []byte("pinned-keep"), 0, 50, "test")
 	c.Put(tailKeyKeep, []byte("tail-keep"), 0, 50, "test")
 
 	// txN=100 tail entry — should be evicted at watermark=60.
@@ -213,8 +205,6 @@ func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
 
 	_, _, ok := c.Get(rootKey)
 	require.True(t, ok, "root entry with txN=50 must survive watermark=60")
-	_, _, ok = c.Get(pinnedKey)
-	require.True(t, ok, "pinned entry with txN=50 must survive watermark=60")
 	_, _, ok = c.Get(tailKeyKeep)
 	require.True(t, ok, "tail entry with txN=50 must survive watermark=60")
 	_, _, ok = c.Get(tailKeyEvict)
@@ -222,55 +212,23 @@ func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
 }
 
 // TestBranchCache_UnwindTo_EvictsAcrossAllTiers verifies eviction reaches
-// the root + pinned tiers, not just the LRU tail.
+// the root slot, not just the LRU tail.
 func TestBranchCache_UnwindTo_EvictsAcrossAllTiers(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
-	pinnedKey := []byte{0x12, 0x34, 0x56}
 	tailKey := []byte{0xa0, 0xb0}
 
 	c.Put(rootKey, []byte("root"), 0, 100, "test")
-	c.PinEntry(pinnedKey, []byte("pinned"), 0, 100, "test")
 	c.Put(tailKey, []byte("tail"), 0, 100, "test")
 
 	evicted := c.UnwindTo(50)
-	require.Equal(t, 3, evicted, "every entry with txN > watermark must be evicted")
+	require.Equal(t, 2, evicted, "every entry with txN > watermark must be evicted")
 
 	_, _, ok := c.Get(rootKey)
 	require.False(t, ok, "root entry must be evicted")
-	_, _, ok = c.Get(pinnedKey)
-	require.False(t, ok, "pinned entry must be evicted (pinning protects capacity, not correctness)")
 	_, _, ok = c.Get(tailKey)
 	require.False(t, ok, "tail entry must be evicted")
-}
-
-// TestBranchCache_UnwindTo_TxNZeroIsImmortal verifies that entries
-// tagged with txN=0 ("not tracked") are NEVER evicted by any watermark.
-// Preserves back-compat with callers that haven't been migrated to
-// pass real txN values.
-func TestBranchCache_UnwindTo_TxNZeroIsImmortal(t *testing.T) {
-	c := NewBranchCache(100)
-
-	rootKey := []byte{0x00}
-	pinnedKey := []byte{0x12, 0x34, 0x56}
-	tailKey := []byte{0xa0, 0xb0}
-
-	c.Put(rootKey, []byte("root"), 0, 0, "test")
-	c.PinEntry(pinnedKey, []byte("pinned"), 0, 0, "test")
-	c.Put(tailKey, []byte("tail"), 0, 0, "test")
-
-	evicted := c.UnwindTo(0)
-	require.Equal(t, 0, evicted, "no entry with txN=0 should be evicted")
-	evicted = c.UnwindTo(1_000_000)
-	require.Equal(t, 0, evicted, "no entry with txN=0 should be evicted even at huge watermark")
-
-	_, _, ok := c.Get(rootKey)
-	require.True(t, ok, "txN=0 root entry must survive any watermark")
-	_, _, ok = c.Get(pinnedKey)
-	require.True(t, ok, "txN=0 pinned entry must survive any watermark")
-	_, _, ok = c.Get(tailKey)
-	require.True(t, ok, "txN=0 tail entry must survive any watermark")
 }
 
 // TestBranchCache_UnwindTo_BoundaryEqualsWatermark verifies the
@@ -293,64 +251,24 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 	require.False(t, ok, "entry at txN>watermark must be evicted")
 }
 
-// TestContractHashFromPrefix_EvenAndOddNibblePaths verifies that the
-// contract-hash extraction handles both parities of hex-prefix compact
-// encoding (the odd-length-path flag puts the first nibble in byte 0,
-// which a naive prefix[1:33] read mis-attributes by one nibble).
-func TestContractHashFromPrefix_EvenAndOddNibblePaths(t *testing.T) {
-	var contract [32]byte
-	for i := range contract {
-		contract[i] = byte((i * 31) & 0xff)
-	}
-	contractNibbles := make([]byte, 64)
-	for i, b := range contract {
-		contractNibbles[2*i] = b >> 4
-		contractNibbles[2*i+1] = b & 0x0f
-	}
-
-	// Even-length path: depth 64 (no storage-trunk nibble). Encodes as
-	// flag byte (0x00) followed by the 32 contract bytes.
-	even := nibbles.HexToCompact(contractNibbles)
-	got, ok := ContractHashFromPrefix(even)
-	require.True(t, ok)
-	require.Equal(t, contract, got, "even-length path must round-trip")
-
-	// Odd-length path: depth 65 (contract + one storage nibble).
-	odd := nibbles.HexToCompact(append(append([]byte(nil), contractNibbles...), 0x0a))
-	got, ok = ContractHashFromPrefix(odd)
-	require.True(t, ok)
-	require.Equal(t, contract, got, "odd-length path must extract the contract hash, not a nibble-shifted slice")
-
-	// Even-length path at depth 66 (contract + two storage nibbles).
-	even66 := nibbles.HexToCompact(append(append([]byte(nil), contractNibbles...), 0x0a, 0x05))
-	got, ok = ContractHashFromPrefix(even66)
-	require.True(t, ok)
-	require.Equal(t, contract, got, "depth-66 even path must extract the contract hash")
-}
-
 // TestBranchCache_PutIfClean_DoesNotCountAsMiss verifies that the
-// write-path dirty check does not bump miss counters or fire the
-// onMiss callback — write traffic must not masquerade as read pressure
-// for the adaptive pin controller.
+// write-path dirty check does not bump miss counters — write traffic
+// must not masquerade as read-miss pressure.
 func TestBranchCache_PutIfClean_DoesNotCountAsMiss(t *testing.T) {
 	c := NewBranchCache(100)
-	var fired atomic.Uint64
-	c.SetMissCallback(func(prefix []byte) { fired.Add(1) })
 
 	key := []byte{0x12, 0x34}
-	// PutIfClean on a cold prefix must succeed without registering as a
-	// triple-miss (no fire, no tail-miss counter bump).
+	// PutIfClean on a cold prefix must succeed without bumping the tail
+	// miss counter (it's a write, not a read).
 	require.True(t, c.PutIfClean(key, []byte("v1"), 0, 0, "test"))
-	require.Equal(t, uint64(0), fired.Load(), "PutIfClean must not fire onMiss on the write path")
 	require.Equal(t, uint64(0), c.tailMisses.Load(), "PutIfClean must not bump tail miss counter")
 
 	// MarkDirty on a different cold prefix: also write-path, also must not count.
 	c.MarkDirty([]byte{0xff, 0xee})
-	require.Equal(t, uint64(0), fired.Load(), "MarkDirty must not fire onMiss on the write path")
 	require.Equal(t, uint64(0), c.tailMisses.Load(), "MarkDirty must not bump tail miss counter")
 
 	// A real read miss should still count.
 	_, _, ok := c.Get([]byte{0xaa, 0xbb})
 	require.False(t, ok)
-	require.Equal(t, uint64(1), fired.Load(), "Get on cold prefix must fire onMiss")
+	require.Equal(t, uint64(1), c.tailMisses.Load(), "Get on cold prefix must bump tail miss counter")
 }
