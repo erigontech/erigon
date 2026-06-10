@@ -735,12 +735,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	// Update the cache with the bytes about to land in MDBX, atomically
-	// with the flush. The WithFlushCallback path holds the latestState write
-	// lock for the full window so a concurrent DomainPut cannot interleave
-	// between the cache update and the MDBX write — readers see either
-	// the local sd.mem value (during the lock) or the cached/MDBX value
-	// (after release). No window where cache is stale vs MDBX.
+	// Update the cache with the bytes that just landed in MDBX, atomically
+	// with the flush. The WithFlushCallback path runs the callback AFTER the
+	// MDBX write succeeds (so a failed flush never leaves the cache ahead of
+	// MDBX) and holds the latestState write lock for the full window so a
+	// concurrent DomainPut cannot interleave between the MDBX write and the
+	// cache update — readers see either the local sd.mem value (during the
+	// lock) or the cached/MDBX value (after release). No window where cache
+	// is stale vs MDBX.
 	if sd.branchCache != nil {
 		if err := sd.mem.Flush(ctx, tx, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
 			if len(v) == 0 {

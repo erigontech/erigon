@@ -789,23 +789,27 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
 // registered callback is invoked for every (key, value, step) tuple of its
-// domain BEFORE the MDBX write, so a downstream cache (e.g. the commitment
-// BranchCache) stays in sync: during the MDBX write window the cache still
-// holds the entry, so a reader going (sd write buffer → cache → MDBX) never
-// observes a key missing from all three sources. The MDBX commit provides
-// db-side atomicity independently.
+// domain AFTER the MDBX write succeeds, so a downstream cache (e.g. the
+// commitment BranchCache) can never be left ahead of MDBX: if the write
+// fails (and is not retried — e.g. a background post-forkchoice flush that
+// logs and continues) the cache is simply not updated for this batch.
 //
-// Callbacks run under latestStateLock so the snapshot they see matches the
-// in-memory state at flush time, and Flush holds the same lock throughout to
-// keep a concurrent DomainPut from interleaving with the
-// snapshot/cache-update/flush sequence.
+// The ordering is safe because flushLocked flushes the domain *writers*, not
+// sd.domains (the in-memory history map). The mem batch therefore still holds
+// this batch's values during the write→callback window, so a reader going
+// (sd write buffer → cache → MDBX) finds them in mem or MDBX — never missing
+// from all sources. The MDBX commit provides db-side atomicity independently.
 //
-// If the flush fails, the cache has already been updated for this batch —
-// the same invariant the cache maintains for any other write path: values may
-// exist in the cache before they reach disk; a retry re-applies them.
+// The callback runs under latestStateLock (held throughout) so the snapshot
+// it sees matches the in-memory state at flush time and no concurrent
+// DomainPut interleaves with the flush/cache-update sequence.
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
+
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
 
 	if len(opts) > 0 {
 		var cfg kv.FlushConfig
@@ -828,7 +832,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 		}
 	}
 
-	return sd.flushLocked(ctx, tx)
+	return nil
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
