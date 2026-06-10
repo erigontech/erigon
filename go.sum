@@ -45,6 +45,10 @@ github.com/Djarvur/go-err113 v0.1.1 h1:eHfopDqXRwAi+YmCUas75ZE0+hoBHJ2GQNLYRSxao
 github.com/Djarvur/go-err113 v0.1.1/go.mod h1:IaWJdYFLg76t2ihfflPZnM1LIQszWOsFDh2hhhAVF6k=
 github.com/FastFilter/xorfilter v0.5.1 h1:UjtPttI1SnKWUmeQKu8Y+4ZvMJv7KP6/NZTsGBPQY08=
 github.com/FastFilter/xorfilter v0.5.1/go.mod h1:h+9l02/leuyyhepO30BKr25MkZdy7LHcfPRBDRuflXw=
+github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e h1:RrlPQT2lAmlGWldQ7PIhmxnusr7V5cFXynPWhktgP30=
+github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e/go.mod h1:c8xKFYwwaqZu58HExXsizNY59YXkX8jWnpG8Llk9wZU=
+github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2 h1:EDX9aPfRkEGkz0Wl9FJX5NHhulPPSoO3yt7Y7U3JJH4=
+github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2/go.mod h1:2lMa5Fzyr09GVk4IY88/u5fuK5zYu2oNUn3e+kw+MiY=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0/go.mod h1:qvl/7zhW3nngYb5+80sSMF+FG2BjYrf8m9wsX0PNOMQ=
@@ -251,8 +255,8 @@ github.com/cilium/ebpf v0.16.0/go.mod h1:L7u2Blt2jMM/vLAVgjxluxtBKlz3/GWjB0dMOEn
 github.com/ckaznocha/intrange v0.3.1 h1:j1onQyXvHUsPWujDH6WIjhyH26gkRt/txNlV7LspvJs=
 github.com/ckaznocha/intrange v0.3.1/go.mod h1:QVepyz1AkUoFQkpEqksSYpNpUo3c5W7nWh/s6SHIJJk=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
-github.com/consensys/gnark-crypto v0.19.1 h1:FWO1JDs7A2OajswzwMG7f8l2Zrxc/yOkxSTByKTc3O0=
-github.com/consensys/gnark-crypto v0.19.1/go.mod h1:rT23F0XSZqE0mUA0+pRtnL56IbPxs6gp4CeRsBk4XS0=
+github.com/consensys/gnark-crypto v0.19.2 h1:qrEAIXq3T4egxqiliFFoNrepkIWVEeIYwt3UL0fvS80=
+github.com/consensys/gnark-crypto v0.19.2/go.mod h1:rT23F0XSZqE0mUA0+pRtnL56IbPxs6gp4CeRsBk4XS0=
 github.com/containerd/cgroups/v3 v3.0.5 h1:44na7Ud+VwyE7LIoJ8JTNQOa549a8543BmzaJHo6Bzo=
 github.com/containerd/cgroups/v3 v3.0.5/go.mod h1:SA5DLYnXO8pTGYiAHXz94qvLQTKfVM5GEVisn4jpins=
 github.com/containerd/log v0.1.0 h1:TCJt7ioM2cr/tfR8GPbGf9/VRAX8D2B4PjzCpfX540I=
@@ -264,6 +268,8 @@ github.com/cpuguy83/go-md2man/v2 v2.0.7 h1:zbFlGlXEAKlwXpmvle3d8Oe3YnkKIK4xSRTd3
 github.com/cpuguy83/go-md2man/v2 v2.0.7/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/crate-crypto/go-eth-kzg v1.5.0 h1:FYRiJMJG2iv+2Dy3fi14SVGjcPteZ5HAAUe4YWlJygc=
 github.com/crate-crypto/go-eth-kzg v1.5.0/go.mod h1:J9/u5sWfznSObptgfa92Jq8rTswn6ahQWEuiLHOjCUI=
+github.com/crate-crypto/go-kzg-4844 v1.1.0 h1:EN/u9k2TF6OWSHrCCDBBU6GLNMq88OspHHlMnHfoyU4=
+github.com/crate-crypto/go-kzg-4844 v1.1.0/go.mod h1:JolLjpSff1tCCJKaJx4psrlEdlXuJEC996PL3tTAFks=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/curioswitch/go-reassign v0.3.0 h1:dh3kpQHuADL3cobV/sSGETA8DOv457dwl+fbBAhrQPs=
 github.com/curioswitch/go-reassign v0.3.0/go.mod h1:nApPCCTtqLJN/s8HfItCcKV0jIPwluBOvZP+dsJGA88=

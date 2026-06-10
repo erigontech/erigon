@@ -23,8 +23,12 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	gevmadapter "github.com/erigontech/erigon/execution/vm/gevm"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -50,7 +54,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
-	se.resetWorkers(ctx, se.rs, se.applyTx)
+	if se.cfg.vmConfig == nil || !se.cfg.vmConfig.UseGevm {
+		se.resetWorkers(ctx, se.rs, se.applyTx)
+	}
 
 	havePartialBlock := false
 	blockNum := startBlockNum
@@ -315,6 +321,10 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 }
 
 func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+	if se.cfg.vmConfig != nil && se.cfg.vmConfig.UseGevm {
+		return se.executeBlockGevm(ctx, tasks, isInitialCycle)
+	}
+
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 
@@ -568,5 +578,136 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 	}
 
+	return true, nil
+}
+
+func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Task, isInitialCycle bool) (cont bool, err error) {
+	blockReceipts := make([]*types.Receipt, 0, len(tasks))
+	var startTxIndex int
+	if len(tasks) > 0 {
+		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
+	}
+	if se.blockExecMetrics == nil {
+		se.blockExecMetrics = newBlockExecMetrics()
+	}
+	defer func(t time.Time) {
+		se.blockExecMetrics.BlockCount.Add(1)
+		se.blockExecMetrics.Duration.Add(time.Since(t))
+	}(time.Now())
+
+	var blockExec *gevmadapter.BlockExecutor
+	defer func() {
+		if blockExec != nil {
+			blockExec.Close()
+		}
+	}()
+	newBlockExecAtCurrentState := func(txTask *exec.TxTask) {
+		stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
+		blockExec = gevmadapter.NewBlockExecutorAtCurrentState(ctx, se.applyTx, se.rs.Domains(), se.cfg.blockReader, se.cfg.chainConfig, txTask.Header, txTask.EvmBlockContext, stateWriter)
+	}
+	for _, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.Config = se.cfg.chainConfig
+		txTask.Engine = se.cfg.engine
+
+		if txTask.TxIndex == -1 {
+			se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())
+			stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
+			blockExec, err = gevmadapter.NewBlockExecutor(ctx, se.applyTx, se.rs.Domains(), se.cfg.blockReader, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.EvmBlockContext, stateWriter, txTask.TxNum, nil)
+			if err != nil {
+				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+			}
+		} else if txTask.IsBlockEnd() {
+			if blockExec == nil {
+				newBlockExecAtCurrentState(txTask)
+			}
+			chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
+			if err = blockExec.FinalizeBlock(se.cfg.chainConfig, se.cfg.engine, txTask.Header, blockReceipts, txTask.Withdrawals, chainReader, txTask.TxNum, nil); err != nil {
+				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+			}
+			if startTxIndex == 0 && !isInitialCycle {
+				se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
+			}
+			checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
+			checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
+			if txTask.BlockNumber() > 0 && startTxIndex == 0 {
+				if err := protocol.BlockPostValidation(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, false, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+				}
+			}
+			if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
+				txTask.BalanceIncreaseSet, nil, se.blobGasUsed, nil, nil, nil,
+				se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
+				return false, err
+			}
+		} else {
+			if blockExec == nil {
+				newBlockExecAtCurrentState(txTask)
+			}
+			sender, senderErr := txTask.TxSender()
+			if senderErr != nil {
+				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, senderErr)
+			}
+			var callTracer *calltracer.CallTracer
+			var hooks *tracing.Hooks
+			if txTask.TracingHooks() != nil {
+				callTracer = calltracer.NewCallTracer(txTask.TracingHooks())
+				hooks = callTracer.Tracer().Hooks
+			}
+			output, execErr := blockExec.ExecuteTx(gevmadapter.TxInput{
+				Tx:      txTask.Tx(),
+				Sender:  sender,
+				TxIndex: txTask.TxIndex,
+				Hooks:   hooks,
+			})
+			result := &exec.TxResult{Task: txTask}
+			if output != nil {
+				result.ExecutionResult = output.Result
+				result.Logs = output.Logs
+			}
+			result.Err = execErr
+			if callTracer != nil {
+				result.TraceFroms = callTracer.Froms()
+				result.TraceTos = callTracer.Tos()
+			}
+			if result.Err != nil && !errors.Is(result.Err, vm.ErrExecutionReverted) {
+				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, result.Err)
+			}
+			se.txCount++
+			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
+			mxExecTransactions.Add(1)
+			se.blobGasUsed += txTask.Tx().GetBlobGas()
+
+			var prev *types.Receipt
+			if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
+				prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
+			}
+			receipt, receiptErr := result.CreateNextReceipt(prev)
+			if receiptErr != nil {
+				return false, receiptErr
+			}
+			blockReceipts = append(blockReceipts, receipt)
+			if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(receipt, result.Err)
+			}
+
+			if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
+				txTask.BalanceIncreaseSet, receipt, se.blobGasUsed, result.Logs, result.TraceFroms, result.TraceTos,
+				se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
+				return false, err
+			}
+		}
+
+		if txTask.IsBlockEnd() {
+			se.executedGas.Add(int64(se.blockGasUsed))
+			se.blockGasUsed = 0
+			se.blobGasUsed = 0
+		}
+
+		se.doms.SetTxNum(txTask.TxNum)
+		se.lastBlockResult = &blockResult{BlockNum: txTask.BlockNumber(), lastTxNum: txTask.TxNum}
+		se.lastExecutedTxNum.Store(int64(txTask.TxNum))
+		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
+	}
 	return true, nil
 }

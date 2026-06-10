@@ -280,6 +280,21 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+func WithUseGevm() Option {
+	return func(opts *options) {
+		opts.useGevm = true
+	}
+}
+
+// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
+// it forces) for tests that exercise patterns the parallel executor doesn't
+// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
+func WithoutExperimentalBAL() Option {
+	return func(opts *options) {
+		opts.experimentalBAL = false
+	}
+}
+
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
@@ -329,16 +344,19 @@ func WithEnableDomain(domain kv.Domain) Option {
 }
 
 type options struct {
-	stepSize        *uint64
-	experimentalBAL bool
-	genesis         *types.Genesis
-	chainConfig     *chain.Config
-	key             *ecdsa.PrivateKey
-	engine          rules.Engine
-	pruneMode       *prune.Mode
-	blockBufferSize int
-	withTxPool      bool
-	enableDomains   []kv.Domain
+	stepSize            *uint64
+	experimentalBAL     bool
+	useGevm             bool
+	genesis             *types.Genesis
+	chainConfig         *chain.Config
+	key                 *ecdsa.PrivateKey
+	engine              rules.Engine
+	pruneMode           *prune.Mode
+	blockBufferSize     int
+	withTxPool          bool
+	enableDomains       []kv.Domain
+	fcuBackgroundCommit bool
+	fcuBackgroundPrune  bool
 }
 
 func applyOptions(opts []Option) options {
@@ -639,7 +657,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 					cfg.BatchSize,
 					mock.ChainConfig,
 					mock.Engine,
-					&vm.Config{},
+					&vm.Config{UseGevm: opt.useGevm},
 					mock.Notifications,
 					cfg.StateStream,
 					false, /*badBlockHalt*/
@@ -652,7 +670,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 					false, /*experimentalBAL*/
 				),
 				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
-				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
+				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{UseGevm: opt.useGevm}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
 				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			),
 			builderstages.BuilderUnwindOrder,
@@ -684,7 +702,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
-				&vm.Config{},
+				&vm.Config{UseGevm: opt.useGevm},
 				mock.Notifications,
 				cfg.StateStream,
 				false, /*badBlockHalt*/

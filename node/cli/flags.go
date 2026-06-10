@@ -120,6 +120,11 @@ var (
 		Usage: "generate block access list",
 		Value: false,
 	}
+	UseGevmFlag = cli.BoolFlag{
+		Name:  "use-gevm",
+		Usage: "Use GEVM for staged block execution",
+		Value: false,
+	}
 
 	// Throttling Flags
 	SyncLoopThrottleFlag = cli.StringFlag{
@@ -279,6 +284,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
+	cfg.UseGevm = ctx.Bool(UseGevmFlag.Name)
 	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
 		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
