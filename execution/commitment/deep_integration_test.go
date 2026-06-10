@@ -41,11 +41,6 @@ func buildBigAccountCorpus(bigSlots int) (pk [][]byte, upds []Update) {
 }
 
 func TestDeepIntegration_Parity(t *testing.T) {
-	t.Setenv("ERIGON_CMT_MOUNT", "1")
-	old := cmtDeep
-	cmtDeep = true
-	defer func() { cmtDeep = old }()
-
 	pk, upds := buildBigAccountCorpus(15_000)
 	ctx := context.Background()
 
@@ -77,11 +72,6 @@ func TestDeepIntegration_Parity(t *testing.T) {
 // branch — execution writes branches to the DB and the next block reads them, so
 // a matching root with wrong branch metadata still breaks the chain.
 func TestDeepIntegration_BranchParity(t *testing.T) {
-	t.Setenv("ERIGON_CMT_MOUNT", "1")
-	old := cmtDeep
-	cmtDeep = true
-	defer func() { cmtDeep = old }()
-
 	pk, upds := buildBigAccountCorpus(15_000)
 	ctx := context.Background()
 

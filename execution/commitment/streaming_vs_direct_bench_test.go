@@ -26,9 +26,7 @@ func Benchmark_RegularVsStreaming(b *testing.B) {
 
 // Benchmark_TrieVariants_1MWhale: regular / parallel / streaming, all on the same
 // ~1M-key corpus where a few accounts hold huge storage shards (3 whales
-// 750k/150k/5k + 95k single-slot accounts). Run with
-// `ERIGON_CMT_MOUNT=1 ERIGON_CMT_DEEP=1` so the Parallel arm takes the mount +
-// deep-storage-fan-out path.
+// 750k/150k/5k + 95k single-slot accounts).
 func Benchmark_TrieVariants_1MWhale(b *testing.B) {
 	pk, upds := build1MWhaleCorpus(b)
 	b.Logf("corpus keys=%d", len(pk))

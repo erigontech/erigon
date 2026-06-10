@@ -12,15 +12,15 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
-// cmtDeep enables concurrent folding of an account's storage subtree (split
-// below depth 64) for accounts whose touched storage exceeds deepStorageThreshold.
-var cmtDeep = os.Getenv("ERIGON_CMT_DEEP") == "1"
-
-const deepStorageThreshold = 10_000
+// deepStorageThreshold is the touched-slot count above which an account's
+// storage subtree folds concurrently (split below depth 64) instead of
+// streaming through the owning worker.
+const deepStorageThreshold = 1_000
 
 // processMounted unfolds one base instance to the root branch, mounts a worker
 // per touched child nibble that inherits the grid state, folds each child's
@@ -104,14 +104,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path := make([]byte, 0, 144)
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
-			var buildErr error
-			if cmtDeep {
-				buildErr = p.dfsSubtreeDeep(gctx, w, pu, ch, path)
-			} else {
-				buildErr = dfsSubtree(ch, path, func(hk, pk []byte, upd *Update) error {
-					return w.followAndUpdate(hk, pk, upd)
-				})
-			}
+			buildErr := p.dfsSubtreeDeep(gctx, w, pu, ch, path)
 			if buildErr != nil {
 				w.resetForReuse()
 				p.workerPool.Put(w)
@@ -186,6 +179,9 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
+	// Only a multi-child root fold sets rootPresent; set it here so the
+	// EncodeCurrentState/SetState round-trip restores a usable root.
+	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
@@ -275,65 +271,46 @@ func (p *ParallelPatriciaHashed) dfsSubtreeDeep(ctx context.Context, w *HexPatri
 }
 
 // concurrentStorageRoot folds each first-storage-nibble subtree of one account in
-// its own worker, then stitches the storage branch and returns its hash (the
-// account's storageRoot). path is the 64-nibble account hash.
+// its own worker via the shared foldStorageLeaf/aggregateStorageRoot helpers
+// (the same fold the streaming committer runs), then returns the storage branch
+// hash (the account's storageRoot). path is the 64-nibble account hash.
 func (p *ParallelPatriciaHashed) concurrentStorageRoot(ctx context.Context, pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
-	accNib := int(path[63])
+	accPrefix := append([]byte(nil), path...)
 	var children [16]cell
-	var present uint16
+	present := node.bitmap
 
-	var g errgroup.Group
+	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(p.numWorkers)
 	childIdx := 0
 	for bm := node.bitmap; bm != 0; {
 		nib := int(bits.TrailingZeros16(bm))
 		child := node.children[childIdx]
-		cpath := make([]byte, len(path), len(path)+1+len(child.ext))
-		copy(cpath, path)
-		cpath = append(cpath, byte(nib))
-		cpath = append(cpath, child.ext...)
-		ni, ch, cp := nib, child, cpath
-		present |= uint16(1) << nib
+		ni, ch := nib, child
+		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(ch.ext))
+		copy(childPrefix, accPrefix)
+		childPrefix = append(childPrefix, byte(ni))
+		childPrefix = append(childPrefix, ch.ext...)
+		group := collectStorageNibbleKeys(ch, childPrefix)
 		g.Go(func() error {
-			w := p.workerPool.Get().(*HexPatriciaHashed)
-			wctx, cleanup := p.trieCtxFactory()
-			if cleanup != nil {
-				defer cleanup()
+			if err := gctx.Err(); err != nil {
+				return err
 			}
-			w.ResetContext(wctx)
-			w.branchEncoder.setDeferUpdates(true)
-			w.SetLeaveDeferredForCaller(true)
-			if err := dfsSubtree(ch, cp, func(hk, pk []byte, upd *Update) error {
-				return w.followAndUpdate(hk, pk, upd)
-			}); err != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
-				return fmt.Errorf("storage mount[%x] build: %w", ni, err)
-			}
-			for w.activeRows > 1 {
-				if err := w.fold(); err != nil {
-					w.resetForReuse()
-					p.workerPool.Put(w)
-					return fmt.Errorf("storage mount[%x] fold: %w", ni, err)
+			w, release := p.newStorageWorker()
+			c, err := foldStorageLeaf(w, childPrefix, group)
+			if err == nil {
+				if d := w.TakeDeferredUpdates(); len(d) > 0 {
+					pu.appendDeferred(d)
 				}
 			}
-			c := w.grid[0][accNib]
-			// strip the leading storage nibble carried in the extension; the column
-			// index at the storage branch now carries it.
-			if c.hashedExtLen > 0 {
-				c.hashedExtLen--
-				copy(c.hashedExtension[:], c.hashedExtension[1:])
+			release()
+			if err != nil {
+				return fmt.Errorf("storage nibble[%x] fold: %w", ni, err)
 			}
-			if c.extLen > 0 {
-				c.extLen--
-				copy(c.extension[:], c.extension[1:])
+			if len(ch.ext) > 0 && !c.IsEmpty() {
+				copy(c.extension[:], ch.ext)
+				c.extLen = int16(len(ch.ext))
 			}
 			children[ni] = c
-			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
-				pu.appendDeferred(deferred)
-			}
-			w.resetForReuse()
-			p.workerPool.Put(w)
 			return nil
 		})
 		childIdx++
@@ -343,40 +320,45 @@ func (p *ParallelPatriciaHashed) concurrentStorageRoot(ctx context.Context, pu *
 		return common.Hash{}, err
 	}
 
-	asm := p.workerPool.Get().(*HexPatriciaHashed)
-	actx, acleanup := p.trieCtxFactory()
-	if acleanup != nil {
-		defer acleanup()
-	}
-	asm.ResetContext(actx)
-	asm.branchEncoder.setDeferUpdates(true)
-	asm.SetLeaveDeferredForCaller(true)
-	copy(asm.currentKey[:], path[:64])
-	asm.currentKeyLen = 64
-	asm.depths[0] = 64
-	asm.depths[1] = 65
-	asm.activeRows = 2
-	asm.touchMap[0] = uint16(1) << accNib
-	asm.afterMap[0] = uint16(1) << accNib
-	for x := 0; x < 16; x++ {
-		if present&(uint16(1)<<x) != 0 {
-			asm.grid[1][x] = children[x]
+	w, release := p.newStorageWorker()
+	sr, err := aggregateStorageRoot(w, path, &children, present)
+	if err == nil {
+		if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
+			pu.appendDeferred(deferred)
 		}
 	}
-	asm.touchMap[1] = present
-	asm.afterMap[1] = present
-	if err := asm.fold(); err != nil {
-		asm.resetForReuse()
-		p.workerPool.Put(asm)
+	release()
+	if err != nil {
 		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
 	}
-	sr := asm.grid[0][accNib].hash
-	if deferred := asm.TakeDeferredUpdates(); len(deferred) > 0 {
-		pu.appendDeferred(deferred)
+	// Every touched first-nibble subtree collapsed (e.g. all storage deleted): the
+	// account is now storage-less, so its storageRoot is the empty-trie root, not a
+	// zero hash. aggregateStorageRoot returns an empty cell in that case.
+	if sr.IsEmpty() {
+		return empty.RootHash, nil
 	}
-	asm.resetForReuse()
-	p.workerPool.Put(asm)
-	return sr, nil
+	return sr.hash, nil
+}
+
+// newStorageWorker yields a pooled trie worker set up for a deferring storage
+// fold and a release that drains it back to the pool and frees its context;
+// mirrors StreamingCommitter.newStorageWorker.
+func (p *ParallelPatriciaHashed) newStorageWorker() (*HexPatriciaHashed, func()) {
+	w := p.workerPool.Get().(*HexPatriciaHashed)
+	wctx, cleanup := p.trieCtxFactory()
+	w.ResetContext(wctx)
+	if p.template != nil {
+		w.SetTrace(p.template.trace)
+	}
+	w.branchEncoder.setDeferUpdates(true)
+	w.SetLeaveDeferredForCaller(true)
+	return w, func() {
+		w.resetForReuse()
+		p.workerPool.Put(w)
+		if cleanup != nil {
+			cleanup()
+		}
+	}
 }
 
 // setAccountStorageRoot sets the just-placed account leaf's storage root to sr,

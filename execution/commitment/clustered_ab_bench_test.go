@@ -12,7 +12,7 @@ import (
 // buildClusteredStorageCorpus pins numAccounts to distinct top nibbles (so only
 // numAccounts of the 16 top-nibble buckets are populated) and gives each many
 // storage slots. The old per-nibble dispatch serializes each bucket on one
-// goroutine; the DFS dispatch splits each account's storage into many leafTasks.
+// goroutine; the DFS dispatch fans each account's storage across workers.
 func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int) ([][]byte, []Update) {
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))

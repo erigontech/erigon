@@ -51,7 +51,6 @@ func parallelRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]by
 	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 	defer tr.Release()
 	tr.SetNumWorkers(workers)
-	tr.SetMinSplitKeys(parallelEquivMinSplitKeys)
 	tr.ResetContext(ms)
 
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
