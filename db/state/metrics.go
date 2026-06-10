@@ -17,9 +17,31 @@
 package state
 
 import (
+	"sync/atomic"
+	"time"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
+
+// kvReadAcc is a lock-free per-(domain,level) read-time accumulator. Under the
+// tip warmup pool the per-read prometheus Summary mutex serializes hundreds of
+// concurrent readers; plain atomics avoid that contention.
+type kvReadAcc struct {
+	count atomic.Int64
+	nanos atomic.Int64
+}
+
+var mxsKVGetLF [kv.DomainLen][6]kvReadAcc
+
+func recordKVGet(name kv.Domain, level int, start time.Time) {
+	if level > 4 {
+		level = 5
+	}
+	a := &mxsKVGetLF[name][level]
+	a.count.Add(1)
+	a.nanos.Add(int64(time.Since(start)))
+}
 
 var (
 	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint

@@ -185,7 +185,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
 		stepSize: tx.Debug().StepSize(),
 	}
 
@@ -767,24 +766,23 @@ func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
 func (sd *SharedDomains) LogMetrics() []any {
 	var metrics []any
 
-	sd.metrics.RLock()
-	defer sd.metrics.RUnlock()
+	m := sd.metrics.Snapshot()
 
-	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
+	if readCount := m.CacheReadCount; readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(sd.metrics.CachePutCount),
+			"puts", common.PrettyCounter(m.CachePutCount),
 			"size", fmt.Sprintf("%s(%s/%s)",
-				common.PrettyCounter(sd.metrics.CachePutSize), common.PrettyCounter(sd.metrics.CachePutKeySize), common.PrettyCounter(sd.metrics.CachePutValueSize)),
-			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
-			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+				common.PrettyCounter(m.CachePutSize), common.PrettyCounter(m.CachePutKeySize), common.PrettyCounter(m.CachePutValueSize)),
+			"gets", common.PrettyCounter(m.CacheGetCount), "size", common.PrettyCounter(m.CacheGetSize),
+			"cdur", common.Round(time.Duration(m.CacheReadDuration)/time.Duration(readCount), 0))
 	}
 
-	if readCount := sd.metrics.DbReadCount; readCount > 0 {
-		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
+	if readCount := m.DbReadCount; readCount > 0 {
+		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(time.Duration(m.DbReadDuration)/time.Duration(readCount), 0))
 	}
 
-	if readCount := sd.metrics.FileReadCount; readCount > 0 {
-		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.FileReadDuration/time.Duration(readCount), 0))
+	if readCount := m.FileReadCount; readCount > 0 {
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(time.Duration(m.FileReadDuration)/time.Duration(readCount), 0))
 	}
 
 	return metrics
@@ -793,26 +791,26 @@ func (sd *SharedDomains) LogMetrics() []any {
 func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	var logMetrics = map[kv.Domain][]any{}
 
-	sd.metrics.RLock()
-	defer sd.metrics.RUnlock()
+	snap := sd.metrics.Snapshot()
 
-	for domain, dm := range sd.metrics.Domains {
+	for d := range snap.Domains {
+		dm := snap.Domains[d]
 		var metrics []any
 
 		if readCount := dm.CacheReadCount; readCount > 0 {
-			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.CacheReadDuration/time.Duration(readCount), 0))
+			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(time.Duration(dm.CacheReadDuration)/time.Duration(readCount), 0))
 		}
 
 		if readCount := dm.DbReadCount; readCount > 0 {
-			metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(dm.DbReadDuration/time.Duration(readCount), 0))
+			metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(time.Duration(dm.DbReadDuration)/time.Duration(readCount), 0))
 		}
 
 		if readCount := dm.FileReadCount; readCount > 0 {
-			metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(dm.DbReadDuration/time.Duration(readCount), 0))
+			metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(time.Duration(dm.FileReadDuration)/time.Duration(readCount), 0))
 		}
 
 		if len(metrics) > 0 {
-			logMetrics[domain] = metrics
+			logMetrics[kv.Domain(d)] = metrics
 		}
 	}
 
