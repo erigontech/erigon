@@ -30,7 +30,7 @@ erigon seg du [--datadir <path>] [--json] [-v | --verbose]
 
 ```
 mainnet | archive | blocks 0–22.000.000 | steps 0–7.000
-total: 1.2TB (42810 files)
+total: 1.2TB (40008 files)
 
 ── Breakdown ──────────────────────────────────────────────────
   domains                 612.0GB      48.8%  18200 files
@@ -45,7 +45,7 @@ total: 1.2TB (42810 files)
   archive        1.2TB          —    all blocks       all history
   full           1.0TB    -200.0GB    last 262.144     last 262.144
   blocks         1.1TB    -100.0GB    all blocks       last 262.144
-  minimal        0.9TB    -300.0GB    last 100.000     last 100.000
+  minimal        954.1GB  -300.0GB    last 100.000     last 100.000
 ```
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
