@@ -4,9 +4,8 @@
 package engine_types
 
 import (
-	"encoding/hex"
+	"encoding/binary"
 	"fmt"
-	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -17,12 +16,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
 	sszMaxBlobHashes          = 4096
-	sszMaxGetBlobHashes       = 128
 	sszMaxBytesPerTransaction = 0x40000000
 	sszMaxValidationError     = 1024
 	sszBlobBytes              = 0x20000
@@ -192,6 +191,53 @@ func withdrawalsFromList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdra
 	return out
 }
 
+// optionalSSZString is Optional[String] = List[List[byte, MAX_ERROR_BYTES], 1].
+type optionalSSZString struct {
+	value *string
+}
+
+func (o *optionalSSZString) Static() bool { return false }
+
+func (o *optionalSSZString) EncodeSSZ(dst []byte) ([]byte, error) {
+	if o.value == nil {
+		return dst, nil
+	}
+	msg := []byte(*o.value)
+	if len(msg) > sszMaxValidationError {
+		msg = msg[:sszMaxValidationError]
+	}
+	dst = append(dst, 4, 0, 0, 0)
+	return append(dst, msg...), nil
+}
+
+func (o *optionalSSZString) DecodeSSZ(buf []byte, _ int) error {
+	o.value = nil
+	if len(buf) == 0 {
+		return nil
+	}
+	if len(buf) < 4 {
+		return ssz.ErrLowBufferSize
+	}
+	if binary.LittleEndian.Uint32(buf) != 4 {
+		return ssz.ErrBadOffset
+	}
+	if len(buf)-4 > sszMaxValidationError {
+		return ssz.ErrTooBigList
+	}
+	msg := string(buf[4:])
+	o.value = &msg
+	return nil
+}
+
+func (o *optionalSSZString) EncodingSizeSSZ() int {
+	if o.value == nil {
+		return 0
+	}
+	return 4 + min(len(*o.value), sszMaxValidationError)
+}
+
+func (*optionalSSZString) Clone() clonable.Clonable { return &optionalSSZString{} }
+
 func (s *PayloadStatus) Static() bool { return false }
 
 func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -199,30 +245,23 @@ func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var latest []common.Hash
-	if s.LatestValidHash != nil {
-		latest = []common.Hash{*s.LatestValidHash}
-	}
 	latestHashes := solid.NewHashList(1)
-	for _, hash := range latest {
-		latestHashes.Append(hash)
+	if s.LatestValidHash != nil {
+		latestHashes.Append(*s.LatestValidHash)
 	}
-	errBytes := solid.NewByteListSSZ(sszMaxValidationError)
+	validationErr := &optionalSSZString{}
 	if s.ValidationError != nil && s.ValidationError.Error() != nil {
-		msg := []byte(s.ValidationError.Error().Error())
-		if len(msg) > sszMaxValidationError {
-			msg = msg[:sszMaxValidationError]
-		}
-		_ = errBytes.SetBytes(msg)
+		msg := s.ValidationError.Error().Error()
+		validationErr.value = &msg
 	}
-	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, errBytes)
+	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, validationErr)
 }
 
 func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 	latest := solid.NewHashList(1)
-	errBytes := solid.NewByteListSSZ(sszMaxValidationError)
+	validationErr := &optionalSSZString{}
 	status := []byte{0}
-	if err := ssz2.UnmarshalSSZ(buf, version, status, latest, errBytes); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, version, status, latest, validationErr); err != nil {
 		return err
 	}
 	engineStatus, err := payloadStatusFromByte(status[0])
@@ -234,8 +273,8 @@ func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 		hash := latest.Get(0)
 		s.LatestValidHash = &hash
 	}
-	if msg := string(errBytes.Bytes()); msg != "" {
-		s.ValidationError = NewStringifiedErrorFromString(msg)
+	if validationErr.value != nil {
+		s.ValidationError = NewStringifiedErrorFromString(*validationErr.value)
 	}
 	return nil
 }
@@ -311,7 +350,7 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:])
 	case clparams.CapellaVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
 	default: // GloasVersion+
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
@@ -334,7 +373,7 @@ func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
 			return err
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:]); err != nil {
 			return err
 		}
@@ -368,44 +407,6 @@ func (a *PayloadAttributes) payloadAttributesSSZVersion() clparams.StateVersion 
 	}
 	return clparams.BellatrixVersion
 }
-
-func (v *ClientVersionV1) Static() bool { return false }
-
-func (v *ClientVersionV1) EncodeSSZ(dst []byte) ([]byte, error) {
-	code := solid.NewByteListSSZ(2)
-	name := solid.NewByteListSSZ(64)
-	version := solid.NewByteListSSZ(64)
-	_ = code.SetBytes([]byte(v.Code))
-	_ = name.SetBytes([]byte(v.Name))
-	_ = version.SetBytes([]byte(v.Version))
-	var commit [4]byte
-	ch := strings.TrimPrefix(v.Commit, "0x")
-	if b, err := hex.DecodeString(ch); err == nil && len(b) >= 4 {
-		copy(commit[:], b[:4])
-	}
-	return ssz2.MarshalSSZ(dst, code, name, version, commit[:])
-}
-
-func (v *ClientVersionV1) DecodeSSZ(buf []byte, version int) error {
-	code := solid.NewByteListSSZ(2)
-	name := solid.NewByteListSSZ(64)
-	ver := solid.NewByteListSSZ(64)
-	var commit [4]byte
-	if err := ssz2.UnmarshalSSZ(buf, version, code, name, ver, commit[:]); err != nil {
-		return err
-	}
-	v.Code = string(code.Bytes())
-	v.Name = string(name.Bytes())
-	v.Version = string(ver.Bytes())
-	v.Commit = "0x" + hex.EncodeToString(commit[:])
-	return nil
-}
-
-func (v *ClientVersionV1) EncodingSizeSSZ() int { out, _ := v.EncodeSSZ(nil); return len(out) }
-func (v *ClientVersionV1) HashSSZ() ([32]byte, error) {
-	return [32]byte{}, nil
-}
-func (*ClientVersionV1) Clone() clonable.Clonable { return &ClientVersionV1{} }
 
 func newKZGCommitment(in []byte) *cltypes.KZGCommitment {
 	var out cltypes.KZGCommitment
@@ -550,41 +551,3 @@ func (b *BlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 func (b *BlobAndProofV2) EncodingSizeSSZ() int       { out, _ := b.EncodeSSZ(nil); return len(out) }
 func (b *BlobAndProofV2) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 func (*BlobAndProofV2) Clone() clonable.Clonable     { return &BlobAndProofV2{} }
-
-type NullableBlobAndProofV2 struct {
-	BlobAndProof *BlobAndProofV2
-}
-
-func NewNullableBlobAndProofV2(blob *BlobAndProofV2) *NullableBlobAndProofV2 {
-	return &NullableBlobAndProofV2{BlobAndProof: blob}
-}
-
-func (n *NullableBlobAndProofV2) Static() bool { return false }
-
-func (n *NullableBlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
-	blobAndProof := solid.NewDynamicListSSZ[*BlobAndProofV2](1)
-	if n != nil && n.BlobAndProof != nil {
-		blobAndProof.Append(n.BlobAndProof)
-	}
-	return ssz2.MarshalSSZ(dst, blobAndProof)
-}
-
-func (n *NullableBlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
-	blobAndProof := solid.NewDynamicListSSZ[*BlobAndProofV2](1)
-	if err := ssz2.UnmarshalSSZ(buf, version, blobAndProof); err != nil {
-		return err
-	}
-	n.BlobAndProof = nil
-	if blobAndProof.Len() != 0 {
-		n.BlobAndProof = blobAndProof.Get(0)
-	}
-	return nil
-}
-
-func (n *NullableBlobAndProofV2) EncodingSizeSSZ() int { out, _ := n.EncodeSSZ(nil); return len(out) }
-func (n *NullableBlobAndProofV2) HashSSZ() ([32]byte, error) {
-	return [32]byte{}, nil
-}
-func (*NullableBlobAndProofV2) Clone() clonable.Clonable {
-	return &NullableBlobAndProofV2{}
-}
