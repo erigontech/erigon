@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sync"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
@@ -343,19 +343,9 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 }
 
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
-	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(nibbles.HexToCompact([]byte{0}))
-		if err != nil {
-			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
-		}
-		if len(zeroPrefixBranch) > 4 { // tm+am+cells
-			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
-			// fmt.Printf("use concurrent next\n")
-			return true, nil
-		}
-		// fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
+	if p.root.root.extLen == 0 && bits.OnesCount16(p.root.afterMap[0]) > 2 {
+		return true, nil
 	}
-	// fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
 	return false, nil
 }
 
