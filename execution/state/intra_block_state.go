@@ -365,6 +365,8 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.versionMap = nil
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0
