@@ -30,6 +30,19 @@ import (
 
 const MaxMapSize = 0xFFFFFFFFFFFF
 
+var osPageSize = uintptr(os.Getpagesize())
+
+// pageAligned expands m to cover whole pages: start rounded down, end rounded up.
+func pageAligned(m []byte) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	start := uintptr(unsafe.Pointer(&m[0]))
+	alignedStart := start &^ (osPageSize - 1)
+	alignedEnd := (start + uintptr(len(m)) + osPageSize - 1) &^ (osPageSize - 1)
+	return unsafe.Slice((*byte)(unsafe.Pointer(alignedStart)), int(alignedEnd-alignedStart))
+}
+
 func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 	// Map the data file to memory.
 	mmapHandle1, err := unix.Mmap(int(f.Fd()), 0, size, syscall.PROT_READ, syscall.MAP_SHARED)
@@ -57,18 +70,16 @@ func MadviseSequential(mmapHandle1 []byte) error {
 }
 
 func MadviseNormal(mmapHandle1 []byte) error {
-	err := unix.Madvise(mmapHandle1, syscall.MADV_NORMAL)
+	err := unix.Madvise(pageAligned(mmapHandle1), syscall.MADV_NORMAL)
 	if err != nil && !errors.Is(err, syscall.ENOSYS) {
-		// Ignore not implemented error in kernel because it still works.
 		return fmt.Errorf("madvise: %w", err)
 	}
 	return nil
 }
 
 func MadviseWillNeed(mmapHandle1 []byte) error {
-	err := unix.Madvise(mmapHandle1, syscall.MADV_WILLNEED)
+	err := unix.Madvise(pageAligned(mmapHandle1), syscall.MADV_WILLNEED)
 	if err != nil && !errors.Is(err, syscall.ENOSYS) {
-		// Ignore not implemented error in kernel because it still works.
 		return fmt.Errorf("madvise: %w", err)
 	}
 	return nil

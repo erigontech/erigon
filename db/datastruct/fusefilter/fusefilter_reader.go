@@ -317,21 +317,6 @@ func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 	return res
 }
 
-// pageAligned expands m to cover whole pages: rounds the start address down
-// and the end address up to the system page size. Safe to pass to madvise on
-// all platforms (macOS requires page-aligned input; Linux rounds silently).
-// Returns nil when m is empty.
-func pageAligned(m []byte) []byte {
-	if len(m) == 0 {
-		return nil
-	}
-	pageSize := uintptr(os.Getpagesize())
-	start := uintptr(unsafe.Pointer(&m[0]))
-	alignedStart := start &^ (pageSize - 1)
-	alignedEnd := (start + uintptr(len(m)) + pageSize - 1) &^ (pageSize - 1)
-	return unsafe.Slice((*byte)(unsafe.Pointer(alignedStart)), int(alignedEnd-alignedStart))
-}
-
 // MadvWillNeed hints to the OS that all shard blobs will be accessed.
 // One madvise on the outer mmap slice covers all shards in a single syscall,
 // instead of 256 madvise calls on adjacent sub-slices of the same VMA.
@@ -339,7 +324,7 @@ func (r *ReaderSharded) MadvWillNeed() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseWillNeed(pageAligned(r.m)); err != nil {
+	if err := mm.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
 }
@@ -348,7 +333,7 @@ func (r *ReaderSharded) MadvNormal() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseNormal(pageAligned(r.m)); err != nil {
+	if err := mm.MadviseNormal(r.m); err != nil {
 		panic(err)
 	}
 }
