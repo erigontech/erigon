@@ -522,10 +522,11 @@ type TemporalDebugDB interface {
 type FlushConfig struct {
 	// DomainCallbacks, if set for a domain, is invoked for each
 	// (key, value, step, txNum) tuple in that domain during Flush — letting a
-	// downstream cache (e.g. the commitment BranchCache or the state cache) stay
-	// in sync with the flush. txNum is the value's write txNum: caches stamp
-	// entries with it so unwind invalidation is tx-precise, not step-coarse
-	// (an unwind to a txNum inside the latest step needs txNum precision) (#21752).
+	// downstream cache (e.g. the commitment BranchCache) stay in sync with the
+	// flush. txNum is the value's write txNum: a cache stamps its entry with it
+	// so unwind invalidation is tx-precise rather than step-coarse (an unwind to
+	// a txNum inside the latest step needs txNum precision). Required by the
+	// stacked state-cache PR (#21752).
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
