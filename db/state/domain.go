@@ -168,6 +168,22 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	return accessor, nil
 }
 
+func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
+	filter, err := existence.OpenFilter(fPath, false)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case domainExistenceForceWillNeed:
+		filter.MadvWillNeed()
+	case domainExistenceForceNormal:
+		filter.MadvNormal()
+	case domainExistenceForceInMem:
+		filter.ForceInMem()
+	}
+	return filter, nil
+}
+
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
 }

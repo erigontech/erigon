@@ -212,6 +212,27 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 	return idx, nil
 }
 
+func (b *Filter) ForceInMem() {
+	if b == nil || b.empty || !b.useFuse {
+		return
+	}
+	b.fuseReader.ForceInMem()
+}
+
+func (b *Filter) MadvWillNeed() {
+	if b == nil || b.empty || !b.useFuse {
+		return
+	}
+	b.fuseReader.MadvWillNeed()
+}
+
+func (b *Filter) MadvNormal() {
+	if b == nil || b.empty || !b.useFuse {
+		return
+	}
+	b.fuseReader.MadvNormal()
+}
+
 func (b *Filter) Close() {
 	if b == nil {
 		return
