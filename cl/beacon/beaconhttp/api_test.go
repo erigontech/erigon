@@ -1,6 +1,7 @@
 package beaconhttp
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,16 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 )
+
+type testSSZResponse struct{}
+
+func (testSSZResponse) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, 1, 2, 3), nil
+}
+
+func (testSSZResponse) EncodingSizeSSZ() int {
+	return 3
+}
 
 func TestHandleEndpoint_SetsEthConsensusVersionHeaderFromBodyVersion(t *testing.T) {
 	h := HandleEndpointFunc(func(w http.ResponseWriter, r *http.Request) (*BeaconResponse, error) {
@@ -31,6 +42,24 @@ func TestHandleEndpoint_SetsEthConsensusVersionHeaderFromBodyVersion(t *testing.
 	}
 }
 
+func TestHandleEndpoint_UsesSSZForPreferredWeightedAccept(t *testing.T) {
+	h := HandleEndpointFunc(func(w http.ResponseWriter, r *http.Request) (*BeaconResponse, error) {
+		return NewBeaconResponse(testSSZResponse{}), nil
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Accept", "application/octet-stream;q=1,application/json;q=0.9")
+	rr := httptest.NewRecorder()
+	h(rr, req)
+
+	if got := rr.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/octet-stream")
+	}
+	if got := rr.Body.Bytes(); !bytes.Equal(got, []byte{1, 2, 3}) {
+		t.Fatalf("body = %v, want %v", got, []byte{1, 2, 3})
+	}
+}
+
 func TestWillEncodeSSZ(t *testing.T) {
 	tests := []struct {
 		accept string
@@ -42,6 +71,11 @@ func TestWillEncodeSSZ(t *testing.T) {
 		{"application/octet-stream", true},
 		{"application/json, application/octet-stream", false},
 		{"application/octet-stream, application/json", false},
+		{"application/octet-stream;q=1,application/json;q=0.9", true},
+		{"application/json;q=0.9,application/octet-stream;q=1", true},
+		{"application/octet-stream;q=0.8,application/json;q=1", false},
+		{"application/octet-stream;q=0,application/json;q=1", false},
+		{"application/octet-stream;q=0", false},
 		{"text/html", false},
 		{"text/event-stream", false},
 		{"application/octet-stream; q=1", true},
