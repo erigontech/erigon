@@ -29,23 +29,23 @@ erigon seg du [--datadir <path>] [--json] [-v | --verbose]
 ### Example output (human-readable)
 
 ```
-mainnet | archive | blocks 0–22.000.000 | steps 0–7.000
-total: 1.2TB (40008 files)
+mainnet | archive | blocks 0–25.296.000 | steps 0–9.153
+total: 1.8TB (4285 files)
 
 ── Breakdown ──────────────────────────────────────────────────
-  domains                 612.0GB      48.8%  18200 files
-  block segments          410.4GB      32.7%  12400 files
-  history                 120.7GB       9.6%   6300 files
-  inverted indices         88.3GB       7.0%   2100 files
-  accessors                21.0GB       1.7%    910 files
-  caplin                    1.2GB       0.1%     90 files
-  other                     0.5GB       0.0%      8 files
+  block segments          900.2GB      48.3%   1195 files
+  domains                 306.3GB      16.4%    154 files
+  inverted indices        299.7GB      16.1%    596 files
+  history                 230.7GB      12.4%    296 files
+  accessors               127.7GB       6.8%    892 files
+  other                     9.8MB       0.0%   1152 files
+    extensions: .toml, .torrent, .txt
 
 ── Estimated Size by Node Type ────────────────────────────────
-  archive        1.2TB          —    all blocks       all history
-  full           1.0TB    -200.0GB    last 262.144     last 262.144
-  blocks         1.1TB    -100.0GB    all blocks       last 262.144
-  minimal        954.1GB  -300.0GB    last 100.000     last 100.000
+  archive            1.8TB          —    all blocks      all history
+  full             361.2GB     -1.5TB    last 262.144    last 262.144
+  blocks             1.2TB   -589.9GB    all blocks      last 262.144
+  minimal          342.3GB     -1.5TB    last 100.000    last 100.000
 ```
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
@@ -80,13 +80,22 @@ The category labels below are exactly what the command prints.
 
 ### Example output (verbose, `-v`)
 
-With `--verbose`, each category expands into its domain or type subcategories:
+With `--verbose`, each category expands into its domain or type subcategories (excerpt — every category expands the same way):
 
 ```
-  history                 120.7GB       9.6%   6300 files
-  ├─ accounts          60.3GB      50.0%   3150 files
-  ├─ storage           48.3GB      40.0%   2520 files
-  └─ code              12.1GB      10.0%    630 files
+  block segments          900.2GB      48.3%   1195 files
+  ├─ transactions        874.2GB      97.1%    174 files
+  ├─ txn2block            12.3GB       1.4%     87 files
+  ├─ headers              10.3GB       1.1%    174 files
+  ├─ bodies                3.3GB       0.4%    174 files
+  └─ blocksidecars        26.9MB       0.0%    586 files
+
+  domains                 306.3GB      16.4%    154 files
+  ├─ commitment          195.0GB      63.7%     22 files
+  ├─ storage              79.7GB      26.0%     33 files
+  ├─ code                 16.5GB       5.4%     33 files
+  ├─ accounts             15.1GB       4.9%     33 files
+  └─ receipt               6.1KB       0.0%     33 files
 ```
 
 ### JSON output (`--json`)
