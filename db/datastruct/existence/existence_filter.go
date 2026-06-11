@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 )
 
@@ -39,7 +38,6 @@ type Filter struct {
 	fuseReaderSharded  *fusefilter.ReaderSharded
 	empty              bool
 	FileName, FilePath string
-	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewFilter(keysCount uint64, filePath string) (*Filter, error) {
@@ -79,7 +77,7 @@ func (b *Filter) ContainsHash(hashedKey uint64) bool {
 }
 
 func (b *Filter) Contains(v hash.Hash64) bool {
-	if b.empty {
+	if b.empty || b.filter == nil {
 		return true
 	}
 	return b.filter.Contains(v)
@@ -102,22 +100,7 @@ func (b *Filter) DisableFsync() {
 	if b.empty {
 		return
 	}
-	b.noFsync = true
 	b.fuseWriterSharded.DisableFsync()
-}
-
-// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
-// To achieve it: write to .tmp file then `rename` when file is ready.
-// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (b *Filter) fsync(f *os.File) error {
-	if b.noFsync {
-		return nil
-	}
-	if err := f.Sync(); err != nil {
-		log.Warn("couldn't fsync", "err", err)
-		return err
-	}
-	return nil
 }
 
 // isBloomMagic checks the first 12 bytes for holiman/bloomfilter/v2's headerMagic:
