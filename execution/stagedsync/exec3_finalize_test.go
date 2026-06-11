@@ -1107,7 +1107,7 @@ func TestResolveStorageWrites_IBSvsSimple(t *testing.T) {
 		{Address: addr, Path: state.StoragePath, Key: slotC, Val: val300},
 	}
 
-	resolved := resolveStorageWrites(collectorWrites, vm, 1, 0, nil)
+	resolved := resolveStorageWrites(t.Context(), collectorWrites, vm, 1, 0, nil)
 
 	// The no-op filter should detect:
 	// slotA: resolved=100, origin(floor at TX0)=100 → no-op → FILTER
@@ -1164,7 +1164,7 @@ func TestResolveStorageWrites_StaleIncarnationNoOp(t *testing.T) {
 	}
 
 	// incarnation=1 is the validated incarnation
-	resolved := resolveStorageWrites(collectorWrites, vm, 1, 1, nil)
+	resolved := resolveStorageWrites(t.Context(), collectorWrites, vm, 1, 1, nil)
 
 	// slotA: versionMap has incarnation=1 entry, resolved=100, origin(TX0)=100 → no-op → FILTER
 	// slotB: not in CollectorWrites (incarnation 1 didn't write it) → already excluded
@@ -1214,7 +1214,7 @@ func TestResolveStorageWrites_NoOpFilter(t *testing.T) {
 	}
 
 	// resolveStorageWrites for TX 1
-	resolved := resolveStorageWrites(collectorWrites, vm, 1, 0, nil)
+	resolved := resolveStorageWrites(t.Context(), collectorWrites, vm, 1, 0, nil)
 
 	// slot1: resolved=100, origin(floor at TX0)=100 → should be FILTERED (no-op)
 	// slot2: resolved=300, origin(floor at TX0)=200 → should be KEPT (value changed)
@@ -1260,7 +1260,7 @@ func TestResolveStorageWrites_StaleIncarnation(t *testing.T) {
 	}
 
 	// Resolve with incarnation=1 (the validated incarnation)
-	resolved := resolveStorageWrites(collectorWrites, vm, 5, 1, nil)
+	resolved := resolveStorageWrites(t.Context(), collectorWrites, vm, 5, 1, nil)
 
 	// slot1: in versionMap at TX 5 with incarnation 1 — kept
 	// slot2: not in CollectorWrites — already filtered before reaching resolveStorageWrites
@@ -1291,7 +1291,7 @@ func TestResolveStorageWrites_SpeculativeExtra(t *testing.T) {
 		{Address: addr, Path: state.StoragePath, Key: slot2, Val: val200},
 	}
 
-	resolved := resolveStorageWrites(collectorWrites, vm, 3, 0, nil)
+	resolved := resolveStorageWrites(t.Context(), collectorWrites, vm, 3, 0, nil)
 
 	// slot1: in versionMap for this TX — kept
 	// slot2: NOT in versionMap for this TX — filtered

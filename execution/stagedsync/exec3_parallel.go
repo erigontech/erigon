@@ -3497,7 +3497,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 //
 // The result matches what the serial IBS collector would produce.
 // DEPRECATED: use normalizeWriteSet with blockIO.WriteSet(txIndex) instead.
-func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, rs *state.StateV3Buffered) state.VersionedWrites {
+func resolveStorageWrites(ctx context.Context, writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, rs *state.StateV3Buffered) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
 	for _, w := range writes {
 		switch w.Path {
@@ -3536,7 +3536,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 					addr := w.Address.Value()
 					slot := w.Key.Value()
 					composite := append(addr[:], slot[:]...)
-					preBlock, _, err := rs.Domains().GetLatest(context.TODO(), kv.StorageDomain, nil, composite)
+					preBlock, _, err := rs.Domains().GetLatest(ctx, kv.StorageDomain, nil, composite)
 					if err == nil {
 						if resolved.IsZero() && len(preBlock) == 0 {
 							continue // both zero — no-op
