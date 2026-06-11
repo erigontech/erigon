@@ -1,6 +1,7 @@
 package commitmentdb
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 
@@ -43,7 +44,7 @@ func (r *testStateReader) WithHistory() bool { return false }
 
 func (r *testStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
-func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (r *testStateReader) Read(_ context.Context, d kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	r.readDomain = d
 	r.readKey = append(r.readKey[:0], key...)
 	r.readStepSize = stepSize

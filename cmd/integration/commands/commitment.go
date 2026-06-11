@@ -208,7 +208,7 @@ Examples:
 		if txnumFlag > 0 {
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
-			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+			if err := readBranch(ctx, reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
 			}
@@ -221,7 +221,7 @@ Examples:
 			}
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd)
-			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+			if err := readBranch(ctx, reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
 			}
@@ -229,11 +229,11 @@ Examples:
 	},
 }
 
-func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
+func readBranch(ctx context.Context, stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
 	compactKey := nibbles.HexToCompact(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
+	val, step, err := stateReader.Read(ctx, kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -625,7 +625,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, stepSize)
+		val, _, err := commitmentReader.Read(ctx, kv.CommitmentDomain, key, stepSize)
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -813,7 +813,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 			lookupStart := time.Now()
-			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
+			_, _, err := reader.Read(ctx, kv.CommitmentDomain, compactKey, stepSize)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -907,7 +907,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 		lookupStart := time.Now()
-		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
+		_, _, err := reader.Read(ctx, kv.CommitmentDomain, compactKey, stepSize)
 		elapsed := time.Since(lookupStart)
 
 		if err != nil {

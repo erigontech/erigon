@@ -810,12 +810,12 @@ func (a *accessedState) isEmpty() bool {
 
 // touchNonZeroKeys touches only keys whose value is non-zero in at least one of pre/post state,
 // skipping zero→zero no-ops that would corrupt the HPH trie's internal maps.
-func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
+func (a *accessedState) touchNonZeroKeys(ctx context.Context, sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
 	for addr := range a.Addresses {
 		plainKey := addr[:]
-		postEnc, _, _ := post.Read(kv.AccountsDomain, plainKey, stepSize)
+		postEnc, _, _ := post.Read(ctx, kv.AccountsDomain, plainKey, stepSize)
 		if len(postEnc) == 0 {
-			preEnc, _, _ := pre.Read(kv.AccountsDomain, plainKey, stepSize)
+			preEnc, _, _ := pre.Read(ctx, kv.AccountsDomain, plainKey, stepSize)
 			if len(preEnc) == 0 {
 				continue
 			}
@@ -828,9 +828,9 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 	for addr, keys := range a.Storage {
 		for key := range keys {
 			plainKey := append(addr[:], key[:]...)
-			postEnc, _, _ := post.Read(kv.StorageDomain, plainKey, stepSize)
+			postEnc, _, _ := post.Read(ctx, kv.StorageDomain, plainKey, stepSize)
 			if len(postEnc) == 0 {
-				preEnc, _, _ := pre.Read(kv.StorageDomain, plainKey, stepSize)
+				preEnc, _, _ := pre.Read(ctx, kv.StorageDomain, plainKey, stepSize)
 				if len(preEnc) == 0 {
 					continue
 				}
@@ -1059,7 +1059,7 @@ func detectCollapseSiblings(
 	}
 
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-	accessed.touchNonZeroKeys(sdCtx, splitStateReader, preReader, domains.StepSize())
+	accessed.touchNonZeroKeys(ctx, sdCtx, splitStateReader, preReader, domains.StepSize())
 
 	type collapseCandidate struct {
 		siblingPath  []byte
