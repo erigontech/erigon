@@ -9,7 +9,6 @@ const (
 	DefaultMaxDeferredUpdates     = 50_000
 	DefaultRebuildShardMaxSteps   = 64
 	DefaultKeyReferencingMinSteps = 2
-	DefaultWarmupNumWorkers       = 16
 )
 
 // TrieConfig holds configuration for commitment tries. It is passed through the
@@ -26,7 +25,7 @@ type TrieConfig struct {
 	MemoizationOff         bool        // disable memoized hashes in computeCellHash (default: false)
 
 	// WarmupNumWorkers is the number of parallel workers used by the MDBX page-cache
-	// warmup during commitment. 0 = use DefaultWarmupNumWorkers (16).
+	// warmup during commitment. 0 = use dbg.TipTrieWarmupers (env TIP_TRIE_WARMUPERS).
 	WarmupNumWorkers int
 }
 
@@ -49,14 +48,11 @@ func (c TrieConfig) Subtrie() TrieConfig {
 }
 
 // WarmupNumWorkersOrDefault resolves the warmup worker count: the configured
-// value if set, otherwise the env-tunable dbg.TipTrieWarmupers (default NumCPU*8),
-// falling back to DefaultWarmupNumWorkers when that is non-positive.
+// value if set, otherwise the env-tunable dbg.TipTrieWarmupers (default NumCPU*8).
+// An explicit dbg.TipTrieWarmupers of 0 propagates as 0, disabling the warmup pool.
 func (c TrieConfig) WarmupNumWorkersOrDefault() int {
 	if c.WarmupNumWorkers != 0 {
 		return c.WarmupNumWorkers
 	}
-	if dbg.TipTrieWarmupers > 0 {
-		return dbg.TipTrieWarmupers
-	}
-	return DefaultWarmupNumWorkers
+	return dbg.TipTrieWarmupers
 }

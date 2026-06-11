@@ -352,7 +352,11 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 }
 
 func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int) (T, bool) {
-	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
+	// A Dependency (Estimate) cell holds the same latest in-block write a Done
+	// cell does; finalize reconstruction must consume it, not fall back to the
+	// pre-block DB value — doing so commits stale state once invalidated txs
+	// flush Estimate instead of Done.
+	if res := versionMap.Read(addr, path, key, txIndex); res.Status() != MVReadResultNone {
 		return res.Value().(T), true
 	}
 	var v T

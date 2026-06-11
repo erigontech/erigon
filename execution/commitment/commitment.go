@@ -1457,8 +1457,15 @@ type Updates struct {
 	nibbles       [16]*etl.Collector
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
-	byteArena []byte      // grow-only byte arena for HashSort key copies
+
+	// Ring of byte arenas for HashSort key copies; a slot is reused only after its prior generation's warm items drain.
+	arenas   [arenaRingSize][]byte
+	curArena int
+	gen      uint64
 }
+
+// arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
+const arenaRingSize = 2
 
 // arenaAlloc appends b to the byte arena and returns the sub-slice.
 // The returned slice is valid until the arena is reset.
@@ -1467,9 +1474,10 @@ type Updates struct {
 // to an independent heap allocation to keep previously returned
 // sub-slices valid.
 func (t *Updates) arenaAlloc(b []byte) []byte {
-	off := len(t.byteArena)
+	arena := t.arenas[t.curArena]
+	off := len(arena)
 	needed := off + len(b)
-	if needed > cap(t.byteArena) {
+	if needed > cap(arena) {
 		// Arena capacity exceeded — fall back to an independent allocation.
 		// This keeps previously returned sub-slices valid while avoiding a
 		// panic that would crash a production node.
@@ -1477,16 +1485,18 @@ func (t *Updates) arenaAlloc(b []byte) []byte {
 		copy(result, b)
 		return result
 	}
-	t.byteArena = t.byteArena[:needed]
-	copy(t.byteArena[off:], b)
-	return t.byteArena[off:needed]
+	arena = arena[:needed]
+	copy(arena[off:], b)
+	t.arenas[t.curArena] = arena
+	return arena[off:needed]
 }
 
-// arenaEnsureCap ensures the byte arena has at least cap bytes of capacity.
-// Must be called before each batch to prevent mid-batch reallocation.
+// arenaEnsureCap reserves at least c bytes in every ring buffer; call before a batch so a mid-batch grow can't reallocate and invalidate returned sub-slices.
 func (t *Updates) arenaEnsureCap(c int) {
-	if cap(t.byteArena) < c {
-		t.byteArena = make([]byte, 0, c)
+	for i := range t.arenas {
+		if cap(t.arenas[i]) < c {
+			t.arenas[i] = make([]byte, 0, c)
+		}
 	}
 }
 
@@ -1811,12 +1821,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		clear(t.keys)
 
 		t.batchSlab = t.batchSlab[:0]
-		// Pre-allocate arena to avoid mid-batch reallocation that would
-		// invalidate previously returned sub-slices (hk/pk in batchSlab).
-		// Worst case: storage keys produce 128-byte nibblized hashed keys +
-		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
+		if warmuper != nil {
+			if err := warmuper.WaitBufferFree(t.curArena); err != nil {
+				return err
+			}
+		}
+		// Pre-size the arena so a mid-batch grow can't reallocate and invalidate live sub-slices (≤180 B/key, 192 with headroom).
 		t.arenaEnsureCap(hashSortBatchSize * 192)
-		t.byteArena = t.byteArena[:0]
+		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -1838,7 +1850,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						startDepth++
 					}
 				}
-				warmuper.WarmKey(hk, startDepth)
+				warmuper.WarmKey(hk, startDepth, t.gen)
 				prevKey = append(prevKey[:0], hk...)
 			}
 
@@ -1854,11 +1866,17 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return err
 					}
 				}
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
 				t.batchSlab = t.batchSlab[:0]
-				t.byteArena = t.byteArena[:0]
+				nextGen := t.gen + 1
+				slot := int(nextGen % arenaRingSize)
+				if warmuper != nil {
+					if err := warmuper.WaitBufferFree(slot); err != nil {
+						return err
+					}
+				}
+				t.gen = nextGen
+				t.arenas[slot] = t.arenas[slot][:0]
+				t.curArena = slot
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1882,8 +1900,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
+		if warmuper != nil {
+			if err := warmuper.WaitBufferFree(t.curArena); err != nil {
+				return err
+			}
+		}
 		t.arenaEnsureCap(hashSortBatchSize * 144)
-		t.byteArena = t.byteArena[:0]
+		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 		var processErr error
 
@@ -1906,7 +1929,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						startDepth++
 					}
 				}
-				warmuper.WarmKey(hk, startDepth)
+				warmuper.WarmKey(hk, startDepth, t.gen)
 				prevKey = append(prevKey[:0], hk...)
 			}
 
@@ -1923,11 +1946,18 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					}
 				}
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
 				t.batchSlab = t.batchSlab[:0]
-				t.byteArena = t.byteArena[:0]
+				nextGen := t.gen + 1
+				slot := int(nextGen % arenaRingSize)
+				if warmuper != nil {
+					if err := warmuper.WaitBufferFree(slot); err != nil {
+						processErr = err
+						return false
+					}
+				}
+				t.gen = nextGen
+				t.arenas[slot] = t.arenas[slot][:0]
+				t.curArena = slot
 			}
 			return true
 		})
@@ -1971,7 +2001,11 @@ func (t *Updates) Reset() {
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
-	t.byteArena = t.byteArena[:0]
+	for i := range t.arenas {
+		t.arenas[i] = t.arenas[i][:0]
+	}
+	t.curArena = 0
+	t.gen = 0
 }
 
 type KeyUpdate struct {
