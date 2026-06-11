@@ -400,12 +400,15 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			break
 		}
 		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
-		if err != nil || b == nil {
+		if err != nil {
+			return nil, false, err
+		}
+		if b == nil {
 			break
 		}
 		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
-			break
+			return nil, false, err
 		}
 		if results == nil && b.HeaderNoCopy().ReceiptHash != empty.RootHash {
 			break
