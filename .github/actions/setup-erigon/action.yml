@@ -297,12 +297,14 @@ runs:
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
 
+    # The module cache is a pure function of go.sum (already in its key), so it
+    # never splits by matrix entry — sibling jobs share one entry per run and
+    # the cleanup-erigon probe dedups the save.
     - id: restore-mod-cache
       uses: ./.github/actions/restore-mod-cache
       with:
         modcache-path: ${{ steps.go-env.outputs.modcache }}
         workflow-id: ${{ steps.go-env.outputs.workflow }}
-        matrix-key: ${{ inputs.build-cache-extra-key }}
 
     - name: Export modcache key
       shell: bash
