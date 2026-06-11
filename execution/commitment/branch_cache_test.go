@@ -23,6 +23,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestBranchCache_AccountTrunkRouting verifies account-trie branches at nibble
+// depths 1-4 land in the resident fixed-array trunk (counted as trunk hits),
+// survive LRU tail-eviction pressure, and are invalidated lazily by an unwind
+// (the trunk honors the same (txN, epoch) model as the tail).
+func TestBranchCache_AccountTrunkRouting(t *testing.T) {
+	c := NewBranchCache(10) // small tail
+
+	trunkKey := []byte{0xa0, 0xb0} // 2 nibbles (even flag) → accountTrunk.d2
+	c.Put(trunkKey, []byte("trunk-data"), 0, 100)
+
+	got, _, ok := c.Get(trunkKey)
+	require.True(t, ok)
+	require.Equal(t, []byte("trunk-data"), got)
+	require.Equal(t, uint64(1), c.trunkHits.Load())
+	require.Equal(t, uint64(0), c.tailHits.Load(), "depth-2 account branch must not land in the tail")
+
+	// Flood the tail well past capacity with deep (5-nibble) keys; the resident
+	// trunk entry must not be evicted.
+	for i := 0; i < 100; i++ {
+		c.Put([]byte{0x10, byte(i), byte(i)}, []byte{byte(i)}, 0, 100) // odd flag, 5 nibbles → tail
+	}
+	got, _, ok = c.Get(trunkKey)
+	require.True(t, ok, "resident trunk entry must survive tail eviction pressure")
+	require.Equal(t, []byte("trunk-data"), got)
+
+	// An unwind below the entry's txN invalidates it lazily on next Get.
+	c.Unwind(60)
+	_, _, ok = c.Get(trunkKey)
+	require.False(t, ok, "trunk entry with txN=100 must drop at unwind floor 60")
+}
+
+// TestBranchCache_StorageTrunkPin verifies PinEntry routes a storage-trunk
+// prefix (>= 64 nibbles) into its per-contract storage trunk, is served from
+// the pinned tier, counts toward PinnedCount, and honors the unwind model.
+func TestBranchCache_StorageTrunkPin(t *testing.T) {
+	c := NewBranchCache(100)
+
+	// 33-byte compact prefix: even flag (0x00) + 32-byte account hash = 64
+	// nibbles exactly → the storage trunk's depth-0 slot for that contract.
+	prefix := make([]byte, 33)
+	for i := 1; i < 33; i++ {
+		prefix[i] = byte(i)
+	}
+	c.PinEntry(prefix, []byte("storage-root"), 0, 100)
+	require.Equal(t, 1, c.PinnedCount())
+
+	got, _, ok := c.Get(prefix)
+	require.True(t, ok)
+	require.Equal(t, []byte("storage-root"), got)
+	require.Equal(t, uint64(1), c.pinnedHits.Load())
+
+	c.Unwind(60)
+	_, _, ok = c.Get(prefix)
+	require.False(t, ok, "pinned storage-trunk entry with txN=100 must drop at unwind floor 60")
+}
+
 // TestBranchCache_RootPinning verifies the root branch lands in the pinned
 // slot (counted as root-hit) and tail entries land in the LRU tier
 // (counted as tail-hit).
@@ -91,10 +147,11 @@ func TestBranchCache_Invalidate(t *testing.T) {
 // TestBranchCache_Clear empties everything and resets stats.
 func TestBranchCache_Clear(t *testing.T) {
 	c := NewBranchCache(100)
+	deepKey := []byte{0x12, 0x34, 0x56} // 5 nibbles → LRU tail
 	c.Put([]byte{0x00}, []byte("r"), 0, 0)
-	c.Put([]byte{0x12}, []byte("d"), 0, 0)
+	c.Put(deepKey, []byte("d"), 0, 0)
 	_, _, _ = c.Get([]byte{0x00})
-	_, _, _ = c.Get([]byte{0x12})
+	_, _, _ = c.Get(deepKey)
 
 	require.Equal(t, uint64(1), c.rootHits.Load())
 	require.Equal(t, uint64(1), c.tailHits.Load())
@@ -104,7 +161,7 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.Equal(t, uint64(0), c.tailHits.Load())
 	_, _, ok := c.Get([]byte{0x00})
 	require.False(t, ok)
-	_, _, ok = c.Get([]byte{0x12})
+	_, _, ok = c.Get(deepKey)
 	require.False(t, ok)
 }
 
@@ -112,11 +169,15 @@ func TestBranchCache_Clear(t *testing.T) {
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {
 	c := NewBranchCache(100)
+	// 3-byte odd-flag prefixes are 5 nibbles deep → LRU tail (the account
+	// trunk only holds depths 1-4).
+	tailHit := []byte{0x12, 0x34, 0x56}
+	tailMiss := []byte{0x12, 0x34, 0x57}
 	c.Put([]byte{0x00}, []byte("rrr"), 0, 0)
-	c.Put([]byte{0x12, 0x34}, []byte("ddd"), 0, 0)
+	c.Put(tailHit, []byte("ddd"), 0, 0)
 	_, _, _ = c.Get([]byte{0x00})
-	_, _, _ = c.Get([]byte{0x12, 0x34})
-	_, _, _ = c.Get([]byte{0xff}) // tail miss
+	_, _, _ = c.Get(tailHit)
+	_, _, _ = c.Get(tailMiss) // tail miss
 
 	s := c.Stats()
 	for _, want := range []string{
@@ -125,6 +186,9 @@ func TestBranchCache_Stats(t *testing.T) {
 	} {
 		require.Contains(t, s, want, "Stats output: %s", s)
 	}
+	// New format carries the trunk and pin tiers.
+	require.Contains(t, s, "trunk hit=", "Stats output: %s", s)
+	require.Contains(t, s, "pin hit=", "Stats output: %s", s)
 	// Sanity: format doesn't blow up if we read it
 	require.True(t, strings.HasPrefix(s, "branch-cache "))
 }
