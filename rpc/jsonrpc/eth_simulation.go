@@ -977,11 +977,11 @@ type simulationStateReader struct {
 
 func (r *simulationStateReader) WithHistory() bool { return false }
 
-func (r *simulationStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+func (r *simulationStateReader) CheckDataAvailable(kv.Domain, uint64) error { return nil }
 
-func (r *simulationStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *simulationStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error) {
 	if v, txNum, ok := r.sd.GetMemBatch().GetLatest(ctx, d, plainKey); ok {
-		return v, kv.Step(txNum / stepSize), nil
+		return v, txNum, nil
 	}
 	asOf := r.plainStateAsOfTxNum
 	if d == kv.CommitmentDomain {
@@ -991,7 +991,7 @@ func (r *simulationStateReader) Read(ctx context.Context, d kv.Domain, plainKey 
 	if err != nil {
 		return nil, 0, fmt.Errorf("simulationStateReader(GetAsOf) %q: %w", d, err)
 	}
-	return enc, kv.Step(asOf / stepSize), nil
+	return enc, asOf, nil
 }
 
 func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {

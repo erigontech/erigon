@@ -36,7 +36,7 @@ type calcDomainReader struct {
 
 func (r *calcDomainReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	addrVal := addr.Value()
-	enc, _, err := r.reader.Read(context.Background(), kv.AccountsDomain, addrVal[:], 0)
+	enc, _, err := r.reader.Read(context.Background(), kv.AccountsDomain, addrVal[:])
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	composite := make([]byte, 20+32)
 	copy(composite, addrVal[:])
 	copy(composite[20:], keyVal[:])
-	enc, _, err := r.reader.Read(context.Background(), kv.StorageDomain, composite, 0)
+	enc, _, err := r.reader.Read(context.Background(), kv.StorageDomain, composite)
 	if err != nil {
 		return uint256.Int{}, false, err
 	}

@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -131,7 +130,7 @@ type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	Branch(prefix []byte) ([]byte, kv.Step, error)
+	Branch(prefix []byte) ([]byte, uint64, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	// fetch account with given plain key

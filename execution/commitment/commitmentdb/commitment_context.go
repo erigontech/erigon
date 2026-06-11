@@ -201,7 +201,6 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(ctx context.Context, tx k
 		ctx:      ctx,
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
-		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
 	}
@@ -496,7 +495,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
-	stepSize := sdc.sharedDomains.StepSize()
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
@@ -506,7 +504,6 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			ctx:      ctx,
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			stepSize: stepSize,
 			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
@@ -525,7 +522,6 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
 func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
-	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
@@ -546,7 +542,6 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 			ctx:            ctx,
 			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
-			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
 		}
@@ -578,7 +573,7 @@ type errorTrieContext struct {
 	err error
 }
 
-func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+func (e *errorTrieContext) Branch(prefix []byte) ([]byte, uint64, error) {
 	return nil, 0, e.err
 }
 
@@ -611,14 +606,14 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
-	var step kv.Step
+	var stateTxNum uint64
 
-	state, step, err = trieContext.Branch(KeyCommitmentState)
+	state, stateTxNum, err = trieContext.Branch(KeyCommitmentState)
 	if err != nil {
 		return 0, 0, nil, err
 	}
 
-	if err = trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
+	if err = trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, stateTxNum); err != nil {
 		return 0, 0, nil, err
 	}
 
@@ -800,7 +795,6 @@ type TrieContext struct {
 	txNum    uint64
 	blockNum uint64
 
-	stepSize       uint64
 	trace          bool
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
@@ -808,12 +802,12 @@ type TrieContext struct {
 
 // NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
-func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
-	return &TrieContext{stateReader: reader, stepSize: stepSize}
+func NewTrieContextRo(reader StateReader) *TrieContext {
+	return &TrieContext{stateReader: reader}
 }
 
-func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
+	enc, txNum, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -822,7 +816,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// underlying state cache / getter aliases shared storage that another goroutine
 	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
 	// boundary so all downstream consumers are safe.
-	return common.Copy(enc), step, nil
+	return common.Copy(enc), txNum, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
@@ -838,16 +832,16 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
 }
 
-// readDomain reads data from domain, dereferences key and returns encoded value and step.
-// Step returned only when reading from domain files, otherwise it is always 0.
-// Step is used in Trie for memo stats and file depth access statistics.
-func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
+// readDomain reads data from domain, dereferences key and returns encoded value
+// and the txNum it is valid as of (used by Branch's CheckDataAvailable freshness
+// check; Account/Storage/Code ignore it).
+func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error) {
 	ctx := sdc.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	enc, step, err = sdc.stateReader.Read(ctx, d, plainKey, sdc.stepSize)
-	return enc, step, err
+	enc, txNum, err = sdc.stateReader.Read(ctx, d, plainKey)
+	return enc, txNum, err
 }
 
 func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {

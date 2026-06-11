@@ -407,6 +407,10 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return gt.tx.StepsInFiles(entitySet...)
 }
 
+func (gt *temporalGetter) TxNumsInFiles(entitySet ...kv.Domain) uint64 {
+	return gt.tx.TxNumsInFiles(entitySet...)
+}
+
 type unmarkedPutter struct {
 	sd         *SharedDomains
 	forkableId kv.ForkableId

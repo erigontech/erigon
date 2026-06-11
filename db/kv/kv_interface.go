@@ -443,6 +443,9 @@ type TemporalGetter interface {
 	GetLatest(ctx context.Context, name Domain, k []byte) (v []byte, txNum uint64, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
+	// TxNumsInFiles is the txNum-native sibling of StepsInFiles: the exclusive
+	// end txNum covered by frozen files (files hold [0, TxNumsInFiles)).
+	TxNumsInFiles(entitySet ...Domain) uint64
 }
 
 type TemporalTx interface {

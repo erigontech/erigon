@@ -9,8 +9,8 @@ import (
 
 type StateReader interface {
 	WithHistory() bool
-	CheckDataAvailable(d kv.Domain, step kv.Step) error
-	Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
+	CheckDataAvailable(d kv.Domain, txNum uint64) error
+	Read(ctx context.Context, d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error)
 	Clone(tx kv.TemporalTx) StateReader
 }
 
@@ -27,22 +27,22 @@ func (r *LatestStateReader) WithHistory() bool {
 	return false
 }
 
-func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
-	// we're processing the latest state - in which case it needs to be writable
-	if frozenSteps := r.getter.StepsInFiles(d); step < frozenSteps {
-		return fmt.Errorf("%q state out of date: step %d, expected step %d", d, step, frozenSteps)
+func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, txNum uint64) error {
+	// we're processing the latest state - in which case it needs to be writable:
+	// its txNum must be at or beyond the frozen-files boundary (files hold
+	// [0, TxNumsInFiles)).
+	if filesTxNum := r.getter.TxNumsInFiles(d); txNum < filesTxNum {
+		return fmt.Errorf("%q state out of date: txNum %d, expected >= %d", d, txNum, filesTxNum)
 	}
 	return nil
 }
 
-func (r *LatestStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	enc, txNum, err := r.getter.GetLatest(ctx, d, plainKey)
+func (r *LatestStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error) {
+	enc, txNum, err = r.getter.GetLatest(ctx, d, plainKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
-	// This StateReader interface still surfaces step (Cluster A in the step-leak
-	// audit — a separate follow-on); convert the txNum back at this boundary.
-	return enc, kv.Step(txNum / stepSize), nil
+	return enc, txNum, nil
 }
 
 func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -67,16 +67,16 @@ func (r *HistoryStateReader) WithHistory() bool {
 	return true
 }
 
-func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, kv.Step) error {
+func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, uint64) error {
 	return nil
 }
 
-func (r *HistoryStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *HistoryStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error) {
 	enc, _, err = r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
 	if err != nil {
 		return enc, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
 	}
-	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	return enc, r.limitReadAsOfTxNum, nil
 }
 
 func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -101,9 +101,9 @@ func NewFilesOnlyStateReader(roTx kv.TemporalTx, limitTxNum uint64) *FilesOnlySt
 
 func (r *FilesOnlyStateReader) WithHistory() bool { return false }
 
-func (r *FilesOnlyStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+func (r *FilesOnlyStateReader) CheckDataAvailable(kv.Domain, uint64) error { return nil }
 
-func (r *FilesOnlyStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *FilesOnlyStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error) {
 	enc, ok, _, endTxNum, err := r.roTx.Debug().GetLatestFromFiles(d, plainKey, r.limitTxNum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("FilesOnlyStateReader %q (limitTxNum=%d): %w", d, r.limitTxNum, err)
@@ -111,7 +111,7 @@ func (r *FilesOnlyStateReader) Read(ctx context.Context, d kv.Domain, plainKey [
 	if !ok {
 		return nil, 0, nil
 	}
-	return enc, kv.Step(endTxNum / stepSize), nil
+	return enc, endTxNum, nil
 }
 
 func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -143,15 +143,15 @@ func (r *SplitStateReader) WithHistory() bool {
 	return r.withHistory
 }
 
-func (r *SplitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
+func (r *SplitStateReader) CheckDataAvailable(_ kv.Domain, _ uint64) error {
 	return nil
 }
 
-func (r *SplitStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (r *SplitStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) ([]byte, uint64, error) {
 	if d == kv.CommitmentDomain {
-		return r.commitmentReader.Read(ctx, d, plainKey, stepSize)
+		return r.commitmentReader.Read(ctx, d, plainKey)
 	}
-	return r.plainStateReader.Read(ctx, d, plainKey, stepSize)
+	return r.plainStateReader.Read(ctx, d, plainKey)
 }
 
 func (r *SplitStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -222,15 +222,15 @@ func (r *RebuildStateReader) WithHistory() bool {
 	return false
 }
 
-func (r *RebuildStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
+func (r *RebuildStateReader) CheckDataAvailable(_ kv.Domain, _ uint64) error {
 	return nil
 }
 
-func (r *RebuildStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (r *RebuildStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) ([]byte, uint64, error) {
 	if d == kv.CommitmentDomain {
-		return r.commitmentReader.Read(ctx, d, plainKey, stepSize)
+		return r.commitmentReader.Read(ctx, d, plainKey)
 	}
-	return r.plainStateReader.Read(ctx, d, plainKey, stepSize)
+	return r.plainStateReader.Read(ctx, d, plainKey)
 }
 
 func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {

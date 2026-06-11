@@ -121,7 +121,6 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 
 	trieCtx := commitmentdb.NewTrieContextRo(
 		commitmentdb.NewLatestStateReader(roTx, roDomains),
-		agg.StepSize(),
 	)
 	reader := commitment.NewTrieReader(trieCtx, length.Addr)
 

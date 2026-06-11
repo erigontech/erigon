@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -35,7 +34,7 @@ type errTrieReaderTestCtx struct {
 	errPrefix string
 }
 
-func (tc *errTrieReaderTestCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+func (tc *errTrieReaderTestCtx) Branch(prefix []byte) ([]byte, uint64, error) {
 	if string(prefix) == tc.errPrefix {
 		return nil, 0, fmt.Errorf("disk I/O error")
 	}
@@ -51,7 +50,7 @@ func newTrieReaderTestCtx() *trieReaderTestCtx {
 	return &trieReaderTestCtx{branches: make(map[string][]byte)}
 }
 
-func (tc *trieReaderTestCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
+func (tc *trieReaderTestCtx) Branch(prefix []byte) ([]byte, uint64, error) {
 	return tc.branches[string(prefix)], 0, nil
 }
 

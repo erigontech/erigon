@@ -18,7 +18,6 @@ package commitment
 
 import (
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // BranchWrite stores the previous and new data for a single PutBranch call.
@@ -51,7 +50,7 @@ func NewRecordingContext(inner PatriciaContext) *RecordingContext {
 	}
 }
 
-func (rc *RecordingContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+func (rc *RecordingContext) Branch(prefix []byte) ([]byte, uint64, error) {
 	data, step, err := rc.inner.Branch(prefix)
 	if err != nil {
 		return data, step, err

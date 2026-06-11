@@ -813,9 +813,9 @@ func (a *accessedState) isEmpty() bool {
 func (a *accessedState) touchNonZeroKeys(ctx context.Context, sdCtx *commitmentdb.SharedDomainsCommitmentContext, post, pre commitmentdb.StateReader, stepSize uint64) {
 	for addr := range a.Addresses {
 		plainKey := addr[:]
-		postEnc, _, _ := post.Read(ctx, kv.AccountsDomain, plainKey, stepSize)
+		postEnc, _, _ := post.Read(ctx, kv.AccountsDomain, plainKey)
 		if len(postEnc) == 0 {
-			preEnc, _, _ := pre.Read(ctx, kv.AccountsDomain, plainKey, stepSize)
+			preEnc, _, _ := pre.Read(ctx, kv.AccountsDomain, plainKey)
 			if len(preEnc) == 0 {
 				continue
 			}
@@ -828,9 +828,9 @@ func (a *accessedState) touchNonZeroKeys(ctx context.Context, sdCtx *commitmentd
 	for addr, keys := range a.Storage {
 		for key := range keys {
 			plainKey := append(addr[:], key[:]...)
-			postEnc, _, _ := post.Read(ctx, kv.StorageDomain, plainKey, stepSize)
+			postEnc, _, _ := post.Read(ctx, kv.StorageDomain, plainKey)
 			if len(postEnc) == 0 {
-				preEnc, _, _ := pre.Read(ctx, kv.StorageDomain, plainKey, stepSize)
+				preEnc, _, _ := pre.Read(ctx, kv.StorageDomain, plainKey)
 				if len(preEnc) == 0 {
 					continue
 				}

@@ -629,42 +629,35 @@ type asOfStateReader struct {
 
 func (r *asOfStateReader) WithHistory() bool { return false }
 
-func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, txNum uint64) error {
 	return nil
 }
 
-func (r *asOfStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+func (r *asOfStateReader) Read(ctx context.Context, d kv.Domain, plainKey []byte) (enc []byte, txNum uint64, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		// This StateReader still surfaces step (Cluster A step-leak follow-on);
-		// convert the returned txNum back here.
-		var txNum uint64
 		enc, txNum, err = r.sd.GetLatest(ctx, d, r.roTx, plainKey)
-		step = kv.Step(txNum / stepSize)
-	} else {
-		// Account/storage/code: use GetAsOf to avoid reading future state.
-		// Check sd.mem first (in-memory data from current batch), then
-		// fall through to DB files for data not in the batch.
-		var ok bool
-		enc, ok, err = r.sd.GetAsOf(d, plainKey, r.txNum)
+		return enc, txNum, err
+	}
+	// Account/storage/code: use GetAsOf to avoid reading future state.
+	// Check sd.mem first (in-memory data from current batch), then
+	// fall through to DB files for data not in the batch.
+	var ok bool
+	enc, ok, err = r.sd.GetAsOf(d, plainKey, r.txNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		// Not in sd.mem — read from DB files
+		enc, ok, err = r.roTx.GetAsOf(d, plainKey, r.txNum)
 		if err != nil {
 			return nil, 0, err
 		}
 		if !ok {
-			// Not in sd.mem — read from DB files
-			enc, ok, err = r.roTx.GetAsOf(d, plainKey, r.txNum)
-			if err != nil {
-				return nil, 0, err
-			}
-			if !ok {
-				enc = nil
-			}
-		}
-		if stepSize > 0 {
-			step = kv.Step(r.txNum / stepSize)
+			enc = nil
 		}
 	}
-	return enc, step, err
+	return enc, r.txNum, err
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {

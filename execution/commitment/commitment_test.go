@@ -32,13 +32,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // noopPatriciaContext is a mock PatriciaContext for testing warmup.
 type noopPatriciaContext struct{}
 
-func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
+func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, uint64, error) { return nil, 0, nil }
 func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
 	return nil
 }
@@ -61,7 +60,7 @@ type gatedPatriciaContext struct {
 	gateDone atomic.Bool
 }
 
-func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, uint64, error) {
 	// Gate only the first Branch call so a released worker can't wedge re-sending to entered.
 	if (g.entered != nil || g.release != nil) && !g.gateDone.Swap(true) {
 		if g.entered != nil {

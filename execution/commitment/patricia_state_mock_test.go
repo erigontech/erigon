@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // In memory commitment and state to use with the tests
@@ -72,7 +71,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 	return nil
 }
 
-func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
+func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()

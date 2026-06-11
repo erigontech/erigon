@@ -926,6 +926,13 @@ func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byt
 	return m.db.HasPrefix(name, prefix)
 }
 
+func (m *MemoryMutation) TxNumsInFiles(entitySet ...kv.Domain) uint64 {
+	if m.db == nil {
+		return 0
+	}
+	return m.db.TxNumsInFiles(entitySet...)
+}
+
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	if m.db == nil {
 		return 0
@@ -1118,6 +1125,9 @@ func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]by
 }
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return v.temporalTx.StepsInFiles(entitySet...)
+}
+func (v *OverlayTemporalReadView) TxNumsInFiles(entitySet ...kv.Domain) uint64 {
+	return v.temporalTx.TxNumsInFiles(entitySet...)
 }
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	return v.temporalTx.GetAsOf(name, k, ts)
