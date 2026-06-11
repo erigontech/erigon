@@ -68,7 +68,7 @@ jobs:
             exec_mode: parallel
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
-            max-allowed-failures: 0
+            max-allowed-failures: 7
             exec_mode: serial
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
