@@ -160,8 +160,8 @@ func (b *Filter) fsync(f *os.File) error {
 }
 
 // isBloomMagic checks the first 12 bytes for holiman/bloomfilter/v2's headerMagic:
-// 8 zero bytes followed by "v02\n". This disambiguates bloom files from fuse files
-// (whose version byte and seed never accidentally match this pattern).
+// 8 zero bytes followed by "v02\n". A fuse file can never match: bytes 4-7 hold
+// SegmentCount (v0) or a shard-size entry (v1), both structurally impossible to be zero.
 func isBloomMagic(peek []byte) bool {
 	return len(peek) >= 12 &&
 		peek[0] == 0 && peek[1] == 0 && peek[2] == 0 && peek[3] == 0 &&
