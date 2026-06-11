@@ -1,8 +1,9 @@
 name: Cache Warming — Kurtosis CL images
 
-# Populates the base-branch docker-cl-* image cache that test-kurtosis-assertoor.yml
-# restores. Its warm path is skipped on cache-warming runs, so PR / merge_group runs
-# otherwise never get this cache and pull every third-party image from Docker Hub.
+# Populates the base-branch docker-cl-* and docker-buildkit-* image caches that
+# test-kurtosis-assertoor.yml restores. Its warm path is skipped on cache-warming
+# runs, so PR / merge_group runs otherwise never get these caches and pull every
+# third-party image from Docker Hub.
 # GitHub cache scoping makes default-branch caches readable from every PR and merge
 # group, so warming on main/release is enough.
 #
