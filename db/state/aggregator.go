@@ -2156,7 +2156,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			var committedTxNum uint64
 			if temporalDB, ok := a.db.(kv.TemporalRoDB); ok {
 				if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
-					v, _, err := tx.GetLatest(context.TODO(), kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+					v, _, err := tx.GetLatest(a.ctx, kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 					if err != nil {
 						return err
 					}
