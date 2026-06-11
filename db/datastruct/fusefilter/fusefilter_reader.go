@@ -3,7 +3,6 @@ package fusefilter
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	mm "github.com/erigontech/erigon/common/mmap"
 )
 
@@ -333,8 +333,7 @@ func (r *ReaderSharded) MadvWillNeed() {
 	addr := uintptr(unsafe.Pointer(&r.m[0]))
 	pageSize := uintptr(os.Getpagesize())
 	pageOffset := addr % pageSize
-	log.Printf("[dbg] MadvWillNeed: fileName=%s addr=0x%x len=%d pageOffset=%d pageAligned=%v",
-		r.fileName, addr, len(r.m), pageOffset, pageOffset == 0)
+	log.Warn("[dbg] MadvWillNeed", "fileName", r.fileName, "addr", fmt.Sprintf("0x%x", addr), "len", len(r.m), "pageOffset", pageOffset, "pageAligned", pageOffset == 0)
 	if err := mm.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
