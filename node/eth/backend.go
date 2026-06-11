@@ -146,11 +146,10 @@ type Ethereum struct {
 
 	networkID uint64
 
-	lock         sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
-	chainConfig  *chain.Config
-	apiList      []rpc.API
-	genesisBlock *types.Block
-	genesisHash  common.Hash
+	lock        sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	chainConfig *chain.Config
+	apiList     []rpc.API
+	genesisHash common.Hash
 
 	execModule *execmodule.ExecModule
 
@@ -346,13 +345,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		genesisConfig, err := rawdb.ReadGenesis(tx)
-		if err != nil {
-			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
+		if config.Genesis == nil {
+			genesisConfig, err := rawdb.ReadGenesis(tx)
+			if err != nil {
+				return err
+			}
+			if genesisConfig != nil {
+				config.Genesis = genesisConfig
+			}
 		}
 
 		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
@@ -379,7 +379,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
-	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
 
 	setDefaultMinerGasLimit(config, chainConfig)
