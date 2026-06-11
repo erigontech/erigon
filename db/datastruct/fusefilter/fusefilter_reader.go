@@ -13,7 +13,6 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 	mm "github.com/erigontech/erigon/common/mmap"
 )
 
@@ -309,18 +308,28 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 	return s.ContainsHash(v)
 }
 
-// ForceInMem clones the entire mmap region into anonymous heap memory in a
-// single allocation, then re-points each shard's Fingerprints slice into the
-// clone at the same byte offset. Avoids 256 separate allocations.
+// ForceInMem clones each shard's fingerprints into anonymous heap memory.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
-	if len(r.m) == 0 {
-		return 0
-	}
 	var res datasize.ByteSize
 	for i := range r.shards {
 		res += r.shards[i].ForceInMem()
 	}
 	return res
+}
+
+// pageAligned expands m to cover whole pages: rounds the start address down
+// and the end address up to the system page size. Safe to pass to madvise on
+// all platforms (macOS requires page-aligned input; Linux rounds silently).
+// Returns nil when m is empty.
+func pageAligned(m []byte) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	pageSize := uintptr(os.Getpagesize())
+	start := uintptr(unsafe.Pointer(&m[0]))
+	alignedStart := start &^ (pageSize - 1)
+	alignedEnd := (start + uintptr(len(m)) + pageSize - 1) &^ (pageSize - 1)
+	return unsafe.Slice((*byte)(unsafe.Pointer(alignedStart)), int(alignedEnd-alignedStart))
 }
 
 // MadvWillNeed hints to the OS that all shard blobs will be accessed.
@@ -330,11 +339,7 @@ func (r *ReaderSharded) MadvWillNeed() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	addr := uintptr(unsafe.Pointer(&r.m[0]))
-	pageSize := uintptr(os.Getpagesize())
-	pageOffset := addr % pageSize
-	log.Warn("[dbg] MadvWillNeed", "fileName", r.fileName, "addr", fmt.Sprintf("0x%x", addr), "len", len(r.m), "pageOffset", pageOffset, "pageAligned", pageOffset == 0)
-	if err := mm.MadviseWillNeed(r.m); err != nil {
+	if err := mm.MadviseWillNeed(pageAligned(r.m)); err != nil {
 		panic(err)
 	}
 }
@@ -343,7 +348,7 @@ func (r *ReaderSharded) MadvNormal() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseNormal(r.m); err != nil {
+	if err := mm.MadviseNormal(pageAligned(r.m)); err != nil {
 		panic(err)
 	}
 }
