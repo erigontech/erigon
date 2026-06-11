@@ -239,6 +239,34 @@ func TestGetDutiesProposerUsesTargetForkBeforeHeadFork(t *testing.T) {
 	}
 }
 
+func TestGetDutiesProposerUsesHeadStateWhenFinalizedSlotIsStillAvailable(t *testing.T) {
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+
+	epoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	expectedSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: headRoot}
+	fcu.FinalizedSlotVal = expectedSlot + handler.beaconChainCfg.SlotsPerEpoch - 1
+	fcu.LowestAvailableSlotVal = &expectedSlot
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, state_accessors.SetStateProcessingProgress(tx, expectedSlot-1))
+	require.NoError(t, tx.Commit())
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.True(t, response.Finalized)
+	require.Equal(t, handler.beaconChainCfg.GetCurrentStateVersion(epoch).String(), response.Version)
+	for i, duty := range response.Data {
+		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
+	}
+}
+
 func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 

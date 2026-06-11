@@ -45,6 +45,7 @@ type ForkChoiceStorageMock struct {
 	AnchorRootVal          common.Hash
 	FinalizedCheckpointVal solid.Checkpoint
 	FinalizedSlotVal       uint64
+	LowestAvailableSlotVal *uint64
 	HeadVal                common.Hash
 	HeadSlotVal            uint64
 	HeadPayloadStatusVal   cltypes.PayloadStatus
@@ -377,6 +378,9 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 }
 
 func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
+	if f.LowestAvailableSlotVal != nil {
+		return *f.LowestAvailableSlotVal
+	}
 	return f.FinalizedSlotVal
 }
 

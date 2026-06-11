@@ -59,8 +59,9 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
+	isAvailableInMemory := expectedSlot >= a.forkchoiceStore.LowestAvailableSlot()
 
-	if isFinalized {
+	if !isAvailableInMemory {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
@@ -81,7 +82,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		if err != nil {
 			return nil, err
 		}
-		return newBeaconResponse(duties).WithFinalized(true).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
+		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
 	}
 
 	dependentRoot, err := a.getDependentRoot(epoch, false)
@@ -176,7 +177,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	}
 
 	return newBeaconResponse(duties).
-		WithFinalized(false).
+		WithFinalized(isFinalized).
 		WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		With("dependent_root", dependentRoot), nil
