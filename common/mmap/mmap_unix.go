@@ -65,41 +65,19 @@ func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 	return mmapHandle1, mmapHandle2, nil
 }
 
-func MadviseSequential(mmapHandle1 []byte) error {
-	err := unix.Madvise(mmapHandle1, syscall.MADV_SEQUENTIAL)
-	if err != nil && !errors.Is(err, syscall.ENOSYS) {
-		// Ignore not implemented error in kernel because it still works.
-		return fmt.Errorf("madvise: %w", err)
-	}
-	return nil
-}
-
-func MadviseNormal(m []byte) error {
+func madvise(m []byte, advice int) error {
 	if aligned := pageAligned(m); len(aligned) > 0 {
-		if err := unix.Madvise(aligned, syscall.MADV_NORMAL); err != nil && !errors.Is(err, syscall.ENOSYS) {
+		if err := unix.Madvise(aligned, advice); err != nil && !errors.Is(err, syscall.ENOSYS) {
 			return fmt.Errorf("madvise: %w", err)
 		}
 	}
 	return nil
 }
 
-func MadviseWillNeed(m []byte) error {
-	if aligned := pageAligned(m); len(aligned) > 0 {
-		if err := unix.Madvise(aligned, syscall.MADV_WILLNEED); err != nil && !errors.Is(err, syscall.ENOSYS) {
-			return fmt.Errorf("madvise: %w", err)
-		}
-	}
-	return nil
-}
-
-func MadviseRandom(mmapHandle1 []byte) error {
-	err := unix.Madvise(mmapHandle1, syscall.MADV_RANDOM)
-	if err != nil && !errors.Is(err, syscall.ENOSYS) {
-		// Ignore not implemented error in kernel because it still works.
-		return fmt.Errorf("madvise: %w", err)
-	}
-	return nil
-}
+func MadviseSequential(m []byte) error { return madvise(m, syscall.MADV_SEQUENTIAL) }
+func MadviseNormal(m []byte) error     { return madvise(m, syscall.MADV_NORMAL) }
+func MadviseWillNeed(m []byte) error   { return madvise(m, syscall.MADV_WILLNEED) }
+func MadviseRandom(m []byte) error     { return madvise(m, syscall.MADV_RANDOM) }
 
 // munmap unmaps a DB's data file from memory.
 func Munmap(mmapHandle1 []byte, _ *[MaxMapSize]byte) error {
