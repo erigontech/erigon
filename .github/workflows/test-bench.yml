@@ -53,6 +53,7 @@ jobs:
         id: erigon
         with:
           cleanup-space: true
+          cache-namespace: test-bench
 
       - name: Run benchmarks
         if: '!inputs.cache-warming-only'

@@ -193,14 +193,19 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	// re-exec then reads those stale nodes when computing block 0's commitment
 	// and produces a wrong trie root (parallel-exec failure mode of #21138).
 	// Drop the cache so it repopulates from the freshly-wiped table.
+	branchCacheCleared := false
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
 			aggTx := agg.BeginFilesRo()
+			defer aggTx.Close()
 			if bc := aggTx.BranchCache(); bc != nil {
 				bc.Clear()
 			}
-			aggTx.Close()
+			branchCacheCleared = true
 		}
+	}
+	if !branchCacheCleared {
+		log.Warn("[reset] commitment branch cache not cleared after wiping the table (no *state.Aggregator); a from-0 re-exec may read stale commitment nodes and produce a wrong trie root")
 	}
 	return nil
 }

@@ -139,6 +139,13 @@ func (l *LRU[V]) Get(key []byte) (V, bool) {
 	return l.cache.Get(h)
 }
 
+// Peek returns the value for key without updating its LRU recency. Use for
+// diagnostic reads that must not perturb eviction order.
+func (l *LRU[V]) Peek(key []byte) (V, bool) {
+	h := Hash(key)
+	return l.cache.Peek(h)
+}
+
 // Set stores a value with the given key.
 func (l *LRU[V]) Set(key []byte, value V) {
 	h := Hash(key)

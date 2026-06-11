@@ -91,10 +91,19 @@ jobs:
             printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+
       - name: Checkout base branch
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.determine.outputs.base_branch }}
+          token: ${{ steps.app_token.outputs.token }}
           persist-credentials: true
 
       - name: Prepare update branch
@@ -183,7 +192,7 @@ jobs:
       - name: Create or update draft PR
         if: steps.diff.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
         run: |
           set -euo pipefail

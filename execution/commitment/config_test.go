@@ -19,9 +19,6 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.LeaveDeferredForCaller {
 		t.Error("LeaveDeferredForCaller should default to false")
 	}
-	if !cfg.EnableWarmupCache {
-		t.Error("EnableWarmupCache should default to true")
-	}
 	if !cfg.EnableTrieWarmup {
 		t.Error("EnableTrieWarmup should default to true")
 	}
@@ -63,7 +60,6 @@ func TestTrieConfig_Subtrie(t *testing.T) {
 		Variant:                VariantHexPatriciaTrie,
 		DeferBranchUpdates:     true,
 		LeaveDeferredForCaller: true,
-		EnableWarmupCache:      true,
 		EnableTrieWarmup:       true,
 		CsvMetricsFilePrefix:   "pre",
 		MemoizationOff:         true,
@@ -87,7 +83,6 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	cfg := TrieConfig{
 		DeferBranchUpdates:     false,
 		LeaveDeferredForCaller: true,
-		EnableWarmupCache:      true,
 		MemoizationOff:         true,
 	}
 

@@ -19,13 +19,11 @@ package execctx
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -173,16 +171,6 @@ type SharedDomains struct {
 	// commitment.BranchCacheProvider.
 	branchCache *commitment.BranchCache
 
-	// adaptivePinController owns the policy that decides which
-	// contracts get pinned based on observed miss pressure. nil when
-	// branchCache is nil or when the adaptive layer is disabled. The
-	// controller's miss callback is wired onto branchCache via Bind
-	// during EnableParaTrieDB; OnBlockComplete fires from sd.Flush.
-	// Uses sd.txNum as the "block tick" for cooldown semantics — Flush
-	// is per-batch so the controller's tick maps to batches not blocks,
-	// but cooldown thresholds are tunable to compensate.
-	adaptivePinController *commitment.AdaptivePinController
-
 	// collector is the process-level KV-read metrics collector (aggregator
 	// scope). Finished per-worker metrics are sent here (ownership transfer)
 	// tagged by source. nil for test setups whose AggTx doesn't implement
@@ -243,19 +231,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg, branchCache)
 
-	// Construct the adaptive pin controller alongside the cache. The
-	// controller observes per-contract miss pressure and decides
-	// promotions/extensions/demotions; without binding (deferred to
-	// EnableParaTrieDB so the db is available for the reader path)
-	// the controller is inert.
-	if branchCache != nil && !dbg.EnvBool("DISABLE_ADAPTIVE_PIN", false) {
-		sd.adaptivePinController = commitment.NewAdaptivePinController(
-			branchCache,
-			commitment.DefaultAdaptivePinControllerConfig(),
-			logger,
-		)
-	}
-
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return sd, err
@@ -271,16 +246,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
 		}
 	}
-
-	// PIN_CONTRACT_TRUNKS preload runs from EnableParaTrieDB (called by
-	// the staged sync exec stage) NOT here in NewSharedDomains — at SD
-	// construction time we'd block the engine HTTP handler for ~3-4s
-	// while preload reads, causing the bench's first NewPayload to be
-	// dropped. EnableParaTrieDB runs in the staged sync init goroutine,
-	// not the request handler, AND has access to the kv.TemporalRoDB
-	// needed to spawn an own-tx preload goroutine that doesn't share
-	// cursors with the main pipeline (the cause of the earlier
-	// cgo-pointer panic).
 
 	return sd, nil
 }
@@ -695,11 +660,11 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	// The changeset-gated Invalidate below only covers keys the unwound
 	// blocks explicitly wrote — it misses entries seeded by the read-pop and
 	// the trunk preload, which is what left stale committed branches that a
-	// fork-validation then read as a wrong trie root. Unwind(txNum) drops all
-	// of them (lazily, by epoch+floor) while keeping at/below-floor entries
-	// — including frozen preloads — warm.
+	// fork-validation then read as a wrong trie root. UnwindTo(txNum) evicts
+	// every entry whose txN is above the unwind point while keeping at/below
+	// entries — including frozen preloads stamped txN 0 — warm.
 	if sd.branchCache != nil {
-		sd.branchCache.Unwind(txNumUnwindTo)
+		sd.branchCache.UnwindTo(txNumUnwindTo)
 		if changeset != nil {
 			for _, diff := range changeset[kv.CommitmentDomain] {
 				sd.branchCache.Invalidate([]byte(diff.Key))
@@ -777,11 +742,11 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
-		sd.logger.Info("[state-cache] SetStateCache skipped",
+		sd.logger.Debug("[state-cache] SetStateCache skipped",
 			"useStateCache", dbg.UseStateCache, "stateCacheNil", stateCache == nil)
 		return
 	}
-	sd.logger.Info("[state-cache] SetStateCache enabled on SD")
+	sd.logger.Debug("[state-cache] SetStateCache enabled on SD")
 	sd.stateCache = stateCache
 }
 
@@ -908,46 +873,48 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	// Refresh the caches with the bytes about to land in MDBX, atomically
-	// with the flush. FlushWithCallback holds the latestState write lock
-	// for the full window so a concurrent DomainPut cannot interleave
-	// between the cache update and the MDBX write — readers see either
-	// the local sd.mem value (during the lock) or the cached/MDBX value
-	// (after release). The caches are refreshed ONLY here, on flush —
-	// never per-write — so they mirror committed, fork-agnostic state:
+	// Refresh the caches with the bytes that just landed in MDBX, atomically
+	// with the flush. The WithFlushCallback path runs the callback AFTER the
+	// MDBX write succeeds (so a failed flush never leaves a cache ahead of
+	// MDBX) and holds the latestState write lock for the full window so a
+	// concurrent DomainPut cannot interleave between the MDBX write and the
+	// cache update. The caches are refreshed ONLY here, on flush — never
+	// per-write — so they mirror committed, fork-agnostic state:
 	// CommitmentDomain → BranchCache, Accounts/Storage/Code → StateCache.
+	// Entries are stamped with sd.txNum (the batch's high-water txNum) as the
+	// unwind watermark; the callback exposes only the step, and sd.txNum is a
+	// safe (conservative) upper bound for unwind invalidation.
 	if sd.branchCache != nil || sd.stateCache != nil {
-		if err := sd.mem.FlushWithCallback(ctx, tx, func(domain kv.Domain, k []byte, v []byte, txNum uint64) {
-			switch domain {
-			case kv.CommitmentDomain:
-				if sd.branchCache != nil {
-					if len(v) == 0 {
-						sd.branchCache.Invalidate(k)
-					} else {
-						sd.branchCache.Put(k, v, txNum, "sd.Flush")
-					}
+		var opts []kv.FlushOption
+		if sd.branchCache != nil {
+			opts = append(opts, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
+				if len(v) == 0 {
+					sd.branchCache.Invalidate(k)
+				} else {
+					sd.branchCache.Put(k, v, uint64(step), sd.txNum)
 				}
-			case kv.AccountsDomain:
-				if sd.stateCache != nil {
+			}))
+		}
+		if sd.stateCache != nil {
+			opts = append(opts,
+				kv.WithFlushCallback(kv.AccountsDomain, func(k []byte, v []byte, step kv.Step) {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.AccountsDomain, k)
 						sd.stateCache.Delete(kv.CodeDomain, k)
 						sd.stateCache.DeleteAddrCodeHash(k)
 					} else {
-						sd.stateCache.Put(kv.AccountsDomain, k, v, txNum)
+						sd.stateCache.Put(kv.AccountsDomain, k, v, sd.txNum)
 						sd.stateCache.DeleteAddrCodeHash(k)
 					}
-				}
-			case kv.StorageDomain:
-				if sd.stateCache != nil {
+				}),
+				kv.WithFlushCallback(kv.StorageDomain, func(k []byte, v []byte, step kv.Step) {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.StorageDomain, k)
 					} else {
-						sd.stateCache.Put(kv.StorageDomain, k, v, txNum)
+						sd.stateCache.Put(kv.StorageDomain, k, v, sd.txNum)
 					}
-				}
-			case kv.CodeDomain:
-				if sd.stateCache != nil {
+				}),
+				kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step) {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.CodeDomain, k)
 					} else {
@@ -959,81 +926,11 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 						// ever hold validated, self-consistent entries.
 						sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v))
 					}
-				}
-			}
-		}); err != nil {
-			return err
+				}),
+			)
 		}
-		if sd.branchCache != nil {
-			// Adaptive controller hook: now that the cache reflects this
-			// batch's writes, decide promotions / extensions / demotions
-			// for the contracts whose miss pressure crossed thresholds.
-			// The reader uses the in-flight Flush tx so pre-cache reads
-			// see the just-committed bytes (the tx's own writes are
-			// visible to itself).
-			if sd.adaptivePinController != nil {
-				if ttx, ok := tx.(kv.TemporalTx); ok {
-					reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-						v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix)
-						if err != nil {
-							return nil, 0, false, err
-						}
-						return v, uint64(step), len(v) > 0, nil
-					}
-					// Install per-call parallel-mode plumbing so the
-					// controller's promote/extend uses the wave-BFS file-only
-					// resolver. The factory captures ttx; cleared after the
-					// call so a future OnBlockComplete can't reach a stale tx.
-					factory := func() (commitment.BatchBranchResolver, func(), error) {
-						resolve := func(keys [][]byte) ([][]byte, error) {
-							d := ttx.Debug()
-							vals := make([][]byte, len(keys))
-							for i, k := range keys {
-								v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, k, 0)
-								if err != nil {
-									return nil, err
-								}
-								if found {
-									vc := make([]byte, len(v))
-									copy(vc, v)
-									vals[i] = vc
-								}
-							}
-							return vals, nil
-						}
-						return resolve, nil, nil
-					}
-					provider := func(contractHash []byte) map[string][]byte {
-						m := map[string][]byte{}
-						c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
-						if cerr != nil {
-							return m
-						}
-						defer c.Close()
-						evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
-						scan := func(from, to []byte) {
-							for k, v, err := c.Seek(from); k != nil && err == nil; k, v, err = c.NextNoDup() {
-								if bytes.Compare(k, to) >= 0 {
-									return
-								}
-								if len(v) < 8 {
-									continue
-								}
-								m[string(common.Copy(k))] = common.Copy(v[8:])
-							}
-						}
-						scan(evenFrom, evenTo)
-						scan(oddFrom, oddTo)
-						return m
-					}
-					sd.adaptivePinController.SetParallelMode(factory, provider)
-					sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
-					sd.adaptivePinController.SetParallelMode(nil, nil)
-				}
-			}
-			// Refresh pinned-tier gauges once per Flush — once-per-batch
-			// cadence avoids per-lookup cost in the hot read path.
-			sd.branchCache.PublishMetrics()
+		if err := sd.mem.Flush(ctx, tx, opts...); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -1171,8 +1068,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
 	// bytes are held in sd.mem above, so a cache hit here is always
-	// equivalent to reading from MDBX. Cleared by sd.Flush so a new MDBX
-	// state never coexists with stale cache entries.
+	// equivalent to reading from MDBX. Refreshed per-key by sd.Flush and
+	// evicted by txN watermark on unwind, so a cache hit never coexists
+	// with a newer MDBX state.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cTxNum, ok := sd.branchCache.Get(k); ok {
 			// Respect maxStep. sd.mem / sd.parent.mem lowered maxStep above when an
@@ -1207,19 +1105,23 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// codeHash from the account record (warm in AccountsDomain cache for
 	// any account the EVM has already loaded) and probe codeHashToCode before paying
 	// the code-file accessor stack cost.
-	var codeHash []byte
 	if domain == kv.CodeDomain && sd.stateCache != nil {
 		if h := sd.codeHashForAddr(tx, k); len(h) > 0 {
-			codeHash = h
-			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
+			if cv, ok := sd.stateCache.GetCodeByHash(h); ok {
 				return cv, 0, nil
 			}
 		}
 	}
 
-	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+	var readTxN uint64
+	var txNKnown bool
+	switch aggTx := tx.AggTx().(type) {
+	case MeteredGetterWithTxN:
+		v, step, readTxN, _, err = aggTx.MeteredGetLatestWithTxN(domain, k, tx, maxStep, wm, start)
+		txNKnown = true
+	case MeteredGetter:
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
-	} else {
+	default:
 		v, step, err = tx.GetLatest(domain, k)
 	}
 	if err != nil {
@@ -1250,11 +1152,11 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			sd.stateCache.Put(domain, k, v, readTxNum)
 		}
 	}
-	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
-		// Stamp the upper-bound txNum of the step the bytes came from, so an
-		// unwind into a recent step drops this entry (frozen-step reads, with
-		// a low txNum, stay warm). Mirrors the stateCache read-pop above.
-		sd.branchCache.Put(k, v, (uint64(step)+1)*sd.StepSize()-1, "sd.GetLatest")
+	// Only cache a branch when the read's txN is known: a txN=0 entry would
+	// be treated as immortal by UnwindTo, so skip the Put rather than insert
+	// an entry that can never be unwind-evicted.
+	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
+		sd.branchCache.Put(k, v, uint64(step), readTxN)
 	}
 
 	return v, step, nil
@@ -1698,27 +1600,6 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sd.sdCtx.EnableParaTrieDB(db)
-
-	if sd.branchCache == nil {
-		return
-	}
-
-	// PIN_CONTRACT_TRUNKS preload is fire-once-per-BranchCache-lifetime:
-	// the cache is aggregator-scope and the preload's IO cost is paid up
-	// front; subsequent SDs reuse the already-populated pins.
-	if sd.branchCache.TryClaimPreload() {
-		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
-			triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
-		}
-	}
-
-	// Bind the adaptive controller on every SD: the controller is
-	// per-SD and Bind installs the cache's onMiss callback. Without
-	// this, SDs created after the first have inert controllers and
-	// the cache's onMiss may point at a closed predecessor.
-	if sd.adaptivePinController != nil {
-		sd.adaptivePinController.Bind()
-	}
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
@@ -1764,237 +1645,4 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		changes++
 	}
 	return changes, nil
-}
-
-// triggerTrunkPreload spawns a goroutine that pre-pins the storage-trunk
-// of each contract in pinList for the given BranchCache. pinList is a
-// comma-separated list of 64-hex-char contract hashes (keccak256(addr)).
-//
-// The goroutine opens its OWN kv.TemporalRoTx via db.BeginTemporalRo,
-// distinct from the staged-sync's main tx. Two earlier shapes failed:
-//  1. Goroutine sharing the SD's MDBX tx → cgo "unpinned Go pointer"
-//     panic from concurrent cursor use across goroutines.
-//  2. Synchronous from NewSharedDomains → blocked the engine HTTP
-//     handler for ~3-4s during the preload window, dropping the bench's
-//     first NewPayload and breaking subsequent backward-download.
-//
-// Own-tx async sidesteps both. Caller must guarantee fire-once via
-// BranchCache.TryClaimPreload (the only call site does this).
-func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCache, db kv.TemporalRoDB, pinList string, logger log.Logger) {
-	// RAM budget per contract. 64 MiB is the perf knee on the
-	// SSTORE-bloat workload — covers the structural d=68 saturation
-	// (~70K branches) plus most-shared d=69 branches, beyond which
-	// marginal returns drop sharply (256 MiB sweep showed −2 ms TEST
-	// took for +35 s preload).
-	//
-	// 64 MiB is the per-contract MAX for this PR. Larger budgets are
-	// not safe to ship without (a) per-account touch-driven minimisation
-	// that prunes the pinned set to the actually-useful subset (R11)
-	// and (b) a global RAM cap aware of available memory (R12). Until
-	// both land, an operator setting 256 MiB across many promoted
-	// contracts could pin GBs without material perf benefit.
-	//
-	// Override is plausibly justified in narrow cases — a measured-hot
-	// mainnet contract whose perf curve genuinely requires deeper
-	// coverage, or operator-driven diagnostic profiling. NOT in scope
-	// for this PR; an override path lands once R11 + R12 + a
-	// per-contract whitelist mechanism exist. Until then, larger values
-	// silently clamp with a warning so an operator can see they were
-	// ignored.
-	const maxPerContractBudgetMB = 64
-	ramBudgetMB := dbg.EnvInt("PIN_TRUNK_RAM_BUDGET_MB", maxPerContractBudgetMB)
-	if ramBudgetMB <= 0 {
-		ramBudgetMB = maxPerContractBudgetMB
-	}
-	if ramBudgetMB > maxPerContractBudgetMB {
-		logger.Warn("[trunk-preload] clamping budget to per-contract max",
-			"requested_mb", ramBudgetMB, "clamped_mb", maxPerContractBudgetMB)
-		ramBudgetMB = maxPerContractBudgetMB
-	}
-	ramBudgetBytes := ramBudgetMB << 20
-	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
-	var hashes [][]byte
-	for _, hexStr := range strings.Split(pinList, ",") {
-		hexStr = strings.TrimSpace(hexStr)
-		if hexStr == "" {
-			continue
-		}
-		h, err := hex.DecodeString(hexStr)
-		if err != nil || len(h) != 32 {
-			logger.Warn("[trunk-preload] skipping invalid PIN_CONTRACT_TRUNKS entry",
-				"entry", hexStr, "err", err, "len", len(h))
-			continue
-		}
-		hashes = append(hashes, h)
-	}
-	logger.Info("[trunk-preload] hashes parsed", "count", len(hashes), "ram_budget_mb", ramBudgetMB)
-	if len(hashes) == 0 {
-		return
-	}
-	go func() {
-		// PIN_TRUNK_PARALLEL (default on): the parallel file-only wave-BFS
-		// (PreloadContractTrunkParallel). =false falls back to the per-prefix
-		// BFS via tx.GetLatest. Worker txs: each goroutine MUST use its own
-		// tx — MDBX cursors aren't concurrent-safe under one tx (cgo "unpinned
-		// Go pointer" panic). Reads here go via the file layer only
-		// (DebugGetLatestFromFiles): no MDBX cursor, no per-key cgo crossing,
-		// and values are already dereferenced. Correct for the from-cold-
-		// snapshot trigger path (MDBX holds nothing for the subtree).
-		parallel := dbg.EnvBool("PIN_TRUNK_PARALLEL", true)
-		nWorkers := runtime.GOMAXPROCS(0)
-		if nWorkers < 1 {
-			nWorkers = 1
-		}
-		if nWorkers > 16 {
-			nWorkers = 16
-		}
-		if !parallel {
-			nWorkers = 1
-		}
-		txs := make([]kv.TemporalTx, 0, nWorkers)
-		for i := 0; i < nWorkers; i++ {
-			t, err := db.BeginTemporalRo(ctx) //nolint:gocritic // collected into txs; all rolled back via the defer below
-			if err != nil {
-				for _, t := range txs {
-					t.Rollback()
-				}
-				logger.Warn("[trunk-preload] BeginTemporalRo failed", "worker", i, "err", err)
-				return
-			}
-			txs = append(txs, t)
-		}
-		defer func() {
-			for _, t := range txs {
-				t.Rollback()
-			}
-		}()
-
-		reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-			v, step, err := txs[0].GetLatest(kv.CommitmentDomain, prefix)
-			if err != nil {
-				return nil, 0, false, err
-			}
-			return v, uint64(step), len(v) > 0, nil
-		}
-
-		resolve := func(keys [][]byte) ([][]byte, error) {
-			n := len(keys)
-			vals := make([][]byte, n)
-			if n == 0 {
-				return vals, nil
-			}
-			nw := nWorkers
-			if nw > n {
-				nw = n
-			}
-			chunk := (n + nw - 1) / nw
-			var wg sync.WaitGroup
-			var mu sync.Mutex
-			var firstErr error
-			for w := 0; w < nw; w++ {
-				lo, hi := w*chunk, (w+1)*chunk
-				if hi > n {
-					hi = n
-				}
-				if lo >= hi {
-					break
-				}
-				wg.Add(1)
-				go func(t kv.TemporalTx, lo, hi int) {
-					defer wg.Done()
-					d := t.Debug()
-					for i := lo; i < hi; i++ {
-						v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, keys[i], 0)
-						if err != nil {
-							mu.Lock()
-							if firstErr == nil {
-								firstErr = err
-							}
-							mu.Unlock()
-							return
-						}
-						if found {
-							vc := make([]byte, len(v))
-							copy(vc, v)
-							vals[i] = vc
-						}
-					}
-				}(txs[w], lo, hi)
-			}
-			wg.Wait()
-			return vals, firstErr
-		}
-
-		// dbPrefetch: phase 1 — pull the contract's MDBX-resident commitment
-		// branches (the freshest values: recently rewritten, not yet flushed to
-		// files) into an in-memory map via one range cursor per parity range, so
-		// the parallel wave-BFS resolves them from memory and the file layer is
-		// authoritative only for the keys MDBX doesn't have. The DupSort
-		// valsTable dups are invertedStep||value (latest first), so Seek +
-		// NextNoDup walks the latest value per key. Bounded by ramBudgetBytes;
-		// on a from-cold-snapshot start this finds nothing.
-		dbPrefetch := func(h []byte) map[string][]byte {
-			m := map[string][]byte{}
-			c, cerr := txs[0].CursorDupSort(kv.TblCommitmentVals)
-			if cerr != nil {
-				logger.Warn("[trunk-preload] phase-1 CursorDupSort failed", "err", cerr)
-				return m
-			}
-			defer c.Close()
-			evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(h))
-			bytesBudget := ramBudgetBytes
-			scanRange := func(from, to []byte) error {
-				for k, v, err := c.Seek(from); k != nil; k, v, err = c.NextNoDup() {
-					if err != nil {
-						return err
-					}
-					if bytes.Compare(k, to) >= 0 {
-						break
-					}
-					if len(v) < 8 {
-						continue
-					}
-					val := common.Copy(v[8:])
-					m[string(common.Copy(k))] = val
-					if bytesBudget -= len(val) + 8; bytesBudget <= 0 {
-						return nil
-					}
-				}
-				return nil
-			}
-			if err := scanRange(evenFrom, evenTo); err != nil {
-				logger.Warn("[trunk-preload] phase-1 even-range scan", "err", err)
-			} else if bytesBudget > 0 {
-				if err := scanRange(oddFrom, oddTo); err != nil {
-					logger.Warn("[trunk-preload] phase-1 odd-range scan", "err", err)
-				}
-			}
-			return m
-		}
-
-		for i, h := range hashes {
-			started := time.Now()
-			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h), "parallel", parallel, "workers", nWorkers)
-			var n int
-			var err error
-			if parallel {
-				dbBranches := dbPrefetch(h)
-				if len(dbBranches) > 0 {
-					logger.Info("[trunk-preload] phase-1 db prefetch", "hash", hex.EncodeToString(h), "db_branches", len(dbBranches))
-				}
-				n, err = commitment.PreloadContractTrunkParallel(h, ramBudgetBytes, dbBranches, resolve, branchCache, logger)
-			} else {
-				n, err = commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
-			}
-			took := time.Since(started)
-			if err != nil {
-				logger.Warn("[trunk-preload] failed",
-					"hash", hex.EncodeToString(h), "pinned_so_far", n, "took", took, "err", err)
-				continue
-			}
-			logger.Info("[trunk-preload] contract done",
-				"hash", hex.EncodeToString(h), "pinned", n, "took", took)
-		}
-		logger.Info("[trunk-preload] all done", "contracts", len(hashes))
-	}()
 }

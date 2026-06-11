@@ -177,6 +177,7 @@ export default async function createConfig(): Promise<Config> {
       },
       metadata: [
         {name: 'description', content: 'Official documentation for Erigon — the efficient, modular Ethereum execution client built for performance and low disk footprint.'},
+        {name: 'theme-color', content: '#EF7716'},
         {property: 'og:type', content: 'website'},
         {property: 'og:site_name', content: 'Erigon Documentation'},
         {property: 'og:image', content: 'https://docs.erigon.tech/img/og-image.png'},
