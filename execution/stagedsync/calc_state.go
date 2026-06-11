@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -319,6 +320,73 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc.dirty = true
 		}
 	}
+}
+
+// finalChange returns the change carrying the highest tx Index from a BAL
+// per-field / per-slot change list — i.e. the block-end value, since the
+// BAL stores changes tx-indexed and the highest index is the last write in
+// the block. Scans for the max rather than assuming the list is sorted.
+// Returns (zero, false) for an empty list.
+func finalChange[T interface{ GetIndex() uint32 }](changes []T) (T, bool) {
+	var best T
+	var bestIdx uint32
+	found := false
+	for _, c := range changes {
+		if idx := c.GetIndex(); !found || idx >= bestIdx {
+			best, bestIdx, found = c, idx, true
+		}
+	}
+	return best, found
+}
+
+// LoadFromBAL populates calcState from an EIP-7928 Block Access List
+// instead of the per-tx VersionedWrites stream. The BAL declares the
+// block's post-state up front, so the commitment calculator can build the
+// trie without waiting for execution to stream writes tx-by-tx.
+//
+// For each touched account it takes the block-end value per field — the
+// highest-tx-indexed change — and feeds the existing ApplyWrites, so the
+// SELFDESTRUCT / Deleted / EIP-161 routing is reused unchanged rather than
+// reimplemented.
+//
+// Storage *reads* are ignored: commitment only consumes the changed
+// (dirty) set.
+//
+// Account deletion and fresh-contract incarnation are not modelled, and by
+// design need not be: BALs exist only for Amsterdam+ blocks, and
+// post-EIP-6780 SELFDESTRUCT removes an account only when it was created in
+// the same transaction — so no pre-existing account is deleted at block
+// scope, and a destroy+recreate (incarnation bump) cannot span a block
+// boundary. Pre-Amsterdam blocks, where unconditional SELFDESTRUCT could
+// delete any account, carry no BAL and never reach this path.
+func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
+	var writes state.VersionedWrites
+	for _, ac := range bal {
+		addr := ac.Address
+		if bc, ok := finalChange(ac.BalanceChanges); ok {
+			writes = append(writes, &state.VersionedWrite{
+				Address: addr, Path: state.BalancePath, Val: bc.Value,
+			})
+		}
+		if nc, ok := finalChange(ac.NonceChanges); ok {
+			writes = append(writes, &state.VersionedWrite{
+				Address: addr, Path: state.NoncePath, Val: nc.Value,
+			})
+		}
+		if cc, ok := finalChange(ac.CodeChanges); ok {
+			writes = append(writes, &state.VersionedWrite{
+				Address: addr, Path: state.CodePath, Val: cc.Bytecode,
+			})
+		}
+		for _, sc := range ac.StorageChanges {
+			if chg, ok := finalChange(sc.Changes); ok {
+				writes = append(writes, &state.VersionedWrite{
+					Address: addr, Path: state.StoragePath, Key: sc.Slot, Val: chg.Value,
+				})
+			}
+		}
+	}
+	cs.ApplyWrites(writes)
 }
 
 // FlushToUpdates writes the accumulated dirty state to a commitment.Updates

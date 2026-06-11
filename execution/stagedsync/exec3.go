@@ -504,7 +504,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, commitResults ...chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -659,6 +659,23 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var commitCh chan applyResult
 			if len(commitResults) > 0 {
 				commitCh = commitResults[0]
+			}
+			// Heads-up to the commitment calculator, ahead of the block's
+			// txResult/blockResult stream and on its own channel. inputTxNum
+			// has been advanced past this block's tasks by the loop above,
+			// so inputTxNum-1 is the block's final txNum.
+			if blockRequests != nil {
+				select {
+				case blockRequests <- &blockRequest{
+					blockNum:  b.NumberU64(),
+					blockHash: b.Hash(),
+					stateRoot: header.Root,
+					lastTxNum: inputTxNum - 1,
+					bal:       dbBAL,
+				}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
