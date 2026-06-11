@@ -57,7 +57,7 @@ The user may specify one or more test suites in any combination:
 
 Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
 entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
-(`max-failures`, default 0) for eest shards.
+(`max-failures` per matrix entry, currently 0 everywhere) for eest shards.
 
 | Suite | Max Allowed Failures |
 |-------|---------------------|
