@@ -548,8 +548,7 @@ type GasPriceCache struct {
 
 func NewGasPriceCache() *GasPriceCache {
 	return &GasPriceCache{
-		latestPrice: uint256.NewInt(0),
-		latestHash:  common.Hash{},
+		latestPrice: uint256.NewInt(common.GWei / 1000),
 	}
 }
 
