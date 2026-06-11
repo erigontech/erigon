@@ -22,6 +22,13 @@ inputs:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
     default: ''
+  cache-namespace:
+    description: >
+      Workflow segment of the Go cache keys. Defaults to the top-level workflow
+      file basename, which differs between ci-gate and cache-warming runs;
+      reusable workflows should pass their own basename so keys match across both.
+    required: false
+    default: ''
   ramdisk:
     description: "Create a RAM disk and export its path as ERIGON_EXECUTION_TESTS_TMPDIR"
     required: false
@@ -227,6 +234,9 @@ runs:
         go-version: ${{ steps.goversion.outputs.version }}
         # We have our own caching because we smrt.
         cache: false
+        # Resolve 1.N.x to the same patch release on every runner regardless of
+        # what the image tool cache ships, so GOVERSION-keyed cache keys don't split.
+        check-latest: true
 
     # TODO: Make this optional, it's possibly not needed for lints and a few other quick things.
     - name: Install dependencies on Linux
@@ -259,11 +269,13 @@ runs:
     - name: Get Go environment paths
       id: go-env
       shell: bash
+      env:
+        CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
       run: |
         echo "goversion=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-        workflow=$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)
+        workflow="${CACHE_NAMESPACE:-$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)}"
         echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"

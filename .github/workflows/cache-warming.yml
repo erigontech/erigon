@@ -6,14 +6,15 @@ name: Cache Warming
 # on a branch are only accessible to that branch and its base branch — so
 # without a push trigger on main, every PR opens to a cold cache.
 #
-# Calls the same reusable sub-workflows that ci-gate uses. Because GitHub
-# sets GITHUB_WORKFLOW_REF to the called workflow's own path, cache keys
-# produced here are identical to those from ci-gate runs.
+# Calls the same reusable sub-workflows that ci-gate uses. GITHUB_WORKFLOW_REF
+# points at the top-level workflow (cache-warming here, ci-gate in gate runs),
+# so each sub-workflow passes a fixed cache-namespace to setup-erigon to keep
+# cache keys identical across both paths.
 #
 # Workflows that benefit from Go test result caching (tests, race-tests,
 # caplin) run their full test suites. Workflows where test result caching
-# is not possible or useful (bench, sonar) use cache-warming-only: true to
-# compile test binaries only, keeping those runs fast.
+# is not possible or useful (bench, sonar, eest-spec) use
+# cache-warming-only: true to compile only, keeping those runs fast.
 
 on:
   push:
@@ -39,6 +40,12 @@ jobs:
 
   bench:
     uses: ./.github/workflows/test-bench.yml
+    with:
+      cache-warming-only: true
+    secrets: inherit
+
+  eest-spec:
+    uses: ./.github/workflows/test-eest-spec.yml
     with:
       cache-warming-only: true
     secrets: inherit
