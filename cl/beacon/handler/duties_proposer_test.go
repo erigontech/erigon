@@ -269,6 +269,28 @@ func TestGetDutiesProposerUsesHeadStateWhenFinalizedSlotIsStillAvailable(t *test
 	}
 }
 
+func TestGetDutiesProposerFutureEpochUsesHeadStateBeforeLowestAvailableSlot(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+
+	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	epoch := headEpoch + 1
+	expectedSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
+	lowestAvailableSlot := expectedSlot + handler.beaconChainCfg.SlotsPerEpoch
+	fcu.LowestAvailableSlotVal = &lowestAvailableSlot
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.False(t, response.Finalized)
+	require.Equal(t, handler.beaconChainCfg.GetCurrentStateVersion(epoch).String(), response.Version)
+	for i, duty := range response.Data {
+		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
+	}
+}
+
 func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 

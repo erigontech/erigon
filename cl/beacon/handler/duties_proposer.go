@@ -63,7 +63,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	if epoch > headEpoch+maxEpochsLookaheadForDuties {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
 	}
-	isAvailableInHeadState := expectedSlot >= a.forkchoiceStore.LowestAvailableSlot() && (!isFinalized || epoch >= headEpoch)
+	isAvailableInHeadState := epoch >= headEpoch || (!isFinalized && expectedSlot >= a.forkchoiceStore.LowestAvailableSlot())
 
 	if !isAvailableInHeadState {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
