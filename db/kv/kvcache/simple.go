@@ -41,8 +41,8 @@ var _ Cache = (*SimpleCache)(nil)    // compile-time interface check
 var _ CacheView = (*SimpleView)(nil) // compile-time interface check
 
 func NewSimple() *SimpleCache { return &SimpleCache{} }
-func (c *SimpleCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
-	return &SimpleView{cache: c, tx: tx}, nil
+func (c *SimpleCache) View(ctx context.Context, tx kv.TemporalTx) (CacheView, error) {
+	return &SimpleView{ctx: ctx, cache: c, tx: tx}, nil
 }
 func (c *SimpleCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	if sc == nil {
@@ -76,7 +76,7 @@ func (c *SimpleCache) Len() int {
 	defer c.mu.RUnlock()
 	return len(c.accounts)
 }
-func (c *SimpleCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+func (c *SimpleCache) Get(ctx context.Context, k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	// Check the in-memory account cache first (populated by OnNewBlock).
 	if len(k) == 20 {
 		c.mu.RLock()
@@ -85,14 +85,14 @@ func (c *SimpleCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error)
 			return common.Copy(v), nil
 		}
 		c.mu.RUnlock()
-		v, _, err := tx.GetLatest(context.TODO(), kv.AccountsDomain, k)
+		v, _, err := tx.GetLatest(ctx, kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := tx.GetLatest(context.TODO(), kv.StorageDomain, k)
+	v, _, err := tx.GetLatest(ctx, kv.StorageDomain, k)
 	return v, err
 }
-func (c *SimpleCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	v, _, err := tx.GetLatest(context.TODO(), kv.CodeDomain, k)
+func (c *SimpleCache) GetCode(ctx context.Context, k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+	v, _, err := tx.GetLatest(ctx, kv.CodeDomain, k)
 	return v, err
 }
 func (c *SimpleCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
@@ -100,15 +100,16 @@ func (c *SimpleCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*
 }
 
 type SimpleView struct {
+	ctx   context.Context
 	cache *SimpleCache
 	tx    kv.TemporalTx
 }
 
-func (c *SimpleView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+func (c *SimpleView) Get(k []byte) ([]byte, error) { return c.cache.Get(c.ctx, k, c.tx, 0) }
 func (c *SimpleView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
-func (c *SimpleView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
+func (c *SimpleView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(c.ctx, k, c.tx, 0) }
 func (c *SimpleView) HasStorage(address common.Address) (bool, error) {
 	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err

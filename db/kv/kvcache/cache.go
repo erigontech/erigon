@@ -134,19 +134,20 @@ type CoherentRoot struct {
 // CoherentView - dumb object, which proxy all requests to Coherent object.
 // It's thread-safe, because immutable
 type CoherentView struct {
+	ctx            context.Context
 	tx             kv.TemporalTx
 	cache          *Coherent
 	stateVersionID uint64
 }
 
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
-	return c.cache.Get(k, c.tx, c.stateVersionID)
+	return c.cache.Get(c.ctx, k, c.tx, c.stateVersionID)
 }
 func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
-	return c.cache.GetCode(k, c.tx, c.stateVersionID)
+	return c.cache.GetCode(c.ctx, k, c.tx, c.stateVersionID)
 }
 func (c *CoherentView) HasStorage(address common.Address) (bool, error) {
 	// note: theoretically we could try to use the cache and look for populated storage
@@ -348,22 +349,22 @@ func (c *Coherent) View(ctx context.Context, tx kv.TemporalTx) (CacheView, error
 	r := c.selectOrCreateRoot(id)
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{ctx: ctx, stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
 	if r.readyChanClosed.Load() {
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{ctx: ctx, stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
 	select {
 	case <-r.ready:
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{ctx: ctx, stateVersionID: id, tx: tx, cache: c}, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
 	case <-time.After(c.cfg.NewBlockWait):
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{ctx: ctx, stateVersionID: id, tx: tx, cache: c}, nil
 	}
 }
 
@@ -390,7 +391,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 	}
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
+func (c *Coherent) Get(ctx context.Context, k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	//TODO: Get must accept from user Domain parameter
 	it, r, err := c.getFromCache(k, id, kv.AccountsDomain)
 	if err != nil {
@@ -406,9 +407,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	c.miss.Inc()
 
 	if len(k) == 20 {
-		v, _, err = tx.GetLatest(context.TODO(), kv.AccountsDomain, k)
+		v, _, err = tx.GetLatest(ctx, kv.AccountsDomain, k)
 	} else {
-		v, _, err = tx.GetLatest(context.TODO(), kv.StorageDomain, k)
+		v, _, err = tx.GetLatest(ctx, kv.StorageDomain, k)
 	}
 	if err != nil {
 		return nil, err
@@ -425,7 +426,7 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
+func (c *Coherent) GetCode(ctx context.Context, k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, kv.CodeDomain)
 	if err != nil {
 		return nil, err
@@ -438,7 +439,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 	c.codeMiss.Inc()
 
-	v, _, err = tx.GetLatest(context.TODO(), kv.CodeDomain, k)
+	v, _, err = tx.GetLatest(ctx, kv.CodeDomain, k)
 	if err != nil {
 		return nil, err
 	}
