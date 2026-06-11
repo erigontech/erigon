@@ -391,27 +391,27 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		hash := query[lookups]
 		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
-			break
+			return receipts, false, nil
 		}
 		// The response carries one receipt list per requested block in request
 		// order, so a block we cannot serve ends the response at that block.
 		number, _ := br.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
-			break
+			return receipts, false, nil
 		}
 		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
 		if err != nil {
 			return nil, false, err
 		}
 		if b == nil {
-			break
+			return receipts, false, nil
 		}
 		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
 			return nil, false, err
 		}
 		if results == nil && b.HeaderNoCopy().ReceiptHash != empty.RootHash {
-			break
+			return receipts, false, nil
 		}
 
 		// For the first block, skip receipts before firstBlockReceiptIndex (eth/70)
