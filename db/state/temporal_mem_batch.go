@@ -823,6 +823,21 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 		// distinguish (see SharedDomains.Flush, which Invalidate's on
 		// len(v)==0 and Put's otherwise).
 		for domain, cb := range cfg.DomainCallbacks {
+			// StorageDomain values live in the separate sd.storage btree, not
+			// sd.domains[StorageDomain] (see getLatest/DomainPut). Iterating
+			// sd.domains here would find an empty map for storage, so its cache
+			// would never be flush-updated and would serve stale slots on hit.
+			if domain == kv.StorageDomain {
+				sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
+					if len(history) == 0 {
+						return true
+					}
+					latest := history[len(history)-1]
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					return true
+				})
+				continue
+			}
 			for keyStr, history := range sd.domains[domain] {
 				if len(history) == 0 {
 					continue
