@@ -37,33 +37,23 @@ type Filter struct {
 	fuseWriterSharded  *fusefilter.WriterSharded
 	fuseReader         *fusefilter.Reader
 	fuseReaderSharded  *fusefilter.ReaderSharded
-	useFuse            bool
 	empty              bool
 	FileName, FilePath string
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewFilter(keysCount uint64, filePath string) (*Filter, error) {
-	useFuse := true
 	_, fileName := filepath.Split(filePath)
-	e := &Filter{FilePath: filePath, FileName: fileName, useFuse: useFuse}
+	e := &Filter{FilePath: filePath, FileName: fileName}
 	if keysCount < 2 {
 		e.empty = true
 	} else {
 		var err error
-		if e.useFuse {
-			e.fuseWriterSharded, err = fusefilter.NewWriterSharded(filePath)
-			if err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-
-		m := bloomfilter.OptimalM(keysCount, 0.01)
-		e.filter, err = bloomfilter.New(m)
+		e.fuseWriterSharded, err = fusefilter.NewWriterSharded(filePath)
 		if err != nil {
-			return nil, fmt.Errorf("%w, %s", err, fileName)
+			return nil, err
 		}
+		return e, nil
 	}
 	return e, nil
 }
@@ -72,11 +62,7 @@ func (b *Filter) AddHash(hash uint64) error {
 	if b.empty {
 		return nil
 	}
-	if b.useFuse {
-		return b.fuseWriterSharded.AddHash(hash)
-	}
-	b.filter.AddHash(hash)
-	return nil
+	return b.fuseWriterSharded.AddHash(hash)
 }
 
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
@@ -109,30 +95,7 @@ func (b *Filter) Build() error {
 		return nil
 	}
 
-	if b.useFuse {
-		return b.fuseWriterSharded.Build()
-	}
-
-	log.Trace("[agg] write file", "file", b.FileName)
-	cf, err := dir.CreateTemp(b.FilePath)
-	if err != nil {
-		return err
-	}
-	defer cf.Close()
-
-	if _, err := b.filter.WriteTo(cf); err != nil {
-		return err
-	}
-	if err = b.fsync(cf); err != nil {
-		return err
-	}
-	if err = cf.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(cf.Name(), b.FilePath); err != nil {
-		return err
-	}
-	return nil
+	return b.fuseWriterSharded.Build()
 }
 
 func (b *Filter) DisableFsync() {
@@ -140,9 +103,7 @@ func (b *Filter) DisableFsync() {
 		return
 	}
 	b.noFsync = true
-	if b.useFuse {
-		b.fuseWriterSharded.DisableFsync()
-	}
+	b.fuseWriterSharded.DisableFsync()
 }
 
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
@@ -169,7 +130,7 @@ func isBloomMagic(peek []byte) bool {
 		peek[8] == 'v' && peek[9] == '0' && peek[10] == '2' && peek[11] == '\n'
 }
 
-// OpenFilter opens a .kvei existence filter file. The useFuse parameter is ignored;
+// OpenFilter opens a .kvei existence filter file
 // the format is auto-detected from the file content (bloom vs fuse v0/v1).
 func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
 	_, fileName := filepath.Split(filePath)
