@@ -1033,7 +1033,9 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 
 // getEncoded returns the encoded value for a domain key: checks mem batch first, then falls back to GetAsOf.
 func (r *simulationIntraBlockStateReader) getEncoded(domain kv.Domain, key []byte) ([]byte, error) {
-	enc, _, ok := r.sd.GetMemBatch().GetLatest(context.TODO(), domain, key)
+	// Reached via the fixed (ctx-less) StateReader IBS methods; bottoms out at a
+	// root context.
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(context.Background(), domain, key)
 	if ok {
 		return enc, nil
 	}

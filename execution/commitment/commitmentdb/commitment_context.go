@@ -501,10 +501,10 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			return &errorTrieContext{err: err}, func() {}
 		}
 		warmupCtx := &TrieContext{
-			ctx:      ctx,
-			getter:   sdc.sharedDomains.AsGetter(roTx),
-			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			txNum:    txNum,
+			ctx:    ctx,
+			getter: sdc.sharedDomains.AsGetter(roTx),
+			putter: sdc.sharedDomains.AsPutDel(roTx),
+			txNum:  txNum,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
@@ -957,7 +957,9 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(context.TODO(), kv.CommitmentDomain, KeyCommitmentState)
+	// Reached via the non-ctx CanUnwindToBlockNum chain; bottoms out at a root
+	// context (threading would mean widening that unwind-bound helper chain).
+	stateVal, _, err := tx.GetLatest(context.Background(), kv.CommitmentDomain, KeyCommitmentState)
 	if err != nil {
 		return 0, err
 	}

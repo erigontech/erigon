@@ -2388,7 +2388,9 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
 	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(context.TODO(), name, k, tx)
+		// GetAsOf carries no ctx (outside the GetLatest unification); this internal
+		// commitment-dereference fallback bottoms out at a root context.
+		v, _, ok, err = at.GetLatest(context.Background(), name, k, tx)
 	}
 	return v, ok, err
 }

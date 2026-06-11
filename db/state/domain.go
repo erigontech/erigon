@@ -1421,7 +1421,9 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, nil
 	}
 	var ok bool
-	v, _, ok, err = dt.GetLatest(context.TODO(), key, roTx)
+	// GetAsOf carries no ctx (outside the GetLatest unification); this internal
+	// fallback bottoms out at a root context.
+	v, _, ok, err = dt.GetLatest(context.Background(), key, roTx)
 	if err != nil {
 		return nil, false, err
 	}
