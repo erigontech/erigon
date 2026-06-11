@@ -26,7 +26,6 @@ import (
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -224,7 +223,6 @@ func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
 		}
 		idx.filter = filter
 		validationPassed = true
-		log.Warn("[existence] open bloom filter", "file", fileName, "size", common.ByteCount(uint64(stat.Size())))
 		return idx, nil
 	}
 
@@ -242,7 +240,6 @@ func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
 		return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 	}
 	validationPassed = true
-	log.Warn("[existence] open fuse filter", "file", fileName, "version", fuseVersion, "size", common.ByteCount(uint64(stat.Size())))
 	return idx, nil
 }
 
