@@ -85,7 +85,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 			}
 			return nil
 		}
-		return nil
+		return beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("dependent root not found for epoch %d", epoch))
 	})
 }
 
@@ -96,6 +96,10 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
+	}
+	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
+	if epoch > headEpoch+maxEpochsLookaheadForDuties {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far in the future", epoch))
 	}
 
 	dependentRoot, err := a.getDependentRoot(epoch, true)
@@ -130,10 +134,6 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
-				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far in the future", epoch))
-			}
-
 			// get active validator indicies
 			committeeCount := s.CommitteeCount(epoch)
 			// now start obtaining the committees from the head state

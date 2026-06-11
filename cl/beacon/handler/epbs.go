@@ -18,6 +18,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/common"
 )
@@ -267,6 +269,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 
 	failures := []poolingFailure{}
 	for i, msg := range req {
+		if msg == nil || msg.Data == nil {
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: "missing payload attestation message data",
+			})
+			continue
+		}
+
 		// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
 		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
 		if a.payloadAttestationService != nil {
@@ -280,7 +290,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		}
 
 		// Store in pool for GET endpoint serving
-		if a.epbsPool != nil && msg.Data != nil {
+		if a.epbsPool != nil {
 			a.epbsPool.PayloadAttestations.Add(pool.PayloadAttestationKey{
 				Slot:           msg.Data.Slot,
 				ValidatorIndex: msg.ValidatorIndex,
@@ -496,7 +506,12 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	// checkBlobData=false because gossip validation handles it; validatePayload=true
 	// so the EL receives NewPayload for the execution payload.
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, false, true); err != nil {
-		a.logger.Debug("[Beacon REST] OnExecutionPayload queued or failed", "err", err)
+		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
+		} else {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 	}
 
 	// Broadcast the envelope on the execution_payload gossip topic

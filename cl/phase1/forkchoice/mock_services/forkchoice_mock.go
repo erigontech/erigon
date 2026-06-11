@@ -71,6 +71,7 @@ type ForkChoiceStorageMock struct {
 	Blocks                    map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                 map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	VerifiedPayloads          map[common.Hash]bool
+	OnExecutionPayloadErr     error
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -346,7 +347,7 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
-	return nil
+	return f.OnExecutionPayloadErr
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {

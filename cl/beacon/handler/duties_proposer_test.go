@@ -51,8 +51,10 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 	fcu.HeadSlotVal = postState.Slot()
 
 	epoch := uint64(3)
+	expectedSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: epoch, Root: headRoot}
 	fcu.FinalizedSlotVal = (epoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+	fcu.LowestAvailableSlotVal = &expectedSlot
 
 	before := getProposerDutiesForEpoch(t, handler, epoch)
 	require.True(t, before.Finalized)
@@ -281,6 +283,21 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestGetDependentRootReturnsNotFoundWhenRootUnavailable(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+
+	epoch := postState.Slot()/handler.beaconChainCfg.SlotsPerEpoch + maxEpochsLookaheadForDuties*3
+	root, err := handler.getDependentRoot(epoch, false)
+	require.Error(t, err)
+	require.Equal(t, common.Hash{}, root)
+	require.Contains(t, err.Error(), "dependent root not found")
 }
 
 type proposerDutiesResponse struct {

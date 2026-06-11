@@ -59,9 +59,13 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
-	isAvailableInMemory := expectedSlot >= a.forkchoiceStore.LowestAvailableSlot()
+	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
+	if epoch > headEpoch+maxEpochsLookaheadForDuties {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
+	}
+	isAvailableInHeadState := expectedSlot >= a.forkchoiceStore.LowestAvailableSlot() && (!isFinalized || epoch >= headEpoch)
 
-	if !isAvailableInMemory {
+	if !isAvailableInHeadState {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
 			return nil, err
@@ -93,11 +97,6 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		headEpoch := state.Epoch(s)
-		if epoch > headEpoch+maxEpochsLookaheadForDuties {
-			return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
-		}
-
 		targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 		if targetVersion.After(s.Version()) {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
@@ -178,7 +177,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 
 	return newBeaconResponse(duties).
 		WithFinalized(isFinalized).
-		WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).
+		WithOptimistic(!isFinalized && a.forkchoiceStore.IsHeadOptimistic()).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		With("dependent_root", dependentRoot), nil
 }
