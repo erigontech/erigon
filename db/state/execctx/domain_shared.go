@@ -744,12 +744,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	// lock) or the cached/MDBX value (after release). No window where cache
 	// is stale vs MDBX.
 	if sd.branchCache != nil {
-		if err := sd.mem.Flush(ctx, tx, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
+		if err := sd.mem.Flush(ctx, tx, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 			if len(v) == 0 {
 				sd.branchCache.Invalidate(k)
 				return
 			}
-			sd.branchCache.Put(k, v, uint64(step), sd.txNum)
+			// Stamp the value's per-key write txNum (not the batch high-water) so
+			// unwind invalidation is tx-precise.
+			sd.branchCache.Put(k, v, uint64(step), txNum)
 		})); err != nil {
 			return err
 		}

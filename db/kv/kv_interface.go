@@ -521,21 +521,24 @@ type TemporalDebugDB interface {
 // FlushOption values.
 type FlushConfig struct {
 	// DomainCallbacks, if set for a domain, is invoked for each
-	// (key, value, step) tuple in that domain BEFORE the mem-batch is written
-	// to the tx — letting a downstream cache (e.g. the commitment BranchCache)
-	// stay in sync with the flush.
-	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step)
+	// (key, value, step, txNum) tuple in that domain during Flush — letting a
+	// downstream cache (e.g. the commitment BranchCache) stay in sync with the
+	// flush. txNum is the value's write txNum: a cache stamps its entry with it
+	// so unwind invalidation is tx-precise rather than step-coarse (an unwind to
+	// a txNum inside the latest step needs txNum precision). Required by the
+	// stacked state-cache PR (#21752).
+	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
 // FlushOption configures a TemporalMemBatch.Flush call.
 type FlushOption func(*FlushConfig)
 
-// WithFlushCallback registers cb to receive every (key, value, step) tuple of
-// the given domain during Flush, ordered before the MDBX write.
-func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step)) FlushOption {
+// WithFlushCallback registers cb to receive every (key, value, step, txNum)
+// tuple of the given domain during Flush.
+func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txNum uint64)) FlushOption {
 	return func(c *FlushConfig) {
 		if c.DomainCallbacks == nil {
-			c.DomainCallbacks = make(map[Domain]func(k []byte, v []byte, step Step))
+			c.DomainCallbacks = make(map[Domain]func(k []byte, v []byte, step Step, txNum uint64))
 		}
 		c.DomainCallbacks[domain] = cb
 	}
