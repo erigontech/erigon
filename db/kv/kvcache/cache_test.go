@@ -127,10 +127,10 @@ func TestEviction(t *testing.T) {
 		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
-		_, _ = c.Get(k1[:], tx, view.stateVersionID)
-		_, _ = c.Get([]byte{1}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{2}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{3}, tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), []byte{1}, tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), []byte{2}, tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), []byte{3}, tx, view.stateVersionID)
 		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 		return nil
 	})
@@ -159,10 +159,10 @@ func TestEviction(t *testing.T) {
 		binary.BigEndian.PutUint64(versionID[:], id)
 		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		view := cacheView.(*CoherentView)
-		_, _ = c.Get(k1[:], tx, view.stateVersionID)
-		_, _ = c.Get(k2[:], tx, view.stateVersionID)
-		_, _ = c.Get([]byte{5}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{6}, tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), k2[:], tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), []byte{5}, tx, view.stateVersionID)
+		_, _ = c.Get(context.Background(), []byte{6}, tx, view.stateVersionID)
 		return nil
 	})
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
@@ -208,7 +208,7 @@ func TestAPI(t *testing.T) {
 						panic(fmt.Sprintf("View error: %v", err))
 					}
 					view := cacheView.(*CoherentView)
-					v, err := c.Get(key[:], tx, view.stateVersionID)
+					v, err := c.Get(context.Background(), key[:], tx, view.stateVersionID)
 					if err != nil {
 						panic(fmt.Sprintf("Get error: %v", err))
 					}
@@ -538,12 +538,12 @@ func TestCode(t *testing.T) {
 		require.NoError(err)
 		view := cacheView.(*CoherentView)
 
-		v, err := c.GetCode(k1[:], tx, view.stateVersionID)
+		v, err := c.GetCode(context.Background(), k1[:], tx, view.stateVersionID)
 		require.NoError(err)
 		require.Equal(code, v)
 
 		// second read is served from the cache
-		v, err = c.GetCode(k1[:], tx, view.stateVersionID)
+		v, err = c.GetCode(context.Background(), k1[:], tx, view.stateVersionID)
 		require.NoError(err)
 		require.Equal(code, v)
 		return nil
