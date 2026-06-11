@@ -138,6 +138,17 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 		expect []rlp.RawValue
 	}{
 		{
+			// Baseline: every requested block — frozen or still in the DB — yields
+			// its receipt list in request order.
+			name: "all blocks available",
+			query: []common.Hash{
+				blockHash(frozenEmptyBlockNum - 2), blockHash(frozenEmptyBlockNum - 1), blockHash(frozenChainLength - 5),
+			},
+			expect: []rlp.RawValue{
+				encodedReceipts(frozenEmptyBlockNum - 2), encodedReceipts(frozenEmptyBlockNum - 1), encodedReceipts(frozenChainLength - 5),
+			},
+		},
+		{
 			// An empty block mid-request must yield an empty receipt list at its
 			// position, not be omitted: omission desyncs the positional matching
 			// peers use to validate the response, and they drop us for it.
