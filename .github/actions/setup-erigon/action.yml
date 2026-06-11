@@ -256,10 +256,27 @@ runs:
         sudo apt-get update -qq -o Acquire::Retries=3 \
           && sudo apt-get install -qq -y build-essential 2>/dev/null
 
-    - name: Install make on Windows
+    - name: Ensure make on Windows
       if: ${{ runner.os == 'Windows' }}
       shell: bash
-      run: choco install make -y --no-progress
+      # The hosted Windows image already ships GNU Make on PATH (C:\mingw64\bin),
+      # so the previous unconditional `choco install make` was redundant and added
+      # a flaky community.chocolatey.org/NuGet dependency. Use the present make and
+      # only fall back to a retried install if none is found.
+      run: |
+        set -euo pipefail
+        if ! command -v make >/dev/null 2>&1; then
+          echo "make not on PATH; installing via choco (fallback)"
+          for i in 1 2 3; do
+            choco install make -y --no-progress && break
+            echo "choco install make failed (attempt $i), retrying..."; sleep 30
+          done
+        fi
+        make_path="$(command -v make)" || { echo "::error::make unavailable on Windows"; exit 1; }
+        # Pin this make's directory at the front of PATH so later steps use
+        # exactly this binary, not another make/gmake also present on the image.
+        echo "$(cygpath -w "$(dirname "$make_path")")" >> "$GITHUB_PATH"
+        echo "using make: $make_path -> $(make --version | head -1)"
 
     - name: Debug parallelism
       shell: bash
