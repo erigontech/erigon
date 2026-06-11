@@ -1609,13 +1609,13 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 		if !ok {
 			return
 		}
-		// Skip non-zero balance writes for selfdestructed accounts within the
-		// SAME transaction (e.g. priority fee applied during finalize of the
-		// selfdestructing tx). Balance writes from LATER transactions (e.g. a
-		// value transfer to the now-empty address) are real state changes that
-		// must appear in the BAL.
+		// A non-zero balance written in the SAME transaction as a selfdestruct
+		// (e.g. a transfer to the pending-destroyed account, or a priority fee
+		// applied during finalize) burns with the account at end of tx, so per
+		// EIP-7928 the account's post-tx balance is zero. Balance writes from
+		// LATER transactions are real state changes and pass through unchanged.
 		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
-			return
+			val.Clear()
 		}
 		// If we haven't seen a balance and the first write is zero, treat it
 		// as a touch only when the pre-block balance is (or is implicitly) zero:
