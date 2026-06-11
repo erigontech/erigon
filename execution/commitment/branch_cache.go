@@ -198,6 +198,12 @@ type BranchCache struct {
 	// preloadClaimed gates the one-shot residency preload trigger.
 	preloadClaimed atomic.Bool
 
+	// last-published pinned counter snapshots — PublishMetrics emits the delta
+	// since the previous publish so the Prometheus counters track per-Flush
+	// activity, not snapshot absolutes.
+	lastPublishedPinnedHits   atomic.Uint64
+	lastPublishedPinnedMisses atomic.Uint64
+
 	// Cache coherence across unwinds is txN/epoch based — no block awareness,
 	// no diffset. An entry is valid iff it was written in the current epoch OR
 	// its txN is strictly below unwindFloor (the first unwound txN), so it
@@ -383,6 +389,24 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool) (st *trunk, acct 
 		c.pinned.Set(packed, st)
 	}
 	return st, packed, stor, true
+}
+
+// ContractHashFromPrefix extracts the 32-byte contract (account) hash from a
+// storage-trunk prefix (compact-hex of >= 64 account nibbles + storage
+// nibbles). ok=false for non-storage prefixes. Used by the residency layer to
+// attribute per-contract miss pressure.
+func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
+	if len(prefix) < 33 {
+		return hash, false
+	}
+	nib := nibbles.CompactToHex(prefix)
+	if len(nib) < 64 {
+		return hash, false
+	}
+	for i := 0; i < 32; i++ {
+		hash[i] = nib[2*i]<<4 | nib[2*i+1]
+	}
+	return hash, true
 }
 
 // clearTrunk resets every resident account-trunk slot (depths 0-4) to nil in
