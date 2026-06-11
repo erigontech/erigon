@@ -213,24 +213,33 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 }
 
 func (b *Filter) ForceInMem() {
-	if b == nil || b.empty || !b.useFuse {
+	if b == nil || b.empty {
 		return
 	}
-	b.fuseReader.ForceInMem()
+	if b.useFuse {
+		b.fuseReader.ForceInMem()
+	}
+	// bloom filter is already heap-allocated by OpenFilter — no-op
 }
 
 func (b *Filter) MadvWillNeed() {
-	if b == nil || b.empty || !b.useFuse {
+	if b == nil || b.empty {
 		return
 	}
-	b.fuseReader.MadvWillNeed()
+	if b.useFuse {
+		b.fuseReader.MadvWillNeed()
+	}
+	// bloom filter is heap-allocated, no mmap to advise — no-op
 }
 
 func (b *Filter) MadvNormal() {
-	if b == nil || b.empty || !b.useFuse {
+	if b == nil || b.empty {
 		return
 	}
-	b.fuseReader.MadvNormal()
+	if b.useFuse {
+		b.fuseReader.MadvNormal()
+	}
+	// bloom filter is heap-allocated, no mmap to advise — no-op
 }
 
 func (b *Filter) Close() {
