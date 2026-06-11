@@ -654,17 +654,17 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	// Tx-aware unwind of the commitment BranchCache: every cached branch
-	// whose bytes belong to the rolled-back window (txNum above the unwind
-	// point, current epoch) is now stale vs the post-unwind canonical state.
-	// The changeset-gated Invalidate below only covers keys the unwound
-	// blocks explicitly wrote — it misses entries seeded by the read-pop and
-	// the trunk preload, which is what left stale committed branches that a
-	// fork-validation then read as a wrong trie root. UnwindTo(txNum) evicts
-	// every entry whose txN is above the unwind point while keeping at/below
-	// entries — including frozen preloads stamped txN 0 — warm.
+	// Tx/epoch-aware unwind of the commitment BranchCache: every cached branch
+	// whose bytes belong to the rolled-back window (txN at/above the unwind
+	// point, superseded epoch) is now stale vs the post-unwind canonical state.
+	// Unwind(txNum) bumps the epoch and lowers the floor (O(1), no scan); those
+	// entries are dropped lazily on their next Get — covering entries seeded by
+	// the read-pop and the trunk preload that the changeset-gated Invalidate
+	// below misses (which is what left stale committed branches a fork-validation
+	// then read as a wrong trie root). The explicit Invalidate of the unwound
+	// changeset keys is a redundant fast path for keys known dead right now.
 	if sd.branchCache != nil {
-		sd.branchCache.UnwindTo(txNumUnwindTo)
+		sd.branchCache.Unwind(txNumUnwindTo)
 		if changeset != nil {
 			for _, diff := range changeset[kv.CommitmentDomain] {
 				sd.branchCache.Invalidate([]byte(diff.Key))
@@ -881,40 +881,41 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	// cache update. The caches are refreshed ONLY here, on flush — never
 	// per-write — so they mirror committed, fork-agnostic state:
 	// CommitmentDomain → BranchCache, Accounts/Storage/Code → StateCache.
-	// Entries are stamped with sd.txNum (the batch's high-water txNum) as the
-	// unwind watermark; the callback exposes only the step, and sd.txNum is a
-	// safe (conservative) upper bound for unwind invalidation.
+	// Entries are stamped with the value's per-key write txNum (delivered by the
+	// callback) as the unwind floor, so invalidation is tx-precise: an unwind to
+	// a txNum inside the latest step drops exactly the entries above it, not the
+	// whole step (#21752). Both caches honor the same (txNum, epoch) model.
 	if sd.branchCache != nil || sd.stateCache != nil {
 		var opts []kv.FlushOption
 		if sd.branchCache != nil {
-			opts = append(opts, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
+			opts = append(opts, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 				if len(v) == 0 {
 					sd.branchCache.Invalidate(k)
 				} else {
-					sd.branchCache.Put(k, v, uint64(step), sd.txNum)
+					sd.branchCache.Put(k, v, uint64(step), txNum)
 				}
 			}))
 		}
 		if sd.stateCache != nil {
 			opts = append(opts,
-				kv.WithFlushCallback(kv.AccountsDomain, func(k []byte, v []byte, step kv.Step) {
+				kv.WithFlushCallback(kv.AccountsDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.AccountsDomain, k)
 						sd.stateCache.Delete(kv.CodeDomain, k)
 						sd.stateCache.DeleteAddrCodeHash(k)
 					} else {
-						sd.stateCache.Put(kv.AccountsDomain, k, v, sd.txNum)
+						sd.stateCache.Put(kv.AccountsDomain, k, v, txNum)
 						sd.stateCache.DeleteAddrCodeHash(k)
 					}
 				}),
-				kv.WithFlushCallback(kv.StorageDomain, func(k []byte, v []byte, step kv.Step) {
+				kv.WithFlushCallback(kv.StorageDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.StorageDomain, k)
 					} else {
-						sd.stateCache.Put(kv.StorageDomain, k, v, sd.txNum)
+						sd.stateCache.Put(kv.StorageDomain, k, v, txNum)
 					}
 				}),
-				kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step) {
+				kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 					if len(v) == 0 {
 						sd.stateCache.Delete(kv.CodeDomain, k)
 					} else {
