@@ -133,7 +133,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
-	if isGloas {
+	if isGloas && f.Slot() == block.Block.Slot {
 		head, _, err := f.computeHeadGloasWithAnchorFallback()
 		if err != nil {
 			return err

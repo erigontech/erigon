@@ -115,6 +115,16 @@ func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, ind
 	proposerIndices := make([]uint64, b.BeaconConfig().SlotsPerEpoch)
 
 	clVersion := b.Version()
+	if clVersion >= clparams.GloasVersion {
+		var err error
+		indices, err = filterSlashedValidators(b, indices)
+		if err != nil {
+			return nil, err
+		}
+		if len(indices) == 0 {
+			return nil, errors.New("ComputeProposerIndices: no unslashed validators")
+		}
+	}
 	// Generate seed for each slot
 	input := make([]byte, 40)
 	copy(input, seed[:])
@@ -124,7 +134,7 @@ func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, ind
 		slotSeed := utils.Sha256(input)
 
 		if clVersion >= clparams.GloasVersion {
-			indicies, err := ComputeUnslashedBalanceWeightedSelection(b, indices, slotSeed, 1, true)
+			indicies, err := ComputeBalanceWeightedSelection(b, indices, slotSeed, 1, true)
 			if err != nil {
 				return nil, err
 			}

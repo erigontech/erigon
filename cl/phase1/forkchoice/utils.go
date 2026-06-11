@@ -217,10 +217,6 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	// By default use the no change encoding to signal that there is no future epoch here.
 	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch) {
 		log.Debug("Long checkpoint detected")
-		baseState, err = baseState.Copy()
-		if err != nil {
-			return nil, err
-		}
 		// If we require to change it then process the future epoch
 		if err := transition.DefaultMachine.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch)); err != nil {
 			return nil, err

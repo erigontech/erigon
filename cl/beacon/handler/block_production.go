@@ -294,29 +294,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
 	baseBlockSlot := baseState.LatestBlockHeader().Slot
 
-	// Apply optional proposer-head reorgs before advancing the state for the
-	// proposal slot. This is needed for GLOAS late/unavailable payload reorgs
-	// and for the classic one-slot proposer reorg rule.
-	if _, _, err := a.forkchoiceStore.GetHead(nil); err == nil {
-		proposerHeadRoot := a.forkchoiceStore.GetProposerHead(baseBlockRoot, targetSlot)
-		if proposerHeadRoot != baseBlockRoot {
-			proposerHeadState, err := a.forkchoiceStore.GetStateAtBlockRoot(proposerHeadRoot, true)
-			if err != nil {
-				return nil, beaconhttp.NewEndpointError(
-					http.StatusInternalServerError,
-					fmt.Errorf("proposer head state not found %x: %w", proposerHeadRoot, err),
-				)
-			}
-			if proposerHeadState == nil {
-				return nil, beaconhttp.NewEndpointError(
-					http.StatusNotFound,
-					fmt.Errorf("proposer head state not found %x", proposerHeadRoot),
-				)
-			}
-			baseBlockRoot = proposerHeadRoot
-			baseState = proposerHeadState
-			baseBlockSlot = baseState.LatestBlockHeader().Slot
-		}
+	if _, _, err := a.forkchoiceStore.GetHead(nil); err != nil {
+		return nil, err
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
@@ -766,8 +745,10 @@ func (a *ApiHandler) produceBeaconBody(
 	}
 	var targetGasLimit *hexutil.Uint64
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		tgl := hexutil.Uint64(baseState.GetLatestExecutionPayloadBid().GasLimit)
-		targetGasLimit = &tgl
+		if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
+			tgl := hexutil.Uint64(parentBid.GasLimit)
+			targetGasLimit = &tgl
+		}
 		if a.epbsPool != nil {
 			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
 			dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)

@@ -399,48 +399,8 @@ func (f *ForkChoiceStore) isShufflingStable(slot uint64) bool {
 	return slot%f.beaconCfg.SlotsPerEpoch != 0
 }
 
-func (f *ForkChoiceStore) reorgLatePayload(head ForkChoiceNode) bool {
-	if !f.isPreviousSlotPayloadDecision(head) {
-		return false
-	}
-	return head.PayloadStatus == cltypes.PayloadStatusFull && !f.ShouldBuildOnFull(head)
-}
-
-// GetProposerHead applies the optional proposer reorg rule before block
-// production. It returns parent(head) only for a single-slot reorg where the
-// head is late and weak while its parent is strong. In GLOAS, a previous-slot
-// FULL payload that should not be built on also triggers the same reorg path.
-func (f *ForkChoiceStore) GetProposerHead(headRoot common.Hash, slot uint64) common.Hash {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	headBlock, ok := f.forkGraph.GetBlock(headRoot)
-	if !ok || headBlock == nil {
-		return headRoot
-	}
-	parentRoot := headBlock.Block.ParentRoot
-	parentBlock, ok := f.forkGraph.GetBlock(parentRoot)
-	if !ok || parentBlock == nil {
-		return headRoot
-	}
-
-	parentSlotOK := parentBlock.Block.Slot+1 == headBlock.Block.Slot
-	currentTimeOK := headBlock.Block.Slot+1 == slot
-	if !parentSlotOK || !currentTimeOK {
-		return headRoot
-	}
-
-	// Only use cached payload status when headRoot matches the cached head;
-	// otherwise the status belongs to a different block.
-	if f.headHash == headRoot {
-		head := ForkChoiceNode{Root: headRoot, PayloadStatus: f.headPayloadStatus}
-		if f.reorgLatePayload(head) && f.isShufflingStable(slot) {
-			return parentRoot
-		}
-	}
-	if f.isHeadLate(headRoot) && f.isHeadWeak(headRoot) && f.isParentStrong(headRoot) && f.isShufflingStable(slot) {
-		return parentRoot
-	}
+// GetProposerHead returns the current head until proposer reorg implements all spec guards.
+func (f *ForkChoiceStore) GetProposerHead(headRoot common.Hash, _ uint64) common.Hash {
 	return headRoot
 }
 

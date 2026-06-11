@@ -567,9 +567,6 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	if parentBid == nil {
 		return errors.New("processExecutionPayloadBid: state has no latest execution payload bid")
 	}
-	if bid.Slot <= parentBid.Slot {
-		return fmt.Errorf("processExecutionPayloadBid: bid slot %d must be greater than parent slot %d", bid.Slot, parentBid.Slot)
-	}
 	// Verify that the bid is for the right parent block
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
 		return errors.New("processExecutionPayloadBid: parent block hash mismatch")

@@ -45,20 +45,20 @@ type ForkChoiceNode struct {
 }
 
 func (n *ForkChoiceNode) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, n.Root[:], uint64(n.PayloadStatus))
+	return ssz2.MarshalSSZ(buf, n.Root[:], []byte{byte(n.PayloadStatus)})
 }
 
 func (n *ForkChoiceNode) DecodeSSZ(buf []byte, version int) error {
-	var payloadStatus uint64
-	if err := ssz2.UnmarshalSSZ(buf, version, n.Root[:], &payloadStatus); err != nil {
+	payloadStatus := []byte{0}
+	if err := ssz2.UnmarshalSSZ(buf, version, n.Root[:], payloadStatus); err != nil {
 		return err
 	}
-	n.PayloadStatus = cltypes.PayloadStatus(payloadStatus)
+	n.PayloadStatus = cltypes.PayloadStatus(payloadStatus[0])
 	return nil
 }
 
 func (*ForkChoiceNode) EncodingSizeSSZ() int {
-	return length.Hash + 8
+	return length.Hash + 1
 }
 
 func (*ForkChoiceNode) Static() bool {
@@ -66,7 +66,7 @@ func (*ForkChoiceNode) Static() bool {
 }
 
 func (n *ForkChoiceNode) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(n.Root[:], uint64(n.PayloadStatus))
+	return merkle_tree.HashTreeRoot(n.Root[:], []byte{byte(n.PayloadStatus)})
 }
 
 func (n *ForkChoiceNode) Clone() clonable.Clonable {
