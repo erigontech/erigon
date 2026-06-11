@@ -45,7 +45,7 @@ func TestCodeCache_GetByCodeHash_HitAfterPut(t *testing.T) {
 	require.Nil(t, v)
 
 	// Populate via PutWithCodeHash — both addr and codeHash paths fill.
-	c.PutWithCodeHash(addr, code, codeHash)
+	c.PutWithCodeHash(addr, code, codeHash, 0)
 
 	// Hit by codeHash directly.
 	v, ok = c.GetByCodeHash(codeHash)
@@ -66,7 +66,7 @@ func TestCodeCache_GetByCodeHash_DistinctAddrsSameCode(t *testing.T) {
 	codeHash := makeCodeHash(0xcd)
 
 	addr1 := makeAddr(1)
-	c.PutWithCodeHash(addr1, code, codeHash)
+	c.PutWithCodeHash(addr1, code, codeHash, 0)
 
 	// A different address never seen at L1 still hits the codeHashToCode layer
 	// when looked up by the shared codeHash.
@@ -86,12 +86,12 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 	addr := makeAddr(1)
 	code := []byte{0x60, 0x00}
 
-	c.PutWithCodeHash(addr, code, nil) // empty hash → skip codeHashToCode
+	c.PutWithCodeHash(addr, code, nil, 0) // empty hash → skip codeHashToCode
 	v, ok := c.GetByCodeHash(makeCodeHash(7))
 	require.False(t, ok)
 	require.Nil(t, v)
 
-	c.PutWithCodeHash(addr, nil, makeCodeHash(7)) // empty code → skip both
+	c.PutWithCodeHash(addr, nil, makeCodeHash(7), 0) // empty code → skip both
 	v, ok = c.GetByCodeHash(makeCodeHash(7))
 	require.False(t, ok)
 	require.Nil(t, v)
@@ -101,9 +101,9 @@ func TestCodeCache_PutWithCodeHash_RespectsCodeCapacity(t *testing.T) {
 	// 8-byte cap: 32-byte codeHash + 4-byte code > 32. New codeHashToCode puts must
 	// no-op when the layer is full. Use tiny code to keep math obvious.
 	c := NewCodeCache(8, 1*datasize.MB)
-	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1))
+	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
 	// Second put exceeds the codeHashToCode budget — must no-op.
-	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2))
+	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
 
 	_, ok := c.GetByCodeHash(makeCodeHash(2))
 	assert.False(t, ok, "second codeHashToCode entry should not exist when capacity is exceeded")
@@ -119,7 +119,7 @@ func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {
 	require.False(t, ok)
 
 	// PutWithCodeHash should fill the size layer alongside the bytes.
-	c.PutWithCodeHash(makeAddr(1), code, codeHash)
+	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0)
 
 	size, ok := c.GetCodeSizeByCodeHash(codeHash)
 	require.True(t, ok)
@@ -131,7 +131,7 @@ func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
 	codeHash := makeCodeHash(0xff)
 
 	// Direct Put without going through the bytes layer.
-	c.PutCodeSizeByCodeHash(codeHash, 4096)
+	c.PutCodeSizeByCodeHash(codeHash, 4096, 0)
 
 	size, ok := c.GetCodeSizeByCodeHash(codeHash)
 	require.True(t, ok)
@@ -140,8 +140,8 @@ func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
 
 func TestCodeCache_CodeSize_EmptyHashOrNegativeIsNoOp(t *testing.T) {
 	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
-	c.PutCodeSizeByCodeHash(nil, 100)
-	c.PutCodeSizeByCodeHash(makeCodeHash(1), -1)
+	c.PutCodeSizeByCodeHash(nil, 100, 0)
+	c.PutCodeSizeByCodeHash(makeCodeHash(1), -1, 0)
 	_, ok := c.GetCodeSizeByCodeHash(makeCodeHash(1))
 	assert.False(t, ok)
 }
@@ -154,7 +154,7 @@ func BenchmarkCodeCache_GetByCodeHash_Hit(b *testing.B) {
 	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
 	code := bytes.Repeat([]byte{0x5b}, 2048) // 2 KiB typical contract size
 	codeHash := makeCodeHash(0x11)
-	c.PutWithCodeHash(makeAddr(1), code, codeHash)
+	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -182,7 +182,7 @@ func BenchmarkCodeCache_Get_AddrLevel_Hit(b *testing.B) {
 	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
 	code := bytes.Repeat([]byte{0x5b}, 2048)
 	addr := makeAddr(1)
-	c.PutWithCodeHash(addr, code, makeCodeHash(0x33))
+	c.PutWithCodeHash(addr, code, makeCodeHash(0x33), 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -201,7 +201,7 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
 	code := bytes.Repeat([]byte{0x5b}, 2048)
 	codeHash := makeCodeHash(0x44)
-	c.PutWithCodeHash(makeAddr(1), code, codeHash) // populate once
+	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0) // populate once
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -211,4 +211,81 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 			b.Fatal("expected hit")
 		}
 	}
+}
+
+// TestCodeCache_Unwind_DropsUnwoundCodeEverywhere verifies the (txNum, epoch)
+// model the user requires (#21752): code deployed on a fork that is later
+// unwound must stop being discoverable on EVERY layer — addr→code, the
+// content-addressed codeHash→code, and the size layer — not just the addr
+// layer. The code's value is invariant for a hash, but its existence is not.
+func TestCodeCache_Unwind_DropsUnwoundCodeEverywhere(t *testing.T) {
+	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+
+	addr := makeAddr(1)
+	code := bytes.Repeat([]byte{0x60}, 64)
+	codeHash := makeCodeHash(0x11)
+
+	// Deploy at txNum=100.
+	c.PutWithCodeHash(addr, code, codeHash, 100)
+
+	// All layers hit before unwind.
+	got, ok := c.Get(addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+	_, ok = c.GetByCodeHash(codeHash)
+	require.True(t, ok, "codeHash lookup must hit before unwind")
+	sz, ok := c.GetCodeSizeByCodeHash(codeHash)
+	require.True(t, ok)
+	require.Equal(t, len(code), sz)
+
+	// Unwind to txNum=50 — the deploy at 100 is rolled back.
+	c.Unwind(50)
+
+	_, ok = c.Get(addr)
+	require.False(t, ok, "addr→code must drop")
+	_, ok = c.GetByCodeHash(codeHash)
+	require.False(t, ok, "unwound code must NOT be discoverable by codeHash")
+	_, ok = c.GetCodeSizeByCodeHash(codeHash)
+	require.False(t, ok, "size of unwound code must drop too")
+}
+
+// TestCodeCache_Unwind_BelowFloorSurvives verifies code deployed below the
+// unwind floor (still live after the unwind) stays warm on all layers.
+func TestCodeCache_Unwind_BelowFloorSurvives(t *testing.T) {
+	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+
+	addr := makeAddr(2)
+	code := bytes.Repeat([]byte{0x61}, 32)
+	codeHash := makeCodeHash(0x22)
+	c.PutWithCodeHash(addr, code, codeHash, 40)
+
+	c.Unwind(50) // floor=50; the deploy at 40 predates it
+
+	got, ok := c.Get(addr)
+	require.True(t, ok, "below-floor addr→code must survive")
+	require.Equal(t, code, got)
+	_, ok = c.GetByCodeHash(codeHash)
+	require.True(t, ok, "below-floor codeHash→code must survive")
+}
+
+// TestCodeCache_Unwind_RedeployRevives verifies that re-deploying the same code
+// on the live fork (current epoch) after an unwind makes it discoverable again,
+// even though a stale entry at the same txNum was left behind.
+func TestCodeCache_Unwind_RedeployRevives(t *testing.T) {
+	c := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+
+	addr := makeAddr(3)
+	code := bytes.Repeat([]byte{0x62}, 48)
+	codeHash := makeCodeHash(0x33)
+
+	c.PutWithCodeHash(addr, code, codeHash, 100) // old fork
+	c.Unwind(50)
+	c.PutWithCodeHash(addr, code, codeHash, 100) // re-executed on live fork, new epoch
+
+	got, ok := c.Get(addr)
+	require.True(t, ok, "re-deployed addr→code must be live")
+	require.Equal(t, code, got)
+	gotH, ok := c.GetByCodeHash(codeHash)
+	require.True(t, ok, "re-deployed codeHash→code must be live")
+	require.Equal(t, code, gotH)
 }

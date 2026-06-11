@@ -925,7 +925,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 						// writes the code cache — reads never populate it (speculative
 						// code lives in the version map), so the shared map can only
 						// ever hold validated, self-consistent entries.
-						sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v))
+						sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v), txNum)
 					}
 				}),
 			)
@@ -1133,9 +1133,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// value's write txNum (the read only gives us the file/step it came from):
 	// the last txNum of that step. An unwind below this bound can't leave the
 	// value stale, so frozen-step reads stay warm across unwinds while
-	// recent-step reads are dropped. (CodeCache addr layers are cleared wholesale
-	// on unwind, so PutCodeWithHash needs no txNum.)
+	// recent-step reads are dropped.
 	if sd.stateCache != nil {
+		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		if domain == kv.CodeDomain {
 			if len(v) > 0 {
 				// This SD getter is the single place that populates the code cache
@@ -1146,10 +1146,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				// (surfacing as a wrong-forwarder gas divergence). keccak(v) makes
 				// every cached entry self-consistent, so a skewed account read can
 				// never produce a bad entry.
-				sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v))
+				sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v), readTxNum)
 			}
 		} else {
-			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 			sd.stateCache.Put(domain, k, v, readTxNum)
 		}
 	}
@@ -1192,7 +1191,9 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, 
 				return size, true, nil
 			}
 			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
-				sd.stateCache.PutCodeSizeByHash(codeHash, len(cv))
+				// sd.txNum is a conservative upper bound: >= the live code's write
+				// txNum, so the size drops on any unwind that drops the code.
+				sd.stateCache.PutCodeSizeByHash(codeHash, len(cv), sd.txNum)
 				return len(cv), true, nil
 			}
 		}
@@ -1272,8 +1273,10 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
 			copy(fixed[:], h)
 		}
 		// Always populate, including the zero-hash sentinel for misses —
-		// repeat lookups skip the whole resolve() chain.
-		sd.stateCache.PutAddrCodeHash(addr, fixed)
+		// repeat lookups skip the whole resolve() chain. sd.txNum is a
+		// conservative upper bound (>= the resolved account's write txNum), so
+		// the mapping drops on any unwind that reverts that account.
+		sd.stateCache.PutAddrCodeHash(addr, fixed, sd.txNum)
 	}
 	return h
 }

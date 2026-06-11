@@ -144,12 +144,12 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 // PutCodeWithHash stores code populating both the addr-keyed path and the
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
-func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte) {
+func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutWithCodeHash(addr, common.Copy(code), codeHash)
+	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
@@ -166,12 +166,12 @@ func (c *StateCache) GetCodeSizeByHash(codeHash []byte) (int, bool) {
 // PutCodeSizeByHash records the code size for a given codeHash. Useful when
 // the caller has the size in hand (e.g. from an account-domain probe that
 // resolved a sibling addr to the same code) but doesn't have the bytes.
-func (c *StateCache) PutCodeSizeByHash(codeHash []byte, size int) {
+func (c *StateCache) PutCodeSizeByHash(codeHash []byte, size int, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutCodeSizeByCodeHash(codeHash, size)
+	cc.PutCodeSizeByCodeHash(codeHash, size, txNum)
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr without an
@@ -188,12 +188,12 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 // PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
 // LRU above SD. Callers that have just decoded an account record should
 // call this so subsequent lookups skip the account-domain read.
-func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte) {
+func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutAddrCodeHash(addr, h)
+	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
 // DeleteAddrCodeHash drops the addr → codeHash mapping. Used by
@@ -239,10 +239,10 @@ func (c *StateCache) Clear() {
 }
 
 // Unwind invalidates, across all caches, entries reflecting state above
-// unwindToTxNum on a now-dead fork. Diffset-free and O(1) (GenericCache bumps
-// an epoch + lowers a floor; CodeCache clears its mutable addr layers). This is
-// the sole cache-invalidation path on unwind — the executor never touches the
-// cache during forward execution.
+// unwindToTxNum on a now-dead fork. Diffset-free and O(1): every cache (the
+// GenericCaches and the CodeCache, all layers) bumps an epoch + lowers a floor
+// and drops stale entries lazily on read. This is the sole cache-invalidation
+// path on unwind — the executor never touches the cache during forward execution.
 func (c *StateCache) Unwind(unwindToTxNum uint64) {
 	for _, cache := range c.caches {
 		if cache != nil {

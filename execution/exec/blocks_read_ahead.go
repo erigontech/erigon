@@ -96,7 +96,7 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 			// can be skewed or cross-account, and a (hash, code) pair that
 			// doesn't satisfy keccak(code)==hash poisons every account sharing
 			// the hash. keccak(v) makes each entry self-consistent.
-			cpg.sc.PutCodeWithHash(k, v, crypto.Keccak256(v))
+			cpg.sc.PutCodeWithHash(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
 		} else {
 			// Cache including nil/empty results: a probe returning no
 			// bytes is a valid negative answer (missing account, empty

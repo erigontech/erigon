@@ -361,8 +361,9 @@ func TestCodeCache_Clear(t *testing.T) {
 
 	c.Clear()
 	assert.Equal(t, 0, c.Len())
-	// Code should still exist (immutable)
-	assert.Equal(t, 2, c.CodeLen())
+	// Clear hard-resets every layer: unwound/cleared code must not remain
+	// discoverable (#21752), so the content layer is dropped too.
+	assert.Equal(t, 0, c.CodeLen())
 }
 
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
