@@ -533,7 +533,7 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(ctx context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
@@ -541,7 +541,7 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		if req.Latest {
-			reply.V, _, err = tx.GetLatest(context.TODO(), domainName, req.K)
+			reply.V, _, err = tx.GetLatest(ctx, domainName, req.K)
 			if err != nil {
 				return err
 			}
