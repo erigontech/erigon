@@ -157,6 +157,10 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	if d.Name == kv.CommitmentDomain {
+		accessor.ForceExistenceFilterInRAM()
+		return accessor, nil
+	}
 	switch {
 	case domainExistenceForceWillNeed:
 		accessor.ForceExistenceFilterWillNeed()
