@@ -7,7 +7,24 @@ allowed-tools: Bash, Read, Glob
 
 # Erigon Datadir Operations
 
-## Duplicating a Datadir
+## Development vs. testing — provenance policy
+
+This skill's duplicate-via-copy procedure is for **development iteration**
+(spinning up another datadir to try a parallel experiment, share with a
+sibling tool, hot-swap configs without re-downloading). It is NOT
+appropriate for **verification / consistency-check / from-0 re-exec runs**
+that produce evidence about a code change's correctness.
+
+For verification runs, the datadir's block snapshots must come from a
+fresh download from the canonical source (webseed + preverified.toml).
+Never symlink, never copy block snapshots from another local datadir into
+a verification harness — both inherit unknown provenance (prior aborted
+rebuilds, partial downloads, out-of-band mutations) that silently
+invalidates the consistency check.
+
+See feedback memory [feedback-no-symlinks-in-consistency-checks](../../memory/feedback-no-symlinks-in-consistency-checks.md) and the from-0 skill's "Development vs. testing" section.
+
+## Duplicating a Datadir (development use)
 
 Given a **source** path and **destination** path, follow this procedure exactly.
 

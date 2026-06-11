@@ -218,6 +218,22 @@ background shell commands) whenever the suites use different simulators. This gi
 `runs × parallelism` total concurrency. Suites using the same simulator can be combined
 with `--sim.limit "suite1|suite2|..."`.
 
+**`--sim.limit` semantics.** `--sim.limit` sets the `HIVE_TEST_PATTERN` env var, which
+simulators interpret as `<suite-regex>/<test-regex>`:
+
+- **No `/`** — filters by suite name only. `--sim.limit api` runs the whole `engine-api`
+  suite; `--sim.limit "withdrawals|cancun"` runs two whole suites.
+- **`<suite-regex>/<test-regex>`** — runs a single test (or matching subset). The part
+  after the `/` matches against the test name, so to debug one failing test pass its
+  full name verbatim:
+  ```bash
+  ./hive --client-file erigon-local.yaml --sim ethereum/engine \
+    --sim.limit "engine-api/Re-Org Back into Canonical Chain, Depth=10, Execute Side Payload on Re-Org" \
+    --sim.parallelism 12 --sim.timelimit 30m
+  ```
+  This is the fastest debug loop — one container instead of the full suite. The
+  `<test-regex>` is a regex, so escape regex metacharacters in the test name if present.
+
 **Engine suites** (sim: `ethereum/engine`) — combine all with `|`:
 ```bash
 ./hive --client-file erigon-local.yaml --sim ethereum/engine \
@@ -312,6 +328,58 @@ rm -rf "$WORKDIR"
 # Prune dangling docker images from the test run
 docker image prune -f
 ```
+
+## Common Gotchas
+
+These two patterns look like Erigon bugs but are not — recognise them before
+spending time chasing a trie-computation root cause.
+
+### "Wrong trie root" with only the last byte different = correct rejection
+
+In an erigon log:
+```
+[5/5 Execution] Wrong trie root of block N: <X> (... block N root <X> expected <Y>)
+```
+If `<X>` and `<Y>` are **identical except the final byte**, and that byte is the
+bitwise complement (`X[31] ^ 0xFF == Y[31]`), this is Erigon **correctly
+rejecting a deliberately-invalid payload** — not a bug.
+
+The hive engine simulator builds an `InvalidStateRoot` negative-test payload by
+inverting the last byte of the true state root —
+`simulators/ethereum/engine/helper/customizer.go`:
+```go
+case InvalidStateRoot:
+    modStateRoot[common.HashLength-1] = byte(255 - modStateRoot[common.HashLength-1])
+```
+Erigon executes, computes the true root, sees it ≠ the corrupted header root,
+returns `INVALID`. That `[EROR] Wrong trie root` line is the expected outcome
+of the negative test. Do not investigate it as a parallel-exec / commitment
+bug. (A keccak hash cannot differ from a correct one in only one byte anyway —
+a genuine wrong root differs in ~all 32 bytes.)
+
+### Genesis hash / fork mismatch → block 1 rejected → whole test stalls in SYNCING
+
+If the test log shows Erigon answering `engine_newPayload` / `engine_forkchoiceUpdated`
+with `{SYNCING}` over and over until timeout, and the erigon log repeats:
+```
+[EngineBlockDownloader] could not process backward download ... err="... no peers available"
+```
+the cause is usually **not** P2P peering — these engine tests do not need a peer.
+The real cause: Erigon's computed **genesis hash does not match** the genesis the
+simulator built its chain on, so block 1's `ParentHash` (the sim's genesis hash)
+is unknown to Erigon. Erigon treats block 1 as having a missing ancestor, tries
+to backward-download it, finds no peer, and never makes progress.
+
+Diagnose by comparing, in the erigon log:
+```
+Successfully wrote genesis state  hash=0x... root=0x...
+```
+against the genesis hash the simulator expects (the `ParentHash` of the first
+`newPayload`). A mismatch points at the **genesis block / fork calculation**
+(`execution/state/genesiswrite/genesis_write.go` — `GenesisWithoutStateToBlock`
+selects fork-dependent header fields; `ComputeGenesisCommitment` computes the
+genesis state root). A wrong fork-active-at-genesis decision or a wrong genesis
+root yields a wrong genesis hash and cascades into the SYNCING stall above.
 
 ## Troubleshooting
 
