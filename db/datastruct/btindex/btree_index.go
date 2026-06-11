@@ -394,8 +394,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
 		var err error
-		useFuse := false
-		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath, useFuse)
+		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath, true)
 		if err != nil {
 			return err
 		}
