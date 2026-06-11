@@ -780,6 +780,19 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}
+	// Past the frozen tip a stale header can linger in chaindata after a
+	// debug_setHead / mode-B unwind even though its hash is no longer the
+	// canonical hash at this height. The CL callers ask "is this block on
+	// EL's current canonical chain?" — without this check they treat the
+	// stale hash as present, take the walker's early-exit, and skip the
+	// re-fetch the recovery needs.
+	canonical, err := e.canonicalHash(ctx, tx, *num)
+	if err != nil {
+		return false, err
+	}
+	if canonical != *blockHash {
+		return false, nil
+	}
 	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
 		return false, err
