@@ -406,9 +406,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	c.miss.Inc()
 
 	if len(k) == 20 {
-		v, _, err = tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err = tx.GetLatest(context.TODO(), kv.AccountsDomain, k)
 	} else {
-		v, _, err = tx.GetLatest(kv.StorageDomain, k)
+		v, _, err = tx.GetLatest(context.TODO(), kv.StorageDomain, k)
 	}
 	if err != nil {
 		return nil, err
@@ -438,7 +438,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 	c.codeMiss.Inc()
 
-	v, _, err = tx.GetLatest(kv.CodeDomain, k)
+	v, _, err = tx.GetLatest(context.TODO(), kv.CodeDomain, k)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +558,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 			}
 
 			// check the db
-			inDb, _, err := tx.GetLatest(domain, val.K)
+			inDb, _, err := tx.GetLatest(ctx, domain, val.K)
 			if err != nil {
 				return false, keys, err
 			}

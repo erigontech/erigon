@@ -17,6 +17,7 @@
 package test
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -536,7 +537,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, key := range storageKeys {
-				_, _, err := rwTx.GetLatest(kv.StorageDomain, key)
+				_, _, err := rwTx.GetLatest(context.Background(), kv.StorageDomain, key)
 				require.NoError(b, err)
 			}
 		}
@@ -546,7 +547,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, key := range accountKeys {
-				_, _, err := rwTx.GetLatest(kv.AccountsDomain, key)
+				_, _, err := rwTx.GetLatest(context.Background(), kv.AccountsDomain, key)
 				require.NoError(b, err)
 			}
 		}

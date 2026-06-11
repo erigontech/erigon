@@ -1421,7 +1421,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, nil
 	}
 	var ok bool
-	v, _, ok, err = dt.GetLatest(key, roTx)
+	v, _, ok, err = dt.GetLatest(context.TODO(), key, roTx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1603,14 +1603,21 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
-func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
-	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
+func (dt *DomainRoTx) GetLatest(ctx context.Context, key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	return dt.getLatest(ctx, key, roTx)
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+// getLatest returns the value and the txNum it is valid as of. The unwind bound
+// + metrics arrive via ctx (changeset.ReadContext); the step a value is found at
+// is converted to txNum here and never returned. nil ctx / no ReadContext ⇒
+// unbounded, unmetered.
+func (dt *DomainRoTx) getLatest(ctx context.Context, key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
+
+	rc := changeset.ReadContextFrom(ctx)
+	maxStep := changeset.MaxStepOr(ctx, dt.stepSize, kv.Step(math.MaxUint64))
 
 	var v []byte
 	var foundStep kv.Step
@@ -1629,21 +1636,21 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
-		if metrics != nil && dbg.KVReadLevelledMetrics {
-			metrics.UpdateDbReads(dt.name, start)
+		if rc != nil && rc.Metrics != nil && dbg.KVReadLevelledMetrics {
+			rc.Metrics.UpdateDbReads(dt.name, rc.Start)
 		}
-		return v, foundStep, true, nil
+		return v, stepLastTxNum(foundStep, dt.stepSize), true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(dt.name, start)
+	if rc != nil && rc.Metrics != nil && dbg.KVReadLevelledMetrics {
+		rc.Metrics.UpdateFileReads(dt.name, rc.Start)
 	}
 
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromFiles: %w", err)
 	}
-	return v, kv.Step(endTxNum / dt.stepSize), foundInFile, nil
+	return v, stepLastTxNum(kv.Step(endTxNum/dt.stepSize), dt.stepSize), foundInFile, nil
 }
 
 // RangeAsOf - if key doesn't exists in history - then look in latest state

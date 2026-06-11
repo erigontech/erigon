@@ -98,7 +98,7 @@ func TestLightCollectorNoncePreservation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read the final account state from the domain.
-	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
+	enc, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
 	require.NotEmpty(t, enc, "account must exist in domain")
 
@@ -160,7 +160,7 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 	}
 
 	// Verify: domain must have nonce=11 (from TX 1), balance=5200 (from TX 5)
-	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
+	enc, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
 	var finalAcc accounts.Account
 	err = accounts.DeserialiseV3(&finalAcc, enc)
@@ -211,7 +211,7 @@ func TestLightCollectorNewAccountCodeHash(t *testing.T) {
 	require.NoError(t, err)
 
 	// Read back and verify CodeHash is EmptyCodeHash, not zero.
-	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
+	enc, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
 	require.NotEmpty(t, enc)
 
@@ -269,7 +269,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify seed
-	v, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
+	v, _, err := domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.Equal(t, one.Bytes(), v)
 
@@ -282,7 +282,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify domain has 2
-	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
+	v, _, err = domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(2).Bytes(), v, "after TX A: slot should be 2")
 
@@ -306,7 +306,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	// The CORRECT value depends on whether TX B intended to revert:
 	// - If TX B executed SSTORE(cb, 1), the correct value is 1.
 	// - The LightCollector skip removal ensures this case is handled.
-	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
+	v, _, err = domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 
 	// With the pre-check in applyVersionedWrites (reading domain value before
@@ -358,7 +358,7 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	require.NoError(t, err)
 
 	// Domain should still have 1 — the write was a no-op (DomainPut skip).
-	v, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
+	v, _, err := domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.Equal(t, one.Bytes(), v,
 		"unchanged slot should preserve domain value")
@@ -381,11 +381,11 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, lc2.TakeWrites(), nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
-	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
+	v, _, err = domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.Equal(t, one.Bytes(), v, "guard slot still 1")
 
-	v2, _, err := domains.GetLatest(kv.StorageDomain, tx, composite2)
+	v2, _, err := domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite2)
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(42).Bytes(), v2, "changed slot should be 42")
 }

@@ -80,7 +80,7 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	cache.WriteStorage(addr, slot, []byte{0x01}, block1TxNum)
 	require.NoError(t, cache.Flush(domains, tx))
 
-	enc1, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
+	enc1, _, err := domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(enc1, []byte{0x01}),
 		"after block 1 flush, domain should hold value 0x01, got %x", enc1)
@@ -95,7 +95,7 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	cache.WriteStorage(addr, slot, nil, block2TxNum)
 	require.NoError(t, cache.Flush(domains, tx))
 
-	enc2, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
+	enc2, _, err := domains.GetLatest(context.Background(), kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.Empty(t, enc2,
 		"after block 2 flush, domain should be cleared (value=empty); "+
@@ -176,7 +176,7 @@ func TestBlockStateCacheFlushPreservesPerTxHistory(t *testing.T) {
 	require.NoError(t, cache.Flush(domains, tx))
 
 	// GetLatest must reflect the final write.
-	latest, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
+	latest, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
 	require.Equal(t, tx5Enc, latest, "latest should be the tx-5 value")
 

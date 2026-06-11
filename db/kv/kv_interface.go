@@ -436,7 +436,11 @@ type (
 )
 
 type TemporalGetter interface {
-	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
+	// GetLatest returns the latest value for k in the domain and the txNum it is
+	// valid as of. txNum (not the on-disk step) is the unit above the db layer;
+	// step stays inside the aggregator/domain. ctx carries the read-context
+	// (metrics, unwind bound) via changeset.WithReadContext when metered/bounded.
+	GetLatest(ctx context.Context, name Domain, k []byte) (v []byte, txNum uint64, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
 }
@@ -520,7 +524,7 @@ type TemporalDebugDB interface {
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
-	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
+	GetLatest(ctx context.Context, domain Domain, key []byte) (v []byte, txNum uint64, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	ClearRam()

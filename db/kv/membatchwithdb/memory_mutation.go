@@ -905,11 +905,11 @@ func (m *MemoryMutation) AggTx() any {
 	return m.db.(hasAggCtx).AggTx()
 }
 
-func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+func (m *MemoryMutation) GetLatest(ctx context.Context, name kv.Domain, k []byte) (v []byte, txNum uint64, err error) {
 	if m.db == nil {
 		return nil, 0, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
-	return m.db.GetLatest(name, k)
+	return m.db.GetLatest(ctx, name, k)
 }
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -1110,8 +1110,8 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 
 // Temporal methods — delegate to the independent temporal tx.
 
-func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	return v.temporalTx.GetLatest(name, k)
+func (v *OverlayTemporalReadView) GetLatest(ctx context.Context, name kv.Domain, k []byte) ([]byte, uint64, error) {
+	return v.temporalTx.GetLatest(ctx, name, k)
 }
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return v.temporalTx.HasPrefix(name, prefix)

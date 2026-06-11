@@ -1,6 +1,7 @@
 package commitmentdb
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -35,11 +36,13 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 }
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	enc, step, err = r.getter.GetLatest(d, plainKey)
+	enc, txNum, err := r.getter.GetLatest(context.TODO(), d, plainKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
-	return enc, step, nil
+	// This StateReader interface still surfaces step (Cluster A in the step-leak
+	// audit — a separate follow-on); convert the txNum back at this boundary.
+	return enc, kv.Step(txNum / stepSize), nil
 }
 
 func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {

@@ -2156,7 +2156,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			var committedTxNum uint64
 			if temporalDB, ok := a.db.(kv.TemporalRoDB); ok {
 				if err := temporalDB.ViewTemporal(a.ctx, func(tx kv.TemporalTx) error {
-					v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+					v, _, err := tx.GetLatest(context.TODO(), kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 					if err != nil {
 						return err
 					}
@@ -2388,44 +2388,56 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
 	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx)
+		v, _, ok, err = at.GetLatest(context.TODO(), name, k, tx)
 	}
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
-	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
+// stepLastTxNum converts a db-layer step to the application-layer txNum a value
+// found at that step is valid as of: the step's last txNum (an upper bound).
+// This is the single step→txNum boundary for the latest-value read path; step
+// never escapes it.
+//
+// The hot domain tables currently key values by step, not txNum, so a DB/file
+// read resolves to step granularity here. Future work could make the hot DB
+// txNum-native, removing this conversion with no interface change. See
+// db/agents.md.
+func stepLastTxNum(step kv.Step, stepSize uint64) uint64 {
+	return (uint64(step)+1)*stepSize - 1
 }
 
-func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
-	return at.getLatest(domain, k, tx, maxStep, metrics, start)
-}
-
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+// GetLatest returns the latest value for k and the txNum it is valid as of.
+// The read-context (unwind bound + metrics) travels via ctx; step stays inside
+// this layer — the bound is converted from txNum to a step here, and the step a
+// value is found at is converted back to a txNum before returning (#21739).
+func (at *AggregatorRoTx) GetLatest(ctx context.Context, domain kv.Domain, k []byte, tx kv.Tx) (v []byte, txNum uint64, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
+		return at.d[domain].getLatest(ctx, k, tx)
 	}
 
-	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
+	rc := changeset.ReadContextFrom(ctx)
+	maxStep := changeset.MaxStepOr(ctx, at.StepSize(), kv.Step(math.MaxUint64))
+
+	v, step, ok, err := at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
-		return nil, kv.Step(0), false, err
+		return nil, 0, false, err
 	}
 	if ok && step <= maxStep {
-		if metrics != nil && dbg.KVReadLevelledMetrics {
-			metrics.UpdateDbReads(domain, start)
+		if rc != nil && rc.Metrics != nil && dbg.KVReadLevelledMetrics {
+			rc.Metrics.UpdateDbReads(domain, rc.Start)
 		}
-		return v, step, true, nil
+		return v, stepLastTxNum(step, at.StepSize()), true, nil
 	}
 
 	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
 	if !found {
-		return nil, kv.Step(0), false, err
+		return nil, 0, false, err
 	}
-	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(domain, start)
+	if rc != nil && rc.Metrics != nil && dbg.KVReadLevelledMetrics {
+		rc.Metrics.UpdateFileReads(domain, rc.Start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	return v, stepLastTxNum(kv.Step(fileEndTxNum/at.StepSize()), at.StepSize()), found, err
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {

@@ -99,7 +99,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, uint64(1), extendingNum)
 	var inMemBlockNum, inMemTxNum uint64
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+		v, _, err := extendingSd.GetLatest(context.Background(), kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
 		require.NoError(t, err)
 		inMemTxNum = binary.BigEndian.Uint64(v[:8])
 		inMemBlockNum = binary.BigEndian.Uint64(v[8:16])
@@ -225,7 +225,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		v, _, err := tx.GetLatest(context.Background(), kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
@@ -307,7 +307,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		v, _, err := tx.GetLatest(context.Background(), kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
@@ -1930,7 +1930,7 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 		require.Eventually(t, func() bool {
 			var funded bool
 			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+				v, _, err := tx.GetLatest(context.Background(), kv.AccountsDomain, senderAddr[:])
 				if err != nil {
 					return err
 				}

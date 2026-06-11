@@ -495,15 +495,15 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
 }
 
-func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, err error) {
-	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
+func (tx *tx) getLatest(ctx context.Context, name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, txNum uint64, err error) {
+	v, txNum, ok, err := tx.aggtx.GetLatest(ctx, name, k, dbTx)
 	if err != nil {
-		return nil, step, err
+		return nil, txNum, err
 	}
 	if !ok {
-		return nil, step, nil
+		return nil, txNum, nil
 	}
-	return v, step, err
+	return v, txNum, err
 }
 
 func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
@@ -538,12 +538,12 @@ func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []by
 	return k, v, true, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return tx.getLatest(name, tx.Tx, k)
+func (tx *Tx) GetLatest(ctx context.Context, name kv.Domain, k []byte) (v []byte, txNum uint64, err error) {
+	return tx.getLatest(ctx, name, tx.Tx, k)
 }
 
-func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return tx.getLatest(name, tx.RwTx, k)
+func (tx *RwTx) GetLatest(ctx context.Context, name kv.Domain, k []byte) (v []byte, txNum uint64, err error) {
+	return tx.getLatest(ctx, name, tx.RwTx, k)
 }
 
 func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {

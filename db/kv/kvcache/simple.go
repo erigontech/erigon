@@ -85,14 +85,14 @@ func (c *SimpleCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error)
 			return common.Copy(v), nil
 		}
 		c.mu.RUnlock()
-		v, _, err := tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err := tx.GetLatest(context.TODO(), kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := tx.GetLatest(kv.StorageDomain, k)
+	v, _, err := tx.GetLatest(context.TODO(), kv.StorageDomain, k)
 	return v, err
 }
 func (c *SimpleCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	v, _, err := tx.GetLatest(kv.CodeDomain, k)
+	v, _, err := tx.GetLatest(context.TODO(), kv.CodeDomain, k)
 	return v, err
 }
 func (c *SimpleCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {

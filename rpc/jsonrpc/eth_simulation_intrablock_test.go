@@ -81,7 +81,7 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, storageKey, []byte{42}, 1, nil))
 
 	// Verify the value is indeed in the RAM batch (sanity check).
-	got, _, ok := sd.GetMemBatch().GetLatest(kv.StorageDomain, storageKey)
+	got, _, ok := sd.GetMemBatch().GetLatest(context.Background(), kv.StorageDomain, storageKey)
 	require.True(t, ok, "storage must be in the RAM batch after DomainPut")
 	require.Equal(t, []byte{42}, got)
 

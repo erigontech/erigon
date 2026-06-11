@@ -152,10 +152,10 @@ func (c *CacheView) Get(k []byte) ([]byte, error) {
 		getter = c.context.AsGetter(c.tx)
 	}
 	if len(k) == 20 {
-		v, _, err := getter.GetLatest(kv.AccountsDomain, k)
+		v, _, err := getter.GetLatest(context.TODO(), kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := getter.GetLatest(kv.StorageDomain, k)
+	v, _, err := getter.GetLatest(context.TODO(), kv.StorageDomain, k)
 	return v, err
 }
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
@@ -163,7 +163,7 @@ func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 	if c.context != nil {
 		getter = c.context.AsGetter(c.tx)
 	}
-	v, _, err := getter.GetLatest(kv.CodeDomain, k)
+	v, _, err := getter.GetLatest(context.TODO(), kv.CodeDomain, k)
 	return v, err
 }
 

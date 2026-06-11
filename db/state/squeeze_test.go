@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -182,7 +183,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			prev, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(tb, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
@@ -530,7 +531,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
+	v, _, err := roTx.GetLatest(context.Background(), kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 }
@@ -765,7 +766,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			prev, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
@@ -810,7 +811,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
+			prev, _, err := rwTx.GetLatest(context.Background(), kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
@@ -857,7 +858,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
+			prev, _, err := rwTx.GetLatest(context.Background(), kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)

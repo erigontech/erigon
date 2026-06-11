@@ -17,6 +17,7 @@
 package test
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -162,7 +163,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-stepSize {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
+		stored, _, err := tx.GetLatest(context.Background(), kv.AccountsDomain, key[:length.Addr])
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -175,7 +176,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(context.Background(), kv.StorageDomain, key)
 		require.NoError(t, err)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
@@ -268,7 +269,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	for txNum = txNum + 1; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
+		prev, _, err := tx.GetLatest(context.Background(), kv.AccountsDomain, keys[txNum-1-half])
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev)
 		require.NoError(t, err)
@@ -283,7 +284,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	for i, key := range keys {
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(context.Background(), kv.StorageDomain, key)
 		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
@@ -346,14 +347,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
+			pv, _, err := domains.GetLatest(context.Background(), kv.CommitmentDomain, rwTx, commKey2)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
+			pv, _, err := domains.GetLatest(context.Background(), kv.CommitmentDomain, rwTx, commKey1)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
@@ -432,11 +433,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+	v, _, err := roTx.GetLatest(context.Background(), kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+	v, _, err = roTx.GetLatest(context.Background(), kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }
@@ -857,7 +858,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, key)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
@@ -877,7 +878,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, _, err := domains.GetLatest(kv.CodeDomain, tx, key)
+			prev, _, err := domains.GetLatest(context.Background(), kv.CodeDomain, tx, key)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CodeDomain, tx, key, codeUpd, txNum, prev)
@@ -897,7 +898,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				key = key[:length.Addr]
 			}
 
-			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, key)
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
@@ -920,7 +921,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 
-				prev, _, err := domains.GetLatest(kv.StorageDomain, tx, sk[:length.Addr])
+				prev, _, err := domains.GetLatest(context.Background(), kv.StorageDomain, tx, sk[:length.Addr])
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, tx, sk, uint256.NewInt(txNum).Bytes(), txNum, prev)

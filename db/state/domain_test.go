@@ -348,11 +348,11 @@ func TestDomain_AfterPrune(t *testing.T) {
 	var v []byte
 	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
-	v, _, found, err := domainRoTx.GetLatest(k1, tx)
+	v, _, found, err := domainRoTx.GetLatest(context.Background(), k1, tx)
 	require.Truef(t, found, "key1 not found")
 	require.NoError(t, err)
 	require.Equal(t, p1, v)
-	v, _, found, err = domainRoTx.GetLatest(k2, tx)
+	v, _, found, err = domainRoTx.GetLatest(context.Background(), k2, tx)
 	require.Truef(t, found, "key2 not found")
 	require.NoError(t, err)
 	require.Equal(t, p2, v)
@@ -364,12 +364,12 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, isEmpty)
 
-	v, _, found, err = domainRoTx.GetLatest(k1, tx)
+	v, _, found, err = domainRoTx.GetLatest(context.Background(), k1, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key1 not found")
 	require.Equal(t, p1, v)
 
-	v, _, found, err = domainRoTx.GetLatest(k2, tx)
+	v, _, found, err = domainRoTx.GetLatest(context.Background(), k2, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key2 not found")
 	require.Equal(t, p2, v)
@@ -458,7 +458,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 				require.Nil(val, label)
 			}
 			if txNum == txs {
-				val, _, found, err := domainRoTx.GetLatest(k[:], roTx)
+				val, _, found, err := domainRoTx.GetLatest(context.Background(), k[:], roTx)
 				require.True(found, label)
 				require.NoError(err)
 				require.Equal(v[:], val, label)
@@ -830,7 +830,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	_, _, _, err = domainRoTx.GetLatest([]byte("key1"), tx)
+	_, _, _, err = domainRoTx.GetLatest(context.Background(), []byte("key1"), tx)
 	require.NoError(err)
 
 	cursor, err := domainRoTx.valsCursor(tx)
@@ -852,7 +852,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 		//require.ErrorIs(re, sdTxImmutabilityInvariant)
 	}()
 
-	_, _, _, err = domainRoTx.GetLatest([]byte("key1"), otherTx)
+	_, _, _, err = domainRoTx.GetLatest(context.Background(), []byte("key1"), otherTx)
 	require.NoError(err)
 }
 
@@ -999,7 +999,7 @@ func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
 	// GetLatest must return V1 (the changeset-restored value), NOT V2 (the file value).
 	dt = d.beginForTests()
 	defer dt.Close()
-	v, _, found, err := dt.GetLatest(k1, tx)
+	v, _, found, err := dt.GetLatest(context.Background(), k1, tx)
 	require.NoError(t, err)
 	require.True(t, found, "key should be found after unwind")
 	require.Equal(t, "V1", string(v),
@@ -1026,7 +1026,7 @@ func TestDomain_Delete(t *testing.T) {
 
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
-		original, _, _, err := domainRoTx.GetLatest([]byte("key1"), tx)
+		original, _, _, err := domainRoTx.GetLatest(context.Background(), []byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
 			err = writer.PutWithPrev([]byte("key1"), []byte("value1"), txNum, original)
@@ -1171,7 +1171,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, _, found, err := domainRoTx.GetLatest(k[:], roTx)
+		storedV, _, found, err := domainRoTx.GetLatest(context.Background(), k[:], roTx)
 		require.Truef(t, found, label)
 		require.NoError(t, err, label)
 		require.Equal(t, v[:], storedV, label)
@@ -1278,7 +1278,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, _, found, err := domainRoTx.GetLatest(k[:], tx)
+		storedV, _, found, err := domainRoTx.GetLatest(context.Background(), k[:], tx)
 		require.Truef(t, found, label)
 		require.NoErrorf(t, err, label)
 		require.Equal(t, v[:], storedV, label)
@@ -1842,7 +1842,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, _, ok, err := domainRoTx.GetLatest([]byte(key), tx)
+		v, _, ok, err := domainRoTx.GetLatest(context.Background(), []byte(key), tx)
 		require.NoError(err)
 		require.Equalf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(ok)
@@ -2134,7 +2134,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, _, ok, err := domainRoTx.GetLatest([]byte(key), tx)
+		v, _, ok, err := domainRoTx.GetLatest(context.Background(), []byte(key), tx)
 		require.NoError(t, err)
 		require.Equalf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
@@ -2810,7 +2810,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		t.Cleanup(rotx.Rollback)
 
 		domainRoTx := d.beginForTests()
-		v, vs, ok, err := domainRoTx.GetLatest(pruningKey, rotx)
+		v, vs, ok, err := domainRoTx.GetLatest(context.Background(), pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
 		t.Logf("v=%s vs=%d", v, vs)
@@ -2835,11 +2835,12 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		domainRoTx = d.beginForTests()
 		defer domainRoTx.Close()
-		v, vs, ok, err = domainRoTx.GetLatest(pruningKey, rotx)
+		v, vs, ok, err = domainRoTx.GetLatest(context.Background(), pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
-		t.Logf("v=%s vs=%d", v, vs)
-		require.EqualValuesf(t, 2, vs, "expected value of step 2")
+		t.Logf("v=%s vs(txNum)=%d", v, vs)
+		// GetLatest now returns txNum, not step (#21739); convert to assert the step.
+		require.EqualValuesf(t, 2, vs/stepSize, "expected value of step 2")
 	})
 
 	t.Run("simple history discard", func(t *testing.T) {
@@ -3531,7 +3532,7 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		val, _, found, err := domainRoTx.GetLatest(k[:], roTx)
+		val, _, found, err := domainRoTx.GetLatest(context.Background(), k[:], roTx)
 		require.NoError(t, err, "key %x", k)
 		require.True(t, found, "key %x should be found", k)
 
@@ -3608,7 +3609,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
-			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			v, _, found, err := domainRoTx.GetLatest(context.Background(), key, roTx)
 			require.NoError(err)
 			// The key was deleted at step 1. The deletion entry in DB must be
 			// authoritative even though step 1 is covered by frozen files.
@@ -3716,7 +3717,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
-			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			v, _, found, err := domainRoTx.GetLatest(context.Background(), key, roTx)
 			require.NoError(err)
 			// After unwinding txNum 2, the state should reflect txNums 0-1.
 			// At txNum 1, key1 was deleted. The unwind must restore the deletion

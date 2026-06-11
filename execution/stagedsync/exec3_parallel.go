@@ -3536,7 +3536,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 					addr := w.Address.Value()
 					slot := w.Key.Value()
 					composite := append(addr[:], slot[:]...)
-					preBlock, _, err := rs.Domains().GetLatest(kv.StorageDomain, nil, composite)
+					preBlock, _, err := rs.Domains().GetLatest(context.TODO(), kv.StorageDomain, nil, composite)
 					if err == nil {
 						if resolved.IsZero() && len(preBlock) == 0 {
 							continue // both zero — no-op

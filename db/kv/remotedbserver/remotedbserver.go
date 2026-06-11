@@ -541,7 +541,7 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		if req.Latest {
-			reply.V, _, err = tx.GetLatest(domainName, req.K)
+			reply.V, _, err = tx.GetLatest(context.TODO(), domainName, req.K)
 			if err != nil {
 				return err
 			}

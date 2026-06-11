@@ -980,8 +980,8 @@ func (r *simulationStateReader) WithHistory() bool { return false }
 func (r *simulationStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if v, s, ok := r.sd.GetMemBatch().GetLatest(d, plainKey); ok {
-		return v, s, nil
+	if v, txNum, ok := r.sd.GetMemBatch().GetLatest(context.TODO(), d, plainKey); ok {
+		return v, kv.Step(txNum / stepSize), nil
 	}
 	asOf := r.plainStateAsOfTxNum
 	if d == kv.CommitmentDomain {
@@ -1033,7 +1033,7 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 
 // getEncoded returns the encoded value for a domain key: checks mem batch first, then falls back to GetAsOf.
 func (r *simulationIntraBlockStateReader) getEncoded(domain kv.Domain, key []byte) ([]byte, error) {
-	enc, _, ok := r.sd.GetMemBatch().GetLatest(domain, key)
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(context.TODO(), domain, key)
 	if ok {
 		return enc, nil
 	}

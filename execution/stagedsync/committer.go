@@ -636,7 +636,11 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+		// This StateReader still surfaces step (Cluster A step-leak follow-on);
+		// convert the returned txNum back here.
+		var txNum uint64
+		enc, txNum, err = r.sd.GetLatest(context.TODO(), d, r.roTx, plainKey)
+		step = kv.Step(txNum / stepSize)
 	} else {
 		// Account/storage/code: use GetAsOf to avoid reading future state.
 		// Check sd.mem first (in-memory data from current batch), then

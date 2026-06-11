@@ -17,6 +17,7 @@
 package state_test
 
 import (
+	"context"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -92,14 +93,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
+				pv, _, err := rwTx.GetLatest(context.Background(), kv.CommitmentDomain, commKey2)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
+				pv, _, err := rwTx.GetLatest(context.Background(), kv.CommitmentDomain, commKey1)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
@@ -138,13 +139,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+		v, _, err := roTx.GetLatest(context.Background(), kv.CommitmentDomain, commKey1)
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey1)
 
 		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+		v, _, err = roTx.GetLatest(context.Background(), kv.CommitmentDomain, commKey2)
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey2)
 

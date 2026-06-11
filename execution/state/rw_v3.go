@@ -209,10 +209,10 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				if blockCache != nil {
 					if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc)
-					} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+					} else if enc0, _, err := domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
-				} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+				} else if enc0, _, err := domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 					_ = accounts.DeserialiseV3(&acc, enc0)
 				}
 				if d.balance != nil {
@@ -314,14 +314,14 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			} else {
 				// Not in cache yet — read from domain (pre-block state).
 				var err error
-				enc0, _, err = domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
+				enc0, _, err = domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, addrValue[:])
 				if err != nil {
 					return err
 				}
 			}
 		} else {
 			var err error
-			enc0, _, err = domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
+			enc0, _, err = domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, addrValue[:])
 			if err != nil {
 				return err
 			}
@@ -1454,7 +1454,7 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	}
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+	if enc, _, err := r.getter.GetLatest(context.TODO(), kv.AccountsDomain, value[:]); len(enc) == 0 {
 		return false, err
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
@@ -1471,7 +1471,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	if !address.IsNil() {
 		value = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
+	enc, _, err := r.getter.GetLatest(context.TODO(), kv.AccountsDomain, value[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1508,7 +1508,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 	copy(composite[0:20], addressValue[0:20])
 	copy(composite[20:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
+	enc, _, err := r.getter.GetLatest(context.TODO(), kv.StorageDomain, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -1535,7 +1535,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getter.GetLatest(context.TODO(), kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return nil, err
 	}
@@ -1551,7 +1551,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getter.GetLatest(context.TODO(), kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return 0, err
 	}

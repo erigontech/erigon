@@ -213,7 +213,12 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	updateMetrics(domain, putKeySize, putValueSize)
 }
 
-func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
+// GetLatest returns the in-flight value and the txNum it is valid as of. On a
+// hit that is the entry's exact write txNum; on an unwound miss it is the
+// txNum bound (last txNum of the unwound step) the caller uses as its DB
+// search bound. ctx is unused — the mem overlay needs no read-context — but is
+// present for interface symmetry (the whole read path speaks ctx + txNum).
+func (sd *TemporalMemBatch) GetLatest(ctx context.Context, domain kv.Domain, key []byte) (v []byte, txNum uint64, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	return sd.getLatest(domain, key)
@@ -222,19 +227,22 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 // getLatest is the lock-free implementation of GetLatest.
 // The caller must already hold latestStateLock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.
-func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
+func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, txNum uint64, ok bool) {
+	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, txNum uint64, ok bool) {
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
 				if value, ok := values[key]; ok {
 					keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
+					boundTxNum := stepLastTxNum(keyStep, sd.stepSize)
 
 					if value.Value == nil {
-						// Different step: the entry at this step was deleted, key doesn't exist here
-						return nil, keyStep, false
+						// The entry at this step was deleted, key doesn't exist here:
+						// surface the step's txNum bound so the caller skips DB
+						// values above it (post-unwind staleness).
+						return nil, boundTxNum, false
 					}
-					// Same step: restore this value
-					return value.Value, keyStep, true
+					// Restore this pre-unwind value.
+					return value.Value, boundTxNum, true
 				}
 			}
 		}
@@ -250,7 +258,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 			return unwoundLatest(domain, keyS)
 		}
 		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+		return dataWithTxNum.data, dataWithTxNum.txNum, ok
 
 	}
 
@@ -259,7 +267,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 		return unwoundLatest(domain, keyS)
 	}
 	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+	return dataWithTxNum.data, dataWithTxNum.txNum, ok
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

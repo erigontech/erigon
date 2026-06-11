@@ -725,7 +725,7 @@ func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, e
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+func (tx *tx) GetLatest(ctx context.Context, name kv.Domain, k []byte) (v []byte, txNum uint64, err error) {
 	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remoteproto.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
 	if err != nil {
 		return nil, 0, err

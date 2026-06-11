@@ -17,6 +17,7 @@
 package test
 
 import (
+	"context"
 	"encoding/binary"
 	randOld "math/rand"
 	"math/rand/v2"
@@ -124,7 +125,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		t.ReportAllocs()
 		for ik := 0; ik < t.N; ik++ {
 			for i := 0; i < len(keys); i++ {
-				v, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[i])
+				v, _, err := rwTx.GetLatest(context.Background(), kv.AccountsDomain, keys[i])
 				require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 				require.NoError(t, err)
 			}
@@ -371,7 +372,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 				Incarnation: 0,
 			}
 			buf := accounts3.SerialiseV3(&acc)
-			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, key)
 			require.NoError(b, err)
 
 			prevKeys[string(key)] = struct{}{}
@@ -390,7 +391,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 			}
 			prevKeys[string(key)] = struct{}{}
 
-			prev, _, err := domains.GetLatest(kv.CodeDomain, tx, key)
+			prev, _, err := domains.GetLatest(context.Background(), kv.CodeDomain, tx, key)
 			require.NoError(b, err)
 
 			err = domains.DomainPut(kv.CodeDomain, tx, key, codeUpd, txNum, prev)
@@ -410,7 +411,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 				key = key[:length.Addr]
 			}
 
-			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, _, err := domains.GetLatest(context.Background(), kv.AccountsDomain, tx, key)
 			require.NoError(b, err)
 			if prev == nil {
 				prevKeys[string(key)] = struct{}{}
@@ -429,7 +430,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 			copy(sk, key)
 			rnd.Read(sk[length.Addr:])
 
-			prev, _, err = domains.GetLatest(kv.StorageDomain, tx, sk)
+			prev, _, err = domains.GetLatest(context.Background(), kv.StorageDomain, tx, sk)
 			require.NoError(b, err)
 
 			prevKeys[string(sk)] = struct{}{}

@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -390,8 +389,8 @@ type temporalGetter struct {
 	tx kv.TemporalTx
 }
 
-func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.GetLatest(name, gt.tx, k)
+func (gt *temporalGetter) GetLatest(ctx context.Context, name kv.Domain, k []byte) (v []byte, txNum uint64, err error) {
+	return gt.sd.GetLatest(ctx, name, gt.tx, k)
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
@@ -678,7 +677,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+func (sd *SharedDomains) GetLatest(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, txNum uint64, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -686,39 +685,37 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if dbg.KVReadLevelledMetrics {
 		start = time.Now()
 	}
-	maxStep := kv.Step(math.MaxUint64)
+	var maxTxNum uint64 // 0 == unbounded (see changeset.ReadContext.MaxTxNum)
 
 	// Check mem batch first - it has the current transaction's uncommitted state.
 	// No need to populate stateCache here — mem is checked first on every read,
-	// so the value is already accessible without caching it again.
-	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
+	// so the value is already accessible without caching it again. On a miss the
+	// mem returns the unwind-bound txNum (0 if none) we clamp the DB read to.
+	if v, memTxNum, ok := sd.mem.GetLatest(ctx, domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
-		return v, step, nil
-	} else {
-		if step > 0 {
-			maxStep = step
-		}
+		return v, memTxNum, nil
+	} else if memTxNum > 0 {
+		maxTxNum = memTxNum
 	}
 
 	// Check parent's mem batch (read-through chaining for child SDs)
 	if sd.parent != nil {
-		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
+		if v, memTxNum, ok := sd.parent.mem.GetLatest(ctx, domain, k); ok {
 			if dbg.KVReadLevelledMetrics {
 				sd.metrics.UpdateCacheReads(domain, start)
 			}
-			return v, step, nil
-		} else {
-			if step > 0 && step < maxStep {
-				maxStep = step
-			}
+			return v, memTxNum, nil
+		} else if memTxNum > 0 && (maxTxNum == 0 || memTxNum < maxTxNum) {
+			maxTxNum = memTxNum
 		}
 	}
 
-	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
-	}
+	// Thread the read-context (unwind bound + metrics) through ctx. This is what
+	// lets the single tx.GetLatest below replace the old duck-typed metered
+	// variants — the db layer reads the bound/metrics from ctx (#21739).
+	rctx := changeset.WithReadContext(ctx, &changeset.ReadContext{MaxTxNum: maxTxNum, Metrics: &sd.metrics, Start: start})
 
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
@@ -728,12 +725,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 				// Fetch authoritative value from the backing tx and panic on any divergence.
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
 				// backing tx is the single source of truth for this key at this point.
-				var vDB []byte
-				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
-				} else {
-					vDB, _, _ = tx.GetLatest(domain, k)
-				}
+				vDB, _, _ := tx.GetLatest(rctx, domain, k)
 				if !bytes.Equal(v, vDB) {
 					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
 						domain, k, v, vDB, sd.txNum))
@@ -743,11 +735,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
-	} else {
-		v, step, err = tx.GetLatest(domain, k)
-	}
+	v, txNum, err = tx.GetLatest(rctx, domain, k)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -757,7 +745,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.stateCache.Put(domain, k, v)
 	}
 
-	return v, step, nil
+	return v, txNum, nil
 }
 
 func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {
@@ -846,7 +834,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, roTx, k)
+		prevVal, _, err = sd.GetLatest(context.TODO(), domain, roTx, k)
 		if err != nil {
 			return err
 		}
@@ -897,7 +885,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, tx, k)
+		prevVal, _, err = sd.GetLatest(context.TODO(), domain, tx, k)
 		if err != nil {
 			return err
 		}
