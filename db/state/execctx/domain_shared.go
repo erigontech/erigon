@@ -91,6 +91,11 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
+	// ctx is the base context from NewSharedDomains, used for internal reads
+	// (e.g. prevVal lookups in domainPut/DomainDel) that have no per-operation
+	// ctx threaded in. Bottoms out at the caller that built the SharedDomains.
+	ctx context.Context
+
 	stepSize uint64
 
 	logger log.Logger
@@ -182,6 +187,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	trieCfg := o.trieCfg
 
 	sd := &SharedDomains{
+		ctx:    ctx,
 		logger: logger,
 		//trace:   true,
 		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
@@ -834,7 +840,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(context.TODO(), domain, roTx, k)
+		prevVal, _, err = sd.GetLatest(sd.ctx, domain, roTx, k)
 		if err != nil {
 			return err
 		}
@@ -885,7 +891,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(context.TODO(), domain, tx, k)
+		prevVal, _, err = sd.GetLatest(sd.ctx, domain, tx, k)
 		if err != nil {
 			return err
 		}
