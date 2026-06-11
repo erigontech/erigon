@@ -294,9 +294,9 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 
 // BranchChildCount returns the child count of the branch at nibblePrefix, read
 // from the in-memory commitment domain (post-compute state).
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(ctx context.Context, tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(context.TODO(), kv.CommitmentDomain, key)
+	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(ctx, kv.CommitmentDomain, key)
 	if err != nil {
 		return 0, err
 	}
