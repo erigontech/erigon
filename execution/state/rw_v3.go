@@ -1002,18 +1002,25 @@ type ReaderV3 struct {
 	trace       bool
 	tracePrefix string
 	getter      kv.TemporalGetter
+	ctx         context.Context
 }
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:  true,
 		getter: getter,
+		ctx:    context.Background(),
 	}
 }
 
 func (r *ReaderV3) DiscardReadList()                   {}
 func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
 func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
+func (r *ReaderV3) SetCtx(ctx context.Context) {
+	if ctx != nil {
+		r.ctx = ctx
+	}
+}
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
@@ -1454,7 +1461,7 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	}
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(context.TODO(), kv.AccountsDomain, value[:]); len(enc) == 0 {
+	if enc, _, err := r.getter.GetLatest(r.ctx, kv.AccountsDomain, value[:]); len(enc) == 0 {
 		return false, err
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
@@ -1471,7 +1478,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	if !address.IsNil() {
 		value = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(context.TODO(), kv.AccountsDomain, value[:])
+	enc, _, err := r.getter.GetLatest(r.ctx, kv.AccountsDomain, value[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1508,7 +1515,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 	copy(composite[0:20], addressValue[0:20])
 	copy(composite[20:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(context.TODO(), kv.StorageDomain, composite[:])
+	enc, _, err := r.getter.GetLatest(r.ctx, kv.StorageDomain, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -1535,7 +1542,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(context.TODO(), kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getter.GetLatest(r.ctx, kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return nil, err
 	}
@@ -1551,7 +1558,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(context.TODO(), kv.CodeDomain, addressValue[:])
+	enc, _, err := r.getter.GetLatest(r.ctx, kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return 0, err
 	}

@@ -294,6 +294,9 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
 			typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+			if cr, ok := typedReader.(interface{ SetCtx(context.Context) }); ok {
+				cr.SetCtx(rw.ctx)
+			}
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -418,6 +421,9 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
 		typedReader.SetGetter(rw.rs.Domains().AsGetter(rw.chainTx))
+		if cr, ok := typedReader.(interface{ SetCtx(context.Context) }); ok {
+			cr.SetCtx(rw.ctx)
+		}
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
