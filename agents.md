@@ -24,6 +24,19 @@ Before committing, always verify changes with: `make lint && make erigon integra
 - `snapshots` are immutable
 - `Unwind` beyond data in snapshots not allowed
 
+## Local Spec Maps
+
+Before reviewing or modifying consensus-critical code, locate and read the
+applicable `CLAUDE.md` spec maps in the changed path hierarchy.
+
+For changes under `cl/`, read `cl/CLAUDE.md` first, then read each relevant
+subdirectory spec map for the touched areas, such as
+`cl/phase1/forkchoice/CLAUDE.md`, `cl/transition/CLAUDE.md`, or
+`cl/phase1/core/state/CLAUDE.md`.
+
+When declaring the work done, mention which `CLAUDE.md` spec maps were
+consulted.
+
 ## Key Directories
 
 | Directory | Purpose | Component Docs |

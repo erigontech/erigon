@@ -2,6 +2,19 @@
 
 Caplin is Erigon's embedded Beacon Chain client implementing Ethereum's proof-of-stake consensus.
 
+## Required Spec Map Check
+
+For every change under `cl/`, read `cl/CLAUDE.md` before changing or reviewing
+code. Then read the `CLAUDE.md` file for every touched consensus area that has
+one, for example:
+
+- `cl/phase1/forkchoice/CLAUDE.md`
+- `cl/transition/CLAUDE.md`
+- `cl/phase1/core/state/CLAUDE.md`
+
+Use those files as the spec-conformance checklist, and mention the consulted
+`CLAUDE.md` files in the final summary or review note.
+
 ## Directory Structure
 
 | Directory | Purpose |
