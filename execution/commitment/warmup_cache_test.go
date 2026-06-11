@@ -22,7 +22,6 @@ import (
 	"testing"
 )
 
-// TestWarmupCache_Basic tests basic put/get operations
 func TestWarmupCache_Basic(t *testing.T) {
 	cache := NewWarmupCache()
 
@@ -71,7 +70,6 @@ func TestWarmupCache_Basic(t *testing.T) {
 	}
 }
 
-// TestWarmupCache_NotFound tests cache misses
 func TestWarmupCache_NotFound(t *testing.T) {
 	cache := NewWarmupCache()
 
@@ -91,7 +89,6 @@ func TestWarmupCache_NotFound(t *testing.T) {
 	}
 }
 
-// TestWarmupCache_Eviction tests key eviction
 func TestWarmupCache_Eviction(t *testing.T) {
 	cache := NewWarmupCache()
 
@@ -114,7 +111,6 @@ func TestWarmupCache_Eviction(t *testing.T) {
 	}
 }
 
-// TestWarmupCache_Clear tests clearing the cache
 func TestWarmupCache_Clear(t *testing.T) {
 	cache := NewWarmupCache()
 
@@ -133,7 +129,6 @@ func TestWarmupCache_Clear(t *testing.T) {
 	}
 }
 
-// TestWarmupCache_KeyPadding tests that shorter keys work correctly
 func TestWarmupCache_KeyPadding(t *testing.T) {
 	cache := NewWarmupCache()
 
@@ -164,7 +159,6 @@ func TestWarmupCache_KeyPadding(t *testing.T) {
 	}
 }
 
-// generateTestKeys creates random keys of the given size
 func generateTestKeys(n int, size int) [][]byte {
 	keys := make([][]byte, n)
 	for i := 0; i < n; i++ {
@@ -174,7 +168,6 @@ func generateTestKeys(n int, size int) [][]byte {
 	return keys
 }
 
-// BenchmarkWarmupCache_Branch benchmarks branch key operations
 func BenchmarkWarmupCache_Branch(b *testing.B) {
 	cache := NewWarmupCache()
 
@@ -196,7 +189,6 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 	}
 }
 
-// BenchmarkWarmupCache_Branch_Put benchmarks Put operations
 func BenchmarkWarmupCache_Branch_Put(b *testing.B) {
 	cache := NewWarmupCache()
 	const keyCount = 10000
@@ -211,7 +203,6 @@ func BenchmarkWarmupCache_Branch_Put(b *testing.B) {
 	}
 }
 
-// BenchmarkWarmupCache_Account benchmarks account key operations (20 bytes)
 func BenchmarkWarmupCache_Account(b *testing.B) {
 	cache := NewWarmupCache()
 	keys := generateTestKeys(10000, 20)
@@ -230,7 +221,6 @@ func BenchmarkWarmupCache_Account(b *testing.B) {
 	}
 }
 
-// BenchmarkWarmupCache_Storage benchmarks storage key operations (52 bytes)
 func BenchmarkWarmupCache_Storage(b *testing.B) {
 	cache := NewWarmupCache()
 	keys := generateTestKeys(10000, 52)
@@ -249,7 +239,6 @@ func BenchmarkWarmupCache_Storage(b *testing.B) {
 	}
 }
 
-// BenchmarkWarmupCache_Mixed simulates realistic mixed workload
 func BenchmarkWarmupCache_Mixed(b *testing.B) {
 	cache := NewWarmupCache()
 	accountKeys := generateTestKeys(1000, 20)
@@ -284,7 +273,6 @@ func BenchmarkWarmupCache_Mixed(b *testing.B) {
 	}
 }
 
-// BenchmarkComparison_Map_100k benchmarks map with 100k entries
 func BenchmarkComparison_Map_100k(b *testing.B) {
 	cache := NewWarmupCache()
 	keys := generateTestKeys(100000, 52)
