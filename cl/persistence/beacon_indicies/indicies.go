@@ -420,7 +420,13 @@ func PruneBlocksLimit(ctx context.Context, tx kv.RwTx, to uint64, limit int) (de
 		return 0, false, err
 	}
 	defer cursor.Close()
-	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Next() {
+	for k, _, err := cursor.First(); ; k, _, err = cursor.Next() {
+		if err != nil {
+			return deleted, false, err
+		}
+		if k == nil {
+			break
+		}
 		if len(k) != 40 {
 			continue
 		}
@@ -440,12 +446,17 @@ func PruneBlocksLimit(ctx context.Context, tx kv.RwTx, to uint64, limit int) (de
 			return deleted, hasMore, err
 		}
 	}
-	return deleted, false, err
+	return deleted, false, nil
 }
 
 func hasMorePrunableBeaconBlocks(cursor kv.Cursor, to uint64) (bool, error) {
-	var err error
-	for k, _, err := cursor.Next(); err == nil && k != nil; k, _, err = cursor.Next() {
+	for k, _, err := cursor.Next(); ; k, _, err = cursor.Next() {
+		if err != nil {
+			return false, err
+		}
+		if k == nil {
+			return false, nil
+		}
 		if len(k) != 40 {
 			continue
 		}
@@ -455,7 +466,6 @@ func hasMorePrunableBeaconBlocks(cursor kv.Cursor, to uint64) (bool, error) {
 		}
 		return slot < to, nil
 	}
-	return false, err
 }
 
 func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {

@@ -18,6 +18,7 @@ package beacon_indicies
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,19 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
+
+type errorCursor struct {
+	err error
+}
+
+func (c errorCursor) First() ([]byte, []byte, error)           { return nil, nil, nil }
+func (c errorCursor) Seek([]byte) ([]byte, []byte, error)      { return nil, nil, nil }
+func (c errorCursor) SeekExact([]byte) ([]byte, []byte, error) { return nil, nil, nil }
+func (c errorCursor) Next() ([]byte, []byte, error)            { return nil, nil, c.err }
+func (c errorCursor) Prev() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c errorCursor) Last() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c errorCursor) Current() ([]byte, []byte, error)         { return nil, nil, nil }
+func (c errorCursor) Close()                                   {}
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
@@ -328,4 +342,13 @@ func TestPruneBlocksLimitExactLimitHasNoMore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, deleted)
 	require.False(t, hasMore)
+}
+
+func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
+	wantErr := errors.New("cursor failed")
+
+	hasMore, err := hasMorePrunableBeaconBlocks(errorCursor{err: wantErr}, 10)
+
+	require.False(t, hasMore)
+	require.ErrorIs(t, err, wantErr)
 }

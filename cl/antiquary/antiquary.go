@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	safetyMargin             = 20_000 // We retire snapshots 10k blocks after the finalized head
+	safetyMargin             = 20_000 // We retire snapshots 20k blocks after the finalized head
 	antiquaryIndexBatchSlots = snaptype.CaplinMergeLimit / 2
 )
 
