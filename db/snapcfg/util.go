@@ -17,9 +17,7 @@
 package snapcfg
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +29,6 @@ import (
 	"strings"
 	"sync"
 
-	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
@@ -52,53 +49,48 @@ type (
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
+// knownChains is the set of chain names with a preverified-hash source. It is
+// the authoritative answer for KnownCfg's (_, known bool) return. Immutable.
+var knownChains = map[string]struct{}{
+	networkname.Mainnet:  {},
+	networkname.Sepolia:  {},
+	networkname.Gnosis:   {},
+	networkname.Chiado:   {},
+	networkname.Hoodi:    {},
+	networkname.Bloatnet: {},
+}
+
 type preverifiedRegistry struct {
 	mu     sync.RWMutex
-	raw    map[string][]byte      // raw embedded TOML bytes (cheap, no parsing)
-	data   map[string]Preverified // parsed on demand
+	raw    map[string][]byte      // raw TOML bytes loaded at runtime (fetched or local)
+	data   map[string]Preverified // parsed view of raw
 	cached map[string]*Cfg
 }
 
 var registry = &preverifiedRegistry{
-	raw: map[string][]byte{
-		networkname.Mainnet:  snapshothashes.Mainnet,
-		networkname.Sepolia:  snapshothashes.Sepolia,
-		networkname.Gnosis:   snapshothashes.Gnosis,
-		networkname.Chiado:   snapshothashes.Chiado,
-		networkname.Hoodi:    snapshothashes.Hoodi,
-		networkname.Bloatnet: snapshothashes.Bloatnet,
-	},
+	raw:    make(map[string][]byte),
 	data:   make(map[string]Preverified),
 	cached: make(map[string]*Cfg),
 }
 
 func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
+	_, knownOk := knownChains[networkName]
+
 	r.mu.RLock()
 	if cfg, ok := r.cached[networkName]; ok {
 		r.mu.RUnlock()
 		return cfg, true
 	}
-	pv, pvOk := r.data[networkName]
-	rawBytes, rawOk := r.raw[networkName]
+	pv, dataOk := r.data[networkName]
 	r.mu.RUnlock()
 
-	if !pvOk && !rawOk {
+	if !knownOk && !dataOk {
 		return newCfg(networkName, Preverified{}), false
 	}
 
-	if !pvOk && rawOk {
-		// Parse outside the lock (fromEmbeddedToml is a pure function on immutable data)
-		pv = fromEmbeddedToml(rawBytes)
-		r.mu.Lock()
-		// Double-check: another goroutine may have parsed it
-		if existing, ok := r.data[networkName]; ok {
-			pv = existing
-		} else {
-			r.data[networkName] = pv
-		}
-		r.mu.Unlock()
-	}
-
+	// pv is the zero Preverified{} when the chain is known but hashes haven't been loaded yet.
+	// That's expected during the brief window between registry init and LoadRemotePreverified/SetToml;
+	// callers in that window only consult the `known` boolean.
 	cfg := newCfg(networkName, pv.Typed(knownTypes[networkName]))
 
 	r.mu.Lock()
@@ -113,49 +105,14 @@ func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
 	return cfg, true
 }
 
-func (r *preverifiedRegistry) Set(networkName string, pv Preverified) {
+func (r *preverifiedRegistry) Set(networkName string, pv Preverified, raw []byte) {
 	r.mu.Lock()
 	r.data[networkName] = pv
-	delete(r.raw, networkName)    // prevent stale re-parse
+	if raw != nil {
+		r.raw[networkName] = raw
+	}
 	delete(r.cached, networkName) // Invalidate cache atomically
 	r.mu.Unlock()
-}
-
-// Reset replaces all data, clearing raw and cached.
-func (r *preverifiedRegistry) Reset(data map[string]Preverified) {
-	r.mu.Lock()
-	r.data = data
-	r.raw = nil
-	r.cached = make(map[string]*Cfg) // Clear all cached
-	r.mu.Unlock()
-}
-
-// Has checks whether a chain name exists in either raw or data without triggering parsing.
-func (r *preverifiedRegistry) Has(networkName string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if _, ok := r.data[networkName]; ok {
-		return true
-	}
-	_, ok := r.raw[networkName]
-	return ok
-}
-
-var snapshotHashPtrs = map[string]*[]byte{
-	networkname.Mainnet:  &snapshothashes.Mainnet,
-	networkname.Sepolia:  &snapshothashes.Sepolia,
-	networkname.Gnosis:   &snapshothashes.Gnosis,
-	networkname.Chiado:   &snapshothashes.Chiado,
-	networkname.Hoodi:    &snapshothashes.Hoodi,
-	networkname.Bloatnet: &snapshothashes.Bloatnet,
-}
-
-func fromEmbeddedToml(in []byte) Preverified {
-	items := fromToml(in)
-	return Preverified{
-		Local: false,
-		Items: items,
-	}
 }
 
 type Preverified struct {
@@ -550,22 +507,63 @@ func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain st
 	return res, nil
 }
 
-// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
-func LoadRemotePreverified(ctx context.Context, chainName string) error {
-	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
-		log.Info("Loading local preverified override file", "file", s)
+// FetchTomlFromURL fetches a chain.toml file from an arbitrary URL. Plain HTTP
+// GET, no CDN-specific headers. Used by the --snap.chaintoml-url override.
+func FetchTomlFromURL(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch snapshot hashes from overridden URL %q: status code %d %s", url, resp.StatusCode, resp.Status)
+	}
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("empty response from overridden URL %s", url)
+	}
+	return res, nil
+}
 
-		b, err := os.ReadFile(s)
+// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
+//
+// forceChainTomlURL, when non-empty, replaces the default R2/GitHub fetch with
+// a single HTTP GET to that exact URL. There is no fallback — if the URL fetch
+// fails the function returns the error and the registry is not modified. The
+// ERIGON_REMOTE_PREVERIFIED env var (local-file override) still takes
+// precedence over both forceChainTomlURL and the default path.
+func LoadRemotePreverified(ctx context.Context, chainName string, forceChainTomlURL string) error {
+	var hashes []byte
+	switch {
+	case os.Getenv(RemotePreverifiedEnvKey) != "":
+		path := os.Getenv(RemotePreverifiedEnvKey)
+		log.Info("Loading local preverified override file", "file", path)
+
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
-		if ptr, ok := snapshotHashPtrs[chainName]; ok {
-			*ptr = bytes.Clone(b)
+		hashes = b
+	case forceChainTomlURL != "":
+		log.Info("Loading snapshot hashes from forced URL", "chain", chainName, "url", forceChainTomlURL)
+
+		b, err := FetchTomlFromURL(ctx, forceChainTomlURL)
+		if err != nil {
+			return fmt.Errorf("fetching forced chain.toml URL %q: %w", forceChainTomlURL, err)
 		}
-	} else {
+		hashes = b
+	default:
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
-		hashes, err := FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		var err error
+		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
@@ -574,30 +572,22 @@ func LoadRemotePreverified(ctx context.Context, chainName string) error {
 				return err
 			}
 		}
-
-		if ptr, ok := snapshotHashPtrs[chainName]; ok {
-			*ptr = hashes
-		}
 	}
 
-	// Re-load the preverified hashes for this chain
-	if ptr, ok := snapshotHashPtrs[chainName]; ok {
-		registry.Set(chainName, fromEmbeddedToml(*ptr))
-	}
+	registry.Set(chainName, Preverified{Items: fromToml(hashes)}, hashes)
 	return nil
 }
 
 func SetToml(networkName string, toml []byte, local bool) {
-	if registry.Has(networkName) {
-		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)})
+	if _, ok := knownChains[networkName]; ok {
+		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)}, toml)
 	}
 }
 
 func GetToml(networkName string) []byte {
-	if ptr, ok := snapshotHashPtrs[networkName]; ok {
-		return *ptr
-	}
-	return nil
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.raw[networkName]
 }
 
 // Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in

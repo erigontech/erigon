@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handlers
 
 import (
@@ -32,6 +48,13 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	// Validate count
 	if req.Count > c.beaconConfig.MaxRequestBlocksDeneb {
 		return errors.New("request count exceeds MAX_REQUEST_BLOCKS_DENEB")
+	}
+	if req.Count == 0 {
+		return nil
+	}
+
+	if cost := min(int(req.Count), int(c.beaconConfig.MaxRequestBlocksDeneb)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	// Compute minimum serve slot: max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS) * SLOTS_PER_EPOCH
@@ -128,6 +151,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 
 	if req.Length() == 0 {
+		return nil
+	}
+
+	if cost := min(req.Length(), int(c.beaconConfig.MaxRequestBlocksDeneb)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

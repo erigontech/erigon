@@ -13,13 +13,14 @@ Erigon use the following default port for each service:
 | engine    | `9090`  | TCP       | gRPC Server                 | Private       |
 | engine    | `42069` | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | `8551`  | TCP       | Engine API (JWT auth)       | Private       |
-| sentry    | `30303` | TCP & UDP | eth peering (all versions)  | Public        |
-| sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
-| rpcdaemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| Sentry    | `30303` | TCP & UDP | eth/68 peering              | Public        |
+| Sentry    | `30304` | TCP & UDP | eth/69 peering              | Public        |
+| Sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
+| RPC Daemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
 | mcp       | `8553`  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
-Typically, `30303` is exposed to the internet to allow incoming peering connections — all configured eth protocol versions share a single TCP listener on this port. `9090` is exposed only internally for rpcdaemon or other connections (e.g. rpcdaemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
+Typically, `30303` and `30304` are exposed to the internet to allow incoming peering connections. `9090` is exposed only internally for RPC Daemon or other connections, (e.g. RPC Daemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
 
 To ensure proper P2P functionality for both the Execution and Consensus layers use a minimal configuration without exposing unnecessary services:
 
@@ -41,9 +42,10 @@ Here is a comprehensive list of port-related options:
 ### Sentry
 
 * `--port [value]`: Network listening port (default: `30303`)
-* `--sentry.api.addr [value]`: Comma separated sentry addresses `<host>:<port>,<host>:<port>` (default `127.0.0.1:9091`)
+* `--p2p.allowed-ports [value]`: Allowed ports to pick for different eth p2p protocol versions (default: `30303`, `30304`, `30305`, `30306`, `30307`)
+* `--sentry.api.addr [value]`: Comma separated Sentry addresses `<host>:<port>,<host>:<port>` (default `127.0.0.1:9091`)
 
-### RPCdaemon
+### RPC Daemon
 
 * `--ws.port [value]`: WS-RPC server listening port (default: `8546`)
 * `--http.port [value]`: HTTP-RPC server listening port (default: `8545`)

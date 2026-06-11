@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -126,6 +127,33 @@ func TestEngineApiEmptyBlockProduction(t *testing.T) {
 		require.Empty(t, payload.ExecutionPayload.Transactions)
 		// DefaultEngineApiTester already builds 1 empty block, so this is block 2.
 		require.Equal(t, hexutil.Uint64(2), payload.ExecutionPayload.BlockNumber)
+	})
+}
+
+// TestEngineApiBuiltBlockEmptyRequestsHash verifies that a built block with an
+// empty EIP-7685 request set carries empty.RequestsHash (SHA256 of empty input)
+// in its header, not a zero hash.
+func TestEngineApiBuiltBlockEmptyRequestsHash(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// An empty block has no deposit/withdrawal/consolidation requests.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.Empty(t, payload.ExecutionPayload.Transactions)
+		require.Empty(t, payload.ExecutionRequests)
+
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, payload.ExecutionPayload.BlockHash, block.Hash)
+		require.NotNil(t, block.RequestsHash)
+		require.Equal(t, empty.RequestsHash, *block.RequestsHash)
 	})
 }
 

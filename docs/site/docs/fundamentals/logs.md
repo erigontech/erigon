@@ -12,7 +12,7 @@ Erigon features a sophisticated logging framework that offers detailed visibilit
 The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.
 
 :::tip
-Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
+Erigon offers a `--metrics` flag for using Prometheus/Grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
 :::
 
 ## Logging Framework Architecture
@@ -44,7 +44,7 @@ The logging system defines six distinct log levels in hierarchical order:
 
 The log level is set by using the `--verbosity` flag, for example:
 
-```
+```text
 ./build/bin/erigon --verbosity=1
 ```
 

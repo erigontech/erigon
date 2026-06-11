@@ -1,6 +1,6 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-2
+    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-4
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
@@ -17,7 +17,7 @@ participants:
     el_extra_params: ["--experimental.bal"]
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-2
+    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-4
     count: 1
 global_log_level: 'debug'
 network_params:

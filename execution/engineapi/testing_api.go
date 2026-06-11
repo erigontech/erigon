@@ -83,7 +83,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
 		}
 		defer dbTx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger)
+		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger, execctx.WithoutDeferredBranchUpdates())
 		if err != nil {
 			return nil, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
 		}

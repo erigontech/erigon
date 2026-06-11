@@ -157,16 +157,31 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if domainExistenceForceInMem {
+	switch {
+	case domainExistenceForceWillNeed:
+		accessor.ForceExistenceFilterWillNeed()
+	case domainExistenceForceNormal:
+		accessor.ForceExistenceFilterNormal()
+	case domainExistenceForceInMem:
 		accessor.ForceExistenceFilterInRAM()
 	}
-	if domainExistenceForceWillNeed {
-		accessor.ForceExistenceFilterWillNeed()
-	}
-	if domainExistenceForceNormal {
-		accessor.ForceExistenceFilterNormal()
-	}
 	return accessor, nil
+}
+
+func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
+	filter, err := existence.OpenFilter(fPath, false)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case domainExistenceForceWillNeed:
+		filter.MadvWillNeed()
+	case domainExistenceForceNormal:
+		filter.MadvNormal()
+	case domainExistenceForceInMem:
+		filter.ForceInMem()
+	}
+	return filter, nil
 }
 
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
@@ -1472,7 +1487,7 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		dt.mapReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
 	if dt.mapReaders[i] == nil {
-		dt.mapReaders[i] = dt.files[i].src.index.GetReaderFromPool()
+		dt.mapReaders[i] = dt.files[i].src.index.Reader()
 	}
 	return dt.mapReaders[i]
 }
@@ -1878,7 +1893,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
-	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
+	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
 		return stat, err
