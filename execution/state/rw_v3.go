@@ -80,7 +80,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 //   - pure account deletion (no account fields follow) — from DeleteAccount
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
-func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes VersionedWrites, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
+func (rs *StateV3) applyVersionedWrites(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64, writes VersionedWrites, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
 	domains := rs.domains
 
 	if len(writes) > 0 {
@@ -209,10 +209,10 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				if blockCache != nil {
 					if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc)
-					} else if enc0, _, err := domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+					} else if enc0, _, err := domains.GetLatest(ctx, kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
-				} else if enc0, _, err := domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+				} else if enc0, _, err := domains.GetLatest(ctx, kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 					_ = accounts.DeserialiseV3(&acc, enc0)
 				}
 				if d.balance != nil {
@@ -314,14 +314,14 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			} else {
 				// Not in cache yet — read from domain (pre-block state).
 				var err error
-				enc0, _, err = domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, addrValue[:])
+				enc0, _, err = domains.GetLatest(ctx, kv.AccountsDomain, roTx, addrValue[:])
 				if err != nil {
 					return err
 				}
 			}
 		} else {
 			var err error
-			enc0, _, err = domains.GetLatest(context.TODO(), kv.AccountsDomain, roTx, addrValue[:])
+			enc0, _, err = domains.GetLatest(ctx, kv.AccountsDomain, roTx, addrValue[:])
 			if err != nil {
 				return err
 			}
@@ -378,7 +378,7 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	if len(writes) == 0 && len(balanceIncreases) == 0 {
 		return nil
 	}
-	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules, blockCache); err != nil {
+	if err := rs.applyVersionedWrites(ctx, roTx, blockNum, txNum, writes, balanceIncreases, rules, blockCache); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	// Compute commitment at step boundaries — must follow state writes.
