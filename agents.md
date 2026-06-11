@@ -26,16 +26,9 @@ Before committing, always verify changes with: `make lint && make erigon integra
 
 ## Local Spec Maps
 
-Before reviewing or modifying consensus-critical code, locate and read the
-applicable `CLAUDE.md` spec maps in the changed path hierarchy.
-
-For changes under `cl/`, read `cl/CLAUDE.md` first, then read each relevant
-subdirectory spec map for the touched areas, such as
-`cl/phase1/forkchoice/CLAUDE.md`, `cl/transition/CLAUDE.md`, or
-`cl/phase1/core/state/CLAUDE.md`.
-
-When declaring the work done, mention which `CLAUDE.md` spec maps were
-consulted.
+For consensus-critical changes, especially under `cl/`, follow the local
+`CLAUDE.md` spec maps required by the component `agents.md`. Local tests are
+not sufficient evidence of consensus correctness.
 
 ## Key Directories
 
