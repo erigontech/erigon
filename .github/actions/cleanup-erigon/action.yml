@@ -19,12 +19,12 @@ runs:
         lookup-only: true
 
     - name: Prune Go build cache
-      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
       shell: bash
       run: python3 tools/prune-gocache "$ERIGON_CI_GOCACHE_PATH"
 
     - uses: ./.github/actions/save-build-cache
-      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
       with:
         gocache: ${{ env.ERIGON_CI_GOCACHE_PATH }}
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
@@ -40,7 +40,7 @@ runs:
         lookup-only: true
 
     - uses: ./.github/actions/save-mod-cache
-      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
       with:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
