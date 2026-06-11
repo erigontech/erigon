@@ -43,7 +43,8 @@ type Filter struct {
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewFilter(keysCount uint64, filePath string, useFuse bool) (*Filter, error) {
+func NewFilter(keysCount uint64, filePath string) (*Filter, error) {
+	useFuse := true
 	_, fileName := filepath.Split(filePath)
 	e := &Filter{FilePath: filePath, FileName: fileName, useFuse: useFuse}
 	if keysCount < 2 {
