@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -33,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/common"
 )
+
+const maxProposerPreferencesRequestItems = 2048
 
 // ---- PTC Duties ----
 
@@ -362,58 +365,109 @@ func (a *ApiHandler) GetEthV1BeaconPoolProposerPreferences(w http.ResponseWriter
 // Accepts application/json or application/octet-stream (SSZ).
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolProposerPreferences(w http.ResponseWriter, r *http.Request) {
-	req := &cltypes.SignedProposerPreferences{}
-
-	switch r.Header.Get("Content-Type") {
-	case "application/octet-stream":
-		octets, err := io.ReadAll(r.Body)
-		if err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
-		}
-		if err := req.DecodeSSZ(octets, int(clparams.GloasVersion)); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest,
-				fmt.Errorf("failed to decode SSZ SignedProposerPreferences: %w", err)).WriteTo(w)
-			return
-		}
-	default:
-		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
-		}
-	}
-
-	if req.Message == nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("missing message in signed proposer preferences")).WriteTo(w)
+	reqs, ok := decodeProposerPreferencesRequest(w, r)
+	if !ok {
 		return
 	}
+	a.postProposerPreferences(w, r, reqs)
+}
 
-	// Validate via ProposerPreferencesService
-	if a.proposerPreferencesService != nil {
-		if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
-		}
+// PostEthV1ValidatorProposerPreferences submits proposer preferences for validators.
+// POST /eth/v1/validator/proposer_preferences
+// [New in Gloas:EIP7732]
+func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter, r *http.Request) {
+	reqs, ok := decodeProposerPreferencesRequest(w, r)
+	if !ok {
+		return
 	}
+	a.postProposerPreferences(w, r, reqs)
+}
 
-	// Store in pool (the service also stores it, but if the service is nil we store directly)
-	if a.epbsPool != nil {
-		a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-			Slot:          req.Message.ProposalSlot,
-			DependentRoot: req.Message.DependentRoot,
-		}, req)
+func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([]*cltypes.SignedProposerPreferences, bool) {
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType == "" {
+		contentType = "application/json"
 	}
+	msgSize := (&cltypes.SignedProposerPreferences{Message: new(cltypes.ProposerPreferences)}).EncodingSizeSSZ()
+	maxBodySize := int64(maxProposerPreferencesRequestItems * msgSize * 4)
 
-	// Broadcast to gossip
-	if a.sentinel != nil {
-		encodedSSZ, err := req.EncodeSSZ(nil)
+	switch contentType {
+	case "application/octet-stream":
+		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(maxProposerPreferencesRequestItems*msgSize)))
 		if err != nil {
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return nil, false
+		}
+		if len(octets) == 0 || len(octets)%msgSize != 0 {
+			beaconhttp.NewEndpointError(http.StatusBadRequest,
+				fmt.Errorf("SSZ body length %d is not a multiple of SignedProposerPreferences size %d", len(octets), msgSize)).WriteTo(w)
+			return nil, false
+		}
+		reqs := make([]*cltypes.SignedProposerPreferences, 0, len(octets)/msgSize)
+		for i := 0; i < len(octets)/msgSize; i++ {
+			req := &cltypes.SignedProposerPreferences{}
+			if err := req.DecodeSSZ(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest,
+					fmt.Errorf("failed to decode SSZ SignedProposerPreferences at index %d: %w", i, err)).WriteTo(w)
+				return nil, false
+			}
+			reqs = append(reqs, req)
+		}
+		return reqs, true
+	default:
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return nil, false
+		}
+		var reqs []*cltypes.SignedProposerPreferences
+		if err := json.Unmarshal(body, &reqs); err == nil {
+			return reqs, true
+		}
+		req := &cltypes.SignedProposerPreferences{}
+		if err := json.Unmarshal(body, req); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return nil, false
+		}
+		return []*cltypes.SignedProposerPreferences{req}, true
+	}
+}
+
+func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Request, reqs []*cltypes.SignedProposerPreferences) {
+	if len(reqs) == 0 {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty proposer preferences request")).WriteTo(w)
+		return
+	}
+	for i, req := range reqs {
+		if req == nil || req.Message == nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest,
+				fmt.Errorf("missing message in signed proposer preferences at index %d", i)).WriteTo(w)
 			return
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
-			a.logger.Debug("[Beacon REST] failed to publish proposer preferences to gossip", "err", err)
+
+		if a.proposerPreferencesService != nil {
+			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
+		}
+
+		if a.epbsPool != nil {
+			a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+				Slot:          req.Message.ProposalSlot,
+				DependentRoot: req.Message.DependentRoot,
+			}, req)
+		}
+
+		if a.sentinel != nil {
+			encodedSSZ, err := req.EncodeSSZ(nil)
+			if err != nil {
+				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+				return
+			}
+			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameProposerPreferences, encodedSSZ); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish proposer preferences to gossip", "err", err)
+			}
 		}
 	}
 
@@ -671,6 +725,35 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelope(w http.ResponseWr
 	if envelope.BuilderIndex != builderIndex {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("no execution payload envelope found for slot %d with builder_index %d", slot, builderIndex))
+	}
+
+	return newBeaconResponse(envelope).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+}
+
+// GetEthV1ValidatorExecutionPayloadEnvelopeBySlot returns the unsigned ExecutionPayloadEnvelope for a slot.
+// GET /eth/v1/validator/execution_payload_envelopes/{slot}
+// [New in Gloas:EIP7732]
+func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeBySlot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("invalid slot: %w", err))
+	}
+
+	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	if epoch < a.beaconChainCfg.GloasForkEpoch {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
+	}
+
+	envelope, ok := a.selfBuildEnvelopes.Get(slot)
+	if !ok || envelope == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("no execution payload envelope found for slot %d", slot))
 	}
 
 	return newBeaconResponse(envelope).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil

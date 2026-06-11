@@ -92,7 +92,7 @@ func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testin
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	dependentRoot, err := handler.getHistoricalProposerDependentRoot(roTx, state_accessors.GetValFnTxAndSnapshot(roTx, nil), 0)
+	dependentRoot, err := handler.getHistoricalProposerDependentRoot(roTx, state_accessors.GetValFnTxAndSnapshot(roTx, nil), 0, false)
 	require.NoError(t, err)
 	require.Equal(t, genesisRoot, dependentRoot)
 }
@@ -349,6 +349,47 @@ func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "overflows")
 }
 
+func TestGetDutiesProposerV2UsesFuluDependentRoot(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+
+	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	require.Greater(t, headEpoch, uint64(1))
+	targetEpoch := headEpoch
+	handler.beaconChainCfg.FuluForkEpoch = headEpoch
+	handler.beaconChainCfg.InitializeForkSchedule()
+
+	stateCfg := *postState.BeaconConfig()
+	stateCfg.FuluForkEpoch = headEpoch
+	stateCfg.InitializeForkSchedule()
+	encodedPostState, err := postState.EncodeSSZ(nil)
+	require.NoError(t, err)
+	isolatedPostState := state.New(&stateCfg)
+	require.NoError(t, isolatedPostState.DecodeSSZ(encodedPostState, int(clparams.ElectraVersion)))
+
+	fuluHead, err := isolatedPostState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, fuluHead.UpgradeToFulu())
+	require.Equal(t, clparams.FuluVersion, fuluHead.Version())
+
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = fuluHead.Slot()
+	manager, ok := syncedData.(*synced_data.SyncedDataManager)
+	require.True(t, ok)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(fuluHead, headRoot))
+
+	v1 := getProposerDutiesForPath(t, handler, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(targetEpoch, 10))
+	v2 := getProposerDutiesForPath(t, handler, "/eth/v2/validator/duties/proposer/"+strconv.FormatUint(targetEpoch, 10))
+	expectedV2Root, err := fuluHead.GetBlockRootAtSlot((targetEpoch-1)*handler.beaconChainCfg.SlotsPerEpoch - 1)
+	require.NoError(t, err)
+
+	require.NotEqual(t, v1.DependentRoot, v2.DependentRoot)
+	require.Equal(t, expectedV2Root.String(), v2.DependentRoot)
+	require.Equal(t, v1.Data, v2.Data)
+}
+
 func TestComputeDependentRootSlotNoUnderflow(t *testing.T) {
 	slotsPerEpoch := uint64(32)
 	tests := []struct {
@@ -399,7 +440,13 @@ func TestPostPtcDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
 func getProposerDutiesForEpoch(t *testing.T, handler *ApiHandler, epoch uint64) proposerDutiesResponse {
 	t.Helper()
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), nil)
+	return getProposerDutiesForPath(t, handler, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10))
+}
+
+func getProposerDutiesForPath(t *testing.T, handler *ApiHandler, path string) proposerDutiesResponse {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodGet, path, nil)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())

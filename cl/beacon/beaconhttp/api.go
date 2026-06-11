@@ -139,7 +139,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
 			}
 		}
-		switch responseEncodingForAccept(contentType) {
+		switch responseEncodingForAccept(contentType, supportsSSZ(ans)) {
 		case responseEncodingJSON:
 			if !isNil(ans) {
 				w.Header().Set("Content-Type", "application/json")
@@ -176,7 +176,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 // WillEncodeSSZ reports whether the given Accept header will cause
 // HandleEndpoint to use SSZ encoding. Mirrors the switch priority above.
 func WillEncodeSSZ(accept string) bool {
-	return responseEncodingForAccept(accept) == responseEncodingSSZ
+	return responseEncodingForAccept(accept, true) == responseEncodingSSZ
 }
 
 type responseEncoding int
@@ -188,7 +188,7 @@ const (
 	responseEncodingEventStream
 )
 
-func responseEncodingForAccept(accept string) responseEncoding {
+func responseEncodingForAccept(accept string, sszSupported bool) responseEncoding {
 	if accept == "" {
 		return responseEncodingJSON
 	}
@@ -200,7 +200,7 @@ func responseEncodingForAccept(accept string) responseEncoding {
 	eventQ, eventOK := acceptQuality(accept, "text/event-stream")
 
 	bestJSONQ := max(jsonQ, htmlQ, anyQ)
-	if sszOK && sszQ > 0 && (!jsonOK && !htmlOK && !anyOK || sszQ > bestJSONQ) {
+	if sszSupported && sszOK && sszQ > 0 && (!jsonOK && !htmlOK && !anyOK || sszQ > bestJSONQ) {
 		return responseEncodingSSZ
 	}
 	if jsonOK && jsonQ > 0 || htmlOK && htmlQ > 0 || anyOK && anyQ > 0 {
@@ -210,6 +210,15 @@ func responseEncodingForAccept(accept string) responseEncoding {
 		return responseEncodingEventStream
 	}
 	return responseEncodingUnsupported
+}
+
+func supportsSSZ(ans any) bool {
+	if beaconResponse, ok := ans.(*BeaconResponse); ok {
+		_, ok = beaconResponse.Data.(ssz.Marshaler)
+		return ok
+	}
+	_, ok := ans.(ssz.Marshaler)
+	return ok
 }
 
 func acceptQuality(accept, target string) (float64, bool) {

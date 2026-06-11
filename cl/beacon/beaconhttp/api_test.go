@@ -60,6 +60,47 @@ func TestHandleEndpoint_UsesSSZForPreferredWeightedAccept(t *testing.T) {
 	}
 }
 
+func TestHandleEndpoint_UsesJSONForPreferredSSZAcceptWhenResponseDoesNotSupportSSZ(t *testing.T) {
+	h := HandleEndpointFunc(func(w http.ResponseWriter, r *http.Request) (*BeaconResponse, error) {
+		return NewBeaconResponse(map[string]any{"ok": true}), nil
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Accept", "application/octet-stream;q=1,application/json;q=0.9")
+	rr := httptest.NewRecorder()
+	h(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+	}
+
+	var body map[string]map[string]bool
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response json: %v", err)
+	}
+	if !body["data"]["ok"] {
+		t.Fatalf("body = %#v, want data.ok=true", body)
+	}
+}
+
+func TestHandleEndpoint_RejectsSSZOnlyAcceptWhenResponseDoesNotSupportSSZ(t *testing.T) {
+	h := HandleEndpointFunc(func(w http.ResponseWriter, r *http.Request) (*BeaconResponse, error) {
+		return NewBeaconResponse(map[string]any{"ok": true}), nil
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Accept", "application/octet-stream")
+	rr := httptest.NewRecorder()
+	h(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
 func TestWillEncodeSSZ(t *testing.T) {
 	tests := []struct {
 		accept string

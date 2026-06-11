@@ -49,6 +49,14 @@ func (a *ApiHandler) isProposerDutyInLookaheadVector(s *state.CachingBeaconState
 }
 
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return a.getDutiesProposerForVersion(w, r, false)
+}
+
+func (a *ApiHandler) getDutiesProposerV2(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return a.getDutiesProposerForVersion(w, r, true)
+}
+
+func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.Request, v2 bool) (*beaconhttp.BeaconResponse, error) {
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -78,7 +86,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		}
 		stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, view)
 
-		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch)
+		dependentRoot, err := a.getHistoricalProposerDependentRoot(tx, stateGetter, epoch, v2)
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +97,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		return newBeaconResponse(duties).WithFinalized(isFinalized).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
 	}
 
-	dependentRoot, err := a.getDependentRoot(epoch, false)
+	dependentRoot, err := a.getProposerDependentRoot(epoch, v2)
 	if err != nil {
 		return nil, err
 	}
@@ -214,8 +222,17 @@ func fillProposerDutiesFromIndices(duties []proposerDuties, s *state.CachingBeac
 	return nil
 }
 
-func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter state_accessors.GetValFn, epoch uint64) (common.Hash, error) {
-	if epoch == 0 {
+func (a *ApiHandler) getProposerDependentRoot(epoch uint64, v2 bool) (common.Hash, error) {
+	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+	if v2 && targetVersion >= clparams.FuluVersion {
+		return a.getDependentRoot(epoch, true)
+	}
+	return a.getDependentRoot(epoch, false)
+}
+
+func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter state_accessors.GetValFn, epoch uint64, v2 bool) (common.Hash, error) {
+	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
+	if epoch == 0 || (v2 && targetVersion >= clparams.FuluVersion && epoch <= 1) {
 		rootBytes, err := stateGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(0))
 		if err != nil {
 			return common.Hash{}, err
@@ -233,7 +250,11 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		return root, nil
 	}
 
-	dependentRootSlot := epoch*a.beaconChainCfg.SlotsPerEpoch - 1
+	dependentRootEpoch := epoch
+	if v2 && targetVersion >= clparams.FuluVersion {
+		dependentRootEpoch = epoch - 1
+	}
+	dependentRootSlot := dependentRootEpoch*a.beaconChainCfg.SlotsPerEpoch - 1
 	dependentRootBytes, err := stateGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(dependentRootSlot))
 	if err != nil {
 		return common.Hash{}, err
