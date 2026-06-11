@@ -3,6 +3,7 @@ package fusefilter
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -329,6 +330,11 @@ func (r *ReaderSharded) MadvWillNeed() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
+	addr := uintptr(unsafe.Pointer(&r.m[0]))
+	pageSize := uintptr(os.Getpagesize())
+	pageOffset := addr % pageSize
+	log.Printf("[dbg] MadvWillNeed: fileName=%s addr=0x%x len=%d pageOffset=%d pageAligned=%v",
+		r.fileName, addr, len(r.m), pageOffset, pageOffset == 0)
 	if err := mm.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
