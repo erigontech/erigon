@@ -119,7 +119,7 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
-func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var context *execctx.SharedDomains
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
@@ -132,7 +132,7 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.publishedSD()
 	}
 
-	return &CacheView{context: context, tx: tx}, nil
+	return &CacheView{ctx: ctx, context: context, tx: tx}, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
@@ -142,6 +142,7 @@ func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcach
 }
 
 type CacheView struct {
+	ctx     context.Context
 	context *execctx.SharedDomains
 	tx      kv.TemporalTx
 }
@@ -152,10 +153,10 @@ func (c *CacheView) Get(k []byte) ([]byte, error) {
 		getter = c.context.AsGetter(c.tx)
 	}
 	if len(k) == 20 {
-		v, _, err := getter.GetLatest(context.TODO(), kv.AccountsDomain, k)
+		v, _, err := getter.GetLatest(c.ctx, kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := getter.GetLatest(context.TODO(), kv.StorageDomain, k)
+	v, _, err := getter.GetLatest(c.ctx, kv.StorageDomain, k)
 	return v, err
 }
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
@@ -163,7 +164,7 @@ func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 	if c.context != nil {
 		getter = c.context.AsGetter(c.tx)
 	}
-	v, _, err := getter.GetLatest(context.TODO(), kv.CodeDomain, k)
+	v, _, err := getter.GetLatest(c.ctx, kv.CodeDomain, k)
 	return v, err
 }
 
