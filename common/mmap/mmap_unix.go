@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"syscall"
 	"unsafe"
 
@@ -32,15 +33,19 @@ const MaxMapSize = 0xFFFFFFFFFFFF
 
 var osPageSize = uintptr(os.Getpagesize())
 
-// pageAligned expands m to cover whole pages: start rounded down, end rounded up.
+// pageAligned returns the sub-slice of m covering only whole pages:
+// start rounded up, end rounded down. Returns nil when m spans no full page.
 func pageAligned(m []byte) []byte {
 	if len(m) == 0 {
 		return nil
 	}
-	start := uintptr(unsafe.Pointer(&m[0]))
-	alignedStart := start &^ (osPageSize - 1)
-	alignedEnd := (start + uintptr(len(m)) + osPageSize - 1) &^ (osPageSize - 1)
-	return unsafe.Slice((*byte)(unsafe.Pointer(alignedStart)), int(alignedEnd-alignedStart))
+	start := reflect.ValueOf(m).Pointer()
+	skip := int((osPageSize - start%osPageSize) % osPageSize)
+	trim := int((start + uintptr(len(m))) % osPageSize)
+	if skip+trim >= len(m) {
+		return nil
+	}
+	return m[skip : len(m)-trim]
 }
 
 func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
@@ -69,18 +74,20 @@ func MadviseSequential(mmapHandle1 []byte) error {
 	return nil
 }
 
-func MadviseNormal(mmapHandle1 []byte) error {
-	err := unix.Madvise(pageAligned(mmapHandle1), syscall.MADV_NORMAL)
-	if err != nil && !errors.Is(err, syscall.ENOSYS) {
-		return fmt.Errorf("madvise: %w", err)
+func MadviseNormal(m []byte) error {
+	if aligned := pageAligned(m); len(aligned) > 0 {
+		if err := unix.Madvise(aligned, syscall.MADV_NORMAL); err != nil && !errors.Is(err, syscall.ENOSYS) {
+			return fmt.Errorf("madvise: %w", err)
+		}
 	}
 	return nil
 }
 
-func MadviseWillNeed(mmapHandle1 []byte) error {
-	err := unix.Madvise(pageAligned(mmapHandle1), syscall.MADV_WILLNEED)
-	if err != nil && !errors.Is(err, syscall.ENOSYS) {
-		return fmt.Errorf("madvise: %w", err)
+func MadviseWillNeed(m []byte) error {
+	if aligned := pageAligned(m); len(aligned) > 0 {
+		if err := unix.Madvise(aligned, syscall.MADV_WILLNEED); err != nil && !errors.Is(err, syscall.ENOSYS) {
+			return fmt.Errorf("madvise: %w", err)
+		}
 	}
 	return nil
 }
