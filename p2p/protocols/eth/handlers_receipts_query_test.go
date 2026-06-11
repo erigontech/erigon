@@ -36,7 +36,8 @@ import (
 
 // Per the devp2p spec, a Receipts response carries one receipt list per requested
 // block in request order, ending at the first block the server cannot serve.
-// These tests pin that down for every way serving a block can fail mid-query.
+// These tests pin that down for the ways a block can be unavailable mid-query;
+// internal errors are propagated to the caller instead.
 
 // A block whose receipts cannot be produced (and is not empty) ends the response;
 // skipping it instead would misalign every later entry against the request.
@@ -49,26 +50,24 @@ func TestAnswerGetReceiptsQuery_EndsResponseWhenReceiptsUnavailable(t *testing.T
 	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
 }
 
-// An error producing one block's receipts ends the response there instead of
-// dropping the entire response (the peer must still get the prefix).
-func TestAnswerGetReceiptsQuery_EndsResponseOnReceiptsError(t *testing.T) {
+// An error producing one block's receipts is returned to the caller.
+func TestAnswerGetReceiptsQuery_ReturnsReceiptsError(t *testing.T) {
 	f := newReceiptsQueryFixture(t, 3)
 	f.getter.errs[f.blocks[1].Hash()] = errors.New("receipts unavailable")
 	resp, lastBlockIncomplete, err := answerQuery(t, f)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "receipts unavailable")
 	require.False(t, lastBlockIncomplete)
-	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
+	require.Nil(t, resp)
 }
 
-// An error reading one block ends the response there instead of dropping the
-// entire response.
-func TestAnswerGetReceiptsQuery_EndsResponseOnBlockReadError(t *testing.T) {
+// An error reading one block is returned to the caller.
+func TestAnswerGetReceiptsQuery_ReturnsBlockReadError(t *testing.T) {
 	f := newReceiptsQueryFixture(t, 3)
 	f.br.blockErrs[f.blocks[1].Hash()] = errors.New("block read failed")
 	resp, lastBlockIncomplete, err := answerQuery(t, f)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "block read failed")
 	require.False(t, lastBlockIncomplete)
-	require.Equal(t, []rlp.RawValue{f.encoded(t, 0)}, resp)
+	require.Nil(t, resp)
 }
 
 // A hash whose number resolves but whose block cannot be read ends the response
