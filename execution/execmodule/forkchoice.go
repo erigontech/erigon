@@ -174,9 +174,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// The next semaphore acquirer must observe settled state, so the bg-commit/
 	// bg-prune paths run this eagerly before handing the semaphore to their goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
-		if e.currentContext != nil {
-			e.currentContext.ResetPendingUpdates()
-		}
+		e.currentContext.ResetPendingUpdates()
 		e.forkValidator.ClearWithUnwind()
 	})
 	defer cleanupBeforeSemaRelease()
@@ -228,17 +226,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		currentContext.SetStateCache(e.stateCache)
 	}
 
-	defer func() {
-		if currentContext != nil {
-			// Clear the published overlay before closing the SD, so concurrent
-			// readers (e.g. a second FCU calling GetHeaderByHash) don't access
-			// a closed SharedDomains via Events.LatestSD().
-			if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
-				dispatcher.PublishOverlay(nil)
-			}
-			currentContext.Close()
+	// Clear the published overlay before closing the SD, so concurrent
+	// readers (e.g. a second FCU calling GetHeaderByHash) don't access
+	// a closed SharedDomains via Events.LatestSD().
+	teardownOverlay := func() {
+		if currentContext == nil {
+			return
 		}
-	}()
+		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+			dispatcher.PublishOverlay(nil)
+		}
+		currentContext.Close()
+		currentContext = nil
+	}
+	defer teardownOverlay()
 
 	// Initialize the SD's block overlay for table-level writes (canonical
 	// hashes, stage progress, forkchoice markers, TxNums, etc.). All
@@ -614,7 +615,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		currentContext.Close()
 		currentContext = nil
-		if e.fcuBackgroundCommit {
+		if e.fcuBackgroundCommit && e.currentContext != nil {
+			e.currentContext.Close()
 			e.lock.Lock()
 			e.currentContext = nil
 			e.lock.Unlock()
@@ -668,21 +670,27 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
 
+		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
+		// so the next acquirer observes settled state whenever it gets in.
+		handOffSemaphore := func(work func()) {
+			shouldReleaseSema = false
+			cleanupBeforeSemaRelease()
+			go func() {
+				defer e.semaphore.Release(1)
+				work()
+			}()
+		}
+
 		// Flush + commit: foreground by default, background only if
 		// fcuBackgroundCommit is explicitly enabled.
 		var commitTimings []any
 		if e.fcuBackgroundCommit {
-			shouldReleaseSema = false
-			// Transfer roTx ownership to the goroutine so the outer defer
-			// (roTx.Rollback) becomes a no-op on nil.
-			bgRoTx := roTx
-			roTx = nil
-			bgSD := currentContext
-			currentContext = nil
+			// Transfer roTx + SD ownership to the goroutine so the outer
+			// defers become no-ops.
+			bgRoTx, bgSD := roTx, currentContext
+			roTx, currentContext = nil, nil
 			dispatcher := e.pipelineExecutor.Dispatcher()
-			cleanupBeforeSemaRelease()
-			go func() {
-				defer e.semaphore.Release(1)
+			handOffSemaphore(func() {
 				defer bgSD.Close()
 				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
 				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
@@ -697,7 +705,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				if dispatcher != nil {
 					dispatcher.PublishOverlay(nil)
 				}
-			}()
+			})
 		} else {
 			// Foreground commit: pass the outer roTx so it gets released
 			// between Flush and Commit (same openTxs=2→1 optimization as
@@ -707,39 +715,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			commitTimings = ct
-		}
 
-		// Prune: background by default (fcuBackgroundPrune=true).
-		// Only runs in foreground when both background flags are off.
-		if !e.fcuBackgroundCommit {
+			// Prune: background by default (fcuBackgroundPrune=true). RunPrune
+			// shares the pipeline Sync with the next FCU's RunLoop, so the
+			// goroutine keeps the semaphore until done.
 			if e.fcuBackgroundPrune {
-				// RunPrune shares the pipeline Sync with the next FCU's RunLoop,
-				// so the goroutine holds the semaphore until done. Tear the overlay
-				// down here (prune doesn't use it) to free the SD immediately, and
-				// so the outer defer can't clear it after the next FCU publishes
-				// its own.
-				shouldReleaseSema = false
-				if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
-					dispatcher.PublishOverlay(nil)
-				}
-				if currentContext != nil {
-					currentContext.Close()
-					currentContext = nil
-				}
-				cleanupBeforeSemaRelease()
-				go func() {
-					defer e.semaphore.Release(1)
-					pruneTimings, err := e.runForkchoicePrune(initialCycle)
+				// Prune doesn't use the overlay/SD — tear down eagerly to free
+				// the RAM now and keep the outer defer out of the next FCU's way.
+				teardownOverlay()
+				handOffSemaphore(func() {
+					err := e.runPostForkchoice(nil, nil, finishProgressBefore, isSynced, initialCycle)
 					if err != nil && !errors.Is(err, context.Canceled) {
-						e.logger.Error("Error running background prune", "err", err)
+						e.logger.Error("Error running background post forkchoice", "err", err)
 					}
-					if len(pruneTimings) > 0 {
-						var m runtime.MemStats
-						dbg.ReadMemStats(&m)
-						pruneTimings = append(pruneTimings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-						e.logger.Info("Timings: Background Prune", pruneTimings...)
-					}
-				}()
+				})
 			} else {
 				pruneTimings, err := e.runForkchoicePrune(initialCycle)
 				if err != nil {
@@ -749,12 +738,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 		}
 
-		if len(commitTimings) > 0 {
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			commitTimings = append(commitTimings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-			e.logger.Info("Timings: Forkchoice", commitTimings...)
-		}
+		e.logTimings("Timings: Forkchoice", commitTimings)
 	}
 
 	return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -764,7 +748,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}, stateFlushingInParallel)
 }
 
-// runPostForkchoice runs flush+commit+UpdateHead+prune in a background goroutine.
+// runPostForkchoice runs the enabled background FCU work: flush+commit+UpdateHead
+// when fcuBackgroundCommit (sd non-nil), prune when fcuBackgroundPrune.
 // Notifications have already been dispatched inline from the overlay.
 func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.TemporalTx, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
 	var timings []any
@@ -782,13 +767,19 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.Temp
 		}
 		timings = append(timings, pruneTimings...)
 	}
-	if len(timings) > 0 {
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		e.logger.Info("Timings: Post-Forkchoice", timings...)
-	}
+	e.logTimings("Timings: Post-Forkchoice", timings)
 	return nil
+}
+
+// logTimings logs the collected timings with memory stats appended; no-op when empty.
+func (e *ExecModule) logTimings(msg string, timings []any) {
+	if len(timings) == 0 {
+		return
+	}
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	e.logger.Info(msg, timings...)
 }
 
 // dispatchNotificationsFromOverlay sends notifications reading from the SD's
