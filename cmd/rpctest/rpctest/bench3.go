@@ -17,12 +17,12 @@
 package rpctest
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/state"
 )
 
@@ -35,15 +35,14 @@ func Bench3(erigon_url, geth_url string) error {
 	req_id++
 	template := `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1", "%s", %d, true, true, true], "id":%d}`
 
-	zeroHash := common.Hash{}
-	page := zeroHash[:]
+	zeroAddr := common.Address{}
+	page := zeroAddr[:]
 
 	accRangeTG := make(map[common.Address]state.DumpAccount)
 
 	for len(page) > 0 {
-		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, erigon_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, hexutil.Encode(page), pageSize, req_id), &sr); err != nil {
 			return fmt.Errorf("Could not get accountRange: %v\n", err)
 		}
 		if sr.Error != nil {
@@ -57,11 +56,10 @@ func Bench3(erigon_url, geth_url string) error {
 
 	accRangeGeth := make(map[common.Address]state.DumpAccount)
 
-	page = zeroHash[:]
+	page = zeroAddr[:]
 	for len(page) > 0 {
-		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, geth_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
+		if err := post(client, geth_url, fmt.Sprintf(template, hexutil.Encode(page), pageSize, req_id), &sr); err != nil {
 			return fmt.Errorf("Could not get accountRange: %v\n", err)
 		}
 		if sr.Error != nil {
