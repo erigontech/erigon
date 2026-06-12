@@ -281,9 +281,9 @@ func TestSharedDomain_SkipUnwindFallbackAfterForkchoiceUnwind(t *testing.T) {
 	preExistingValue := []byte{0xAA, 0xBB} // value before old fork
 	oldForkValue := []byte{0xDE, 0xAD}     // value written by old fork
 
-	const preWriteTxNum uint64 = 30  // pre-existing write before the fork
-	const unwindTarget uint64 = 50   // unwind point
-	const oldForkTxNum uint64 = 100  // old fork write
+	const preWriteTxNum uint64 = 30 // pre-existing write before the fork
+	const unwindTarget uint64 = 50  // unwind point
+	const oldForkTxNum uint64 = 100 // old fork write
 
 	// 1. Write a pre-existing value at txNum 30 (before the fork divergence).
 	//    This ensures unwindChangeset will have a non-nil fallback value.
