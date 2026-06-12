@@ -33,7 +33,7 @@ func dumpTenSegments(t *testing.T, sema *semaphore.Weighted) (*freezeblocks.Bloc
 	// Dump ten separate 1k segments [0,1000)..[9000,10000); the last one ends on
 	// a 10k boundary, so the merger combines them into a single [0,10000) file.
 	for from := uint64(0); from < chainSize; from += 1000 {
-		require.NoError(t, freezeblocks.DumpBlocks(m.Ctx, from, from+1000, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig))
+		require.NoError(t, freezeblocks.DumpBlocks(m.Ctx, from, from+1000, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig, nil))
 		// Reopen so the next segment's firstTxNum is computed from the prior one.
 		require.NoError(t, m.BlockSnapshots.OpenFolder())
 	}

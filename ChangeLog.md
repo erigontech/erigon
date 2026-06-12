@@ -1,6 +1,16 @@
 # Changelog
 
-## [3.5.0] – TBD
+## [3.5.0] "Tidal Tails" – TBD
+
+Erigon 3.5.0 is a major release headlined by **parallel block execution becoming the default** and **initial support for Ethereum's upcoming Glamsterdam hardfork**. It is a drop-in upgrade for 3.4.x users — no re-sync required; existing datadirs upgrade their prune configuration automatically (see Breaking Changes).
+
+### Key Features
+
+- **Parallel block execution, on by default.** Erigon now executes EVM transactions across multiple cores by default, using the Block-STM (software transactional memory) design pioneered by Aptos: transactions run optimistically in parallel and are re-validated against a multi-version state, re-executing only on conflict (#21591 by @mh0lt, closes #17630). Revert to the serial path with `EXEC3_PARALLEL=false` or `--exec.serial`.
+- **Glamsterdam devnet support.** Initial implementation of Ethereum's next hardfork: Block-Level Access Lists (EIP-7928), enshrined Proposer-Builder Separation / "GLOAS" (EIP-7732) in Caplin, gas repricings (EIP-8037, EIP-7976, EIP-7981), larger contracts (EIP-7954), transfer logs (EIP-7708), and the `eth/71` Block Access List wire protocol (EIP-8159). **Devnet/testing only — not scheduled on mainnet or any public testnet.**
+- **`debug_executionWitness`.** Stateless execution-witness generation (EIP-7928/8025) with reth-compatible output, for zkEVM and stateless clients (#20205 by @antonis19, #21629 by @awskii).
+- **More aggressive history pruning by default.** `--prune.mode=full` now follows the EIP-8252 reorg-retention window (~36 days / 262,144 blocks) — see Breaking Changes.
+- **GraphQL API revival.** Broad resolver coverage restored — queries, logs, `call`, `sendRawTransaction`, `estimateGas`, `gasPrice`, storage, and EIP-4844 fields.
 
 ### Breaking Changes
 
@@ -80,6 +90,121 @@ The change is **twofold**:
 ```
 
 Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceCall`.
+
+---
+
+#### Clique PoA consensus engine removed
+
+The legacy Clique proof-of-authority engine has been removed (#20532 by @yperbasis). `--chain=dev` now runs on an embedded proof-of-stake consensus instead of Clique (#20451 by @mh0lt), matching how all live networks operate post-Merge. Networks or tooling that still depended on Clique are no longer supported.
+
+---
+
+#### Silkworm integration removed
+
+The optional Silkworm C++ execution-backend integration and its `--silkworm.*` flags have been removed (#19662 by @canepat). Erigon uses its native Go execution engine exclusively.
+
+---
+
+### Glamsterdam (Devnet Support)
+
+3.5.0 adds an initial implementation of Ethereum's next hardfork — **Glamsterdam** (consensus-layer "Gloas" + execution-layer "Amsterdam") — for devnet testing and validation. **It is not scheduled on mainnet or any public testnet**, and these code paths are inert on production networks until an activation time is configured.
+
+- **EIP-7928 — Block-Level Access Lists (BAL):** records every account and storage slot a block touches, enabling deterministic parallel validation. Full builder, validator, and strict-validation support (#19627, #19656, #20602, #20776), plus the `eth_getBlockAccessList` RPC method (#19929) — by @mh0lt, @yperbasis, @Sahil-4555
+- **EIP-7732 — Enshrined Proposer-Builder Separation (ePBS / "GLOAS"):** implemented in Caplin — execution-payload envelope, PTC, and builder payments (#18956) — with follow-up audit and fork-choice fixes (#21248, #21228) — by @domiwei
+- **Gas repricings:** EIP-8037 State Creation Gas Cost Increase (#19596), EIP-7976 calldata floor cost (#20613), EIP-7981 access-list cost (#20671) — by @taratorio
+- **EIP-7954 — Increase Maximum Contract Size** (#19624) — by @yperbasis
+- **EIP-7843 — slot-number system contract**, wired into Caplin block production and `engine_forkchoiceUpdatedV4` (#20175) — by @yperbasis
+- **Networking:** `eth/71` Block Access List exchange (EIP-8159, #20793, #20794, #20795) — by @mh0lt
+
+### Added
+
+#### RPC
+
+- `debug_executionWitness`: generate stateless execution witnesses (EIP-7928/8025), with `legacy` and `canonical` output modes — the `legacy` format is reth-compatible — for zkEVM and stateless clients (#20205, #21371, #21518, #21629) — by @antonis19, @lupin012, @awskii
+- `eth_capabilities`: report the set of supported RPC methods (#20951) — by @lupin012
+- `debug_setHead`: rewind the chain head (#19577) — by @canepat
+- **GraphQL** substantially revived — transaction, logs, `call`, `sendRawTransaction`, `estimateGas`, `gasPrice`, and storage resolvers, plus EIP-4844 fields (#20389, #20916, #21219, #21379, #21060) — by @lupin012
+- `testing_` namespace exposed via `--http.api` for engine/spec test harnesses (#20482) — by @lupin012
+- `eth_simulateV1`: per-call gas and result limits (#20232) — by @Sahil-4555
+
+#### CLI & Operations
+
+- `--snap.p2p-manifest` (experimental, opt-in): decentralized snapshot distribution over P2P — peers advertise their `chain.toml` manifest via ENR, instead of the centralized `preverified.toml` (#20526, #20615) — by @mh0lt
+- `--exec.no-prune` (disable all DB pruning), `--exec.serial` (force single-threaded execution), and `--exec.*` executor-tuning flags (#20915, #20853, #20797) — by @mh0lt
+- `seg du` (snapshot disk-usage analysis, #20104) and `seg rm-blocks` (remove latest block snapshots, #20554) — by @awskii, @sudeepdino008
+
+### Changed
+
+#### RPC
+
+- WebSocket transport rewritten on `coder/websocket`, with overload protection, clean close frames, and bounded write timeouts (#20097, #20446, #20788, #20923) — by @lystopad, @lupin012, @Sahil-4555
+- Admission control: uniform `503` responses under load (#20303); optional response compression via libdeflate (#20665) — by @lupin012
+- Geth compatibility: `debug_traceTransaction` index format (#20210), `trace_rawTransaction` (#20448), `debug_accountRange` (#20057), null `v,r,s` for unsigned transactions (#21321) — by @lupin012
+- Performance: faster `eth_getLogs` (#20561), `trace_block` (#20182), `eth_gasPrice` (#19678), canonical-hash cache (#19173); `engine_getPayload` ~2.4× and `getBlobs` ~10× faster (#21615, #21606) — by @lupin012, @taratorio
+- `trace_*` returns an explicit error when an unsupported custom tracer is supplied (#21544) — by @lupin012
+
+#### Networking & P2P
+
+- New `eth/70` wire protocol: partial block receipt lists (EIP-7975, #19755) — by @yperbasis
+- All eth protocol versions now multiplex on a single TCP listener (see Breaking Changes, #21335) — by @lystopad
+- Peer hygiene / DoS hardening: cap and rate-limit inbound `NewBlockHashes` (#21557), enforce the 4096-hash limit on `NewPooledTransactionHashes` (#20577), drop peers failing blob KZG verification (#21421), and bound fan-out stream buffers (#20783) — by @yperbasis
+- Skip chain-specific bootnodes on genesis-hash mismatch (#19807); honour an explicitly empty `--bootnodes` (#20630) — by @yperbasis
+
+#### TxPool
+
+- Proactive dormancy-based eviction of stale queued transactions (#19862) — by @lystopad
+- Transaction parsing migrated onto the shared `execution/types` transaction types (#19757); malformed EIP-7702 authorization tuples are now tolerated rather than rejected wholesale (#20809) — by @yperbasis
+
+#### Caplin (Consensus Layer)
+
+- Unified Engine API client for standalone mode (#20035) — by @mh0lt
+- Fork-choice and ENR-stability fixes — recovery from a post-GLOAS fork-choice stall and a persistent node key for stable ENR across restarts (#21228, #21276) — by @domiwei
+
+#### Storage & Performance
+
+- Off-heap Elias-Fano index building (#20640) and parallel commitment computation (#20805) — by @AskAlexSharov, @mh0lt
+- Transient-storage zero-write fast path (#20568) and opcode-scoped intern cache to eliminate duplicate `unique.Make()` (#20552) — by @Sahil-4555, @AskAlexSharov
+
+### Removed
+
+- Clique PoA engine (#20532 by @yperbasis) and Silkworm integration (#19662 by @canepat) — see Breaking Changes.
+- Unused `hack` (#20412), `state` (#20420), and `diag` (#21351) helper binaries — by @awskii, @AskAlexSharov
+
+### Security
+
+- `--ethstats` credentials are redacted from the startup command log (#20890) — by @MysticRyuujin
+- DoS-resistance limits on inbound P2P message volume (#20577, #21557) and bounded RPC/stream buffers (#20446, #20783) — by @yperbasis, @lupin012
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.5.0
+
+---
+
+## [3.4.3] "Splashing Saga" – 2026-06-02
+
+v3.4.3 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- db/state: prune `TemporalMemBatch` overlay entries past the unwind point (#21538) by @JkLondon — second
+  fix for the post-reorg `gas used mismatch` / state-leak some users still hit on v3.4.2. After a tip reorg
+  a stale read in the in-memory overlay could return a write made *inside* the unwound `txNum` range,
+  flipping an `SSTORE` from cold to warm gas pricing. Complements the #21157 diffset fix shipped in v3.4.2.
+- rpc: match Geth semantics in `debug_getModifiedAccountsByHash` / `debug_getModifiedAccountsByNumber`
+  (#21507) by @lupin012 — corrects the block-range convention (exclusive start), now also reports contracts
+  whose storage changed without an account change, and excludes touched-but-unchanged precompiles and
+  self-destructed accounts.
+- node/cli: register `--rpc.logs.maxresults` in `DefaultFlags` so it takes effect via the CLI (#21389) by
+  @lupin012 — the limit was documented in 3.4.0 but never wired into the flag set, so setting it on the
+  command line had no effect; it now applies.
+
+**Improvements**
+
+- execution/p2p, execution/engineapi: fail-fast `engine_newPayload` backward download when the gap exceeds
+  the reorg limit (#21502) by @yperbasis — when a payload's parent is more than `MaxReorgDepth` blocks from
+  the local head, the download short-circuits instead of fetching a header batch every slot, and logs the
+  expected gap at INFO instead of WARN. The gap is still closed by the following fork-choice update.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.2...v3.4.3
 
 ---
 

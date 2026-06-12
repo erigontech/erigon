@@ -1,6 +1,7 @@
 package ethapi
 
 import (
+	"math"
 	"math/big"
 	"testing"
 
@@ -116,6 +117,36 @@ func TestOverride_PartialOverrideDoesNotTouchOtherFields(t *testing.T) {
 	assert.Equal(t, uint64(10), ctx.BlockNumber, "BlockNumber must be unchanged")
 	assert.Equal(t, uint64(99), ctx.Time, "Time must be unchanged")
 	assert.Equal(t, uint64(30_000_000), ctx.GasLimit)
+}
+
+func TestOverride_GasLimitAndMaxGasLimit(t *testing.T) {
+	tests := []struct {
+		name            string
+		overrides       BlockOverrides
+		wantGasLimit    uint64
+		wantMaxGasLimit bool
+	}{
+		{
+			name:            "clears MaxGasLimit when GasLimit is overridden",
+			overrides:       BlockOverrides{GasLimit: u64Hex(30_000_000)},
+			wantGasLimit:    30_000_000,
+			wantMaxGasLimit: false,
+		},
+		{
+			name:            "leaves MaxGasLimit untouched when GasLimit is not overridden",
+			overrides:       BlockOverrides{},
+			wantGasLimit:    math.MaxUint64,
+			wantMaxGasLimit: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := evmtypes.BlockContext{GasLimit: math.MaxUint64, MaxGasLimit: true}
+			require.NoError(t, tt.overrides.Override(&ctx))
+			assert.Equal(t, tt.wantGasLimit, ctx.GasLimit)
+			assert.Equal(t, tt.wantMaxGasLimit, ctx.MaxGasLimit)
+		})
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
