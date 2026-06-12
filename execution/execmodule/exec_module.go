@@ -541,10 +541,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, criticalError
 	}
 
-	// No cache cleanup needed on an invalid block: the write path only
-	// invalidates cache entries (never stores uncommitted values), and fork
-	// validation never commits, so a rejected payload leaves no poisoned cache
-	// state to clear.
+	// Clear state cache on invalid block
+	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if e.stateCache != nil && isInvalid {
+		e.stateCache.ClearWithHash(header.ParentHash)
+	}
 
 	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
 	// its rollback. By design we do not persist validation-run writes — there

@@ -991,16 +991,9 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Write path INVALIDATES the cache entry rather than storing the new value:
-	// the value already lives in sd.mem (the write-path's local copy), so caching
-	// it here would both double-store and put an uncommitted value into the
-	// aggregator-lifetime cache — which a failed commit would then leave ahead of
-	// MDBX (poison). Dropping the entry keeps the cache holding only committed
-	// state; the next read repopulates it from committed files. (Guaranteed-no-
-	// poisoning consistency pulled forward from #21386; that PR adds back warm
-	// post-commit repopulation under its txNum/epoch model.)
+	// Update state cache when writing
 	if sd.stateCache != nil {
-		sd.stateCache.Delete(domain, k)
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	// Serialize against the calculator's accumulator-swap window — see
