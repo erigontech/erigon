@@ -37,9 +37,8 @@ import (
 func writeIndex(writes VersionedWrites) map[AccountKey]any {
 	idx := make(map[AccountKey]any, len(writes))
 	for _, w := range writes {
-		idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
-		// Keyed per-address via a composite; store per-address sub-map below.
-		_ = w.Address
+		h := w.Header()
+		idx[AccountKey{Path: h.Path, Key: h.Key}] = w.ValAny()
 	}
 	return idx
 }
@@ -48,8 +47,9 @@ func writeIndex(writes VersionedWrites) map[AccountKey]any {
 func addrWriteIndex(writes VersionedWrites, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for _, w := range writes {
-		if w.Address == addr {
-			idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
+		h := w.Header()
+		if h.Address == addr {
+			idx[AccountKey{Path: h.Path, Key: h.Key}] = w.ValAny()
 		}
 	}
 	return idx
@@ -115,7 +115,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.True(t, ok, "addr1: CodePath write missing from VersionedWrites")
 	gotCode1, err := ibs.GetCode(addr1)
 	require.NoError(t, err)
-	require.Equal(t, gotCode1, wcode1.([]byte), "addr1: code mismatch between stateObject and VersionedWrites")
+	require.Equal(t, gotCode1, wcode1.(accounts.Code).Bytes, "addr1: code mismatch between stateObject and VersionedWrites")
 
 	wstor1, ok := idx1[AccountKey{Path: StoragePath, Key: key1}]
 	require.True(t, ok, "addr1: StoragePath[key1] write missing from VersionedWrites")

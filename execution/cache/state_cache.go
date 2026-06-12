@@ -24,7 +24,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func (c *StateCache) PutCode(hash accounts.CodeHash, code []byte) accounts.Code {
+	return accounts.Code{Hash: hash, Bytes: code}
+}
 
 const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (1 GB)

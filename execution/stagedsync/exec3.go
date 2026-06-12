@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -137,9 +139,18 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	// Background collation removed from exec code — collation is now managed
-	// by CollateAndPrune in the FCU/stage loop (forkchoice.go).
-	// Block-snapshot boundary gating happens inside readyForCollation.
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		// Cap collation to the max txNum covered by block files.
+		// Without this, collation creates domain files past the block
+		// file boundary, causing "behind commitment" errors.
+		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
+			agg.SetMaxCollationTxNum(maxTxNum)
+		}
+		// Background collation removed from exec code — collation is now managed
+		// by CollateAndPruneIfNeeded in the FCU/stage loop (forkchoice.go).
+		// This avoids background collation db.View() txs overlapping with
+		// commit+prune, which prevented MDBX GC page reclamation.
+	}
 
 	var (
 		inputTxNum               uint64
@@ -197,12 +208,6 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Short-term: keep the trie warmuper's value cache off on the parallel
-	// path. The warmuper reads paraTrieDB (persisted state), so during a
-	// multi-block uncommitted batch (fork validation) it caches values stale
-	// w.r.t. sd.mem and feeds them to the trie, producing wrong roots. The
-	// page-cache warmer above is unaffected; the full fix lands separately.
-	doms.EnableWarmupCache(!isApplyingBlocks && !parallel)
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
@@ -306,10 +311,11 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
+					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
@@ -414,6 +420,7 @@ type txExecutor struct {
 
 	execRequests chan *execRequest
 	execCount    atomic.Int64
+	reExecCount  atomic.Int64
 	abortCount   atomic.Int64
 	invalidCount atomic.Int64
 	readCount    atomic.Int64
@@ -597,13 +604,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 
 			var dbBAL types.BlockAccessList
-			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
-			// a separate db.View() as it can deadlock with the stageloop's
-			// RW transaction when BlockOverlay is active.
-			data, err := rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
-			if err != nil {
-				return err
-			}
+			// BALs are cache-only (see db/rawdb/balcache.go). If the engine_newPayload
+			// path cached one for this block (via execmodule.InsertBlocks), pick it up
+			// here for the parallel exec's BAL validation.
+			data, _ := balcache.CachedBlockAccessList(b.Hash())
 			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
@@ -631,6 +635,25 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var txTasks []exec.Task
 			// Per-block committed state cache for parallel workers' GetCommittedState.
 			blockStateCache := state.NewBlockStateCache()
+
+			// Pattern B: seed the per-block cache from cache.StateCache hits
+			// the async BlockReadAheader already populated. Source order: the
+			// canonical MDBX BAL above (dbBAL) on sync paths, balcache on the
+			// bench/engine path where BAL only lives in memory. RAM-to-RAM,
+			// no MDBX, misses fall through to the lazy CachedReaderV3 path.
+			prewarmBAL := dbBAL
+			if len(prewarmBAL) == 0 {
+				if data, ok := balcache.CachedBlockAccessList(b.Hash()); ok && len(data) > 0 {
+					if decoded, decErr := types.DecodeBlockAccessListBytes(data); decErr == nil {
+						prewarmBAL = decoded
+					}
+				}
+			}
+			if len(prewarmBAL) > 0 {
+				if stateCache := te.doms.GetStateCache(); stateCache != nil {
+					state.PrewarmBlockStateCacheFromBAL(blockStateCache, prewarmBAL, stateCache)
+				}
+			}
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {

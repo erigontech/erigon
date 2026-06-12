@@ -1,13 +1,13 @@
 package state
 
 import (
+	"github.com/erigontech/erigon/execution/tracing"
 	"testing"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -122,7 +122,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	writes90 := ibs90.VersionedWrites(false)
 	hasCodeWrite := false
 	for _, w := range writes90 {
-		if w.Address == addr && w.Path == CodePath {
+		if w.Header().Address == addr && w.Header().Path == CodePath {
 			hasCodeWrite = true
 			break
 		}

@@ -215,30 +215,7 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 }
 
 func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
-	// Symmetric with createObjectChange.dirtied: both journal entries
-	// represent the same logical operation (a stateObject was placed at
-	// this address); they differ only in revert behaviour
-	// (createObjectChange.revert deletes; resetObjectChange.revert swaps
-	// back to prev). Dirty tracking must be identical, otherwise the
-	// recreated address is missed from journal.dirties and downstream
-	// consumers (FinalizeTx, GetRemovedAccountsWithBalance, MakeWriteSet)
-	// silently skip it.
-	//
-	// Manifests under parallel-exec when tx1 SD's an address and tx2 hits
-	// CreateAccount / GetOrNewStateObject on the same address — the
-	// versionedRead-synthesised `previous` is non-nil so createObject's
-	// else-branch is taken; with dirtied() returning false the worker's
-	// MakeWriteSet drops the write for the recreated address and the
-	// receipts / state root diverge from serial. See #21138.
-	//
-	// Known regression at the time of this change: TestSelfDestructReceive
-	// fails under EXEC3_PARALLEL=true with a wrong-trie-root, because the
-	// validator's stateObject reconstruction for an SD-then-revived address
-	// emits different field values (`nonce=1, codehash=emptyHash`) than
-	// the unfixed canonical (`nonce=0, codehash=<nil>`). Tracked in #21217
-	// — needs a narrower fix that gets the empty-touch / CreateAccount
-	// case right without changing the AddBalance(non-zero) writeset.
-	return ch.account, true
+	return accounts.NilAddress, false
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
@@ -251,7 +228,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 		var tracePrefix string
 		if trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-			fmt.Printf("%s Revert SelfDestruct %x: %v:%s, prev: %v:%s, commited: %v\n", tracePrefix, ch.account, ch.prev, ch.prevbalance.String(), obj.selfdestructed, obj.data.Balance.String(), ch.wasCommited)
+			fmt.Printf("%s Revert SelfDestruct %x: %v:%d, prev: %v:%d, commited: %v\n", tracePrefix, ch.account, ch.prev, &ch.prevbalance, obj.selfdestructed, &obj.data.Balance, ch.wasCommited)
 		}
 		obj.selfdestructed = ch.prev
 		obj.setBalance(ch.prevbalance)
@@ -259,29 +236,31 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 		if s.versionMap != nil {
 			if ch.wasCommited {
 				if trace {
-					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, ch.prev)
+					if v, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
+						sd := v.Val
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
 					}
-					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
-						val := v.Val.(uint256.Int)
-						fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, val.String(), ch.prevbalance.String())
+					if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
+						val := v.Val
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
 				}
-				s.versionedWrites.Delete(ch.account, AccountKey{Path: BalancePath})
-				s.versionedWrites.Delete(ch.account, AccountKey{Path: SelfDestructPath})
+				s.versionedWrites.DelBalance(ch.account)
+				s.versionedWrites.DelSelfDestruct(ch.account)
 			} else {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
+				if v, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
 					if trace {
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, ch.prev)
+						sd := v.Val
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
 					}
-					s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: SelfDestructPath}, ch.prev)
+					s.versionedWrites.updateSelfDestruct(ch.account, ch.prev)
 				}
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
-					val := v.Val.(uint256.Int)
+				if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
+					val := v.Val
 					if trace {
-						fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, val.String(), ch.prevbalance.String())
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
-					s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: BalancePath}, ch.prevbalance)
+					s.versionedWrites.updateBalance(ch.account, ch.prevbalance)
 				}
 			}
 		}
@@ -318,25 +297,25 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		fmt.Printf("%s Revert Balance %x: %s, prev: %s, orig: %s, commited: %v\n", tracePrefix, ch.account, obj.data.Balance.String(), ch.prev.String(), obj.original.Balance.String(), ch.wasCommited)
+		fmt.Printf("%s Revert Balance %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, &obj.data.Balance, &ch.prev, &obj.original.Balance, ch.wasCommited)
 	}
 	obj.setBalance(ch.prev)
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
-					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, val.String(), ch.prev.String())
+				if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
+					val := v.Val
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: BalancePath})
+			s.versionedWrites.DelBalance(ch.account)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+			if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
 				if trace {
-					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, val.String(), ch.prev.String())
+					val := v.Val
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
-				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: BalancePath}, ch.prev)
+				s.versionedWrites.updateBalance(ch.account, ch.prev)
 			}
 		}
 	}
@@ -381,23 +360,25 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, obj.data.Nonce, ch.prev, obj.original.Nonce, ch.wasCommited)
+		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, obj.data.Nonce, &ch.prev, obj.original.Nonce, ch.wasCommited)
 	}
 	obj.setNonce(ch.prev)
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, ch.prev)
+				if v, ok := s.versionedWrites.GetNonce(ch.account); ok {
+					n := v.Val
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: NoncePath})
+			s.versionedWrites.DelNonce(ch.account)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
+			if v, ok := s.versionedWrites.GetNonce(ch.account); ok {
 				if trace {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, ch.prev)
+					n := v.Val
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
 				}
-				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: NoncePath}, ch.prev)
+				s.versionedWrites.updateNonce(ch.account, ch.prev)
 			}
 		}
 	}
@@ -419,44 +400,45 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		_, cs := printCode(obj.code)
+		_, cs := printCode(obj.code.Bytes)
 		_, ps := printCode(ch.prevcode)
 		fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %x, origHash: %x, prevCode: %s, commited: %v\n", tracePrefix,
 			ch.account, obj.data.CodeHash, cs, ch.prevhash, obj.original.CodeHash, ps, ch.wasCommited)
 	}
-	obj.setCode(ch.prevhash, ch.prevcode)
+	obj.setCode(accounts.Code{Hash: ch.prevhash, Bytes: ch.prevcode})
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(accounts.CodeHash), ch.prevhash)
-				}
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
-					_, cs := printCode(v.Val.([]byte))
-					_, ps := printCode(ch.prevcode)
-					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
-				}
-			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeHashPath})
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodePath})
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeSizePath})
-		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
-				if trace {
-					_, cs := printCode(v.Val.([]byte))
-					_, ps := printCode(ch.prevcode)
-					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
-				}
-				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodePath}, ch.prevcode)
-			}
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
-				if trace {
+				if v, ok := s.versionedWrites.GetCodeHash(ch.account); ok {
 					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val, ch.prevhash)
 				}
-				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
+				if v, ok := s.versionedWrites.GetCode(ch.account); ok {
+					_, cs := printCode(v.Val.Bytes)
+					_, ps := printCode(ch.prevcode)
+					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
+				}
 			}
-			if _, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
-				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeSizePath}, len(ch.prevcode))
+			s.versionedWrites.DelCodeHash(ch.account)
+			s.versionedWrites.DelCode(ch.account)
+			s.versionedWrites.DelCodeSize(ch.account)
+		} else {
+			if v, ok := s.versionedWrites.GetCode(ch.account); ok {
+				if trace {
+					_, cs := printCode(v.Val.Bytes)
+					_, ps := printCode(ch.prevcode)
+					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
+				}
+				s.versionedWrites.updateCode(ch.account, accounts.Code{Hash: ch.prevhash, Bytes: ch.prevcode})
+			}
+			if v, ok := s.versionedWrites.GetCodeHash(ch.account); ok {
+				if trace {
+					h := v.Val
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, h, ch.prevhash)
+				}
+				s.versionedWrites.updateCodeHash(ch.account, ch.prevhash)
+			}
+			if _, ok := s.versionedWrites.GetCodeSize(ch.account); ok {
+				s.versionedWrites.updateCodeSize(ch.account, len(ch.prevcode))
 			}
 		}
 	}
@@ -479,24 +461,24 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
 		val, _ := obj.GetState(ch.key)
 		commited, _ := obj.GetCommittedState(ch.key)
-		fmt.Printf("%s Revert State %x %x: %s, prev: %s, orig: %s, commited: %v\n", tracePrefix, ch.account, ch.key, val.String(), ch.prevalue.String(), commited.String(), ch.wasCommited)
+		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
-					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %x: %s -> %s\n", tracePrefix, ch.account, ch.key, val.Hex()[2:], ch.prevalue.Hex()[2:])
+				if v, ok := s.versionedWrites.GetStorage(ch.account, ch.key); ok {
+					val := v.Val
+					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: StoragePath, Key: ch.key})
+			s.versionedWrites.DelStorage(ch.account, ch.key)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
+			if v, ok := s.versionedWrites.GetStorage(ch.account, ch.key); ok {
 				if trace {
-					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %x: %s -> %s\n", tracePrefix, ch.account, ch.key, val.String(), ch.prevalue.String())
+					val := v.Val
+					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
-				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: StoragePath, Key: ch.key}, ch.prevalue)
+				s.versionedWrites.updateStorage(ch.account, ch.key, ch.prevalue)
 			}
 		}
 	}

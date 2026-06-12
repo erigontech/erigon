@@ -377,6 +377,9 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
+	// A concurrent RunPrune on the same Sync may have advanced currentStage.
+	s.currentStage = 0
+
 	// Reset currentStage on every exit so the next invocation starts at
 	// stages[0]. Sync.Run is contracted to run a full pipeline per call;
 	// without this defer, an error return from a stage leaves currentStage

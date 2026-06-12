@@ -958,12 +958,14 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	phantomVal := *uint256.NewInt(0xaabb)
 
 	invalidTxWrites := state.VersionedWrites{
-		{
-			Address: addr,
-			Path:    state.StoragePath,
-			Key:     slot,
-			Version: state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc},
-			Val:     phantomVal,
+		&state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{
+				Address: addr,
+				Path:    state.StoragePath,
+				Key:     slot,
+				Version: state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc},
+			},
+			Val: phantomVal,
 		},
 	}
 
