@@ -213,8 +213,7 @@ type ExecModule struct {
 	config  *chain.Config
 	syncCfg ethconfig.Sync
 	// rules engine
-	engine rules.Engine
-	// regenerates pruned Block Access Lists for engine_getPayloadBodiesBy*V2
+	engine         rules.Engine
 	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
