@@ -158,24 +158,24 @@ STRESS_INTER_ITER_SEC="${STRESS_INTER_ITER_SEC:-90}"
 SNAP_DIR="${SNAP_DIR:-}"
 INVENTORY_CHECK="${INVENTORY_CHECK:-1}"
 
-# inventory_check: compare chain.toml's listed block-snapshot files
-# against what's actually on disk. Returns a count of mismatches via
-# stdout (0 = consistent). Used as a post-setHead regression signal.
-# When SNAP_DIR is empty, returns 0 (skipped — typical when the script
-# runs without datadir access).
-inventory_check() {
+# inventory_drift: returns "missing_on_disk on_disk_not_in_toml" pair.
+# Used to compute before/after deltas around a setHead so transient
+# steady-state drift (mid-retire files not yet advertised, normal in
+# a busy node) doesn't fire false positives. The setHead-induced
+# regression we care about is *new* drift introduced by the unwind —
+# captured by the delta, not the absolute.
+inventory_drift() {
     if [[ -z "$SNAP_DIR" || ! -r "$SNAP_DIR/chain.toml" ]]; then
-        echo "0"
+        echo "0 0"
         return
     fi
-    # Files chain.toml advertises (extract the bare filename).
     local toml_files disk_files missing_on_disk on_disk_not_in_toml
     toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
         | tr -d '"' | sort -u || true)
     disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
     missing_on_disk=$(comm -23 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
     on_disk_not_in_toml=$(comm -13 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
-    echo "$((missing_on_disk + on_disk_not_in_toml))"
+    echo "$missing_on_disk $on_disk_not_in_toml"
 }
 
 # scenario_test: run one setHead test and write a CSV row. Args:
@@ -214,6 +214,10 @@ scenario_test() {
     target_hex=$(dec_to_hex "$target")
     log_offset=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
     start_ts=$(date +%s)
+    # Inventory baseline BEFORE the setHead. The delta after recovery
+    # tells us whether the unwind introduced new chain.toml/disk drift.
+    local pre_missing pre_extras
+    read -r pre_missing pre_extras <<< "$(inventory_drift)"
     echo "iter $iter $phase: $(date +%T) pre_head=$pre_head depth=$depth target=$target ($target_hex)"
     resp=$(curl -s --max-time "$sethead_timeout" -X POST -H "Content-Type: application/json" \
         --data "{\"jsonrpc\":\"2.0\",\"method\":\"debug_setHead\",\"params\":[\"$target_hex\"],\"id\":1}" \
@@ -264,7 +268,10 @@ scenario_test() {
     errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
         | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process" \
         || true)
-    inv_drift=$(inventory_check)
+    local post_missing post_extras
+    read -r post_missing post_extras <<< "$(inventory_drift)"
+    local d_missing=$((post_missing - pre_missing))
+    local d_extras=$((post_extras - pre_extras))
     note="ok"
     if [[ $recovery_ok -ne 1 ]]; then
         note="fail:recovery-timeout"
@@ -276,13 +283,20 @@ scenario_test() {
         PHASE_RC=1
         OVERALL_RC=1
     fi
-    if [[ $inv_drift -gt 0 ]]; then
-        note="${note}+inv_drift=${inv_drift}"
+    # missing-on-disk delta is always a hard regression (toml advertises
+    # files that aren't there → next setHead reads stale view).
+    # extras-on-disk delta is informational only — a busy node retiring
+    # / merging in the background routinely shows transient extras.
+    if [[ $d_missing -gt 0 ]]; then
+        note="${note}+inv_missing+=${d_missing}"
         PHASE_RC=1
         OVERALL_RC=1
     fi
+    if [[ $d_extras -ne 0 ]]; then
+        note="${note}+inv_extras=${d_extras}"
+    fi
     echo "$iter,$phase,$target,$pre_head,$post_head,$duration,$errors,$note" >> "$OUT"
-    echo "iter $iter $phase: $note post_head=$post_head duration=${duration}s errors=$errors inv_drift=$inv_drift"
+    echo "iter $iter $phase: $note post_head=$post_head duration=${duration}s errors=$errors inv_missing=$post_missing/+$d_missing inv_extras=$post_extras/$d_extras"
 }
 
 # emit CSV header if file is empty/new
