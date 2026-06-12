@@ -105,29 +105,33 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			startRootNum, endRootNum := item.src.Range()
 			compression := f.isCompressionUsed(RootNum(startRootNum), RootNum(endRootNum))
 
-			if err = item.src.decompressor.WithReadAhead(func() error {
-				reader := f.PagedDataReader(item.src.decompressor, compression)
-				var k, v []byte
-				var fmeta NumMetadata
-				if err := fmeta.Unmarshal(reader.GetMetadata()); err != nil {
-					return err
-				}
-				if meta.Count == 0 {
-					meta.First = fmeta.First
-				}
-				meta.Last = fmeta.Last
-				meta.Count += fmeta.Count
-
-				for reader.HasNext() {
-					k, v, word, _ = reader.Next2(word[:0])
-					if err = writer.Add(k, v); err != nil {
-						return err
-					}
-					p.Processed.Add(1)
-				}
-				return nil
-			}); err != nil {
+			view, viewErr := item.src.decompressor.OpenSequentialView()
+			if viewErr != nil {
+				err = viewErr
 				return
+			}
+			defer view.Close()
+			reader := seg.NewPagedReader(
+				seg.NewReader(view.MakeGetter(), f.cfg.Compression),
+				f.cfg.ValuesOnCompressedPage, compression,
+			)
+			var k, v []byte
+			var fmeta NumMetadata
+			if err = fmeta.Unmarshal(reader.GetMetadata()); err != nil {
+				return
+			}
+			if meta.Count == 0 {
+				meta.First = fmeta.First
+			}
+			meta.Last = fmeta.Last
+			meta.Count += fmeta.Count
+
+			for reader.HasNext() {
+				k, v, word, _ = reader.Next2(word[:0])
+				if err = writer.Add(k, v); err != nil {
+					return
+				}
+				p.Processed.Add(1)
 			}
 
 		}
