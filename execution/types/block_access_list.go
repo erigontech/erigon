@@ -874,6 +874,91 @@ func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
 	return nil
 }
 
+// CountDeclaredReads returns the total number of storage_reads entries across
+// all accounts (R_declared in EIP-7928 Security Considerations).
+func (bal BlockAccessList) CountDeclaredReads() int {
+	var n int
+	for _, ac := range bal {
+		n += len(ac.StorageReads)
+	}
+	return n
+}
+
+// DeclaredReadTracker accumulates which (address, slot) pairs from a declared
+// BlockAccessList's storage_reads have been satisfied by an actual SLOAD during
+// block execution. It backs the EIP-7928 phantom-read DoS mitigation: at each
+// transaction boundary, the executor observes the tx's reads, then asks
+// EarlyRejectCheck whether enough block gas remains to still satisfy the
+// outstanding declared reads at the minimum per-read cost.
+type DeclaredReadTracker struct {
+	pending   map[common.Address]map[common.Hash]struct{}
+	remaining int
+}
+
+func NewDeclaredReadTracker(bal BlockAccessList) *DeclaredReadTracker {
+	t := &DeclaredReadTracker{pending: make(map[common.Address]map[common.Hash]struct{}, len(bal))}
+	for _, ac := range bal {
+		if ac == nil || len(ac.StorageReads) == 0 {
+			continue
+		}
+		addr := ac.Address.Value()
+		slots := make(map[common.Hash]struct{}, len(ac.StorageReads))
+		for _, k := range ac.StorageReads {
+			slots[k.Value()] = struct{}{}
+		}
+		t.pending[addr] = slots
+		t.remaining += len(slots)
+	}
+	return t
+}
+
+// ObserveRead marks (addr, slot) as observed. First-time observation of a
+// declared storage_read decrements Remaining; reads of undeclared slots or
+// repeats are no-ops.
+func (t *DeclaredReadTracker) ObserveRead(addr common.Address, slot common.Hash) {
+	slots, ok := t.pending[addr]
+	if !ok {
+		return
+	}
+	if _, ok := slots[slot]; !ok {
+		return
+	}
+	delete(slots, slot)
+	if len(slots) == 0 {
+		delete(t.pending, addr)
+	}
+	t.remaining--
+}
+
+// Remaining returns the number of declared storage_reads not yet observed
+// (R_remaining in EIP-7928 Security Considerations).
+func (t *DeclaredReadTracker) Remaining() int { return t.remaining }
+
+// EarlyRejectCheck enforces the EIP-7928 Security Considerations budget:
+//
+//	G_remaining >= R_remaining * BalItemCost
+//
+// where G_remaining = blockGasLimit - gasUsed and R_remaining is the count of
+// declared storage_reads still outstanding. Returns nil when the block can
+// still feasibly satisfy its declared reads, an error otherwise. The check is
+// a non-consensus DoS defense: a malicious proposer could declare phantom
+// reads, and post-execution validation alone would force the client to fetch
+// the state before noticing the mismatch.
+func EarlyRejectCheck(blockGasLimit, gasUsed uint64, remainingDeclaredReads int) error {
+	if gasUsed > blockGasLimit {
+		return fmt.Errorf("gas accounting: used %d exceeds limit %d", gasUsed, blockGasLimit)
+	}
+	if remainingDeclaredReads <= 0 {
+		return nil
+	}
+	gasRemaining := blockGasLimit - gasUsed
+	needed := uint64(remainingDeclaredReads) * BalItemCost
+	if gasRemaining < needed {
+		return fmt.Errorf("phantom declared reads: %d × %d = %d gas needed, %d remaining", remainingDeclaredReads, BalItemCost, needed, gasRemaining)
+	}
+	return nil
+}
+
 func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
