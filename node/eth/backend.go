@@ -1644,6 +1644,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		config.Snapshot.PublishRetirementDone = func(fromBlock, toBlock uint64) {
 			bus.Publish(flow.RetirementDone{FromBlock: fromBlock, ToBlock: toBlock})
+			// Block-retire / merge produces new on-disk files (and
+			// supersedes smaller chunks). Without re-publishing
+			// chain.toml here, the Inventory falls behind disk until
+			// the next Provider.Unwind triggers a regeneration — at
+			// which point Provider.Unwind itself reads the stale
+			// manifest, finds zero files past toBlock, and no-ops on
+			// the snapshot trim. Wedge follows once mode-B engages
+			// because the writable DB resets to toBlock but the
+			// on-disk snapshots still cover past it. Caught live on
+			// hoodi (2026-06-12 iter-2 of the soak).
+			if backend.components != nil && backend.components.Downloader != nil &&
+				backend.components.Downloader.Downloader != nil {
+				if err := backend.components.Downloader.Downloader.PublishLocalChainToml(); err != nil {
+					logger.Warn("[chaintoml] republish after retire/merge failed", "err", err)
+				}
+			}
 		}
 	}
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
