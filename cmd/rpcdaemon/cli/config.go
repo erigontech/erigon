@@ -181,6 +181,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTxs, "rpc.subscription.filters.maxtxs", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs, "Maximum number of transactions to store per subscription.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "rpc.subscription.filters.maxaddresses", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "Maximum number of addresses per subscription to filter logs by.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTopics, "rpc.subscription.filters.maxtopics", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics, "Maximum number of topics per subscription to filter logs by.")
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersTimeout, "rpc.subscription.filters.timeout", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout, "Timeout before idle filters are evicted. Defaults to 0 to disable eviction.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BlockRangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.GetLogsMaxResults, utils.RpcGetLogsMaxResults.Name, utils.RpcGetLogsMaxResults.Value, utils.RpcGetLogsMaxResults.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)

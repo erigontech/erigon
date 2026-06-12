@@ -21,15 +21,43 @@ import (
 )
 
 const (
-	filterLabelName = "filter"
-	clientLabelName = "client"
+	filterLabelName   = "filter"
+	clientLabelName   = "client"
+	protocolLabelName = "protocol"
+)
+
+// Protocol types for metrics labeling
+const (
+	ProtocolHTTP = "http"
+	ProtocolWS   = "ws"
 )
 
 var (
-	activeSubscriptionsGauge                 = metrics.GetOrCreateGaugeVec("subscriptions", []string{filterLabelName}, "Current number of subscriptions")
+	// activeSubscriptionsGauge tracks current active subscriptions by filter type and protocol
+	activeSubscriptionsGauge = metrics.GetOrCreateGaugeVec(
+		"subscriptions_active",
+		[]string{filterLabelName, protocolLabelName},
+		"Current number of active subscriptions",
+	)
+
 	activeSubscriptionsLogsAllAddressesGauge = metrics.GetOrCreateGauge("subscriptions_logs_all_addresses")
 	activeSubscriptionsLogsAllTopicsGauge    = metrics.GetOrCreateGauge("subscriptions_logs_all_topics")
 	activeSubscriptionsLogsAddressesGauge    = metrics.GetOrCreateGauge("subscriptions_logs_addresses")
 	activeSubscriptionsLogsTopicsGauge       = metrics.GetOrCreateGauge("subscriptions_logs_topics")
 	activeSubscriptionsLogsClientGauge       = metrics.GetOrCreateGaugeVec("subscriptions_logs_client", []string{clientLabelName}, "Current number of subscriptions by client")
 )
+
+// getSubscriptionCounter returns a counter for subscription lifecycle events.
+// pattern: subscriptions_{event}_total{{filter="{filterType}",protocol="{protocol}"}}
+func getSubscriptionCounter(event, filterType, protocol string) metrics.Counter {
+	return metrics.GetOrCreateCounter(
+		`subscriptions_` + event + `_total{filter="` + filterType + `",protocol="` + protocol + `"}`,
+	)
+}
+
+// getReapedCounter returns a counter for reaped (timeout-evicted) subscriptions.
+func getReapedCounter(filterType string) metrics.Counter {
+	return metrics.GetOrCreateCounter(
+		`subscriptions_reaped_total{filter="` + filterType + `"}`,
+	)
+}

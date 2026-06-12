@@ -16,15 +16,21 @@
 
 package rpchelper
 
+import "time"
+
+// DefaultFilterTimeout is the default eviction timeout; 0 disables eviction.
+const DefaultFilterTimeout time.Duration = 0
+
 // FiltersConfig defines the configuration settings for RPC subscription filters.
 // Each field represents a limit on the number of respective items that can be stored per subscription.
 // A value of 0 disables the limit (no cap). Oldest items are evicted first (FIFO) when the limit is reached.
 type FiltersConfig struct {
-	RpcSubscriptionFiltersMaxLogs      int // Maximum number of logs to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxHeaders   int // Maximum number of block headers to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxTxs       int // Maximum number of transactions to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxAddresses int // Maximum number of addresses per subscription to filter logs by. Default: 0 (no limit)
-	RpcSubscriptionFiltersMaxTopics    int // Maximum number of topics per subscription to filter logs by. Default: 0 (no limit)
+	RpcSubscriptionFiltersMaxLogs      int           // Maximum number of logs to store per subscription. Default: 10000
+	RpcSubscriptionFiltersMaxHeaders   int           // Maximum number of block headers to store per subscription. Default: 10000
+	RpcSubscriptionFiltersMaxTxs       int           // Maximum number of transactions to store per subscription. Default: 10000
+	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses per subscription to filter logs by. Default: 0 (no limit)
+	RpcSubscriptionFiltersMaxTopics    int           // Maximum number of topics per subscription to filter logs by. Default: 0 (no limit)
+	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 0 (no eviction)
 }
 
 // DefaultFiltersConfig defines the default settings for filter configurations.
@@ -37,4 +43,5 @@ var DefaultFiltersConfig = FiltersConfig{
 	RpcSubscriptionFiltersMaxTxs:       10000,
 	RpcSubscriptionFiltersMaxAddresses: 0, // no limit
 	RpcSubscriptionFiltersMaxTopics:    0, // no limit
+	RpcSubscriptionFiltersTimeout:      DefaultFilterTimeout,
 }
