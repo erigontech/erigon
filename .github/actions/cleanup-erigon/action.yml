@@ -4,11 +4,13 @@ description: Save build and module caches, and report uncached test packages
 runs:
   using: composite
   steps:
-    # Sibling matrix jobs can share one primary key; skip the prune/tar/upload
-    # when another job in this run has already saved the exact entry.
+    # Skip all Go cache saves in merge-queue runs: caches saved on the ephemeral
+    # merge-queue ref cannot be restored by any later run. Sibling matrix jobs
+    # can also share one primary key; skip the prune/tar/upload when another job
+    # in this run has already saved the exact entry.
     - name: Check for existing build cache entry
       id: gocache-probe
-      if: ${{ always() && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' }}
       continue-on-error: true
       uses: actions/cache/restore@v4
       with:
@@ -17,19 +19,19 @@ runs:
         lookup-only: true
 
     - name: Prune Go build cache
-      if: ${{ always() && env.ERIGON_CI_GOCACHE_PATH != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
       shell: bash
       run: python3 tools/prune-gocache "$ERIGON_CI_GOCACHE_PATH"
 
     - uses: ./.github/actions/save-build-cache
-      if: ${{ always() && env.ERIGON_CI_GOCACHE_PATH != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
       with:
         gocache: ${{ env.ERIGON_CI_GOCACHE_PATH }}
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
 
     - name: Check for existing module cache entry
       id: modcache-probe
-      if: ${{ always() && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' }}
       continue-on-error: true
       uses: actions/cache/restore@v4
       with:
@@ -38,7 +40,7 @@ runs:
         lookup-only: true
 
     - uses: ./.github/actions/save-mod-cache
-      if: ${{ always() && env.ERIGON_CI_MODCACHE != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
       with:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
