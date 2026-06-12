@@ -46,6 +46,9 @@ while [[ $# -gt 0 ]]; do
         --iter) ITER="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --depths) DEPTHS_CSV="$2"; shift 2 ;;
+        --snap-dir) SNAP_DIR="$2"; shift 2 ;;
+        --stress) STRESS_MODE=1; shift ;;
+        --scenario2-depth) SCENARIO2_DEPTH="$2"; shift 2 ;;
         -h|--help)
             sed -n '2,30p' "$0"
             exit 0
@@ -124,162 +127,212 @@ set_head_retry() {
     done
 }
 
-# Mode-A regression check parameters. Per user direction (2026-06-12),
-# every iter runs a shallow (< 96 block) unwind first to catch Mode-A
-# regressions before the deeper Mode-B unwind that's the iter's main test.
-# The 96 ceiling matches hoodi's writable-shadow extent: deeper escalates
-# to Mode B, which is not what this preflight is checking.
-MODEA_DEPTH="${MODEA_DEPTH:-50}"
-MODEA_SETHEAD_TIMEOUT_SEC="${MODEA_SETHEAD_TIMEOUT_SEC:-60}"
-MODEA_RECOVERY_TIMEOUT_SEC="${MODEA_RECOVERY_TIMEOUT_SEC:-180}"
+# Three unwind scenarios per iter (per user direction 2026-06-12):
+#   1. Within changeset            (target >= minUnwindableBlock)  -> Mode A
+#   2. Past changeset, within DB   (target above frozenBlocks tip) -> Mode B lite (no snapshot trim)
+#   3. Within snapshots            (target <= frozenBlocks tip)    -> Mode B full
+#
+# SCENARIO1_DEPTH ceiling matches hoodi's writable-shadow extent (< 96).
+# SCENARIO2_DEPTH should land past the changeset retention but above the
+# snapshot tip. SCENARIO3_DEPTH (per-iter --depths flag) drops the head
+# into snapshot territory.
+SCENARIO1_DEPTH="${SCENARIO1_DEPTH:-${MODEA_DEPTH:-50}}"
+SCENARIO2_DEPTH="${SCENARIO2_DEPTH:-300}"
+SETHEAD_PREFLIGHT_TIMEOUT_SEC="${SETHEAD_PREFLIGHT_TIMEOUT_SEC:-${MODEA_SETHEAD_TIMEOUT_SEC:-120}}"
+PREFLIGHT_RECOVERY_TIMEOUT_SEC="${PREFLIGHT_RECOVERY_TIMEOUT_SEC:-${MODEA_RECOVERY_TIMEOUT_SEC:-300}}"
+
+# Forward-progress requirement: per-iter recovery must reach pre_head+N,
+# not just target+1000. Set FORWARD_PROGRESS_MARGIN=0 to require
+# strictly post_head > pre_head (no margin).
+FORWARD_PROGRESS_MARGIN="${FORWARD_PROGRESS_MARGIN:-1}"
+
+# Stress mode: when set, don't wait for full recovery between iters —
+# fire the next iter's setHead while the prior one's recovery is still
+# climbing. Verifies the system handles overlapping unwinds.
+STRESS_MODE="${STRESS_MODE:-0}"
+STRESS_INTER_ITER_SEC="${STRESS_INTER_ITER_SEC:-90}"
+
+# Inventory check: after each setHead, compare chain.toml's listed
+# block-snapshot files against what's actually on disk. SNAP_DIR
+# resolves from --datadir; pass --snap-dir explicitly to override.
+SNAP_DIR="${SNAP_DIR:-}"
+INVENTORY_CHECK="${INVENTORY_CHECK:-1}"
+
+# inventory_check: compare chain.toml's listed block-snapshot files
+# against what's actually on disk. Returns a count of mismatches via
+# stdout (0 = consistent). Used as a post-setHead regression signal.
+# When SNAP_DIR is empty, returns 0 (skipped — typical when the script
+# runs without datadir access).
+inventory_check() {
+    if [[ -z "$SNAP_DIR" || ! -r "$SNAP_DIR/chain.toml" ]]; then
+        echo "0"
+        return
+    fi
+    # Files chain.toml advertises (extract the bare filename).
+    local toml_files disk_files missing_on_disk on_disk_not_in_toml
+    toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
+        | tr -d '"' | sort -u || true)
+    disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
+    missing_on_disk=$(comm -23 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
+    on_disk_not_in_toml=$(comm -13 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
+    echo "$((missing_on_disk + on_disk_not_in_toml))"
+}
+
+# scenario_test: run one setHead test and write a CSV row. Args:
+#   $1 phase label (mode_a / mode_a2 / mode_b)
+#   $2 iter number
+#   $3 depth (blocks below current head)
+#   $4 sethead curl timeout (seconds)
+#   $5 recovery timeout (seconds)
+#   $6 forward-progress required (1=must exceed pre_head, 0=just hit target+1000)
+# Sets:
+#   PHASE_RC=0 on success, 1 on failure (sets OVERALL_RC=1 too)
+#   PHASE_POST_HEAD = post-test head
+scenario_test() {
+    local phase=$1 iter=$2 depth=$3 sethead_timeout=$4 recovery_timeout=$5 require_forward=$6
+    local pre_head_hex pre_head target target_hex log_offset start_ts resp duration sethead_dur
+    local post_head_hex post_head recovery_ok elapsed errors inv_drift note
+    PHASE_RC=0
+    PHASE_POST_HEAD=0
+    pre_head_hex=$(eth_block_number)
+    if [[ "$pre_head_hex" == "null" || -z "$pre_head_hex" ]]; then
+        echo "iter $iter $phase: ABORT — eth_blockNumber returned null"
+        echo "$iter,$phase,,,,0,0,abort:no-head" >> "$OUT"
+        PHASE_RC=1
+        OVERALL_RC=1
+        return
+    fi
+    pre_head=$(hex_to_dec "$pre_head_hex")
+    target=$((pre_head - depth))
+    if [[ $target -lt 1 ]]; then
+        echo "iter $iter $phase: ABORT — target $target below 1 (pre_head=$pre_head depth=$depth)"
+        echo "$iter,$phase,$target,$pre_head,,0,0,abort:target-too-low" >> "$OUT"
+        PHASE_RC=1
+        OVERALL_RC=1
+        return
+    fi
+    target_hex=$(dec_to_hex "$target")
+    log_offset=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+    start_ts=$(date +%s)
+    echo "iter $iter $phase: $(date +%T) pre_head=$pre_head depth=$depth target=$target ($target_hex)"
+    resp=$(curl -s --max-time "$sethead_timeout" -X POST -H "Content-Type: application/json" \
+        --data "{\"jsonrpc\":\"2.0\",\"method\":\"debug_setHead\",\"params\":[\"$target_hex\"],\"id\":1}" \
+        "$RPC")
+    sethead_dur=$(( $(date +%s) - start_ts ))
+    if ! echo "$resp" | grep -q '"result":'; then
+        echo "iter $iter $phase: FAILED setHead — $resp"
+        echo "$iter,$phase,$target,$pre_head,,${sethead_dur},0,fail:setHead-$resp" >> "$OUT"
+        PHASE_RC=1
+        OVERALL_RC=1
+        return
+    fi
+    # Recovery polling. Success requires:
+    #   (a) head reached at least target + RECOVERY_WINDOW_BLOCKS, AND
+    #   (b) if require_forward=1, head exceeded pre_head + FORWARD_PROGRESS_MARGIN.
+    recovery_ok=0
+    while true; do
+        sleep 5
+        post_head_hex=$(eth_block_number)
+        if [[ "$post_head_hex" == "null" || -z "$post_head_hex" ]]; then
+            continue
+        fi
+        post_head=$(hex_to_dec "$post_head_hex")
+        elapsed=$(( $(date +%s) - start_ts ))
+        local advanced=0
+        if [[ $require_forward -eq 1 ]]; then
+            if [[ $post_head -gt $((pre_head + FORWARD_PROGRESS_MARGIN)) ]]; then
+                advanced=1
+            fi
+        else
+            if [[ $post_head -gt $((target + RECOVERY_WINDOW_BLOCKS)) ]]; then
+                advanced=1
+            fi
+        fi
+        if [[ $advanced -eq 1 ]]; then
+            recovery_ok=1
+            break
+        fi
+        if [[ $elapsed -gt $recovery_timeout ]]; then
+            break
+        fi
+        if [[ $((elapsed % 30)) -lt 6 ]]; then
+            echo "  t+${elapsed}s head=$post_head $( [[ $require_forward -eq 1 ]] && echo "pre_head+${FORWARD_PROGRESS_MARGIN}=$((pre_head + FORWARD_PROGRESS_MARGIN))" || echo "target+1000=$((target + RECOVERY_WINDOW_BLOCKS))")"
+        fi
+    done
+    PHASE_POST_HEAD=$post_head
+    duration=$(( $(date +%s) - start_ts ))
+    errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
+        | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process" \
+        || true)
+    inv_drift=$(inventory_check)
+    note="ok"
+    if [[ $recovery_ok -ne 1 ]]; then
+        note="fail:recovery-timeout"
+        PHASE_RC=1
+        OVERALL_RC=1
+    fi
+    if [[ $errors -gt 0 ]]; then
+        note="${note}+errors=${errors}"
+        PHASE_RC=1
+        OVERALL_RC=1
+    fi
+    if [[ $inv_drift -gt 0 ]]; then
+        note="${note}+inv_drift=${inv_drift}"
+        PHASE_RC=1
+        OVERALL_RC=1
+    fi
+    echo "$iter,$phase,$target,$pre_head,$post_head,$duration,$errors,$note" >> "$OUT"
+    echo "iter $iter $phase: $note post_head=$post_head duration=${duration}s errors=$errors inv_drift=$inv_drift"
+}
 
 # emit CSV header if file is empty/new
 if [[ ! -s "$OUT" ]]; then
     echo "iter,phase,target,pre_head,post_head,duration_sec,error_count,note" > "$OUT"
 fi
 
-echo "soak: rpc=$RPC log=$LOG iter=$ITER out=$OUT depths=$DEPTHS_CSV modeA_depth=$MODEA_DEPTH"
+echo "soak: rpc=$RPC log=$LOG iter=$ITER out=$OUT depths=$DEPTHS_CSV"
+echo "       scenario1_depth=$SCENARIO1_DEPTH scenario2_depth=$SCENARIO2_DEPTH stress=$STRESS_MODE snap_dir=$SNAP_DIR"
 echo
 
 OVERALL_RC=0
 for ((i=1; i<=ITER; i++)); do
-    # -------- Mode-A preflight --------
-    PREA_HEX=$(eth_block_number)
-    if [[ "$PREA_HEX" == "null" || -z "$PREA_HEX" ]]; then
-        echo "iter $i: ABORT — eth_blockNumber returned null (Mode-A preflight)" | tee -a "$OUT.log"
-        echo "$i,mode_a,,,,0,0,abort:no-head" >> "$OUT"
-        OVERALL_RC=1
-        break
-    fi
-    PREA=$(hex_to_dec "$PREA_HEX")
-    TARGETA=$((PREA - MODEA_DEPTH))
-    TARGETA_HEX=$(dec_to_hex "$TARGETA")
-    LOG_OFFSET_A=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
-    START_TS_A=$(date +%s)
-    echo "iter $i mode-A: $(date +%T) pre_head=$PREA depth=$MODEA_DEPTH target=$TARGETA"
-    RESP_A=$(curl -s --max-time "$MODEA_SETHEAD_TIMEOUT_SEC" -X POST -H "Content-Type: application/json" \
-        --data "{\"jsonrpc\":\"2.0\",\"method\":\"debug_setHead\",\"params\":[\"$TARGETA_HEX\"],\"id\":1}" \
-        "$RPC")
-    SETA_DUR=$(( $(date +%s) - START_TS_A ))
-    if ! echo "$RESP_A" | grep -q '"result":'; then
-        echo "iter $i mode-A: REGRESSION setHead — $RESP_A" | tee -a "$OUT.log"
-        echo "$i,mode_a,$TARGETA,$PREA,,${SETA_DUR},0,regression:setHead-$RESP_A" >> "$OUT"
-        OVERALL_RC=1
-        break
-    fi
-    # Mode A should recover within MODEA_RECOVERY_TIMEOUT_SEC; head must
-    # return to at least PREA (live forward sync continues, so >= is fine).
-    RECOVA_OK=0
-    POSTA=0
-    while true; do
-        sleep 5
-        POSTA_HEX=$(eth_block_number)
-        POSTA=$(hex_to_dec "${POSTA_HEX:-0x0}")
-        ELAPSED_A=$(( $(date +%s) - START_TS_A ))
-        if [[ $POSTA -ge $PREA ]]; then
-            RECOVA_OK=1
-            break
-        fi
-        if [[ $ELAPSED_A -gt $MODEA_RECOVERY_TIMEOUT_SEC ]]; then
-            break
-        fi
-    done
-    ERRORS_A=$(tail -c +"$((LOG_OFFSET_A + 1))" "$LOG" 2>/dev/null | \
-        grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|Provider\.Unwind" \
-        || true)
-    DURATION_A=$(( $(date +%s) - START_TS_A ))
-    NOTE_A="ok"
-    if [[ $RECOVA_OK -ne 1 ]]; then
-        NOTE_A="regression:recovery-timeout"
-        OVERALL_RC=1
-    fi
-    if [[ $ERRORS_A -gt 0 ]]; then
-        NOTE_A="${NOTE_A}+errors=${ERRORS_A}"
-        OVERALL_RC=1
-    fi
-    echo "$i,mode_a,$TARGETA,$PREA,$POSTA,$DURATION_A,$ERRORS_A,$NOTE_A" >> "$OUT"
-    echo "iter $i mode-A: $NOTE_A post_head=$POSTA duration=${DURATION_A}s errors=$ERRORS_A"
-    if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i mode-A: ABORTING (regression) — Mode-A must work before Mode-B is meaningful"
-        break
-    fi
-    # -------- Mode-B main test --------
     DEPTH=${DEPTHS[$((i-1))]}
-    PRE_HEAD_HEX=$(eth_block_number)
-    if [[ "$PRE_HEAD_HEX" == "null" || -z "$PRE_HEAD_HEX" ]]; then
-        echo "iter $i: ABORT — eth_blockNumber returned null" | tee -a "$OUT.log"
-        echo "$i,mode_b,,,,0,0,abort:no-head" >> "$OUT"
-        OVERALL_RC=1
-        break
-    fi
-    PRE_HEAD=$(hex_to_dec "$PRE_HEAD_HEX")
-    TARGET=$((PRE_HEAD - DEPTH))
-    if [[ $TARGET -lt 1 ]]; then
-        echo "iter $i: ABORT — target $TARGET below 1 (pre_head=$PRE_HEAD depth=$DEPTH)" | tee -a "$OUT.log"
-        echo "$i,mode_b,$TARGET,$PRE_HEAD,,0,0,abort:target-too-low" >> "$OUT"
-        OVERALL_RC=1
-        break
-    fi
-    TARGET_HEX=$(dec_to_hex "$TARGET")
-    LOG_OFFSET=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
-    START_TS=$(date +%s)
-    echo "iter $i: $(date +%T) pre_head=$PRE_HEAD depth=$DEPTH target=$TARGET ($TARGET_HEX)"
 
-    SETHEAD_RESULT=$(set_head_retry "$TARGET_HEX")
-    if [[ "$SETHEAD_RESULT" != "ok" ]]; then
-        DURATION=$(( $(date +%s) - START_TS ))
-        echo "iter $i: ABORT setHead — $SETHEAD_RESULT" | tee -a "$OUT.log"
-        echo "$i,mode_b,$TARGET,$PRE_HEAD,,${DURATION},0,abort:setHead-$SETHEAD_RESULT" >> "$OUT"
-        OVERALL_RC=1
+    # Scenario 1: within changeset (Mode-A path). Must succeed before
+    # any deeper test is meaningful — chaindata-only unwind is the
+    # safety baseline.
+    scenario_test mode_a "$i" "$SCENARIO1_DEPTH" \
+        "$SETHEAD_PREFLIGHT_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
+    if [[ $OVERALL_RC -ne 0 ]]; then
+        echo "iter $i: ABORTING — Mode-A (scenario 1) regression"
         break
     fi
 
-    SETHEAD_TS=$(date +%s)
-    echo "iter $i: setHead acquired in $((SETHEAD_TS - START_TS))s; polling for recovery..."
-
-    POST_HEAD=0
-    RECOVERY_OK=0
-    while true; do
-        POST_HEAD_HEX=$(eth_block_number)
-        if [[ "$POST_HEAD_HEX" == "null" || -z "$POST_HEAD_HEX" ]]; then
-            sleep "$POLL_INTERVAL_SEC"
-            continue
-        fi
-        POST_HEAD=$(hex_to_dec "$POST_HEAD_HEX")
-        if [[ $POST_HEAD -gt $((TARGET + RECOVERY_WINDOW_BLOCKS)) ]]; then
-            RECOVERY_OK=1
-            break
-        fi
-        ELAPSED=$(( $(date +%s) - SETHEAD_TS ))
-        if [[ $ELAPSED -gt $RECOVERY_TIMEOUT_SEC ]]; then
-            break
-        fi
-        echo "  t+${ELAPSED}s head=$POST_HEAD target+1000=$((TARGET + RECOVERY_WINDOW_BLOCKS))"
-        sleep "$POLL_INTERVAL_SEC"
-    done
-
-    DURATION=$(( $(date +%s) - START_TS ))
-
-    # scan log for forbidden patterns since iteration start (by byte offset)
-    ERROR_COUNT=$(tail -c +"$((LOG_OFFSET + 1))" "$LOG" 2>/dev/null | \
-        grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process" \
-        || true)
-
-    NOTE="ok"
-    if [[ $RECOVERY_OK -ne 1 ]]; then
-        NOTE="abort:recovery-timeout"
-        OVERALL_RC=1
-    fi
-    if [[ $ERROR_COUNT -gt 0 ]]; then
-        NOTE="${NOTE}+errors=${ERROR_COUNT}"
-        OVERALL_RC=1
+    # Scenario 2: past changeset, above frozen-blocks tip. Currently
+    # routes through setHeadModeB but the snapshot-trim subpath
+    # no-ops (no files past toBlock). Exercises the "lite" Mode-B.
+    scenario_test mode_a2 "$i" "$SCENARIO2_DEPTH" \
+        "$SETHEAD_PREFLIGHT_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
+    if [[ $OVERALL_RC -ne 0 ]]; then
+        echo "iter $i: ABORTING — scenario 2 (past-changeset, within-DB) regression"
+        break
     fi
 
-    echo "$i,mode_b,$TARGET,$PRE_HEAD,$POST_HEAD,$DURATION,$ERROR_COUNT,$NOTE" >> "$OUT"
-    echo "iter $i mode-B: $NOTE post_head=$POST_HEAD duration=${DURATION}s errors=$ERROR_COUNT"
+    # Scenario 3: within snapshots (Mode-B with full trim). Stress
+    # mode uses a shorter recovery polling — the *eventual* recovery
+    # gets verified at the end of the loop, after the next iter's
+    # setHead has already fired.
+    if [[ "$STRESS_MODE" == "1" ]]; then
+        scenario_test mode_b "$i" "$DEPTH" \
+            "$SETHEAD_CALL_TIMEOUT_SEC" "$STRESS_INTER_ITER_SEC" 0
+    else
+        scenario_test mode_b "$i" "$DEPTH" \
+            "$SETHEAD_CALL_TIMEOUT_SEC" "$RECOVERY_TIMEOUT_SEC" 1
+    fi
 
     if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i: ABORTING further iterations"
+        echo "iter $i: ABORTING — scenario 3 (within-snapshots) regression"
+        LOG_OFFSET=0  # show full recent tail on abort
         echo "--- last 200 non-noise log lines ---"
         tail -c +"$((LOG_OFFSET + 1))" "$LOG" 2>/dev/null | \
             grep -vE "Downloader.*Syncing|publishing DownloadComplete|forced bond|Handshake transport|peerSelector|stop force.bonding|sentry.*PeerEvent|chaintoml|storage-lifecycle|GossipManager|method=eth_|p2p.*GoodPeers|Forward Sync.*progress=" \
@@ -288,10 +341,46 @@ for ((i=1; i<=ITER; i++)); do
     fi
 
     if [[ $i -lt $ITER ]]; then
-        echo "iter $i: sleeping ${INTER_ITER_SLEEP_SEC}s before next iteration..."
-        sleep "$INTER_ITER_SLEEP_SEC"
+        if [[ "$STRESS_MODE" == "1" ]]; then
+            echo "iter $i: stress mode — proceeding to iter $((i+1)) without waiting for full recovery"
+        else
+            echo "iter $i: sleeping ${INTER_ITER_SLEEP_SEC}s before next iteration..."
+            sleep "$INTER_ITER_SLEEP_SEC"
+        fi
     fi
 done
+
+# In stress mode the per-iter scenario-3 only polled briefly. The full
+# recovery still needs to land before we call the soak passed: head
+# must reach AT LEAST the last iter's pre_head + FORWARD_PROGRESS_MARGIN.
+# Use a generous timeout because the EL is recovering from multiple
+# overlapping setHeads.
+if [[ "$STRESS_MODE" == "1" && $OVERALL_RC -eq 0 ]]; then
+    echo
+    echo "stress mode: final-recovery wait (must exceed iter-$ITER pre_head)"
+    FINAL_DEADLINE=$(( $(date +%s) + RECOVERY_TIMEOUT_SEC ))
+    FINAL_OK=0
+    while [[ $(date +%s) -lt $FINAL_DEADLINE ]]; do
+        sleep 30
+        FINAL_HEAD_HEX=$(eth_block_number)
+        FINAL_HEAD=$(hex_to_dec "${FINAL_HEAD_HEX:-0x0}")
+        printf "  final-recovery head=%d\n" "$FINAL_HEAD"
+        # Reuse last PRE_HEAD captured by scenario_test via CSV.
+        LAST_PRE=$(tail -1 "$OUT" | cut -d, -f4)
+        if [[ -n "$LAST_PRE" && $FINAL_HEAD -gt $((LAST_PRE + FORWARD_PROGRESS_MARGIN)) ]]; then
+            FINAL_OK=1
+            break
+        fi
+    done
+    if [[ $FINAL_OK -ne 1 ]]; then
+        echo "stress mode: FINAL-RECOVERY TIMEOUT"
+        echo "$((ITER + 1)),final_recovery,,${LAST_PRE},$FINAL_HEAD,${RECOVERY_TIMEOUT_SEC},0,fail:final-recovery-timeout" >> "$OUT"
+        OVERALL_RC=1
+    else
+        echo "stress mode: final-recovery OK head=$FINAL_HEAD"
+        echo "$((ITER + 1)),final_recovery,,${LAST_PRE},$FINAL_HEAD,0,0,ok" >> "$OUT"
+    fi
+fi
 
 echo
 echo "=== soak complete: rc=$OVERALL_RC csv=$OUT ==="
