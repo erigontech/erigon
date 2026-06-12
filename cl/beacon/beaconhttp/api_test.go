@@ -99,6 +99,14 @@ func TestHandleEndpoint_RejectsSSZOnlyAcceptWhenResponseDoesNotSupportSSZ(t *tes
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
+
+	var body EndpointError
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response json: %v", err)
+	}
+	if body.Message != ErrorSszNotSupported.Error() {
+		t.Fatalf("error = %#v, want %q", body, ErrorSszNotSupported.Error())
+	}
 }
 
 func TestWillEncodeSSZ(t *testing.T) {

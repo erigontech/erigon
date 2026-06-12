@@ -152,6 +152,10 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				w.WriteHeader(200)
 			}
 		case responseEncodingSSZ:
+			if !supportsSSZ(ans) {
+				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
+				return
+			}
 			sizeMarshaller, ok := any(ans).(ssz.Marshaler)
 			if !ok {
 				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
@@ -203,10 +207,15 @@ func responseEncodingForAccept(accept string, sszSupported bool) responseEncodin
 	if sszSupported && sszOK && sszQ > 0 && (!jsonOK && !htmlOK && !anyOK || sszQ > bestJSONQ) {
 		return responseEncodingSSZ
 	}
-	if jsonOK && jsonQ > 0 || htmlOK && htmlQ > 0 || anyOK && anyQ > 0 {
+	hasJSONAlternative := jsonOK && jsonQ > 0 || htmlOK && htmlQ > 0 || anyOK && anyQ > 0
+	hasEventStreamAlternative := eventOK && eventQ > 0
+	if !sszSupported && sszOK && sszQ > 0 && !hasJSONAlternative && !hasEventStreamAlternative {
+		return responseEncodingSSZ
+	}
+	if hasJSONAlternative {
 		return responseEncodingJSON
 	}
-	if eventOK && eventQ > 0 {
+	if hasEventStreamAlternative {
 		return responseEncodingEventStream
 	}
 	return responseEncodingUnsupported

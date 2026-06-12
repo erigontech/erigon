@@ -206,7 +206,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 	// Fast path: when HTTP has been working, skip P2P probing entirely.
 	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
 		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
-		if err == nil {
+		if err == nil && len(blocks) > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
 			return blocks, nil
 		}
@@ -241,12 +241,14 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*clty
 				continue
 			}
 			blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
-			if err == nil {
+			if err == nil && len(blocks) > 0 {
 				log.Debug("[BackwardBeaconDownloader] P2P failed, fetched blocks from beacon API", "fromSlot", start, "count", len(blocks))
 				b.httpPreferred.Store(true)
 				return blocks, nil
 			}
-			log.Debug("[BackwardBeaconDownloader] HTTP fallback also failed", "err", err)
+			if err != nil {
+				log.Debug("[BackwardBeaconDownloader] HTTP fallback also failed", "err", err)
+			}
 			p2pDeadline.Reset(10 * time.Second)
 		}
 	}
