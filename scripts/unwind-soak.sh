@@ -124,21 +124,91 @@ set_head_retry() {
     done
 }
 
+# Mode-A regression check parameters. Per user direction (2026-06-12),
+# every iter runs a shallow (< 96 block) unwind first to catch Mode-A
+# regressions before the deeper Mode-B unwind that's the iter's main test.
+# The 96 ceiling matches hoodi's writable-shadow extent: deeper escalates
+# to Mode B, which is not what this preflight is checking.
+MODEA_DEPTH="${MODEA_DEPTH:-50}"
+MODEA_SETHEAD_TIMEOUT_SEC="${MODEA_SETHEAD_TIMEOUT_SEC:-60}"
+MODEA_RECOVERY_TIMEOUT_SEC="${MODEA_RECOVERY_TIMEOUT_SEC:-180}"
+
 # emit CSV header if file is empty/new
 if [[ ! -s "$OUT" ]]; then
-    echo "iter,target,pre_head,post_head,duration_sec,error_count,note" > "$OUT"
+    echo "iter,phase,target,pre_head,post_head,duration_sec,error_count,note" > "$OUT"
 fi
 
-echo "soak: rpc=$RPC log=$LOG iter=$ITER out=$OUT depths=$DEPTHS_CSV"
+echo "soak: rpc=$RPC log=$LOG iter=$ITER out=$OUT depths=$DEPTHS_CSV modeA_depth=$MODEA_DEPTH"
 echo
 
 OVERALL_RC=0
 for ((i=1; i<=ITER; i++)); do
+    # -------- Mode-A preflight --------
+    PREA_HEX=$(eth_block_number)
+    if [[ "$PREA_HEX" == "null" || -z "$PREA_HEX" ]]; then
+        echo "iter $i: ABORT — eth_blockNumber returned null (Mode-A preflight)" | tee -a "$OUT.log"
+        echo "$i,mode_a,,,,0,0,abort:no-head" >> "$OUT"
+        OVERALL_RC=1
+        break
+    fi
+    PREA=$(hex_to_dec "$PREA_HEX")
+    TARGETA=$((PREA - MODEA_DEPTH))
+    TARGETA_HEX=$(dec_to_hex "$TARGETA")
+    LOG_OFFSET_A=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+    START_TS_A=$(date +%s)
+    echo "iter $i mode-A: $(date +%T) pre_head=$PREA depth=$MODEA_DEPTH target=$TARGETA"
+    RESP_A=$(curl -s --max-time "$MODEA_SETHEAD_TIMEOUT_SEC" -X POST -H "Content-Type: application/json" \
+        --data "{\"jsonrpc\":\"2.0\",\"method\":\"debug_setHead\",\"params\":[\"$TARGETA_HEX\"],\"id\":1}" \
+        "$RPC")
+    SETA_DUR=$(( $(date +%s) - START_TS_A ))
+    if ! echo "$RESP_A" | grep -q '"result":'; then
+        echo "iter $i mode-A: REGRESSION setHead — $RESP_A" | tee -a "$OUT.log"
+        echo "$i,mode_a,$TARGETA,$PREA,,${SETA_DUR},0,regression:setHead-$RESP_A" >> "$OUT"
+        OVERALL_RC=1
+        break
+    fi
+    # Mode A should recover within MODEA_RECOVERY_TIMEOUT_SEC; head must
+    # return to at least PREA (live forward sync continues, so >= is fine).
+    RECOVA_OK=0
+    POSTA=0
+    while true; do
+        sleep 5
+        POSTA_HEX=$(eth_block_number)
+        POSTA=$(hex_to_dec "${POSTA_HEX:-0x0}")
+        ELAPSED_A=$(( $(date +%s) - START_TS_A ))
+        if [[ $POSTA -ge $PREA ]]; then
+            RECOVA_OK=1
+            break
+        fi
+        if [[ $ELAPSED_A -gt $MODEA_RECOVERY_TIMEOUT_SEC ]]; then
+            break
+        fi
+    done
+    ERRORS_A=$(tail -c +"$((LOG_OFFSET_A + 1))" "$LOG" 2>/dev/null | \
+        grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|Provider\.Unwind" \
+        || true)
+    DURATION_A=$(( $(date +%s) - START_TS_A ))
+    NOTE_A="ok"
+    if [[ $RECOVA_OK -ne 1 ]]; then
+        NOTE_A="regression:recovery-timeout"
+        OVERALL_RC=1
+    fi
+    if [[ $ERRORS_A -gt 0 ]]; then
+        NOTE_A="${NOTE_A}+errors=${ERRORS_A}"
+        OVERALL_RC=1
+    fi
+    echo "$i,mode_a,$TARGETA,$PREA,$POSTA,$DURATION_A,$ERRORS_A,$NOTE_A" >> "$OUT"
+    echo "iter $i mode-A: $NOTE_A post_head=$POSTA duration=${DURATION_A}s errors=$ERRORS_A"
+    if [[ $OVERALL_RC -ne 0 ]]; then
+        echo "iter $i mode-A: ABORTING (regression) — Mode-A must work before Mode-B is meaningful"
+        break
+    fi
+    # -------- Mode-B main test --------
     DEPTH=${DEPTHS[$((i-1))]}
     PRE_HEAD_HEX=$(eth_block_number)
     if [[ "$PRE_HEAD_HEX" == "null" || -z "$PRE_HEAD_HEX" ]]; then
         echo "iter $i: ABORT — eth_blockNumber returned null" | tee -a "$OUT.log"
-        echo "$i,,,,0,0,abort:no-head" >> "$OUT"
+        echo "$i,mode_b,,,,0,0,abort:no-head" >> "$OUT"
         OVERALL_RC=1
         break
     fi
@@ -146,7 +216,7 @@ for ((i=1; i<=ITER; i++)); do
     TARGET=$((PRE_HEAD - DEPTH))
     if [[ $TARGET -lt 1 ]]; then
         echo "iter $i: ABORT — target $TARGET below 1 (pre_head=$PRE_HEAD depth=$DEPTH)" | tee -a "$OUT.log"
-        echo "$i,$TARGET,$PRE_HEAD,,0,0,abort:target-too-low" >> "$OUT"
+        echo "$i,mode_b,$TARGET,$PRE_HEAD,,0,0,abort:target-too-low" >> "$OUT"
         OVERALL_RC=1
         break
     fi
@@ -159,7 +229,7 @@ for ((i=1; i<=ITER; i++)); do
     if [[ "$SETHEAD_RESULT" != "ok" ]]; then
         DURATION=$(( $(date +%s) - START_TS ))
         echo "iter $i: ABORT setHead — $SETHEAD_RESULT" | tee -a "$OUT.log"
-        echo "$i,$TARGET,$PRE_HEAD,,${DURATION},0,abort:setHead-$SETHEAD_RESULT" >> "$OUT"
+        echo "$i,mode_b,$TARGET,$PRE_HEAD,,${DURATION},0,abort:setHead-$SETHEAD_RESULT" >> "$OUT"
         OVERALL_RC=1
         break
     fi
@@ -205,8 +275,8 @@ for ((i=1; i<=ITER; i++)); do
         OVERALL_RC=1
     fi
 
-    echo "$i,$TARGET,$PRE_HEAD,$POST_HEAD,$DURATION,$ERROR_COUNT,$NOTE" >> "$OUT"
-    echo "iter $i: $NOTE post_head=$POST_HEAD duration=${DURATION}s errors=$ERROR_COUNT"
+    echo "$i,mode_b,$TARGET,$PRE_HEAD,$POST_HEAD,$DURATION,$ERROR_COUNT,$NOTE" >> "$OUT"
+    echo "iter $i mode-B: $NOTE post_head=$POST_HEAD duration=${DURATION}s errors=$ERROR_COUNT"
 
     if [[ $OVERALL_RC -ne 0 ]]; then
         echo "iter $i: ABORTING further iterations"
