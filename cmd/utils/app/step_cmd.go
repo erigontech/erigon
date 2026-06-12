@@ -127,6 +127,11 @@ func printStepRebasePlan(plan stepRebasePlan) {
 }
 
 func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebasePlan, logger log.Logger) error {
+	unlock, err := dirs.TryFlock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	// reset before renaming: a crash mid-apply then leaves old settings with old file
 	// names and cleared exec state, which is a consistent datadir and a re-runnable command
 	if plan.resetExec {
@@ -155,7 +160,18 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 }
 
 func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("no chaindata database to keep at %s", dirs.Chaindata)
+	}
+	// exclusive non-Accede open: fail fast if the DB is in use rather than resetting a live node
+	chainDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Accede(false).Exclusive(true).Open(ctx)
+	if err != nil {
+		return err
+	}
 	defer chainDB.Close()
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()

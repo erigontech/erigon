@@ -92,6 +92,47 @@ func TestStepRebaseDeletesChaindataByDefault(t *testing.T) {
 	require.Equal(t, uint64(8), rebased.StepsInFrozenFile)
 }
 
+func TestStepRebaseKeepBlocksFailsFastWhenDatadirInUse(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, 16, 4)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	writeTestChaindata(t, dirs)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := buildStepRebasePlan(dirs, settings, 8, true, logger)
+	require.NoError(t, err)
+	unlock, err := dirs.TryFlock()
+	require.NoError(t, err)
+	defer unlock()
+	err = applyStepRebasePlan(context.Background(), dirs, plan, logger)
+	require.ErrorIs(t, err, datadir.ErrDataDirLocked)
+	tx, err := openTestChaindata(t, dirs).BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	accVal, err := tx.GetOne(kv.TblAccountVals, []byte("acc-key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("acc-val"), accVal)
+	untouched, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	require.Equal(t, uint64(16), untouched.StepSize)
+}
+
+func TestStepRebaseKeepBlocksFailsWithoutChaindata(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, 16, 4)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := buildStepRebasePlan(dirs, settings, 8, true, logger)
+	require.NoError(t, err)
+	err = applyStepRebasePlan(context.Background(), dirs, plan, logger)
+	require.ErrorContains(t, err, "chaindata")
+}
+
 func writeTestErigonDBSettings(t *testing.T, dirs datadir.Dirs, stepSize, stepsInFrozenFile uint64) {
 	t.Helper()
 	content := fmt.Sprintf("step_size = %d\nsteps_in_frozen_file = %d\n", stepSize, stepsInFrozenFile)
