@@ -23,9 +23,9 @@
 
 ## Fundamentals
 
-- [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, prune modes, database internals, and node configuration.
+- [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, pruning modes, database internals, and node configuration.
 - [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
-- [Prune Modes](https://docs.erigon.tech/fundamentals/prune-modes): Full, minimal, blocks, and archive prune modes explained — choose the right mode for your use case.
+- [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes): Full, minimal, blocks, and archive pruning modes explained — choose the right mode for your use case.
 - [Architecture](https://docs.erigon.tech/fundamentals/architecture): How Erigon is built — staged sync, modular processes, flat-DB on MDBX, immutable snapshots, and an embedded consensus layer.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
