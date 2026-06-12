@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -46,73 +47,67 @@ func oneBlockStep(m *execmoduletester.ExecModuleTester, require *require.Asserti
 }
 
 func TestSendRawTransaction(t *testing.T) {
-	m := execmoduletester.New(t, execmoduletester.WithTxPool())
-	require := require.New(t)
-	oneBlockStep(m, require)
-	expectedValue := uint64(1234)
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-	require.NoError(err)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	txPool := txpoolproto.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
-	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
-	require.NoError(err)
-	txsCh, id := ff.SubscribePendingTxs(1)
-	defer ff.UnsubscribePendingTxs(id)
-	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
-	require.NoError(err)
-	select {
-	case got := <-txsCh:
-		require.Equal(expectedValue, got[0].GetValue().Uint64())
-	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
-		t.Log("Timeout waiting for txn from channel")
-		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
+	synctest.Test(t, func(t *testing.T) {
+		m := execmoduletester.New(t, execmoduletester.WithTxPool())
+		require := require.New(t)
+		oneBlockStep(m, require)
+		expectedValue := uint64(1234)
+		txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(err)
-		require.Equal(expectedValue, jsonTx.Value.Uint64())
-	}
-	//send same txn second time and expect error
-	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.Error(err)
-	expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
-	require.Equal(expectedErr, err.Error())
-	m.ReceiveWg.Wait()
-	//TODO: make propagation easy to test - now race
-	//time.Sleep(time.Second)
-	//sent := m.SentMessage(0)
-	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+		ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+		txPool := txpoolproto.NewTxpoolClient(conn)
+		ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
+		buf := bytes.NewBuffer(nil)
+		err = txn.MarshalBinary(buf)
+		require.NoError(err)
+		txsCh, id := ff.SubscribePendingTxs(1)
+		defer ff.UnsubscribePendingTxs(id)
+		_, err = api.SendRawTransaction(ctx, buf.Bytes())
+		require.NoError(err)
+		select {
+		case got := <-txsCh:
+			require.Equal(expectedValue, got[0].GetValue().Uint64())
+		case <-time.After(20 * time.Second):
+			t.Fatal("timeout waiting for txn from channel")
+		}
+		//send same txn second time and expect error
+		_, err = api.SendRawTransaction(ctx, buf.Bytes())
+		require.Error(err)
+		expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
+		require.Equal(expectedErr, err.Error())
+		m.ReceiveWg.Wait()
+	})
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
-	m := execmoduletester.New(t, execmoduletester.WithTxPool())
-	require := require.New(t)
-	oneBlockStep(m, require)
-	expectedTxValue := uint64(4444)
-	// Create a legacy signer pre-155
-	unprotectedSigner := types.MakeFrontierSigner()
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedTxValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *unprotectedSigner, m.Key)
-	require.NoError(err)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	txPool := txpoolproto.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
-	// Enable unprotected txs flag
-	api.AllowUnprotectedTxs = true
-	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
-	require.NoError(err)
-	txsCh, id := ff.SubscribePendingTxs(1)
-	defer ff.UnsubscribePendingTxs(id)
-	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
-	require.NoError(err)
-	select {
-	case got := <-txsCh:
-		require.Equal(expectedTxValue, got[0].GetValue().Uint64())
-	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
-		t.Log("Timeout waiting for txn from channel")
-		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
+	synctest.Test(t, func(t *testing.T) {
+		m := execmoduletester.New(t, execmoduletester.WithTxPool())
+		require := require.New(t)
+		oneBlockStep(m, require)
+		expectedTxValue := uint64(4444)
+		// Create a legacy signer pre-155
+		unprotectedSigner := types.MakeFrontierSigner()
+		txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedTxValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *unprotectedSigner, m.Key)
 		require.NoError(err)
-		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
-	}
+		ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+		txPool := txpoolproto.NewTxpoolClient(conn)
+		ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
+		// Enable unprotected txs flag
+		api.AllowUnprotectedTxs = true
+		buf := bytes.NewBuffer(nil)
+		err = txn.MarshalBinary(buf)
+		require.NoError(err)
+		txsCh, id := ff.SubscribePendingTxs(1)
+		defer ff.UnsubscribePendingTxs(id)
+		_, err = api.SendRawTransaction(ctx, buf.Bytes())
+		require.NoError(err)
+		select {
+		case got := <-txsCh:
+			require.Equal(expectedTxValue, got[0].GetValue().Uint64())
+		case <-time.After(20 * time.Second):
+			t.Fatal("timeout waiting for txn from channel")
+		}
+	})
 }
