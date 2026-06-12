@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
-
 // Shared helpers for commitment tests: trie processing wrappers, key generators,
 // cell-row generators and common update fixtures.
+
+package commitment
 
 import (
 	"bytes"

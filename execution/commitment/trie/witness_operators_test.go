@@ -90,8 +90,7 @@ func TestAccountBigBalance(t *testing.T) {
 
 }
 
-// mustWriteAccountOp serializes the account operator and returns the raw bytes plus the
-// length of a minimal encoding with no optional fields (opcode + CBOR key prefix + key + flags).
+// mustWriteAccountOp serializes acc and returns the raw bytes plus the minimal (no-optional-fields) encoding length.
 func mustWriteAccountOp(t *testing.T, acc *OperatorLeafAccount) ([]byte, int) {
 	t.Helper()
 	var buff bytes.Buffer
