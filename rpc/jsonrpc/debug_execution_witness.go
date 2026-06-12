@@ -1311,7 +1311,9 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	defer postDomains.Close()
 	postSdCtx := postDomains.GetCommitmentContext()
 
-	// Set up to read state at current block (after execution)
+	// Set up to read state at current block (after execution).
+	// Stay on the committed view: the branch below reads txnums and seeks
+	// commitment against plain tx, so latestBlock must agree with that view.
 	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)

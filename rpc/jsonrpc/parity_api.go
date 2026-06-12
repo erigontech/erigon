@@ -73,7 +73,16 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, errors.New("acc not found")
 	}
 
+	// Stay on the committed view: bn, _txNumReader.Min, and the RangeAsOf scan
+	// over kv.StorageDomain must agree on a single state version. The block
+	// overlay exposes table writes but not the SD's domain mem batch, so an
+	// overlay-derived bn would point at a block whose StorageDomain writes
+	// are not yet visible to RangeAsOf, returning either an error or
+	// inconsistent storage.
 	bn := rawdb.ReadCurrentBlockNumber(tx)
+	if bn == nil {
+		return nil, errors.New("current block number not found")
+	}
 	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
 	if err != nil {
 		return nil, err

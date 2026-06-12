@@ -128,6 +128,10 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err != nil {
 		return nil, err
 	}
+	// Stay on the committed view: NewSharedDomains below builds the simulator
+	// on plain tx, so state reads only see committed domain data (the SD's mem
+	// batch is not exposed by the block overlay). An overlay-aware latest could
+	// land at N while the simulator can only reach state at N-1.
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err

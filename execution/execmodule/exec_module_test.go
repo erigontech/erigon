@@ -1287,17 +1287,13 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 // commit enabled, notifications are still dispatched before FCU returns,
 // even though the DB commit happens asynchronously.
 //
-// Note: with background commit, subsequent blocks may fail validation
-// because the DB state hasn't caught up yet (the commit is async). This
-// test only processes the genesis → block 1 transition to verify that
-// notification dispatch works correctly in the background commit path.
+// Successive FCUs are correctly serialized via the ExecModule semaphore
+// (see updateForkChoice / runPostForkchoice): the bg goroutine releases
+// the semaphore only after Flush+Commit, so FCU N+1 always reads the
+// committed state of FCU N. This test exercises one genesis → block 1
+// transition; multi-block coverage lives in TestNotificationDispatchForegroundCommit
+// and the integration suites.
 func TestNotificationDispatchBackgroundCommit(t *testing.T) {
-	// Background commit creates a race: FCU N returns before commit finishes,
-	// so FCU N+1 reads stale state from DB. This is the known limitation that
-	// the API-layer "latest head pointer" coordination is designed to solve.
-	// Once that's implemented, remove this skip and verify the full flow.
-	t.Skip("background commit requires API-layer coordination (latest head pointer) to work correctly")
-
 	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundCommit())
 
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()

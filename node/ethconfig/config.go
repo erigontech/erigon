@@ -111,9 +111,36 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	// FcuBackgroundCommit lets the FCU response return to the consensus client
+	// before MDBX commit lands. Notifications are dispatched pre-commit from the
+	// SharedDomains overlay (see execution/execmodule/notification_dispatcher.go).
+	// Successive FCUs are serialized through the ExecModule semaphore so FCU N+1
+	// always reads FCU N's committed state.
+	//
+	// Embedded rpcdaemon: head-sensitive paths whose dependent reads are also
+	// overlay-backed (canonical hashes, headers, bodies, stage progress, TxNums)
+	// consult filters.LatestSD()/WithOverlay (see rpc/rpchelper/filters.go), so
+	// they see the new head without waiting for fsync. Paths whose dependent
+	// reads use SD-temporal data (eth_call, getProof, witness, simulation, log
+	// range scans) intentionally stay on the committed plain tx to avoid a
+	// head-vs-state divergence.
+	//
+	// Remote rpcdaemon: kvcache.Coherent receives pre-commit StateChanges and
+	// the matching root is keyed by PlainStateVersion, which is bumped atomically
+	// inside the commit batch — remote txs observe a consistent (lagging) state,
+	// not a divergent one.
+	//
+	// Known limitation: during the ~50ms window between FCU response and MDBX
+	// commit, "latest"-anchored *state* reads (eth_call(latest), eth_getBalance,
+	// eth_getStorageAt, eth_getCode) return block N's header but evaluate against
+	// block N-1's state — the SD's domain mem batch is not exposed by the block
+	// overlay. A proper SD-aware temporal view that chains SD.mem → block
+	// overlay → committed MDBX is tracked in
+	// https://github.com/erigontech/erigon/issues/21314. The trade-off here is
+	// bounded staleness (~50ms), not corruption.
+	FcuBackgroundCommit: true,
 	ExperimentalBAL:     false,
 	WarmupKzgCtxOnInit:  true,
 }
