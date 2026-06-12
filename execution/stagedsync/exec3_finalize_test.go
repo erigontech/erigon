@@ -2000,6 +2000,43 @@ func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 	assert.Equal(t, code, gotCode, "recovered code is the deployed bytecode")
 }
 
+// Recovery must reject code that does not hash to the emitted CodeHashPath:
+// emitting mismatched code would itself break code/codeHash consistency, so a
+// candidate whose keccak != the recovered hash is skipped, not written.
+func TestNormalizeWriteSet_CodePathRecoveryRejectsHashMismatch(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x42})
+
+	codeA := types.AddressToDelegation(accounts.InternAddress([20]byte{0xaa}))
+	hashA := accounts.InternCodeHash(crypto.Keccak256Hash(codeA))
+	codeB := types.AddressToDelegation(accounts.InternAddress([20]byte{0xbb})) // different code
+
+	const txIndex = 5
+
+	// The versionMap holds codeB for this tx, but the output's CodeHashPath is
+	// hashA — the candidate code disagrees with the hash being recovered.
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: addr, Path: state.CodePath, Val: codeB,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: addr, Path: state.CodeHashPath, Val: hashA,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: addr, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}, true, "")
+
+	rawWrites := state.VersionedWrites{
+		{Address: addr, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
+		{Address: addr, Path: state.CodeHashPath, Val: hashA,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}
+
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
+
+	require.Equal(t, 0, countPath(result, state.CodePath),
+		"code whose keccak != the recovered codeHash must not be emitted")
+}
+
 // TestCalcFees_EmitsAddressPathForCoinbase pins the fix for the mainnet
 // block 25151825 tx 31 +25k gas bug. Background:
 //

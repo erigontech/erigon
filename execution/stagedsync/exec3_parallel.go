@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -3409,30 +3410,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// CodePath travels with CodeHashPath. The CodeHashPath case and the
-	// fill-missing loop above both recover an account's codeHash from the
-	// versionMap, but CodePath has no equivalent recovery: the case above keeps
-	// it only when this tx's CodePath write is present at the validated
-	// incarnation (the incarnation filter), and the fill loop never emits it. So a
-	// tx whose validated writeset lacks a fresh CodePath persists a non-empty
-	// codeHash with no code bytes (codeHash-no-code) — and a later block that
-	// CALLs the contract executes it as empty and diverges (wrong gas / wrong
-	// root). Two ways the fresh CodePath goes missing, both on re-execution where
-	// SetCode short-circuits (so.Code() already returns the prior incarnation's
-	// bytes, bytes.Equal):
-	//   - CREATE/CREATE2 of an ordinary contract (mainnet 25291004: a Safe proxy
-	//     deployed via the SafeProxyFactory, called 6785 blocks later at 25297789);
-	//   - an EIP-7702 delegating tx (the 7702 sender then fails EIP-3607 as "not an
-	//     eoa").
-	// Recover the code whose hash this tx emitted so code can never be lost while
-	// its hash survives. The versionMap holds CodePath iff the code was written in
-	// THIS block, so a versionMap hit is always genuine in-block code — recover it
-	// for any contract. Only the stateReader fallback (versionMap miss) is bounded
-	// to 7702 designators, since stateReader also returns an unchanged contract's
-	// existing code and re-emitting that for every touched contract would be write
-	// amplification with no correctness benefit. NOTE: forward-prevention only; it
-	// cannot repair codeHash-no-code already collated into immutable snapshot files
-	// (that needs a snapshot unwind).
+	// CodePath must travel with CodeHashPath. The CodeHashPath case and the
+	// fill-missing loop recover a codeHash from the versionMap, but nothing
+	// recovers CodePath: a tx whose validated writeset lacks a fresh CodePath
+	// (SetCode short-circuits on re-execution — bytes.Equal of the prior
+	// incarnation's code) would persist a non-empty codeHash with no code, and a
+	// later CALL would execute it as empty (wrong gas/root). A versionMap hit means
+	// the code was written in this block — recover it for any contract. On a miss,
+	// fall back to committed state only for 7702 designators: stateReader also
+	// returns an unchanged contract's code, and re-emitting that for every touched
+	// contract is write amplification with no correctness benefit.
 	codeInOutput := make(map[accounts.Address]bool)
 	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
 	for _, w := range filtered {
@@ -3445,36 +3432,34 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			}
 		}
 	}
-	emit := func(addr accounts.Address, code []byte) {
+	// emit recovers code only if it hashes to the codeHash being recovered:
+	// emitting code that doesn't match its hash would itself break code/codeHash
+	// consistency, so a mismatch is skipped.
+	emit := func(addr accounts.Address, code []byte, want accounts.CodeHash) bool {
+		if crypto.Keccak256Hash(code) != want.Value() {
+			return false
+		}
 		filtered = append(filtered, &state.VersionedWrite{
 			Address: addr,
 			Path:    state.CodePath,
 			Val:     code,
 			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 		})
+		return true
 	}
 	for addr, h := range codeHashInOutput {
 		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
 			continue
 		}
-		// versionMap hit = the code was written in THIS block (deploy / code change
-		// / 7702 designator); recover it for any contract — it's genuine in-block
-		// code, never an unchanged contract's bytes.
 		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
-			if c, ok := rr.Value().([]byte); ok && len(c) > 0 {
-				emit(addr, c)
+			if c, ok := rr.Value().([]byte); ok && len(c) > 0 && emit(addr, c, h) {
 				continue
 			}
 		}
-		// versionMap miss (e.g. a re-executing 7702 delegation whose prior
-		// incarnation's CodePath entry was invalidated): fall back to the committed
-		// post-state, bounded to 7702 designators — stateReader returns an
-		// unchanged contract's existing code too, and re-emitting that for every
-		// touched contract is write amplification with no correctness benefit.
 		if stateReader != nil {
 			if c, err := stateReader.ReadAccountCode(addr); err == nil {
 				if _, ok := types.ParseDelegation(c); ok {
-					emit(addr, c)
+					emit(addr, c, h)
 				}
 			}
 		}
