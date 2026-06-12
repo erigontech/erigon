@@ -18,7 +18,6 @@ package execmodule_test
 
 import (
 	"bytes"
-	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -84,7 +83,6 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	// Freeze the first segment's blocks into a snapshot file and prune them from
 	// the DB, exactly as block retirement does.
 	snCfg, _ := snapcfg.KnownCfg(networkname.Mainnet)
-	snCfg.ExpectBlocks = math.MaxUint64
 	require.NoError(t, freezeblocks.DumpBlocks(m.Ctx, 0, snaptype.Erigon2MinSegmentSize, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB, 1, log.LvlInfo, log.New(), m.BlockReader, snCfg, nil))
 	require.NoError(t, m.BlockSnapshots.OpenFolder())
 	rwTx, err := m.DB.BeginRw(m.Ctx)
@@ -188,17 +186,31 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 				require.NoError(t, err)
 			}
 			m.ReceiveWg.Wait()
-			sent, err := m.SentMessage(i)
-			require.NoError(t, err)
-			require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
-			var resp eth.ReceiptsRLPPacket70
-			require.NoError(t, rlp.DecodeBytes(sent.Data, &resp))
-			require.Equal(t, uint64(i+1), resp.RequestId)
+			resp := findReceiptsResponse(t, m, uint64(i+1))
 			require.False(t, resp.LastBlockIncomplete)
 			require.Len(t, resp.ReceiptsRLPPacket, len(tt.expect))
 			for pos, expected := range tt.expect {
 				require.Equal(t, expected, resp.ReceiptsRLPPacket[pos], "receipt list at position %d", pos)
 			}
 		})
+	}
+}
+
+// findReceiptsResponse locates the Receipts response by request id rather than by
+// outbound message position.
+func findReceiptsResponse(t *testing.T, m *execmoduletester.ExecModuleTester, requestId uint64) *eth.ReceiptsRLPPacket70 {
+	t.Helper()
+	receiptsMsgId := eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg]
+	for i := 0; ; i++ {
+		sent, err := m.SentMessage(i)
+		require.NoError(t, err, "no Receipts response found for request id %d", requestId)
+		if sent.Id != receiptsMsgId {
+			continue
+		}
+		var resp eth.ReceiptsRLPPacket70
+		require.NoError(t, rlp.DecodeBytes(sent.Data, &resp))
+		if resp.RequestId == requestId {
+			return &resp
+		}
 	}
 }
