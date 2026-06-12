@@ -22,7 +22,6 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
@@ -81,39 +80,14 @@ func (b *Filter) AddHash(hash uint64) error {
 	return nil
 }
 
-// Process-cumulative counters of ContainsHash outcomes.
-// True = "probably present" (filter does not short-circuit, lookup proceeds).
-// False = "definitely not present" (filter short-circuits the lookup).
-// Hit-rate = true / (true + false). Used to size the value of bypassing
-// the filter for callers known to lookup present keys (e.g. warmer).
-var (
-	containsTrueCount  atomic.Uint64
-	containsFalseCount atomic.Uint64
-)
-
-// ContainsHashStats returns (true, false) cumulative counts since process
-// start. To get a per-block delta, snapshot before/after.
-func ContainsHashStats() (containsTrue, containsFalse uint64) {
-	return containsTrueCount.Load(), containsFalseCount.Load()
-}
-
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
 	if b.empty {
-		containsTrueCount.Add(1)
 		return true
 	}
-	var ok bool
 	if b.useFuse {
-		ok = b.fuseReader.ContainsHash(hashedKey)
-	} else {
-		ok = b.filter.ContainsHash(hashedKey)
+		return b.fuseReader.ContainsHash(hashedKey)
 	}
-	if ok {
-		containsTrueCount.Add(1)
-	} else {
-		containsFalseCount.Add(1)
-	}
-	return ok
+	return b.filter.ContainsHash(hashedKey)
 }
 func (b *Filter) Contains(v hash.Hash64) bool {
 	if b.empty {

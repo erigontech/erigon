@@ -157,6 +157,30 @@ func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
 	require.False(t, ok, "tail entry with txN=100 must be evicted by watermark=60")
 }
 
+// TestBranchCache_UnwindTo_LatePutCaughtByNextUnwind documents the invariant
+// the concurrency contract relies on: a Put that lands after an UnwindTo's scan
+// has already passed (the acknowledged Put-vs-scan race) is not lost — a
+// subsequent UnwindTo with the same watermark still evicts it. So repeated
+// UnwindTo converges regardless of scan/Put interleaving. If a future change
+// breaks this (e.g. UnwindTo stops re-scanning), this test fails.
+func TestBranchCache_UnwindTo_LatePutCaughtByNextUnwind(t *testing.T) {
+	c := NewBranchCache(100)
+	key := []byte{0xa0, 0xb1}
+
+	// First UnwindTo evicts the stale entry.
+	c.Put(key, []byte("v1"), 0, 100)
+	require.Equal(t, 1, c.UnwindTo(60))
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+
+	// A Put that races in after that scan (txN still above the watermark) is
+	// caught by the next UnwindTo at the same watermark — no permanent stale entry.
+	c.Put(key, []byte("v2"), 0, 100)
+	require.Equal(t, 1, c.UnwindTo(60))
+	_, _, ok = c.Get(key)
+	require.False(t, ok, "a late Put above the watermark must be evicted by the next UnwindTo")
+}
+
 // TestBranchCache_UnwindTo_EvictsAcrossAllTiers verifies eviction reaches
 // the root slot, not just the LRU tail.
 func TestBranchCache_UnwindTo_EvictsAcrossAllTiers(t *testing.T) {

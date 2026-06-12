@@ -511,6 +511,12 @@ type DomainMetrics struct {
 	// therefore contributes to UniqueFileReadCount. Held outside the
 	// mutex (sync.Map handles its own concurrency) so the unique check
 	// doesn't serialise with other metric updates.
+	//
+	// Trade-off: this grows to one entry per distinct prefix ever file-read
+	// (unbounded over a long run) and is intentionally NOT capped — a cap would
+	// re-count already-seen prefixes and corrupt UniqueFileReadCount. It only
+	// accumulates when dbg.KVReadLevelledMetrics is enabled, a short-lived
+	// diagnostic toggle rather than a production long-running setting.
 	seenFileReads sync.Map
 }
 
