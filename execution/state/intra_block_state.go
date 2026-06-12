@@ -406,6 +406,7 @@ func (sdb *IntraBlockState) Reset() {
 	// boundary call.  Walk the per-path maps and return every VW to its
 	// typed pool before resetting.
 	sdb.versionedWrites.ReleaseAndReset()
+	sdb.recordAccess = false
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0
@@ -753,6 +754,18 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
+// codeAccessTracker lets a stateReader observe code accesses (EIP-7928 BAL /
+// EIP-7702 delegation). No-op when the reader doesn't implement it.
+type codeAccessTracker interface {
+	OnCodeAccess(accounts.Address, []byte)
+}
+
+func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
+	if hook, ok := sdb.stateReader.(codeAccessTracker); ok {
+		hook.OnCodeAccess(addr, code)
+	}
+}
+
 func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr, true)
@@ -815,6 +828,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 			return accounts.ZeroAddress, false, err
 		}
 		if delegation, ok := types.ParseDelegation(code); ok {
+			sdb.callCodeAccessHook(addr, code)
 			return delegation, true, nil
 		}
 	}

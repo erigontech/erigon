@@ -296,19 +296,11 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
-		f.forkGraph.MarkHeaderAsInvalid(beaconBlockRoot)
-		// remove from optimistic candidate
-		if err := f.optimisticStore.InvalidateBlock(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to remove block from optimistic store: %v", err)
-		}
+		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
 		return errors.New("execution payload is invalid")
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
-		// remove from optimistic candidate
-		if err := f.optimisticStore.ValidateBlock(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to validate block in optimistic store: %v", err)
-		}
-		f.verifiedExecutionPayload.Add(beaconBlockRoot, struct{}{})
+		f.markPayloadVerifiedLocked(beaconBlockRoot, executionBlockHash)
 	}
 
 	if err != nil {
@@ -451,24 +443,24 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 // on disk to resolve parent execution payloads for subsequent blocks.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return errors.New("StoreAnchorEnvelope: nil envelope")
 	}
 	envelope := signedEnvelope.Message
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("StoreAnchorEnvelope: envelope root %v does not match block root %v", envelope.BeaconBlockRoot, blockRoot)
+	}
 
 	f.mu.Lock()
-	// Update eth2Roots mapping so FCU can resolve the EL block hash
-	if envelope.Payload != nil {
-		f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
-	}
-	// Persist to disk so HasEnvelope() returns true and forward sync can find it
 	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
 		f.mu.Unlock()
 		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
 	}
+	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.mu.Unlock()
 
-	// Write DB indices outside the lock
 	if f.db != nil {
 		ctx := context.Background()
 		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
@@ -477,6 +469,7 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 			return fmt.Errorf("StoreAnchorEnvelope: failed to write indices: %w", err)
 		}
 	}
+
 	return nil
 }
 

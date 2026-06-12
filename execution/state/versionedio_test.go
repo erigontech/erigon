@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -981,7 +982,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 		Version{TxIndex: 0, Incarnation: 0},
 		postWithdrawalBalance, true)
 
-	ibs := New(NewVersionedStateReader(1, nil, vm, reader))
+	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1032,7 +1033,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 		Version{TxIndex: 0, Incarnation: 0},
 		postWithdrawalBalance, true)
 
-	ibs := New(NewVersionedStateReader(1, nil, vm, reader))
+	ibs := New(NewVersionedStateReader(1, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 1)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1129,7 +1130,7 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	// Tx 4 reads addr. Strict-greater on subfields wouldn't see the
 	// same-TxIdx Balance/Nonce/CodeHash; the AddressPath >= destructTxIndex
 	// branch is what surfaces the re-created account.
-	ibs := New(NewVersionedStateReader(4, nil, vm, reader))
+	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -1141,4 +1142,55 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 			"getVersionedAccount must surface the re-created account, not nil")
 	require.Equal(t, uint64(2), account.Incarnation,
 		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
+}
+
+// EIP-7928 net-zero guard: a slot that is read and then written back to the
+// same value must stay a read in the BAL, not become a write. The filter
+// lives in accountState.updateWrite (the helper addStorageUpdate only
+// appends). This locks the behaviour down across the typed-vio refactor.
+func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	slot := accounts.InternKey(common.HexToHash("0x07"))
+	orig := *uint256.NewInt(42)
+
+	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+
+	account.updateReadStorage(slot, orig)
+	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
+
+	writeBack := &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 0}},
+		Val:         orig,
+	}
+	account.updateWrite(writeBack, 0)
+
+	require.Empty(t, account.changes.StorageChanges,
+		"write-back to the originally-read value is net-zero and must NOT be recorded as a storage write")
+	require.Contains(t, account.changes.StorageReads, slot,
+		"the net-zero write-back must remain a read")
+}
+
+// The complement: a read followed by a write to a DIFFERENT value is a real
+// state change — it becomes a write and supersedes the recorded read.
+func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	slot := accounts.InternKey(common.HexToHash("0x07"))
+	orig := *uint256.NewInt(42)
+	changed := *uint256.NewInt(99)
+
+	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+
+	account.updateReadStorage(slot, orig)
+
+	write := &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 0}},
+		Val:         changed,
+	}
+	account.updateWrite(write, 0)
+
+	require.Len(t, account.changes.StorageChanges, 1,
+		"a write to a different value is a real state change and must be recorded")
+	require.Equal(t, slot, account.changes.StorageChanges[0].Slot)
+	require.NotContains(t, account.changes.StorageReads, slot,
+		"a real write supersedes the recorded read")
 }

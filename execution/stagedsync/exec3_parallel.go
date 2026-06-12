@@ -174,10 +174,6 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
-	// blockRequestsCh feeds the calculator per-block heads-up messages on
-	// its own channel, so a blockRequest is never trapped behind a block's
-	// txResults on the result fan-out. Closed by closeApplyChannels.
-	blockRequestsCh chan *blockRequest
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
 	// reachedMaxBlock is set by the exec loop when it exits cleanly because
 	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
@@ -195,8 +191,11 @@ type parallelExecutor struct {
 	// goroutine and avoids the data race between SetChangesetAccumulator
 	// (apply loop) and ApplyStateWrites (exec loop, via SysCallContract for
 	// block-end system calls) on SharedDomains.mem.
-	shouldGenerateChangesets bool
-	currentChangeSet         *changeset.StateChangeSet
+	// changesetWindowStart is the first block of the batch that must capture
+	// a changeset (see changesetWindowStart in exec3.go); blocks below it run
+	// without an accumulator.
+	changesetWindowStart uint64
+	currentChangeSet     *changeset.StateChangeSet
 	// currentChangeSetBlock is the block number currentChangeSet belongs to
 	// (0 == none). Tracked so ensureChangesetAccumulator can be a no-op when the
 	// accumulator is already installed for the block whose writes are about to
@@ -213,7 +212,7 @@ type parallelExecutor struct {
 // SetChangesetAccumulator, which must be single-writer (see the comment on
 // currentChangeSet).
 func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
-	if !pe.shouldGenerateChangesets || blockNum == 0 || blockNum > pe.maxBlockNum {
+	if blockNum < pe.changesetWindowStart || blockNum == 0 || blockNum > pe.maxBlockNum {
 		return
 	}
 	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
@@ -250,7 +249,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// Both are fed by the fan-out in the execLoop's blockExecutor.
 	applyResults := make(chan applyResult, 2_048)
 	commitResults := make(chan applyResult, 2_048)
-	blockRequests := make(chan *blockRequest, 2_048)
 
 	// rootResults receives per-block commitment roots from the calculator.
 	rootResults := make(chan commitmentResult, 64)
@@ -309,7 +307,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
-	pe.blockRequestsCh = blockRequests
 	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE
@@ -317,7 +314,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// exec loop owns all subsequent SetChangesetAccumulator transitions
 	// (per-block save/clear/install) so apply-loop and exec-loop sd.mem
 	// writes never race on SharedDomains.mem.
-	pe.shouldGenerateChangesets = shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum)
+	pe.changesetWindowStart = changesetWindowStart(pe.cfg.syncCfg.AlwaysGenerateChangesets,
+		pe.cfg.syncCfg.MaxReorgDepth, pe.cfg.blockReader.FrozenBlocks(), startBlockNum, maxBlockNum)
 	pe.ensureChangesetAccumulator(startBlockNum)
 
 	// Start the commitment calculator. forcePerBlockCompute mirrors serial's
@@ -326,16 +324,17 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// must be generated (for unwind/reorg) the calculator must compute
 	// per-block — otherwise batch-mode dedupes branch updates across the
 	// batch and flushes them all into the last block's changeset, which
-	// fails on subsequent reorgs.
-	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, blockRequests, rootResults, executorCancel)
+	// fails on subsequent reorgs. Blocks from the changeset window
+	// (perBlockFrom) onward compute per-block for the same reason.
+	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
 	calculator.Start(executorContext)
 	defer calculator.Stop()
 
-	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, blockRequests, commitResults); err != nil {
+	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, commitResults); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -371,7 +370,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		}
 		defer applyRoTx.Rollback()
 
-		// pe.shouldGenerateChangesets and pe.currentChangeSet were set up
+		// pe.changesetWindowStart and pe.currentChangeSet were set up
 		// before pe.run/executeBlocks launched their goroutines (above the
 		// calculator.Start call). Per-block accumulator save/clear/install
 		// transitions are driven from the exec loop's blockResult handler.
@@ -624,7 +623,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 
 					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							return err
 						}
@@ -996,7 +995,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// blockResult, so that the commitment calculator (which consumes
 				// blockResults on a separate goroutine) can find this block's
 				// saved changeset via GetChangesetByBlockNum at compute time.
-				// In per-block compute mode (shouldGenerateChangesets), the
+				// In per-block compute mode (changeset window), the
 				// calculator switches the accumulator to this saved CS for the
 				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
 				// so branch writes land in block N's CS rather than whatever the
@@ -1188,9 +1187,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 // path into a spurious InvalidBlock error — the BenchmarkFeeHistory
 // 200-block fixture exhausts the 5MB batch budget at block 114 and
 // previously errored despite blocks 1..114 being applied cleanly.
-//
-// Pure function — extracted from the apply loop's channel-close branch
-// so the invariant is unit-testable. See TestApplyLoopMissingBlocks.
 func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
@@ -1199,6 +1195,26 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 		}
 	}
 	return missing
+}
+
+// applyLoopFlushAsComplete returns the `complete` flag for
+// versionMap.FlushVersionedWrites. cntInvalid counts prior VersionTooEarly
+// and VersionInvalid txs seen earlier in this iteration but excludes the
+// current tx's own verdict, so the `valid` term is required to prevent an
+// invalidated tx's writes being flushed as Done and read as committed by
+// downstream OCC consumers.
+func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
+	return valid && cntInvalid == 0
+}
+
+// wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
+// preserving the real origErr as OriginError instead of the zero-value an
+// inline type-assertion would substitute on the failure branch.
+func wrapAsExecAbort(origErr error, depTxIndex int) error {
+	if _, ok := origErr.(protocol.ErrExecAbortError); ok {
+		return origErr
+	}
+	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
 }
 
 // execLoopExitDecision is the result of evaluating the exec-loop's
@@ -1291,13 +1307,6 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 	if pe.commitResultsCh != nil {
 		safeClose(pe.commitResultsCh, "commitResults")
 		pe.commitResultsCh = nil
-	}
-	// blockRequests has a single sender (executeBlocks), so a plain close is
-	// race-free; the nil-guard keeps closeApplyChannels idempotent.
-	if pe.blockRequestsCh != nil {
-		close(pe.blockRequestsCh)
-		pe.blockRequestsCh = nil
-		closedOrder = append(closedOrder, "blockRequests")
 	}
 	if pe.applyResultsCh != nil {
 		safeClose(pe.applyResultsCh, "applyResults")
@@ -1520,36 +1529,6 @@ type txResult struct {
 	schedStartedNs        int64
 	schedFinishedNs       int64
 }
-
-// blockRequest is the commitment calculator's per-block heads-up, sent by the
-// dispatch layer on its own channel — ahead of, and separate from, the
-// block's txResult/blockResult stream so it is never trapped behind a prior
-// block's results. It carries the block identity and the block's BAL (nil
-// when none), from which the calculator selects its per-block mode.
-type blockRequest struct {
-	blockNum  uint64
-	blockHash common.Hash
-	stateRoot common.Hash
-	// lastTxNum is the block's final txNum (block-end system tx). The
-	// calculator needs it to position asOfReader and ComputeCommitment
-	// when folding the block ahead of its blockResult.
-	lastTxNum uint64
-	bal       types.BlockAccessList
-}
-
-// calcMode is the commitment calculator's per-block strategy.
-type calcMode uint8
-
-const (
-	// calcModeIncremental accumulates per-tx writes from the result stream
-	// then computes — today's behaviour, and the fallback when a block has
-	// no BAL.
-	calcModeIncremental calcMode = iota
-	// calcModeBALDriven loads the changed-key set from the block's BAL up
-	// front so the trie fold need not wait for the per-tx stream. Selected
-	// when the block carries a BAL and BAL I/O is enabled.
-	calcModeBALDriven
-)
 
 type execTask struct {
 	exec.Task
@@ -2347,9 +2326,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
-		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
-			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
-		}
+		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
 	}
 
 	if result.Err != nil {
@@ -2693,7 +2670,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.cntTotalValidations++
 
 		tx := toValidate[i]
-		txVersion := be.tasks[tx].Task.Version()
+		txResult := be.results[tx]
+		// txResult.Task is the *taskVersion wrapper from this scheduled run,
+		// carrying the current Incarnation. be.tasks[tx].Task is the bare
+		// TxTask whose Version().Incarnation never advances past 0.
+		txVersion := txResult.Task.Version()
 
 		var trace bool
 		var tracePrefix string
@@ -2725,7 +2706,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		be.versionMap.FlushVersionedWrites(writeSet, cntInvalid == 0, tracePrefix)
+		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
 		be.versionMap.SetTrace(false)
 
 		if valid {

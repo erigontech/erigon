@@ -1,0 +1,77 @@
+name: Cache Warming — EEST fixtures
+
+# Populates the base-branch EEST fixture-tarball cache that test-eest-spec.yml
+# restores (restore-only there, so PR / merge_group runs never save their own
+# per-ref duplicates). GitHub cache scoping makes default-branch caches readable
+# from every PR and merge group, so warming on main/release is enough.
+#
+# Triggers:
+#   - push to a protected branch touching test-fixtures.json -> warm on a version bump
+#   - schedule (daily)                                       -> safety net if LRU-evicted
+#   - workflow_dispatch                                      -> manual (use once to bootstrap)
+#
+# The key matches test-eest-spec.yml exactly:
+#   test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - test-fixtures.json
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cache-warming-eest-fixtures-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # Probe for an exact-key hit without downloading the archive. cache-hit is
+      # true only on the exact primary key, so a version bump (new key) reports a
+      # miss even when an older entry still matches the restore-key prefix.
+      - name: Probe EEST cache
+        id: probe
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            test-fixtures-cache/eest_stable.tar.gz
+            test-fixtures-cache/eest_devnet.tar.gz
+            test-fixtures-cache/eest_benchmark.tar.gz
+            test-fixtures-cache/eest_zkevm.tar.gz
+          key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          lookup-only: true
+
+      # Download all four tarballs in one invocation so the single cached entry
+      # is complete (a shard run only fetches the subset it needs).
+      - name: Download EEST tarballs
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark eest_zkevm
+
+      - name: Save EEST cache
+        if: steps.probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            test-fixtures-cache/eest_stable.tar.gz
+            test-fixtures-cache/eest_devnet.tar.gz
+            test-fixtures-cache/eest_benchmark.tar.gz
+            test-fixtures-cache/eest_zkevm.tar.gz
+          key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}

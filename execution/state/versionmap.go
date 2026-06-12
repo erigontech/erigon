@@ -967,16 +967,18 @@ func (vm *VersionMap) AnyDoneBoolWriteEquals(addr accounts.Address, path Account
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
-	cells := vm.getKeyCells(addr, path, key, nil)
-	if cells == nil {
+	// vio typed model: SelfDestructPath is the only bool path; read its
+	// per-address typed cells directly (mirrors ReadSelfDestruct).
+	e, present := vm.s[addr]
+	if !present || e.SelfDestruct == nil {
 		return false
 	}
 	found := false
-	cells.Descend(txIdxLimit, func(_ int, v *WriteCell) bool {
+	e.SelfDestruct.Descend(txIdxLimit, func(_ int, v *WriteCell[bool]) bool {
 		if v.flag != FlagDone {
 			return true
 		}
-		if b, ok := v.data.(bool); ok && b == target {
+		if v.Value == target {
 			found = true
 			return false
 		}

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -516,7 +517,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, commitResults ...chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -695,23 +696,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if len(commitResults) > 0 {
 				commitCh = commitResults[0]
 			}
-			// Heads-up to the commitment calculator, ahead of the block's
-			// txResult/blockResult stream and on its own channel. inputTxNum
-			// has been advanced past this block's tasks by the loop above,
-			// so inputTxNum-1 is the block's final txNum.
-			if blockRequests != nil {
-				select {
-				case blockRequests <- &blockRequest{
-					blockNum:  b.NumberU64(),
-					blockHash: b.Hash(),
-					stateRoot: header.Root,
-					lastTxNum: inputTxNum - 1,
-					bal:       dbBAL,
-				}:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
@@ -873,4 +857,23 @@ func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64)
 	// Generate changesets for blocks within the reorg window of the batch end,
 	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
+}
+
+// changesetWindowStart returns the first block in [startBlockNum, maxBlockNum]
+// for which shouldGenerateChangeSets is true, or math.MaxUint64 when there is
+// none. Parallel exec gates per-block changeset capture and the commitment
+// calculator's per-block mode on this boundary.
+func changesetWindowStart(alwaysGenerateChangesets bool, maxReorgDepth uint64, frozenBlocks uint64, startBlockNum uint64, maxBlockNum uint64) uint64 {
+	if alwaysGenerateChangesets {
+		return startBlockNum
+	}
+	windowStart := startBlockNum
+	if maxBlockNum > maxReorgDepth {
+		windowStart = max(windowStart, maxBlockNum-maxReorgDepth)
+	}
+	windowStart = max(windowStart, frozenBlocks)
+	if windowStart > maxBlockNum {
+		return math.MaxUint64
+	}
+	return windowStart
 }

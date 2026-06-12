@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -346,6 +347,83 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 		require.Equal(t, uint64(15), execProg, "execution must have advanced to the tip")
 		return nil
 	}))
+}
+
+// Exercises the hive engine-cancun "Re-Org Back into Canonical Chain" scenario:
+// after producing each block N>5 the CL re-orgs the head back to block 5 and
+// then forward to N, re-applying blocks 6..N. With background prune enabled
+// (the node default) the prune runs on the shared pipeline sync, and before the
+// fix it could race the next FCU's RunLoop, skip the execution stage and leave
+// the head behind ("Invalid chain after execution"). Run under -race.
+func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
+	modes := []struct {
+		name string
+		opt  execmoduletester.Option
+	}{
+		{name: "fg-prune"},
+		// bg-prune matches the hive erigon default (FcuBackgroundPrune=true): the
+		// background prune shares the pipeline sync with the next FCU's RunLoop.
+		// bg-commit hands the semaphore to its goroutine the same way; in both
+		// modes the handoff must not overlap the FCU goroutine's cleanup.
+		{name: "bg-prune", opt: execmoduletester.WithFcuBackgroundPrune()},
+		{name: "bg-commit", opt: execmoduletester.WithFcuBackgroundCommit()},
+	}
+	for _, mode := range modes {
+		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
+		if mode.opt != nil {
+			opts = append(opts, mode.opt)
+		}
+		t.Run(mode.name, func(t *testing.T) {
+			ctx := t.Context()
+			m := execmoduletester.New(t, opts...)
+
+			const chainLen = 9
+			const reorgBackTo = 5
+			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {})
+			require.NoError(t, err)
+			require.Len(t, chainPack.Blocks, chainLen)
+
+			headerAt := func(n uint64) *types.Header { return chainPack.Blocks[n-1].Header() }
+
+			for n := uint64(1); n <= chainLen; n++ {
+				// Insert the block only when it is "produced" (as newPayload would):
+				// later blocks must not exist in the DB during the earlier re-orgs.
+				insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[n-1:n])
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, insRes, "insert block %d", n)
+
+				h := headerAt(n)
+				vr, err := validateChain(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "validate block %d", n)
+				ur, err := updateForkChoice(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, ur.Status, "fcu to canonical block %d", n)
+
+				if n <= reorgBackTo {
+					continue
+				}
+				// Re-org the head back down to block 5.
+				back, err := updateForkChoice(ctx, m.ExecModule, headerAt(reorgBackTo))
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, back.Status, "re-org back to block %d (cycle at %d)", reorgBackTo, n)
+
+				// Re-org the head forward back into the canonical chain (block n).
+				fwd, err := updateForkChoice(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, fwd.Status, "re-org forward back to canonical block %d", n)
+				require.Equalf(t, h.Hash(), fwd.LatestValidHash, "forward re-org should make block %d the head", n)
+			}
+
+			// Let the last FCU's commit and prune (foreground or background)
+			// settle before reading the committed head.
+			m.ExecModule.WaitIdle(ctx)
+			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
+				return nil
+			}))
+		})
+	}
 }
 
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
@@ -2049,4 +2127,114 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground(t *testing.T) {
 // committed state before asserting (see waitForGenesis/waitForBlock).
 func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background(t *testing.T) {
 	runBatchedFCUBadBlockRecovery(t, true)
+}
+
+// transferGen returns a deterministic per-block tx generator: identical
+// inputs produce identical blocks, which lets tests build forks that share
+// a prefix with the canonical chain (requires a pre-Cancun config — Cancun+
+// blocks get a random ParentBeaconBlockRoot in blockgen).
+func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {
+	return func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(amount), 50000, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(nil),
+			key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	}
+}
+
+// A batch longer than MaxReorgDepth must still produce changesets for the
+// last MaxReorgDepth blocks, otherwise no reorg of any depth is possible
+// after the batch.
+func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+
+	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
+	chainLen := int(maxReorgDepth) + 14
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		transferGen(t, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, chainPack.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status)
+
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen)-maxReorgDepth, lowest,
+			"changesets must cover the last MaxReorgDepth blocks of the batch")
+		return nil
+	}))
+}
+
+// After a single batch execution longer than MaxReorgDepth, an FCU onto a
+// fork branching a few blocks below the tip must unwind and re-execute
+// instead of failing with ReorgTooDeep.
+func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+
+	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
+	chainLen := int(maxReorgDepth) + 14
+	const reorgDepth = 4
+	divergeFrom := chainLen - reorgDepth
+
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		transferGen(t, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			amount := uint64(1_000)
+			if i >= divergeFrom {
+				amount = 2_000
+			}
+			transferGen(t, privKey, senderAddr, amount)(i, b)
+		})
+	require.NoError(t, err)
+	require.Equal(t, canonical.Blocks[divergeFrom-1].Hash(), fork.Blocks[divergeFrom-1].Hash())
+	require.NotEqual(t, canonical.Blocks[divergeFrom].Hash(), fork.Blocks[divergeFrom].Hash())
+
+	insRes, err := insertBlocks(ctx, m.ExecModule, canonical.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status)
+
+	insRes, err = insertBlocks(ctx, m.ExecModule, fork.Blocks[divergeFrom:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err = updateForkChoice(ctx, m.ExecModule, fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+		"shallow reorg of %d blocks after a %d-block batch must succeed; status=%s validationError=%q",
+		reorgDepth, chainLen, fcuRes.Status, fcuRes.ValidationError)
+
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen), execProg)
+		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
 }

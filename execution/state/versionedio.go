@@ -1448,12 +1448,14 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 // Per-path versionedUpdate helpers replace the legacy generic
 // versionedUpdate[T] — they consume the typed VersionMap Read primitives
 // directly so neither the call site nor the read path crosses an any
-// boundary. Each returns the cell value if a Done write exists at txIndex,
-// otherwise the zero value and ok=false.
+// boundary. Each returns the cell value if a Done OR Dependency (Estimate)
+// write exists at txIndex (a Dependency cell holds the same latest in-block
+// write a Done cell does; finalize reconstruction must consume it, not fall
+// back to the pre-block DB value — #21667), otherwise zero value and ok=false.
 
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
-	if ok && res.Status() == MVReadResultDone {
+	if ok && res.Status() != MVReadResultNone {
 		return val, true
 	}
 	return nil, false
@@ -2528,10 +2530,6 @@ func addStorageUpdate(ac *types.AccountChanges, slot accounts.StorageKey, val ui
 			return
 		}
 	}
-	if origVal, wasRead := account.storageReadValues[slot]; wasRead && val.Eq(&origVal) {
-		return
-	}
-	removeStorageRead(ac, slot) // a real write supersedes any recorded read
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
