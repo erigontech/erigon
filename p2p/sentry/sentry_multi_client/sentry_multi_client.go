@@ -278,7 +278,8 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 	}
 	defer tx.Rollback()
 	response := eth.AnswerGetBlockAccessListsQuery(ctx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator)
-	tx.Rollback()
+	// Encode before releasing the tx: stored BALs are mdbx-backed slices only
+	// valid while the tx is open.
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
 		RequestId:              query.RequestId,
 		BlockAccessListsPacket: response,
@@ -286,6 +287,7 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 	if err != nil {
 		return fmt.Errorf("encode BlockAccessLists response: %w", err)
 	}
+	tx.Rollback()
 	outreq := sentryproto.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &sentryproto.OutboundMessageData{

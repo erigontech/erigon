@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -268,16 +269,19 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: ReadBlockAccessListBytes error %w", err)
 		}
-		var bal []byte
 		if len(balBytes) > 0 {
-			bal = bytes.Clone(balBytes)
+			// GetOne returns mdbx-backed memory; bodies outlive this tx.
+			balBytes = bytes.Clone(balBytes)
 		} else {
-			bal = e.regenerateBlockAccessList(ctx, tx, h, *number)
+			balBytes, err = e.regenerateBlockAccessList(ctx, tx, h, *number)
+			if err != nil {
+				return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: regenerateBlockAccessList error %w", err)
+			}
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
 			Withdrawals:     body.Withdrawals,
-			BlockAccessList: bal,
+			BlockAccessList: balBytes,
 		})
 	}
 	return bodies, nil
@@ -316,16 +320,19 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadBlockAccessListBytes error %w", err)
 		}
-		var bal []byte
 		if len(balBytes) > 0 {
-			bal = bytes.Clone(balBytes)
+			// GetOne returns mdbx-backed memory; bodies outlive this tx.
+			balBytes = bytes.Clone(balBytes)
 		} else {
-			bal = e.regenerateBlockAccessList(ctx, tx, hash, blockNum)
+			balBytes, err = e.regenerateBlockAccessList(ctx, tx, hash, blockNum)
+			if err != nil {
+				return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: regenerateBlockAccessList error %w", err)
+			}
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
 			Withdrawals:     body.Withdrawals,
-			BlockAccessList: bal,
+			BlockAccessList: balBytes,
 		})
 	}
 	// Remove trailing nil values
@@ -340,15 +347,18 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 }
 
 // regenerateBlockAccessList re-derives a missing BAL by re-execution. Returns
-// nil when the block has no BAL or the required history is unavailable — the
-// engine API then reports null for that block, per spec.
-func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) []byte {
+// nil bytes when the block has no BAL or the required history is no longer
+// available — the engine API then reports null for that block, per spec.
+func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
 	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum)
-	if err != nil {
-		e.logger.Debug("regenerateBlockAccessList: regeneration failed", "block", blockNum, "hash", blockHash, "err", err)
-		return nil
+	if errors.Is(err, state.PrunedError) {
+		e.logger.Debug("regenerateBlockAccessList: history unavailable", "block", blockNum, "hash", blockHash, "err", err)
+		return nil, nil
 	}
-	return encoded
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
 }
 
 func (e *ExecModule) GetHeaderHashNumber(ctx context.Context, blockHash common.Hash) (*uint64, error) {
