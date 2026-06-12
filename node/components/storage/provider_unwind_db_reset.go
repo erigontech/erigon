@@ -103,6 +103,27 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		return fmt.Errorf("TruncateBlocks(%d): %w", toBlock+1, err)
 	}
 
+	// TruncateBlocks deletes EthTx entries per-block by walking
+	// kv.Headers and looking up each body's BaseTxnID..LastSystemTx
+	// range. That misses any EthTx rows whose owning header has
+	// already been removed (e.g. by a prior partial truncation, or
+	// by a Mode-A unwind that left EthTx behind because the stages
+	// unwind path doesn't touch it directly). Live-caught
+	// 2026-06-12 in soak iter 2 mode_a2: post-unwind verifier saw
+	// EthTx last txnID=107073820 > lastTxNum(toBlock)=106898374
+	// even though kv.Headers truncated cleanly. Walk EthTx by
+	// txnID starting at lastTxNum+1 and delete anything still
+	// present.
+	if p.Aggregator != nil {
+		lastTxNum, err := rawdbv3.TxNums.Max(ctx, tx, toBlock)
+		if err != nil {
+			return fmt.Errorf("TxNums.Max(%d) for EthTx truncate: %w", toBlock, err)
+		}
+		if err := truncateEthTxPastTxNum(ctx, tx, lastTxNum); err != nil {
+			return fmt.Errorf("truncateEthTxPastTxNum(%d): %w", lastTxNum, err)
+		}
+	}
+
 	if err := rawdb.TruncateTd(tx, toBlock+1); err != nil {
 		return fmt.Errorf("TruncateTd(%d): %w", toBlock+1, err)
 	}
@@ -151,6 +172,44 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		}
 	}
 
+	return nil
+}
+
+// truncateEthTxPastTxNum walks kv.EthTx from lastTxNum+1 onward and
+// deletes every entry. kv.EthTx is keyed by 8-byte big-endian txnID
+// so seek-then-iterate gives the past-target range in a single pass.
+// Pairs with rawdb.TruncateBlocks: TruncateBlocks walks kv.Headers
+// and deletes the EthTx range each surviving body claims; this walks
+// EthTx directly and catches any entries whose header has already
+// been removed.
+func truncateEthTxPastTxNum(ctx context.Context, tx kv.RwTx, lastTxNum uint64) error {
+	c, err := tx.RwCursor(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	seekKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(seekKey, lastTxNum+1)
+	for k, _, err := c.Seek(seekKey); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) < 8 {
+			continue
+		}
+		if binary.BigEndian.Uint64(k[:8]) <= lastTxNum {
+			continue
+		}
+		if err := tx.Delete(kv.EthTx, k); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
 	return nil
 }
 
