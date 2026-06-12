@@ -1789,14 +1789,7 @@ Run `seg du` while the node is **stopped**. If Erigon is running and holds the d
 
 ## Snapshot Types (Pruning Modes)
 
-The snapshot set on disk reflects the node's **pruning mode**. `seg du` automatically detects which mode your current files correspond to. For full details on choosing a pruning mode, see [Pruning Modes](pruning-modes).
-
-| Mode | History retained | Transactions retained | Typical use case |
-|------|------------------|-----------------------|------------------|
-| **Archive** | All history from genesis | All blocks | Developers, RPC providers, researchers needing full historical state. |
-| **Full** (default) | Last 262,144 blocks (~36 days, EIP-8252 window) | Last 262,144 blocks | General users, DApp interaction, fastest sync. |
-| **Blocks** | Last 262,144 blocks | All blocks (genesis onward) | Users needing full block/receipt history without full historical state. |
-| **Minimal** | Last 100,000 blocks (~14 days) | Last 100,000 blocks | Solo staking, hardware-constrained setups, maximum privacy. |
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
 
 The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
 
@@ -1806,16 +1799,11 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 ### EIP-8252 retention window change
 
-Erigon v3.5 aligns the **Full** and **Blocks** pruning modes with [EIP-8252](https://github.com/ethereum/EIPs/pull/11601), which defines `REORG_RETENTION_WINDOW = 2^18 = 262,144 blocks` (≈ 36.4 days) as the inactivity-leak-bounded non-finality window. Prior versions used a retention window of **100,000 blocks** (~14 days).
+v3.5 retargets the **Full** and **Blocks** pruning modes to the EIP-8252 reorg-retention window (262,144 blocks, ~36 days), up from the previous 100,000-block window. This changes **which snapshot files are present on disk** after upgrading — most notably, full nodes prune older block segments down to the window, freeing space. Existing datadirs migrate automatically on first start.
 
-**What this means for existing nodes:**
+For the full breaking-change details — what each mode keeps, why block data older than the window cannot be recovered, and what to do *before* upgrading if you need to keep all post-merge blocks — see the v3.5 breaking-change note in [Pruning Modes](pruning-modes).
 
-- **Full mode** changes the most. In v3.4 it kept *all* post-merge block bodies, transactions, and receipts (pruning only pre-merge data); in v3.5 it prunes that block data down to the last **262,144 blocks**. A full node will therefore **stop serving block bodies and receipts older than ~36 days** and will *free* disk space as the older block segments are pruned away. The state-history window, by contrast, *grows* from 100,000 to 262,144 blocks.
-- **Blocks mode** still keeps every block back to genesis; only its **state-history** window widens from 100,000 to 262,144 blocks, so its disk usage rises modestly.
-- On first startup after upgrading to v3.5, Erigon **rewrites the persisted pruning mode automatically** and logs the transition — no operator action is required (the migration shim accepts the full-mode block-pruning change in both directions). Note that **already-pruned block data cannot be recovered**; if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading.
-- Use `seg du` to inspect the resulting on-disk breakdown after the first prune pass.
-
-**Minimal mode is unchanged** — it continues to use a 100,000-block window for both blocks and state and is not subject to EIP-8252 compliance requirements.
+After the first prune pass, run `seg du` to inspect the resulting on-disk breakdown.
 
 ### Manual snapshot operations
 
