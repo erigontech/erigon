@@ -1701,7 +1701,7 @@ erigon seg du [--datadir <path>] [--json] [-v | --verbose]
 
 ### Example output (human-readable)
 
-```
+```text
 mainnet | archive | blocks 0–25.296.000 | steps 0–9.153
 total: 1.8TB (4285 files)
 
@@ -1755,7 +1755,7 @@ The category labels below are exactly what the command prints.
 
 With `--verbose`, each category expands into its domain or type subcategories (excerpt — every category expands the same way):
 
-```
+```text
   block segments          900.2GB      48.3%   1195 files
   ├─ transactions        874.2GB      97.1%    174 files
   ├─ txn2block            12.3GB       1.4%     87 files
