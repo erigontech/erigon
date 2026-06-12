@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	balsCacheLimit      = dbg.EnvInt("BAL_LRU", 128) // ~72KiB avg compressed BAL → ~9MB RAM
+	balsCacheLimit      = dbg.EnvInt("BAL_LRU", 1024) // ~100KiB avg encoded BAL → ~100MB RAM
 	balsExecConcurrency = dbg.EnvInt("BAL_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
@@ -47,17 +47,16 @@ var (
 // rpc/jsonrpc/receipts.Generator: caching and history-env preparation live
 // here, the replay itself is RederiveBlockAccessList.
 type Regenerator struct {
-	blockReader services.FullBlockReader
-	txNumReader rawdbv3.TxNumsReader
-	engine      rules.Engine
-	cache       *lru.Cache[common.Hash, []byte]
-	// blockExecMutex ensures only one replay per block hash runs at a time —
-	// concurrent requests for the same block wait and hit the cache.
-	blockExecMutex *loaderMutex[common.Hash]
+	blockReader    services.FullBlockReader
+	txNumReader    rawdbv3.TxNumsReader
+	engine         rules.Engine
+	cache          *lru.Cache[common.Hash, []byte]
+	perBlockExecMu *loaderMutex[common.Hash]
 	execSem        chan struct{} // bounds concurrent block replays
+	logger         log.Logger
 }
 
-func NewRegenerator(blockReader services.FullBlockReader, engine rules.Engine) *Regenerator {
+func NewRegenerator(blockReader services.FullBlockReader, engine rules.Engine, logger log.Logger) *Regenerator {
 	cache, err := lru.New[common.Hash, []byte](balsCacheLimit)
 	if err != nil {
 		panic(err)
@@ -67,8 +66,9 @@ func NewRegenerator(blockReader services.FullBlockReader, engine rules.Engine) *
 		txNumReader:    blockReader.TxnumReader(),
 		engine:         engine,
 		cache:          cache,
-		blockExecMutex: &loaderMutex[common.Hash]{},
+		perBlockExecMu: &loaderMutex[common.Hash]{},
 		execSem:        make(chan struct{}, balsExecConcurrency),
+		logger:         logger,
 	}
 }
 
@@ -88,8 +88,8 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if header == nil || header.BlockAccessListHash == nil {
 		return nil, nil
 	}
-	mu := g.blockExecMutex.lock(blockHash)
-	defer g.blockExecMutex.unlock(mu, blockHash)
+	mu := g.perBlockExecMu.lock(blockHash)
+	defer g.perBlockExecMu.unlock(mu, blockHash)
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
 	}
@@ -115,9 +115,8 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return g.blockReader.Header(ctx, tx, hash, number)
 	}
-	logger := log.Root()
-	chainReader := exec.NewChainReader(cfg, tx, g.blockReader, logger)
-	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, reader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, logger)
+	chainReader := exec.NewChainReader(cfg, tx, g.blockReader, g.logger)
+	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, reader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, g.logger)
 	if err != nil {
 		return nil, err
 	}

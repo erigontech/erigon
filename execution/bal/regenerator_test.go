@@ -34,6 +34,7 @@ import (
 )
 
 func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -48,7 +49,7 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	storingInitCode := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00} // PUSH1 1, PUSH1 0, SSTORE, STOP
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
@@ -65,15 +66,16 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 			txn2, err := types.SignTx(types.NewTransaction(3, common.Address{3}, uint256.NewInt(30_000), 50_000, baseFee, nil), *signer, privKey)
 			require.NoError(t, err)
 			b.AddTx(txn2)
+		case 3:
+			// empty block — its BAL is the canonical empty list
 		}
 	})
 	require.NoError(t, err)
-	require.Len(t, chainPack.Blocks, 3)
+	require.Len(t, chainPack.Blocks, 4)
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
-	err = pruneStoredBALs(t, m)
-	require.NoError(t, err)
-	gen := bal.NewRegenerator(m.BlockReader, m.Engine)
+	pruneStoredBALs(t, m)
+	gen := bal.NewRegenerator(m.BlockReader, m.Engine, m.Log)
 	ttx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer ttx.Rollback()
@@ -92,6 +94,7 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 }
 
 func TestRegeneratorReturnsNilForPreAmsterdamBlocks(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -138,7 +141,7 @@ func TestRegeneratorReturnsNilForPreAmsterdamBlocks(t *testing.T) {
 	err = m.InsertChain(chainPack)
 	require.NoError(t, err)
 	require.Nil(t, chainPack.Blocks[0].Header().BlockAccessListHash)
-	gen := bal.NewRegenerator(m.BlockReader, m.Engine)
+	gen := bal.NewRegenerator(m.BlockReader, m.Engine, m.Log)
 	ttx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer ttx.Rollback()
@@ -149,11 +152,19 @@ func TestRegeneratorReturnsNilForPreAmsterdamBlocks(t *testing.T) {
 
 // pruneStoredBALs drops every stored BAL row, simulating the exec-stage prune
 // that keeps BALs only for the reorg window.
-func pruneStoredBALs(t *testing.T, m *execmoduletester.ExecModuleTester) error {
+func pruneStoredBALs(t *testing.T, m *execmoduletester.ExecModuleTester) {
 	t.Helper()
-	return m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
 			return tx.Delete(kv.BlockAccessList, k)
 		})
 	})
+	require.NoError(t, err)
+	err = m.DB.View(t.Context(), func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
+		return nil
+	})
+	require.NoError(t, err)
 }

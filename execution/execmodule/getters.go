@@ -55,7 +55,7 @@ var errNotFound = errors.New("notfound")
 // fresh RO tx — each caller gets its own independent DB snapshot, so concurrent
 // getters never share MDBX internal state.
 // The caller must call the returned cleanup function when done.
-func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.Tx, func(), error) {
+func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(), error) {
 	e.lock.RLock()
 	sd := e.currentContext
 	// Fall back to published SD during background commit.
@@ -79,7 +79,7 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.Tx, func(), error
 	}
 	e.lock.RUnlock()
 
-	tx, err := e.db.BeginRo(ctx) //nolint:gocritic
+	tx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err
 	}
@@ -272,7 +272,7 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		if len(balBytes) > 0 {
 			bal = bytes.Clone(balBytes)
 		} else {
-			bal = e.regenerateBlockAccessList(ctx, h, *number)
+			bal = e.regenerateBlockAccessList(ctx, tx, h, *number)
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
@@ -320,7 +320,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if len(balBytes) > 0 {
 			bal = bytes.Clone(balBytes)
 		} else {
-			bal = e.regenerateBlockAccessList(ctx, hash, blockNum)
+			bal = e.regenerateBlockAccessList(ctx, tx, hash, blockNum)
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
@@ -342,14 +342,8 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 // regenerateBlockAccessList re-derives a missing BAL by re-execution. Returns
 // nil when the block has no BAL or the required history is unavailable — the
 // engine API then reports null for that block, per spec.
-func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, blockHash common.Hash, blockNum uint64) []byte {
-	ttx, err := e.db.BeginTemporalRo(ctx)
-	if err != nil {
-		e.logger.Debug("regenerateBlockAccessList: begin temporal ro", "err", err)
-		return nil
-	}
-	defer ttx.Rollback()
-	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, ttx, blockHash, blockNum)
+func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) []byte {
+	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum)
 	if err != nil {
 		e.logger.Debug("regenerateBlockAccessList: regeneration failed", "block", blockNum, "hash", blockHash, "err", err)
 		return nil

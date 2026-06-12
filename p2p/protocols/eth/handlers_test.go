@@ -681,6 +681,7 @@ func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Conf
 // stored BALs are served without consulting the getter, and that getter errors
 // or empty results degrade to the "not available" sentinel.
 func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
+	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {

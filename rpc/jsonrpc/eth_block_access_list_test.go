@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -40,6 +39,7 @@ import (
 // serves BALs whose stored copy has been pruned (kept only for the reorg window)
 // by regenerating them via re-execution.
 func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -68,14 +68,10 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 		})
 	})
 	require.NoError(t, err)
-	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		for _, block := range chainPack.Blocks {
-			data, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
-			if err != nil {
-				return err
-			}
-			require.Nil(t, data, "stored BAL for block %d should be pruned", block.NumberU64())
-		}
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
 		return nil
 	})
 	require.NoError(t, err)

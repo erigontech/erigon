@@ -274,7 +274,7 @@ func NewExecModule(
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
-		balRegenerator:          bal.NewRegenerator(blockReader, engine),
+		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,

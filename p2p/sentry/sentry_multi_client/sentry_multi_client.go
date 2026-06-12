@@ -203,7 +203,7 @@ func NewMultiClient(
 		logger:                           logger,
 		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
 		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
-		balGenerator:                     bal.NewRegenerator(blockReader, engine),
+		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
 	}
 
 	return cs, nil

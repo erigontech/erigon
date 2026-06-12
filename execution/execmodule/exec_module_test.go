@@ -1176,6 +1176,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 // only for the reorg window), regenerate them by re-execution —
 // engine_getPayloadBodiesBy*V2 must serve BALs for the weak subjectivity period.
 func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -1209,6 +1210,13 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
 			return tx.Delete(kv.BlockAccessList, k)
 		})
+	})
+	require.NoError(t, err)
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
+		return nil
 	})
 	require.NoError(t, err)
 	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)

@@ -160,9 +160,7 @@ type BaseAPI struct {
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
-	// balRegenerator reproduces pruned Block Access Lists by re-execution.
-	// Nil when the engine is not a full rules.Engine (cannot replay system calls).
-	balRegenerator *bal.Regenerator
+	balRegenerator      *bal.Regenerator
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
@@ -180,7 +178,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 
 	var balRegenerator *bal.Regenerator
 	if fullEngine, ok := engine.(rules.Engine); ok {
-		balRegenerator = bal.NewRegenerator(blockReader, fullEngine)
+		balRegenerator = bal.NewRegenerator(blockReader, fullEngine, log.Root())
 	}
 
 	return &BaseAPI{
