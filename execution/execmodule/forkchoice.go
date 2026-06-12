@@ -467,13 +467,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("isDomainAhead: begin rw: %w", err), false)
 		}
 		defer commitRwTx.Rollback()
-		if err := currentContext.Flush(ctx, commitRwTx); err != nil {
+		// Commit() commits commitRwTx and only then advances the BranchCache,
+		// so a failed commit can't poison it.
+		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		currentContext.ClearRam(true)
-		if err := commitRwTx.Commit(); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
 		return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusTooFarAway,
@@ -544,13 +543,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
 			defer commitRwTx.Rollback() // safety net; idempotent after successful Commit
-			if err := sd.Flush(ctx, commitRwTx); err != nil {
-				return nil, fmt.Errorf("updateForkChoice: flush sd after hasMore: %w", err)
+			// Commit() commits commitRwTx and advances the BranchCache only on
+			// success, so a failed commit can't leave the cache ahead of MDBX.
+			if err := sd.Commit(ctx, commitRwTx); err != nil {
+				return nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
 			sd.ClearRam(true)
-			if err := commitRwTx.Commit(); err != nil {
-				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
-			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
@@ -825,26 +823,24 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 // closing it after Flush is safe. Rollback is idempotent, so callers keep their
 // outer `defer roTx.Rollback()` as a safety net.
 func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
-	var timings []any
+	timings := make([]any, 0, 2)
 
 	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
 	if err != nil {
 		return nil, fmt.Errorf("fcu flush+commit: begin rw: %w", err)
 	}
 	defer rwTx.Rollback()
-	flushStart := time.Now()
-	if err := sd.Flush(e.bacgroundCtx, rwTx); err != nil {
-		return nil, err
-	}
-	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+	// Release the read snapshot before committing (Flush doesn't read it).
+	// Commit() commits rwTx and advances the BranchCache only on success,
+	// so a failed commit can't leave the cache ahead of MDBX.
 	if roTxToCloseBeforeCommit != nil {
 		roTxToCloseBeforeCommit.Rollback()
 	}
-	commitStart := time.Now()
-	if err := rwTx.Commit(); err != nil {
+	flushStart := time.Now()
+	if err := sd.Commit(e.bacgroundCtx, rwTx); err != nil {
 		return nil, err
 	}
-	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+	timings = append(timings, "flush+commit", common.Round(time.Since(flushStart), 0))
 
 	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {

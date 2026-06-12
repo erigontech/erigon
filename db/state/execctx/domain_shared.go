@@ -127,40 +127,14 @@ type SharedDomains struct {
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
-	// changesetMu guards the global current-changeset-accumulator pointer
-	// against concurrent mutation while other writers are recording into it.
-	//
-	// Why this exists (the layering violation we are NOT fixing here):
-	//
-	// The "current accumulator" is unwind-side machinery: a sidecar that
-	// records per-block prev-value diffs so a later unwind can reconstruct
-	// the pre-block state. Execution should be forward-only and not be
-	// concerned with it at all. The proper architecture is to ignore the
-	// accumulator during execution and derive the per-block changesets
-	// post-hoc from sd entries (which are now tx-granular) at sd.Flush time.
-	// That decoupling is a larger refactor than this PR is taking on.
-	//
-	// The acute symptom that forces this band-aid: the parallel commitment
-	// calculator briefly swaps the global accumulator pointer to route its
-	// own per-block branch writes into block N's saved changeset (see
-	// committer.go computeWithBlockAccumulator). During that swap window,
-	// the apply goroutine continues calling DomainPut for block N+1's
-	// account/storage writes, and those land in block N's CS instead of
-	// block N+1's. On a later unwind, block N+1's CS lacks the prev-value
-	// for those writes and the executor reads stale state, producing wrong
-	// trie roots in reorg/fork tests (TestBlockchainHeaderchainReorgConsistency
-	// + the off-by-one cluster).
-	//
-	// Until the architectural fix lands, serialize the swap window: the
-	// calculator takes Lock around its swap+compute+restore, and DomainPut
-	// / DomainDel take Lock during the brief window they record into the
-	// accumulator. Functionally correct; perf-suboptimal.
-	//
-	// PERF FOLLOW-UP DRIVER: this lock is the concrete reason to move the
-	// accumulator out of the execution path. The goal is lock-free
-	// execution: derive per-block changesets post-hoc from sd entries
-	// (now tx-granular) at sd.Flush time, and delete this Mutex + the
-	// SetChangesetAccumulator/GetChangesetAccumulator API entirely.
+	// changesetMu serializes the parallel commitment calculator's swap of the
+	// global current-changeset-accumulator pointer against DomainPut/DomainDel.
+	// Without it, account/storage writes for block N+1 can land in block N's
+	// changeset during the calculator's swap+compute+restore window, so a later
+	// unwind reads stale prev-values and computes wrong roots (reorg/fork tests).
+	// A band-aid for execution being coupled to unwind-side accumulator
+	// machinery; removable once per-block changesets are derived post-hoc from
+	// the (now tx-granular) sd entries at Flush time.
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scope commitment-branch cache. It sits
@@ -742,11 +716,8 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
-		sd.logger.Debug("[state-cache] SetStateCache skipped",
-			"useStateCache", dbg.UseStateCache, "stateCacheNil", stateCache == nil)
 		return
 	}
-	sd.logger.Debug("[state-cache] SetStateCache enabled on SD")
 	sd.stateCache = stateCache
 }
 
@@ -858,9 +829,24 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
+// The state caches (the account/storage StateCache and the commitment
+// BranchCache) are an internal implementation detail of SharedDomains. No
+// external entity accesses or mutates them directly — callers drive state
+// through Flush / Commit / GetLatest / DomainPut, and the cache lifecycle
+// (population, invalidation, commit-gating) is owned entirely here.
+
+// Flush writes the in-memory batch into tx without committing. It deliberately
+// does NOT touch the caches: a cache entry may only ever reflect committed
+// state, and plain Flush leaves the commit to the caller (who may still roll
+// back). Cache population is owned by Commit, which applies it only after a
+// successful commit. Callers that flush a tx they commit themselves get a
+// cache-safe (cold-but-correct) result; use Commit to also keep the cache warm.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	return sd.flushMem(ctx, tx)
+}
 
+func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
@@ -873,69 +859,106 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	// Refresh the caches with the bytes that just landed in MDBX, atomically
-	// with the flush. The WithFlushCallback path runs the callback AFTER the
-	// MDBX write succeeds (so a failed flush never leaves a cache ahead of
-	// MDBX) and holds the latestState write lock for the full window so a
-	// concurrent DomainPut cannot interleave between the MDBX write and the
-	// cache update. The caches are refreshed ONLY here, on flush — never
-	// per-write — so they mirror committed, fork-agnostic state:
-	// CommitmentDomain → BranchCache, Accounts/Storage/Code → StateCache.
-	// Entries are stamped with the value's per-key write txNum (delivered by the
-	// callback) as the unwind floor, so invalidation is tx-precise: an unwind to
-	// a txNum inside the latest step drops exactly the entries above it, not the
-	// whole step (#21752). Both caches honor the same (txNum, epoch) model.
-	if sd.branchCache != nil || sd.stateCache != nil {
-		var opts []kv.FlushOption
-		if sd.branchCache != nil {
-			opts = append(opts, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-				if len(v) == 0 {
-					sd.branchCache.Invalidate(k)
-				} else {
-					sd.branchCache.Put(k, v, uint64(step), txNum)
-				}
-			}))
-		}
-		if sd.stateCache != nil {
-			opts = append(opts,
-				kv.WithFlushCallback(kv.AccountsDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-					if len(v) == 0 {
-						sd.stateCache.Delete(kv.AccountsDomain, k)
-						sd.stateCache.Delete(kv.CodeDomain, k)
-						sd.stateCache.DeleteAddrCodeHash(k)
-					} else {
-						sd.stateCache.Put(kv.AccountsDomain, k, v, txNum)
-						sd.stateCache.DeleteAddrCodeHash(k)
-					}
-				}),
-				kv.WithFlushCallback(kv.StorageDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-					if len(v) == 0 {
-						sd.stateCache.Delete(kv.StorageDomain, k)
-					} else {
-						sd.stateCache.Put(kv.StorageDomain, k, v, txNum)
-					}
-				}),
-				kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-					if len(v) == 0 {
-						sd.stateCache.Delete(kv.CodeDomain, k)
-					} else {
-						// Validated committed code: populate the addr layer AND the
-						// content-addressed codeHash->code map, with codeHash=keccak(v)
-						// (consistent by construction). This is the ONLY path that
-						// writes the code cache — reads never populate it (speculative
-						// code lives in the version map), so the shared map can only
-						// ever hold validated, self-consistent entries.
-						sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v), txNum)
-					}
-				}),
-			)
-		}
-		if err := sd.mem.Flush(ctx, tx, opts...); err != nil {
+	return sd.mem.Flush(ctx, tx, opts...)
+}
+
+type cacheUpdate struct {
+	domain kv.Domain
+	key    []byte
+	val    []byte
+	step   kv.Step
+	txN    uint64
+}
+
+// Commit flushes the in-memory batch into tx, commits tx, and only then applies
+// the flushed domain bytes to the in-memory caches — CommitmentDomain to the
+// BranchCache, Accounts/Storage/Code to the StateCache. The flush is implicit in
+// committing the shared-domain state. Tying cache population to commit success
+// makes it impossible by construction for an aggregator-lifetime cache to hold a
+// value a failed commit rolled back — so no caller clears a cache or reaches into
+// the SD's internal caches after committing. Entries are stamped with the value's
+// per-key write txNum (delivered by the callback) as the unwind floor, so
+// invalidation is tx-precise: an unwind to a txNum inside the latest step drops
+// exactly the entries above it, not the whole step (#21752). All caches honor the
+// same (txNum, epoch) model. tx MUST be a flush-specific transaction: it is
+// committed here.
+func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
+
+	if sd.branchCache == nil && sd.stateCache == nil {
+		if err := sd.flushMem(ctx, tx); err != nil {
 			return err
 		}
-		return nil
+		return tx.Commit()
 	}
-	return sd.mem.Flush(ctx, tx)
+
+	// Stash every cache-bound domain tuple during the flush; apply them only
+	// after the commit succeeds. On a failed commit the stash is discarded, so
+	// no cache is ever advanced past durable MDBX state.
+	var pending []cacheUpdate
+	stash := func(domain kv.Domain) kv.FlushOption {
+		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+			pending = append(pending, cacheUpdate{
+				domain: domain,
+				key:    append([]byte(nil), k...),
+				val:    append([]byte(nil), v...),
+				step:   step,
+				txN:    txNum,
+			})
+		})
+	}
+	var opts []kv.FlushOption
+	if sd.branchCache != nil {
+		opts = append(opts, stash(kv.CommitmentDomain))
+	}
+	if sd.stateCache != nil {
+		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain), stash(kv.CodeDomain))
+	}
+	if err := sd.flushMem(ctx, tx, opts...); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for i := range pending {
+		u := &pending[i]
+		switch u.domain {
+		case kv.CommitmentDomain:
+			if len(u.val) == 0 {
+				sd.branchCache.Invalidate(u.key)
+			} else {
+				sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
+			}
+		case kv.AccountsDomain:
+			if len(u.val) == 0 {
+				sd.stateCache.Delete(kv.AccountsDomain, u.key)
+				sd.stateCache.Delete(kv.CodeDomain, u.key)
+				sd.stateCache.DeleteAddrCodeHash(u.key)
+			} else {
+				sd.stateCache.Put(kv.AccountsDomain, u.key, u.val, u.txN)
+				sd.stateCache.DeleteAddrCodeHash(u.key)
+			}
+		case kv.StorageDomain:
+			if len(u.val) == 0 {
+				sd.stateCache.Delete(kv.StorageDomain, u.key)
+			} else {
+				sd.stateCache.Put(kv.StorageDomain, u.key, u.val, u.txN)
+			}
+		case kv.CodeDomain:
+			if len(u.val) == 0 {
+				sd.stateCache.Delete(kv.CodeDomain, u.key)
+			} else {
+				// Validated committed code: populate the addr layer AND the
+				// content-addressed codeHash->code map, with codeHash=keccak(v)
+				// (consistent by construction). This is the ONLY path that writes
+				// the code cache — reads never populate it (speculative code lives
+				// in the version map), so the shared map can only ever hold
+				// validated, self-consistent entries.
+				sd.stateCache.PutCodeWithHash(u.key, u.val, crypto.Keccak256(u.val), u.txN)
+			}
+		}
+	}
+	return nil
 }
 
 // ClearBranchCache empties the aggregator-scope commitment BranchCache.

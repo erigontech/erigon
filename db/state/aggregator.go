@@ -355,9 +355,15 @@ func (a *Aggregator) ConfigureDomains() error {
 	// Attach the long-lived commitment branch cache to the commitment
 	// domain. Lifetime = aggregator lifetime; shared by every
 	// SharedDomains derived from this aggregator. Idempotent across
-	// repeated ConfigureDomains calls (early return above).
-	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
-		cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+	// repeated ConfigureDomains calls (early return above). The BranchCache
+	// is a state cache, so it rides the same USE_STATE_CACHE switch as the
+	// account/storage StateCache: one operator switch turns all caching off
+	// (e.g. when bisecting a state-root mismatch), and a nil cache is the
+	// documented "disabled" path that every consumer already tolerates.
+	if dbg.UseStateCache {
+		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
+			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+		}
 	}
 
 	if a.disableFsync {

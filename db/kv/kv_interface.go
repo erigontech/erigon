@@ -525,8 +525,7 @@ type FlushConfig struct {
 	// downstream cache (e.g. the commitment BranchCache) stay in sync with the
 	// flush. txNum is the value's write txNum: a cache stamps its entry with it
 	// so unwind invalidation is tx-precise rather than step-coarse (an unwind to
-	// a txNum inside the latest step needs txNum precision). Required by the
-	// stacked state-cache PR (#21752).
+	// a txNum inside the latest step needs txNum precision).
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 

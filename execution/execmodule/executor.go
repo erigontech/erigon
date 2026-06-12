@@ -223,13 +223,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			if err := sd.Flush(ctx, tx); err != nil {
-				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)
+			// Commit() commits tx and advances the BranchCache only on success.
+			if err := sd.Commit(ctx, tx); err != nil {
+				return nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
 			sd.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return nil, err
-			}
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
 			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {

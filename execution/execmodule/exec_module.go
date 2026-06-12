@@ -506,40 +506,18 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// DO NOT CHANGE THIS WITHOUT WORKING THROUGH THE UNWIND CACHING SCENARIOS.
-	// The earlier `header.ParentHash == ReadHeadBlockHash(tx)` head-extending-
-	// only gate has been intentionally widened back to "chain whenever a
-	// currentContext exists" because fork-payload caching needs the parent
-	// link too — see the two-role breakdown below. The narrower gate was
-	// merged from main during the post-#21017 rebase and is the WRONG choice
-	// for this branch; keep the wider gate.
-	//
-	// Chain the validation SD to the latest in-memory canonical generation:
-	// e.currentContext when present, otherwise the newest in-flight commit
-	// generation (gate item 2 — the prior FCU cleared currentContext and
-	// handed its SD to the background commit).
-	//
-	// The parent link serves two roles:
-	//
+	// Chain the validation SD to the canonical generation (currentContext) so
+	// the parent link is available for two cases:
 	//  1. Head-extending payloads read the canonical generation's
 	//     not-yet-committed domain state instead of stale MDBX.
-	//
-	//  2. Fork payloads: unwindToCommonCanonical below must build an unwind
-	//     set, and the diffsets of the canonical blocks it unwinds live in
-	//     the canonical generation's pastChangesAccumulator — reachable only
-	//     through this parent link (GetDiffset chains to the parent). Without
-	//     it the unwind silently runs with no unwind set, leaving the
-	//     BranchCache unmasked and corrupting the computed root.
-	//
-	// For a fork payload the parent does NOT shadow the unwound base: once
-	// unwindToCommonCanonical has run, doms.mem.unwindChangeset holds every
-	// key the unwound canonical blocks touched, and TemporalMemBatch.getLatest
-	// resolves those from the unwind set before ever consulting the parent.
-	//
-	// Cherry-pick note: the upstream commit also chained to e.latestGen()
-	// (the gate-2 in-flight commit generation) when currentContext is nil;
-	// that generation chain is not on this branch, so currentContext is the
-	// only canonical generation here.
+	//  2. Fork payloads: unwindToCommonCanonical builds an unwind set from the
+	//     unwound canonical blocks' diffsets, which live in the canonical
+	//     generation's pastChangesAccumulator — reachable only through this
+	//     parent (GetDiffset chains to it). Without it the unwind runs with no
+	//     unwind set, leaving the BranchCache unmasked and corrupting the root.
+	// The parent does not shadow the unwound base: after unwindToCommonCanonical,
+	// doms.mem.unwindChangeset holds every unwound key and getLatest resolves
+	// those before consulting the parent.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}

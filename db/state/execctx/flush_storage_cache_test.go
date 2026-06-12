@@ -27,18 +27,20 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-// TestFlush_UpdatesStorageStateCache is the deterministic regression for the
+// TestCommit_UpdatesStorageStateCache is the deterministic regression for the
 // stateCache stale-storage bug: storage values live in a dedicated ordered
 // btree (sd.storage), not sd.domains[StorageDomain], so the flush-callback loop
 // — which iterated sd.domains[domain] only — never fired the StorageDomain
 // callback. The storage cache was therefore only ever read-populated and never
-// flush-updated: once a slot was cached, a later write to it was invisible and
-// the cache served the stale value on hit. (Surfaced under parallel exec as a
-// swap reading a stale reserve → revert → gas mismatch.)
+// refreshed on commit: once a slot was cached, a later write to it was invisible
+// and the cache served the stale value on hit. (Surfaced under parallel exec as
+// a swap reading a stale reserve → revert → gas mismatch.)
 //
-// The test writes a slot, flushes, then overwrites it and flushes again, and
-// asserts the cache reflects the second write rather than the first.
-func TestFlush_UpdatesStorageStateCache(t *testing.T) {
+// The caches are commit-gated: they are populated only after tx.Commit succeeds
+// (Commit stashes the flush-callback tuples and applies them post-commit), never
+// by a bare Flush. The test commits a slot, then commits an overwrite in a second
+// tx, and asserts the module-scope cache reflects the second write, not the first.
+func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -48,20 +50,6 @@ func TestFlush_UpdatesStorageStateCache(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-
-	sc := cache.NewDefaultStateCache()
-	sd.SetStateCache(sc)
-	if !sd.HasStateCache() {
-		t.Skip("state cache disabled (USE_STATE_CACHE=false); coherence test needs it on")
-	}
-
 	// composite storage key: 20-byte addr || 32-byte slot
 	key := make([]byte, 52)
 	key[0] = 0xab
@@ -70,22 +58,41 @@ func TestFlush_UpdatesStorageStateCache(t *testing.T) {
 	val1 := []byte{0x01, 0x11}
 	val2 := []byte{0x02, 0x22}
 
-	// First write + flush: the storage callback must fire and populate the cache.
-	sd.SetTxNum(1)
-	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val1, 1, nil))
-	require.NoError(t, sd.Flush(ctx, rwTx))
+	// Module-scope cache, shared across the two commit cycles (the real cache is
+	// aggregator-lifetime, outliving any single SharedDomains/tx).
+	sc := cache.NewDefaultStateCache()
 
+	commit := func(txNum uint64, val, prevVal []byte) {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback() // safety net; Rollback after a successful Commit is a no-op
+
+		sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(t, err)
+		defer sd.Close()
+
+		sd.SetStateCache(sc)
+		if !sd.HasStateCache() {
+			t.Skip("state cache disabled (USE_STATE_CACHE=false); coherence test needs it on")
+		}
+
+		sd.SetTxNum(txNum)
+		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val, txNum, prevVal))
+		// Commit commits rwTx and only then applies the flush-callback tuples to
+		// the cache. The StorageDomain callback must fire (iterate sd.storage).
+		require.NoError(t, sd.Commit(ctx, rwTx))
+	}
+
+	// First commit: the storage callback must fire and populate the cache.
+	commit(1, val1, nil)
 	got, ok := sc.Get(kv.StorageDomain, key)
-	require.True(t, ok, "storage cache must be populated by the flush callback")
+	require.True(t, ok, "storage cache must be populated by the commit callback")
 	require.Equal(t, val1, got)
 
-	// Overwrite + flush: the callback must fire again and refresh the entry —
-	// not leave the stale val1 behind.
-	sd.SetTxNum(stepSize + 1)
-	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val2, stepSize+1, val1))
-	require.NoError(t, sd.Flush(ctx, rwTx))
-
+	// Overwrite in a second tx: the callback must fire again and refresh the
+	// entry — not leave the stale val1 behind.
+	commit(stepSize+1, val2, val1)
 	got, ok = sc.Get(kv.StorageDomain, key)
 	require.True(t, ok)
-	require.Equal(t, val2, got, "flush must refresh the storage cache; stale value served on hit was the bug")
+	require.Equal(t, val2, got, "commit must refresh the storage cache; stale value served on hit was the bug")
 }
