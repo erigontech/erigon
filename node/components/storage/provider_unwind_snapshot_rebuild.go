@@ -63,10 +63,21 @@ func chunkAlignedToBlock(toBlock uint64) uint64 {
 // other two — but the search runs per-type to keep the function
 // straightforward and to tolerate any edge-case asymmetry from
 // historical retire boundaries.
+//
+// When block snapshots have been merged (1000-block chunks rolled up
+// into 100k-block chunks) the inventory can carry stale entries for
+// the original sub-chunks alongside the merged superset. Multiple
+// inventory entries can then straddle toBlock at once. Prefer the
+// widest range — the merged superset is the file actually on disk;
+// the stale sub-chunk would fail to open in seedLeftoverBlocks (live
+// 2026-06-12 wedge: setHead→2,996,374 looked up v1.1-002996-002997
+// while the disk only had v1.1-002900-003000).
 func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.Enum) (*snaptype.FileInfo, error) {
 	if p.Inventory == nil {
 		return nil, nil
 	}
+	var widest *snaptype.FileInfo
+	var widestSpan uint64
 	for _, e := range p.Inventory.BlockFiles() {
 		if e.FromBlock > toBlock || e.ToBlock <= toBlock {
 			continue
@@ -78,9 +89,14 @@ func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.En
 		if info.Type == nil || info.Type.Enum() != typeEnum {
 			continue
 		}
-		return &info, nil
+		span := info.To - info.From
+		if widest == nil || span > widestSpan {
+			infoCopy := info
+			widest = &infoCopy
+			widestSpan = span
+		}
 	}
-	return nil, nil
+	return widest, nil
 }
 
 // headersStraddleFile is a thin convenience wrapper kept for the
