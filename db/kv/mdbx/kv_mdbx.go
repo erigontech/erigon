@@ -492,6 +492,7 @@ type MdbxKV struct {
 
 func (db *MdbxKV) Path() string                { return db.opts.path }
 func (db *MdbxKV) PageSize() datasize.ByteSize { return db.opts.pageSize }
+func (db *MdbxKV) GetLabel() kv.Label          { return db.opts.label }
 func (db *MdbxKV) ReadOnly() bool              { return db.opts.HasFlag(mdbx.Readonly) }
 func (db *MdbxKV) Accede() bool                { return db.opts.HasFlag(mdbx.Accede) }
 
@@ -842,6 +843,19 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.MDBXGauges.DbPgopsWops.WithLabelValues(dbLabel).SetUint64(info.PageOps.Wops)
 	kv.MDBXGauges.UnsyncedBytes.WithLabelValues(dbLabel).SetUint64(uint64(info.UnsyncedBytes))
 
+	if readerStats, err := tx.db.env.ReaderStats(); err == nil {
+		kv.MDBXGauges.DbReadersCount.WithLabelValues(dbLabel).SetUint64(readerStats.Count)
+		kv.MDBXGauges.DbReadersOldestTxID.WithLabelValues(dbLabel).SetUint64(readerStats.OldestTxID)
+		kv.MDBXGauges.DbReadersMaxLag.WithLabelValues(dbLabel).SetUint64(readerStats.MaxLag)
+		kv.MDBXGauges.DbReadersMaxUsedBytes.WithLabelValues(dbLabel).SetUint64(readerStats.MaxBytesUsed)
+		kv.MDBXGauges.DbReadersMaxRetainedBytes.WithLabelValues(dbLabel).SetUint64(readerStats.MaxBytesRetained)
+		kv.MDBXGauges.DbReadersSumRetainedBytes.WithLabelValues(dbLabel).SetUint64(readerStats.SumBytesRetained)
+		kv.MDBXGauges.DbReadersParked.WithLabelValues(dbLabel).SetUint64(readerStats.Parked)
+		kv.MDBXGauges.DbReadersOusted.WithLabelValues(dbLabel).SetUint64(readerStats.Ousted)
+	} else {
+		tx.db.log.Debug("failed ReaderStats", "err", err)
+	}
+
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
@@ -860,6 +874,30 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.MDBXGauges.GcLeafMetric.WithLabelValues(dbLabel).SetUint64(gc.LeafPages)
 	kv.MDBXGauges.GcOverflowMetric.WithLabelValues(dbLabel).SetUint64(gc.OverflowPages)
 	kv.MDBXGauges.GcPagesMetric.WithLabelValues(dbLabel).SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
+}
+
+func (db *MdbxKV) collectGCInfoMetrics(dbLabel string) {
+	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
+	if err != nil {
+		db.log.Debug("failed to begin GCInfo tx", "err", err)
+		return
+	}
+	defer tx.Abort()
+
+	gcInfo, err := tx.GCInfo()
+	if err != nil {
+		db.log.Debug("failed GCInfo", "err", err)
+		return
+	}
+	pageSize := db.opts.pageSize.Bytes()
+	kv.MDBXGauges.GcAllocatedBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.PagesAllocated * pageSize)
+	kv.MDBXGauges.GcBackedBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.PagesBacked * pageSize)
+	kv.MDBXGauges.GcTotalBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.PagesTotal * pageSize)
+	kv.MDBXGauges.GcPagesBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.PagesGC * pageSize)
+	kv.MDBXGauges.GcReclaimableBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.PagesReclaimable * pageSize)
+	kv.MDBXGauges.GcRetainedBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.PagesRetained * pageSize)
+	kv.MDBXGauges.GcMaxReaderLagMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.MaxReaderLag)
+	kv.MDBXGauges.GcMaxRetainedBytesMetric.WithLabelValues(dbLabel).SetUint64(gcInfo.MaxRetainedPages * pageSize)
 }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
@@ -1144,6 +1182,7 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
+		tx.db.collectGCInfoMetrics(string(dbLabel))
 		err = RecordSummaries(dbLabel, latency)
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
