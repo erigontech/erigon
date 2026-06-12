@@ -275,6 +275,8 @@ func (tx *tx) Dirs() datadir.Dirs                                   { panic("not
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }
+func (db *DB) NotifyOnFilesChange(names []string)             { panic("not implemented") }
+func (db *DB) NotifyOnFilesDelete(names []string)             { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}

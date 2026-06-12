@@ -265,6 +265,14 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
 
+func (db *DB) NotifyOnFilesChange(names []string) {
+	db.stateFiles.NotifyOnFilesChange(names)
+}
+
+func (db *DB) NotifyOnFilesDelete(names []string) {
+	db.stateFiles.NotifyOnFilesDelete(names)
+}
+
 func (db *DB) searchForkableAggIdx(forkableId kv.ForkableId) int {
 	for i, forkagg := range db.forkaggs {
 		if forkagg.IsForkablePresent(forkableId) {

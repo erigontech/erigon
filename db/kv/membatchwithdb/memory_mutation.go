@@ -1267,6 +1267,8 @@ func (td temporaldb) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRw
 }
 
 func (td temporaldb) OnFilesChange(onChange kv.OnFilesChange, onDelete kv.OnFilesChange) {}
+func (td temporaldb) NotifyOnFilesChange(names []string)                                 {}
+func (td temporaldb) NotifyOnFilesDelete(names []string)                                 {}
 
 func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	return f(td.memoryMutation)

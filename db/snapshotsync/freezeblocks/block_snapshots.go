@@ -155,7 +155,19 @@ type BlockRetire struct {
 
 	workers atomic.Int32
 	tmpDir  string
-	db      kv.RoDB
+	// db is the read surface. May be wrapped with a commit gate
+	// (SetCommitGate) so retirement read-txs serialize against the
+	// aggregator commit+prune path's brief writer-Lock.
+	db kv.RoDB
+	// filesNotifier is the SnapshotNotifier surface (from the same
+	// temporal DB the read surface comes from). retireBlocks fires
+	// NotifyOnFilesChange on it after DumpBlocks so produced
+	// block-snapshot files flow through the same callback the
+	// Aggregator already fires for state files — single
+	// notification path, no parallel channel for block files. Kept
+	// separate from db so wrapping db with the gate doesn't have to
+	// extend through the temporal interface.
+	filesNotifier kv.SnapshotNotifier
 
 	notifier    services.DBEventNotifier
 	logger      log.Logger
@@ -172,6 +184,12 @@ type BlockRetire struct {
 	borDataNotReadyBefore time.Time
 }
 
+// NewBlockRetire — db is the read surface. If db also satisfies
+// kv.SnapshotNotifier (which kv.TemporalRoDB does), retireBlocks
+// will fire NotifyOnFilesChange on it after DumpBlocks so the
+// retire-output filenames flow through the same callback the
+// Aggregator already fires for state files. Plain kv.RoDB (CLI tools
+// that don't carry temporal state) silently skip the notify.
 func NewBlockRetire(
 	compressWorkers int,
 	dirs datadir.Dirs,
@@ -200,12 +218,19 @@ func NewBlockRetire(
 		cfgCopy.BlockAlignedBoundaries = config.Snapshot.BlockAlignedBoundaries
 	}
 	snCfg := &cfgCopy
+	// Type-assert the SnapshotNotifier surface. Production wiring
+	// passes kv.TemporalRwDB (satisfies the assertion); CLI tools
+	// that pass plain kv.RwDB do not — they silently skip the
+	// notify, which is fine because they're one-shot operations
+	// without a running inventory subscriber.
+	filesNotifier, _ := db.(kv.SnapshotNotifier)
 	r := &BlockRetire{
 		tmpDir:                dirs.Tmp,
 		dirs:                  dirs,
 		blockReader:           blockReader,
 		blockWriter:           blockWriter,
 		db:                    db,
+		filesNotifier:         filesNotifier,
 		snBuildAllowed:        snBuildAllowed,
 		chainConfig:           chainConfig,
 		config:                config,
@@ -334,7 +359,8 @@ func (br *BlockRetire) retireBlocks(
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg); err != nil {
+		producedFiles, err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg)
+		if err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -344,6 +370,13 @@ func (br *BlockRetire) retireBlocks(
 		snapshots.LogStat("blocks:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
+		}
+		// Fire the registered frozen-files-changed callback so the
+		// Provider's inventory + chain.toml republish path picks up
+		// the retire output the same way it picks up Aggregator's
+		// state-file output. Same callback fires in both producers.
+		if br.filesNotifier != nil && len(producedFiles) > 0 {
+			br.filesNotifier.NotifyOnFilesChange(producedFiles)
 		}
 	}
 
@@ -612,43 +645,57 @@ func (br *BlockRetire) DisableReadAhead() {
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg) error {
+// DumpBlocks writes the headers / bodies / transactions snapshot files
+// for [blockFrom, blockTo) and returns the basenames of every file
+// produced. Caller fires NotifyOnFilesChange with these names so the
+// inventory + chain.toml stay in sync without a disk scan.
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg) ([]string, error) {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+	var produced []string
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+		segEnd := chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg)
+		lastTxNum, segFiles, err := dumpBlocksRange(ctx, i, segEnd, tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
-			return err
+			return produced, err
 		}
+		produced = append(produced, segFiles...)
 		firstTxNum = lastTxNum + 1
 	}
-	return nil
+	return produced, nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, producedFiles []string, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	if blockFrom > 0 && firstTxNum == 0 {
 		err := fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
 		logger.Error("DumpBodies", "err", err)
-		return lastTxNum, err
+		return lastTxNum, nil, err
 	}
 
-	if _, err = dumpRange(ctx, snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo),
+	hdrFI := snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo)
+	if _, err = dumpRange(ctx, hdrFI,
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
+	producedFiles = append(producedFiles, hdrFI.Name())
 
-	if lastTxNum, err = dumpRange(ctx, snaptype2.Bodies.FileInfo(snapDir, blockFrom, blockTo),
+	bodyFI := snaptype2.Bodies.FileInfo(snapDir, blockFrom, blockTo)
+	if lastTxNum, err = dumpRange(ctx, bodyFI,
 		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
-		return lastTxNum, err
+		return lastTxNum, producedFiles, err
 	}
-	if _, err = dumpRange(ctx, snaptype2.Transactions.FileInfo(snapDir, blockFrom, blockTo),
-		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
-		return lastTxNum, err
-	}
+	producedFiles = append(producedFiles, bodyFI.Name())
 
-	return lastTxNum, nil
+	txFI := snaptype2.Transactions.FileInfo(snapDir, blockFrom, blockTo)
+	if _, err = dumpRange(ctx, txFI,
+		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		return lastTxNum, producedFiles, err
+	}
+	producedFiles = append(producedFiles, txFI.Name())
+
+	return lastTxNum, producedFiles, nil
 }
 
 type firstKeyGetter func(ctx context.Context) uint64

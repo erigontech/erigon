@@ -764,5 +764,16 @@ type Closer interface {
 
 type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
+	// OnFilesChange registers the two callbacks the notifier will
+	// fire when frozen files are added / removed. Registration is
+	// idempotent; the last call wins.
 	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
+	// NotifyOnFilesChange / NotifyOnFilesDelete fire the registered
+	// callback with the given names. Single fire path shared by every
+	// producer of frozen-file changes (Aggregator for state files,
+	// BlockRetire for block-snapshot files) so the consumer's
+	// callback sees a unified stream — no parallel event channels.
+	// nil-safe when no callback has been registered.
+	NotifyOnFilesChange(frozenFileNames []string)
+	NotifyOnFilesDelete(frozenFileNames []string)
 }

@@ -280,6 +280,21 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	a.onFilesDelete = onDel
 }
 
+// NotifyOnFilesChange fires the registered onChange callback with the
+// given names. nil-safe when no callback has been registered.
+func (a *Aggregator) NotifyOnFilesChange(names []string) {
+	if a.onFilesChange != nil {
+		a.onFilesChange(names)
+	}
+}
+
+// NotifyOnFilesDelete fires the registered onDelete callback. nil-safe.
+func (a *Aggregator) NotifyOnFilesDelete(names []string) {
+	if a.onFilesDelete != nil {
+		a.onFilesDelete(names)
+	}
+}
+
 func (a *Aggregator) StepSize() uint64          { return a.stepSize.Load() }
 func (a *Aggregator) Dirs() datadir.Dirs        { return a.dirs }
 func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile.Load() }
@@ -792,7 +807,7 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
 	if !missedFilesItems.IsEmpty() {
-		defer a.onFilesChange(nil)
+		defer a.NotifyOnFilesChange(nil)
 	}
 
 	startIndexingTime := time.Now()
@@ -1121,7 +1136,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
-			a.onFilesChange(nil)
+			a.NotifyOnFilesChange(nil)
 		}
 
 		if doMerge {
@@ -1219,7 +1234,7 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumTo uint64) {
-	defer a.onFilesChange(nil) //TODO: add relative file paths
+	defer a.NotifyOnFilesChange(nil) //TODO: add relative file paths
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -1966,7 +1981,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 }
 
 func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
-	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
+	defer a.NotifyOnFilesChange(in.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -2027,7 +2042,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 		retired = append(retired, r...)
 	}
 
-	a.onFilesDelete(deleted)
+	a.NotifyOnFilesDelete(deleted)
 	a.recalcVisibleFiles(retired)
 }
 
@@ -2224,7 +2239,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
-			a.onFilesChange(nil)
+			a.NotifyOnFilesChange(nil)
 		}
 		if !doMerge {
 			return
