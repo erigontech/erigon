@@ -1,27 +1,52 @@
 // Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 
+// HTTP routing for the Engine API v2 REST transport
+// (https://github.com/ethereum/execution-apis/pull/793).
+
 package engineapi
 
 import (
-	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-const sszRestContentType = "application/octet-stream"
+const (
+	sszRestContentType = "application/octet-stream"
+	jsonContentType    = "application/json"
+	problemContentType = "application/problem+json"
+)
+
+// RFC 7807 problem types, written as relative URIs per the spec.
+const (
+	problemInvalidRequest       = "/engine-api/errors/invalid-request"
+	problemSSZDecodeError       = "/engine-api/errors/ssz-decode-error"
+	problemUnsupportedFork      = "/engine-api/errors/unsupported-fork"
+	problemMethodNotFound       = "/engine-api/errors/method-not-found"
+	problemUnknownPayload       = "/engine-api/errors/unknown-payload"
+	problemInvalidForkchoice    = "/engine-api/errors/invalid-forkchoice"
+	problemReorgTooDeep         = "/engine-api/errors/reorg-too-deep"
+	problemRequestTooLarge      = "/engine-api/errors/request-too-large"
+	problemUnsupportedMediaType = "/engine-api/errors/unsupported-media-type"
+	problemInvalidBody          = "/engine-api/errors/invalid-body"
+	problemInvalidAttributes    = "/engine-api/errors/invalid-attributes"
+	problemInternal             = "/engine-api/errors/internal"
+)
 
 func (e *EngineServer) SSZRESTHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,114 +55,71 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 }
 
 func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(r.URL.Path, "/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 || parts[0] != "engine" || !strings.HasPrefix(parts[1], "v") {
-		http.NotFound(w, nil)
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	// trailing slashes are forbidden, so an empty last segment is method-not-found
+	if len(parts) < 3 || parts[0] != "engine" || parts[1] != "v2" || parts[len(parts)-1] == "" {
+		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 		return
 	}
-	version, err := strconv.Atoi(strings.TrimPrefix(parts[1], "v"))
-	if err != nil {
-		writeSSZError(w, http.StatusNotFound, "invalid engine version")
-		return
-	}
-
+	rest := parts[2:]
 	switch {
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "payloads":
-		e.handleSSZNewPayload(w, r, version)
-	case r.Method == http.MethodGet && len(parts) == 4 && parts[2] == "payloads":
-		e.handleSSZGetPayload(w, r, version, parts[3])
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "forkchoice":
-		e.handleSSZForkchoice(w, r, version)
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "blobs":
-		e.handleSSZGetBlobs(w, r, version)
-	case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "client" && parts[3] == "version" && version == 1:
-		e.handleSSZClientVersion(w, r)
-	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "capabilities" && version == 1:
-		e.handleSSZCapabilities(w, r)
+	case rest[0] == "capabilities":
+		if len(rest) == 1 && r.Method == http.MethodGet {
+			e.handleSSZCapabilities(w)
+			return
+		}
+	case rest[0] == "identity":
+		if len(rest) == 1 && r.Method == http.MethodGet {
+			e.handleSSZIdentity(w, r)
+			return
+		}
+	case rest[0] == "blobs":
+		if len(rest) == 2 && r.Method == http.MethodPost {
+			e.handleSSZGetBlobs(w, r, rest[1])
+			return
+		}
 	default:
-		writeSSZError(w, http.StatusNotFound, "unknown SSZ-REST Engine API endpoint")
-	}
-}
-
-func sszNewPayloadVersion(version int) (clparams.StateVersion, bool) {
-	switch version {
-	case 1:
-		return clparams.BellatrixVersion, true
-	case 2:
-		return clparams.CapellaVersion, true
-	case 3:
-		return clparams.DenebVersion, true
-	case 4:
-		return clparams.ElectraVersion, true
-	case 5:
-		return clparams.GloasVersion, true
-	default:
-		return 0, false
-	}
-}
-
-func sszGetPayloadVersion(version int) (clparams.StateVersion, bool) {
-	switch version {
-	case 1:
-		return clparams.BellatrixVersion, true
-	case 2:
-		return clparams.CapellaVersion, true
-	case 3:
-		return clparams.DenebVersion, true
-	case 4:
-		return clparams.ElectraVersion, true
-	case 5:
-		return clparams.FuluVersion, true
-	case 6:
-		return clparams.GloasVersion, true
-	default:
-		return 0, false
-	}
-}
-
-func sszForkchoiceVersion(version int) (clparams.StateVersion, bool) {
-	switch version {
-	case 1:
-		return clparams.BellatrixVersion, true
-	case 2:
-		return clparams.CapellaVersion, true
-	case 3:
-		return clparams.DenebVersion, true
-	case 4:
-		return clparams.GloasVersion, true
-	default:
-		return 0, false
-	}
-}
-
-func readSSZBody(r *http.Request) ([]byte, error) {
-	defer r.Body.Close()
-	return io.ReadAll(http.MaxBytesReader(nil, r.Body, 128<<20))
-}
-
-func writeSSZ(w http.ResponseWriter, obj interface {
-	EncodeSSZ([]byte) ([]byte, error)
-}) {
-	out, err := obj.EncodeSSZ(nil)
-	if err != nil {
-		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		e.handleSSZForkScoped(w, r, rest)
 		return
 	}
-	w.Header().Set("Content-Type", sszRestContentType)
-	_, _ = w.Write(out)
+	writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 }
 
-func writeSSZBytes(w http.ResponseWriter, out []byte) {
-	w.Header().Set("Content-Type", sszRestContentType)
-	_, _ = w.Write(out)
+func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Request, rest []string) {
+	forkName := rest[0]
+	version, ok := engineForkVersion(forkName)
+	if !ok || !forkScheduled(e.config, forkName) {
+		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("unsupported fork %q", forkName))
+		return
+	}
+	sub := rest[1:]
+	switch {
+	case len(sub) == 1 && sub[0] == "payloads" && r.Method == http.MethodPost:
+		e.handleSSZNewPayload(w, r, forkName, version)
+	case len(sub) == 2 && sub[0] == "payloads" && r.Method == http.MethodGet:
+		e.handleSSZGetPayload(w, r, forkName, version, sub[1])
+	case len(sub) == 1 && sub[0] == "forkchoice" && r.Method == http.MethodPost:
+		e.handleSSZForkchoice(w, r, forkName, version)
+	case len(sub) == 2 && sub[0] == "bodies" && sub[1] == "hash" && r.Method == http.MethodPost:
+		e.handleSSZBodiesByHash(w, r, forkName, version)
+	case len(sub) == 1 && sub[0] == "bodies" && r.Method == http.MethodGet:
+		e.handleSSZBodiesByRange(w, r, forkName, version)
+	default:
+		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
+	}
 }
 
-func writeSSZError(w http.ResponseWriter, code int, msg string) {
-	http.Error(w, msg, code)
+func writeProblem(w http.ResponseWriter, status int, problemType, detail string) {
+	w.Header().Set("Content-Type", problemContentType)
+	w.WriteHeader(status)
+	problem := struct {
+		Type   string `json:"type"`
+		Detail string `json:"detail,omitempty"`
+	}{Type: problemType, Detail: detail}
+	_ = json.NewEncoder(w).Encode(problem)
 }
 
-func writeEngineError(w http.ResponseWriter, err error) {
+func writeEngineProblem(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
@@ -145,111 +127,129 @@ func writeEngineError(w http.ResponseWriter, err error) {
 	if errors.As(err, &rpcErr) {
 		switch rpcErr.ErrorCode() {
 		case engine_helpers.UnknownPayloadErr.Code:
-			writeSSZError(w, http.StatusNotFound, err.Error())
+			writeProblem(w, http.StatusNotFound, problemUnknownPayload, err.Error())
 			return
 		case engine_helpers.InvalidForkchoiceStateErr.Code:
-			writeSSZError(w, http.StatusConflict, err.Error())
+			writeProblem(w, http.StatusConflict, problemInvalidForkchoice, err.Error())
 			return
 		case engine_helpers.InvalidPayloadAttributesErr.Code:
-			writeSSZError(w, http.StatusUnprocessableEntity, err.Error())
+			writeProblem(w, http.StatusUnprocessableEntity, problemInvalidAttributes, err.Error())
 			return
 		case engine_helpers.TooLargeRequestErr.Code:
-			writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
+			writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, err.Error())
+			return
+		case engine_helpers.ReorgTooDeepErr.Code:
+			writeProblem(w, http.StatusConflict, problemReorgTooDeep, err.Error())
+			return
+		case (&rpc.UnsupportedForkError{}).ErrorCode():
+			writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, err.Error())
+			return
+		case (&rpc.InvalidParamsError{}).ErrorCode():
+			writeProblem(w, http.StatusUnprocessableEntity, problemInvalidBody, err.Error())
 			return
 		}
 	}
-	writeSSZError(w, http.StatusInternalServerError, err.Error())
+	writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
 }
 
-func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, version int) {
-	if version < 1 || version > 5 {
-		writeSSZError(w, http.StatusNotFound, "unsupported new payload version")
+func checkSSZContentType(w http.ResponseWriter, r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != sszRestContentType {
+		writeProblem(w, http.StatusUnsupportedMediaType, problemUnsupportedMediaType, "want "+sszRestContentType)
+		return false
+	}
+	return true
+}
+
+func readSSZBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, sszMaxRequestBody))
+	if err != nil {
+		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, err.Error())
+		return nil, false
+	}
+	return body, true
+}
+
+func writeSSZ(w http.ResponseWriter, obj interface {
+	EncodeSSZ([]byte) ([]byte, error)
+}) {
+	out, err := obj.EncodeSSZ(nil)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
 		return
 	}
-	sv, _ := sszNewPayloadVersion(version)
-	body, err := readSSZBody(r)
-	if err != nil {
-		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
+	writeSSZBytes(w, out)
+}
+
+func writeSSZBytes(w http.ResponseWriter, out []byte) {
+	w.Header().Set("Content-Type", sszRestContentType)
+	_, _ = w.Write(out)
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", jsonContentType)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
+	if !checkSSZContentType(w, r) {
 		return
 	}
-	payload, blobHashes, parentRoot, executionRequests, err := decodeNewPayloadRequest(body, sv)
+	body, ok := readSSZBody(w, r)
+	if !ok {
+		return
+	}
+	payload, parentRoot, executionRequests, err := decodeNewPayloadEnvelope(body, version)
 	if err != nil {
-		writeSSZError(w, http.StatusBadRequest, err.Error())
+		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
 	var status *engine_types.PayloadStatus
 	switch version {
-	case 1:
+	case clparams.BellatrixVersion:
 		status, err = e.NewPayloadV1(r.Context(), payload)
-	case 2:
+	case clparams.CapellaVersion:
 		status, err = e.NewPayloadV2(r.Context(), payload)
-	case 3:
-		status, err = e.NewPayloadV3(r.Context(), payload, hashListValues(blobHashes), &parentRoot)
-	case 4:
-		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
-	case 5:
-		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
+	case clparams.DenebVersion:
+		status, err = e.NewPayloadV3(r.Context(), payload, blobVersionedHashesFromTxs(payload.Transactions), &parentRoot)
+	case clparams.ElectraVersion, clparams.FuluVersion:
+		status, err = e.NewPayloadV4(r.Context(), payload, blobVersionedHashesFromTxs(payload.Transactions), &parentRoot, executionRequests)
+	default:
+		status, err = e.NewPayloadV5(r.Context(), payload, blobVersionedHashesFromTxs(payload.Transactions), &parentRoot, executionRequests)
 	}
 	if err != nil {
-		writeEngineError(w, err)
+		writeEngineProblem(w, err)
 		return
 	}
-	e.logger.Info("[SSZ-REST] handled new payload", "path", r.URL.Path)
+	e.logger.Debug("[SSZ-REST] handled new payload", "fork", forkName)
 	writeSSZ(w, status)
 }
 
-func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, version int, payloadID string) {
-	if version < 1 || version > 6 {
-		writeSSZError(w, http.StatusNotFound, "unsupported get payload version")
-		return
-	}
+func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, payloadID string) {
 	id, err := parsePayloadIDPath(payloadID)
 	if err != nil {
-		writeSSZError(w, http.StatusBadRequest, err.Error())
+		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
 		return
 	}
-	switch version {
-	case 1:
-		resp, err := e.GetPayloadV1(r.Context(), id)
-		if err != nil {
-			writeEngineError(w, err)
-			return
-		}
-		resp.SSZVersion = clparams.BellatrixVersion
-		e.logger.Info("[SSZ-REST] handled get payload", "path", r.URL.Path)
-		writeSSZ(w, resp)
-	default:
-		resp, err := callGetPayload(r.Context(), e, version, id)
-		if err != nil {
-			writeEngineError(w, err)
-			return
-		}
-		sv, _ := sszGetPayloadVersion(version)
-		out, err := encodeGetPayloadResponse(resp, sv)
-		if err != nil {
-			writeSSZError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		e.logger.Info("[SSZ-REST] handled get payload", "path", r.URL.Path)
-		writeSSZBytes(w, out)
+	decodedID, err := decodePayloadID(id)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
+		return
 	}
-}
-
-func callGetPayload(ctx context.Context, e *EngineServer, version int, id hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	switch version {
-	case 2:
-		return e.GetPayloadV2(ctx, id)
-	case 3:
-		return e.GetPayloadV3(ctx, id)
-	case 4:
-		return e.GetPayloadV4(ctx, id)
-	case 5:
-		return e.GetPayloadV5(ctx, id)
-	case 6:
-		return e.GetPayloadV6(ctx, id)
-	default:
-		return nil, &rpc.UnsupportedForkError{Message: "unsupported get payload version"}
+	resp, err := e.getPayload(r.Context(), decodedID, version)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
 	}
+	out, err := encodeBuiltPayload(resp, version)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
+	e.logger.Debug("[SSZ-REST] handled get payload", "fork", forkName, "payloadId", decodedID)
+	w.Header().Set("Cache-Control", "no-store")
+	writeSSZBytes(w, out)
 }
 
 func parsePayloadIDPath(s string) (hexutil.Bytes, error) {
@@ -264,157 +264,239 @@ func parsePayloadIDPath(s string) (hexutil.Bytes, error) {
 	return hexutil.Bytes(b), nil
 }
 
-func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Request, version int) {
-	if version < 1 || version > 4 {
-		writeSSZError(w, http.StatusNotFound, "unsupported forkchoice version")
+func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
+	if !checkSSZContentType(w, r) {
 		return
 	}
-	sv, _ := sszForkchoiceVersion(version)
-	body, err := readSSZBody(r)
-	if err != nil {
-		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
+	body, ok := readSSZBody(w, r)
+	if !ok {
 		return
 	}
-	state, attrs, err := decodeForkchoiceRequest(body, sv)
+	state, attrs, custodyColumns, err := decodeForkchoiceUpdate(body, version)
 	if err != nil {
-		writeSSZError(w, http.StatusBadRequest, err.Error())
+		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	var resp *engine_types.ForkChoiceUpdatedResponse
-	switch version {
-	case 1:
-		resp, err = e.ForkchoiceUpdatedV1(r.Context(), &state, attrs)
-	case 2:
-		resp, err = e.ForkchoiceUpdatedV2(r.Context(), &state, attrs)
-	case 3:
-		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
-	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
+	if custodyColumns != nil {
+		e.logger.Debug("[SSZ-REST] ignoring custody columns update", "fork", forkName)
 	}
+	if attrs != nil {
+		// the URL fork is load-bearing for payload builds only: it must match
+		// the fork the new payload would belong to
+		if attrsFork := forkNameAtTime(e.config, uint64(attrs.Timestamp)); attrsFork != forkName {
+			writeProblem(w, http.StatusBadRequest, problemUnsupportedFork,
+				fmt.Sprintf("payload attributes timestamp belongs to fork %q, not URL fork %q", attrsFork, forkName))
+			return
+		}
+	}
+	resp, err := e.forkchoiceUpdated(r.Context(), &state, attrs, version)
 	if err != nil {
-		writeEngineError(w, err)
+		writeEngineProblem(w, err)
 		return
 	}
 	out, err := encodeForkchoiceResponse(resp)
 	if err != nil {
-		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
 		return
 	}
-	e.logger.Info("[SSZ-REST] handled forkchoice", "path", r.URL.Path)
+	e.logger.Debug("[SSZ-REST] handled forkchoice", "fork", forkName)
 	writeSSZBytes(w, out)
 }
 
-func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request, version int) {
-	if version < 1 || version > 3 {
-		writeSSZError(w, http.StatusNotFound, "unsupported get blobs version")
+func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
+	if !checkSSZContentType(w, r) {
 		return
 	}
-	body, err := readSSZBody(r)
+	body, ok := readSSZBody(w, r)
+	if !ok {
+		return
+	}
+	if len(body) > sszMaxBodiesRequest*32 {
+		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, "too many block hashes")
+		return
+	}
+	hashes := solid.NewHashList(sszMaxBodiesRequest)
+	if err := hashes.DecodeSSZ(body, 0); err != nil {
+		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		return
+	}
+	blockHashes := hashListValues(hashes)
+	bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), blockHashes)
 	if err != nil {
-		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
+		writeEngineProblem(w, err)
+		return
+	}
+	// blocks outside the URL fork's time range come back as available=false
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(blockHashes))
+	for i := range blockHashes {
+		if i >= len(bodies) || bodies[i] == nil {
+			continue
+		}
+		header := e.chainRW.GetHeaderByHash(r.Context(), blockHashes[i])
+		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
+			continue
+		}
+		entries[i] = bodies[i]
+	}
+	out, err := encodeBodiesResponse(entries, version)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
+	e.logger.Debug("[SSZ-REST] handled bodies by hash", "fork", forkName, "count", len(blockHashes))
+	writeSSZBytes(w, out)
+}
+
+func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
+	query := r.URL.Query()
+	from, errFrom := strconv.ParseUint(query.Get("from"), 10, 64)
+	count, errCount := strconv.ParseUint(query.Get("count"), 10, 64)
+	if errFrom != nil || errCount != nil {
+		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, "from and count query parameters are required")
+		return
+	}
+	if count > sszMaxBodiesRequest {
+		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge,
+			fmt.Sprintf("count %d exceeds the limit of %d", count, sszMaxBodiesRequest))
+		return
+	}
+	if from == 0 || count == 0 {
+		writeProblem(w, http.StatusUnprocessableEntity, problemInvalidBody,
+			fmt.Sprintf("invalid from or count, from: %d count: %d", from, count))
+		return
+	}
+	bodies, err := e.chainRW.GetPayloadBodiesByRange(r.Context(), from, count)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
+	}
+	// blocks outside the URL fork's time range or past the latest known block
+	// come back as available=false
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, count)
+	for i := uint64(0); i < count; i++ {
+		if i >= uint64(len(bodies)) || bodies[i] == nil {
+			continue
+		}
+		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
+		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
+			continue
+		}
+		entries[i] = bodies[i]
+	}
+	out, err := encodeBodiesResponse(entries, version)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
+	e.logger.Debug("[SSZ-REST] handled bodies by range", "fork", forkName, "from", from, "count", count)
+	writeSSZBytes(w, out)
+}
+
+func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request, revision string) {
+	if revision != "v1" && revision != "v2" && revision != "v3" {
+		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
+		return
+	}
+	if !checkSSZContentType(w, r) {
+		return
+	}
+	body, ok := readSSZBody(w, r)
+	if !ok {
+		return
+	}
+	if len(body) > sszMaxGetBlobHashes*32 {
+		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, "too many blob hashes")
 		return
 	}
 	hashes := solid.NewHashList(sszMaxGetBlobHashes)
 	if err := hashes.DecodeSSZ(body, 0); err != nil {
-		writeSSZError(w, http.StatusBadRequest, err.Error())
+		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	if hashes.Length() > sszMaxGetBlobHashes {
-		writeSSZError(w, http.StatusRequestEntityTooLarge, "too many blob hashes")
-		return
-	}
-	switch version {
-	case 1:
-		resp, err := e.GetBlobsV1(r.Context(), hashListValues(hashes))
-		if err != nil {
-			writeEngineError(w, err)
-			return
-		}
-		e.logger.Info("[SSZ-REST] handled get blobs", "path", r.URL.Path)
-		out, err := encodeGetBlobsV1Response(resp)
-		if err != nil {
-			writeSSZError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeSSZBytes(w, out)
-		return
-	case 2:
-		resp, err := e.GetBlobsV2(r.Context(), hashListValues(hashes))
-		if err != nil {
-			writeEngineError(w, err)
-			return
-		}
-		e.logger.Info("[SSZ-REST] handled get blobs", "path", r.URL.Path)
-		out, err := encodeGetBlobsV2Response(resp)
-		if err != nil {
-			writeSSZError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeSSZBytes(w, out)
-		return
-	case 3:
-		resp, err := e.GetBlobsV3(r.Context(), hashListValues(hashes))
-		if err != nil {
-			writeEngineError(w, err)
-			return
-		}
-		e.logger.Info("[SSZ-REST] handled get blobs", "path", r.URL.Path)
-		out, err := encodeGetBlobsV3Response(resp)
-		if err != nil {
-			writeSSZError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeSSZBytes(w, out)
-		return
-	}
-}
+	blobHashes := hashListValues(hashes)
 
-func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Request) {
-	body, err := readSSZBody(r)
-	if err != nil {
-		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
-		return
+	var out []byte
+	switch revision {
+	case "v1":
+		resp, err := e.GetBlobsV1(r.Context(), blobHashes)
+		if err != nil {
+			writeBlobsProblem(w, err)
+			return
+		}
+		if resp == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		out, err = encodeBlobsV1Response(resp)
+		if err != nil {
+			writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+			return
+		}
+	case "v2", "v3":
+		var resp engine_types.BlobsBundleV2
+		var err error
+		if revision == "v2" {
+			resp, err = e.GetBlobsV2(r.Context(), blobHashes)
+		} else {
+			resp, err = e.GetBlobsV3(r.Context(), blobHashes)
+		}
+		if err != nil {
+			writeBlobsProblem(w, err)
+			return
+		}
+		// nil signals "cannot serve" (and the all-or-nothing miss on v2)
+		if resp == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		out, err = encodeBlobsV2Response(resp)
+		if err != nil {
+			writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+			return
+		}
 	}
-	clientVersion, err := decodeClientVersionRequest(body)
-	if err != nil {
-		writeSSZError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	resp, err := e.GetClientVersionV1(r.Context(), clientVersion)
-	if err != nil {
-		writeEngineError(w, err)
-		return
-	}
-	e.logger.Info("[SSZ-REST] handled client version", "path", r.URL.Path)
-	out, err := encodeClientVersionResponse(resp)
-	if err != nil {
-		writeSSZError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	e.logger.Debug("[SSZ-REST] handled get blobs", "revision", revision, "count", len(blobHashes))
 	writeSSZBytes(w, out)
 }
 
-func ptr[T any](v T) *T { return &v }
-
-func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Request) {
-	body, err := readSSZBody(r)
-	if err != nil {
-		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
+func writeBlobsProblem(w http.ResponseWriter, err error) {
+	if errors.Is(err, txpool.ErrPoolDisabled) {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	capabilities, err := decodeCapabilities(body, 0)
-	if err != nil {
-		writeSSZError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	resp := e.ExchangeCapabilities(capabilities)
-	e.logger.Info("[SSZ-REST] handled capabilities", "path", r.URL.Path)
-	out, err := encodeCapabilities(resp)
-	if err != nil {
-		writeSSZError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeSSZBytes(w, out)
+	writeEngineProblem(w, err)
 }
 
-func hashesToCommon(in []common.Hash) []common.Hash { return in }
+type sszRestCapabilities struct {
+	SupportedForks         []string            `json:"supported_forks"`
+	ForkScopedEndpoints    []string            `json:"fork_scoped_endpoints"`
+	IndependentlyVersioned map[string][]string `json:"independently_versioned"`
+	UnscopedEndpoints      []string            `json:"unscoped_endpoints"`
+	Limits                 map[string]uint64   `json:"limits"`
+}
+
+func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
+	writeJSON(w, sszRestCapabilities{
+		SupportedForks:         supportedForkNames(e.config),
+		ForkScopedEndpoints:    []string{"payloads", "forkchoice", "bodies"},
+		IndependentlyVersioned: map[string][]string{"blobs": {"v1", "v2", "v3"}},
+		UnscopedEndpoints:      []string{"capabilities", "identity"},
+		Limits: map[string]uint64{
+			"bodies.max_count":           sszMaxBodiesRequest,
+			"blobs.max_versioned_hashes": sszMaxGetBlobHashes,
+			"payload.max_bytes":          sszMaxRequestBody,
+		},
+	})
+}
+
+func (e *EngineServer) handleSSZIdentity(w http.ResponseWriter, r *http.Request) {
+	if clientVersion := r.Header.Get("X-Engine-Client-Version"); clientVersion != "" {
+		e.logger.Debug("[SSZ-REST] client version", "version", clientVersion)
+	}
+	versions, err := e.GetClientVersionV1(r.Context(), nil)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
+	}
+	writeJSON(w, versions)
+}
