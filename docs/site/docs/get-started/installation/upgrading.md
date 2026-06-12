@@ -26,7 +26,7 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 
 ### Snapshots Upgrade Options
 
-* `erigon update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
+* `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
 * `erigon snapshots reset --datadir /your/datadir`: this command removes all old snapshots that have had performance improvements.
 
 Choose `upgrade` for a quicker process, or `reset` for maximum performance. If you choose `reset`, you'll need to wait for the new snapshots to download once Erigon starts.
@@ -58,7 +58,7 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 :::
 
 1. Make sure that you're running Erigon on 3.1.x version, use `erigon --version`.
-2. Run `erigon --datadir ../your/datadir reset-to-old-ver-format` to reset your snapshots to old format.
+2. Run `erigon snapshots reset-to-old-ver-format --datadir /your/datadir` to reset your snapshots to old format.
 3. `git checkout v3.0.x` to checkout to preferred `3.0` version. For example now latest: `git checkout v3.0.15`
 4. Run your old version of Erigon.
 
