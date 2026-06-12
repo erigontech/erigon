@@ -271,6 +271,8 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		var bal []byte
 		if len(balBytes) > 0 {
 			bal = bytes.Clone(balBytes)
+		} else {
+			bal = e.regenerateBlockAccessList(ctx, h, *number)
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
@@ -317,6 +319,8 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		var bal []byte
 		if len(balBytes) > 0 {
 			bal = bytes.Clone(balBytes)
+		} else {
+			bal = e.regenerateBlockAccessList(ctx, hash, blockNum)
 		}
 		bodies = append(bodies, &PayloadBody{
 			Transactions:    txs,
@@ -333,6 +337,24 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		}
 	}
 	return bodies, nil
+}
+
+// regenerateBlockAccessList re-derives a missing BAL by re-execution. Returns
+// nil when the block has no BAL or the required history is unavailable — the
+// engine API then reports null for that block, per spec.
+func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, blockHash common.Hash, blockNum uint64) []byte {
+	ttx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		e.logger.Debug("regenerateBlockAccessList: begin temporal ro", "err", err)
+		return nil
+	}
+	defer ttx.Rollback()
+	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, ttx, blockHash, blockNum)
+	if err != nil {
+		e.logger.Debug("regenerateBlockAccessList: regeneration failed", "block", blockNum, "hash", blockHash, "err", err)
+		return nil
+	}
+	return encoded
 }
 
 func (e *ExecModule) GetHeaderHashNumber(ctx context.Context, blockHash common.Hash) (*uint64, error) {

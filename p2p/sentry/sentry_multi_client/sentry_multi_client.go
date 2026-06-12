@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -166,9 +167,11 @@ type MultiClient struct {
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
 	ethApiWrapper                    eth.ReceiptsGetter
+	balGenerator                     eth.BlockAccessListGetter
 }
 
-var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
+var _ eth.ReceiptsGetter = new(receipts.Generator)     // compile-time interface-check
+var _ eth.BlockAccessListGetter = new(bal.Regenerator) // compile-time interface-check
 
 func NewMultiClient(
 	dirs datadir.Dirs,
@@ -200,6 +203,7 @@ func NewMultiClient(
 		logger:                           logger,
 		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
 		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balGenerator:                     bal.NewRegenerator(blockReader, engine),
 	}
 
 	return cs, nil
@@ -260,19 +264,20 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 }
 
 // getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
-// (EIP-8159) by looking up stored BALs from rawdb and replying with a
-// BlockAccessLists response positionally aligned to the request.
+// (EIP-8159) by looking up stored BALs from rawdb — regenerating pruned ones
+// via re-execution — and replying with a BlockAccessLists response positionally
+// aligned to the request.
 func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockAccessListsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockAccessLists71: %w, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.BeginRo(ctx)
+	tx, err := cs.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockAccessListsQuery(tx, query.GetBlockAccessListsPacket, cs.blockReader)
+	response := eth.AnswerGetBlockAccessListsQuery(ctx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator)
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
 		RequestId:              query.RequestId,
