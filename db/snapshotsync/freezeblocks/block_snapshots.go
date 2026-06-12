@@ -371,13 +371,22 @@ func (br *BlockRetire) retireBlocks(
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
-		// Fire the registered frozen-files-changed callback so the
-		// Provider's inventory + chain.toml republish path picks up
-		// the retire output the same way it picks up Aggregator's
-		// state-file output. Same callback fires in both producers.
-		if br.filesNotifier != nil && len(producedFiles) > 0 {
-			br.filesNotifier.NotifyOnFilesChange(producedFiles)
-		}
+		// NotifyOnFilesChange is NOT called here. The retire dump only
+		// produces the .seg; its accessor builds asynchronously (or
+		// via the lifecycle driver) and may fail (recsplit collision,
+		// crash mid-build). Firing the notification now would advertise
+		// a .seg whose .idx may never materialise — the iter-2 wedge of
+		// the 2026-06-12 5-iter soak hit exactly this pattern. The
+		// lifecycle driver's OnValidation handler now fires the notify
+		// when each file enters LifecycleAdvertisable (i.e. .seg + .idx
+		// pair both verified) — see
+		// lifecycle.BuildOnBatchValidationWithHook.
+		//
+		// producedFiles is still computed so the legacy notifier wire
+		// (OnNewSnapshot above) and any future per-file logging stays
+		// available; the rename of br.filesNotifier in favour of the
+		// lifecycle hook is the actual layering change.
+		_ = producedFiles
 	}
 
 	merged, err := br.MergeBlocks(ctx, lvl, seeder)

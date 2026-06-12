@@ -974,7 +974,21 @@ func (p *Provider) Initialize(deps Deps) error {
 			Logger:       logger,
 			SnapDir:      snapDir,
 			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory, logger),
-			OnValidation: lifecycle.BuildOnBatchValidation(batchChain, deps.Inventory, logger),
+			OnValidation: lifecycle.BuildOnBatchValidationWithHook(batchChain, deps.Inventory, logger,
+				// Single fire-path for "this file is now ready to be
+				// part of the public set." Triggered when the lifecycle
+				// driver advances a file (state or block) into
+				// LifecycleAdvertisable — i.e. all bytes verified, the
+				// accessor exists, no half-written cross-file state.
+				// Goes through the same SnapshotNotifier surface the
+				// Aggregator uses for its own files; the Provider's
+				// OnFilesChange handler (above) republishes chain.toml
+				// and exercises the downloader seed path.
+				func(names []string) {
+					if notifier, ok := p.ChainDB.(kv.SnapshotNotifier); ok {
+						notifier.NotifyOnFilesChange(names)
+					}
+				}),
 			// Meta / salt / caplin files skip the step-validation chain
 			// (they take the dispatch's meta path, not OnValidation), so
 			// the InfoHashValidator above never sees a meta/salt/caplin

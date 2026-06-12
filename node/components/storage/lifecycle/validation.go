@@ -98,27 +98,50 @@ func BuildOnValidation(chain validation.Chain, contentFor ContentSourceFor, inv 
 //
 // logger may be nil; on successful advance the handler emits Info
 // log lines distinguishing the minimum pass from the extras pass.
+// OnAdvertised fires from the lifecycle validation handlers each time
+// one or more files transition into LifecycleAdvertisable. The single
+// fire-path is unified across producers (Aggregator state files,
+// BlockRetire output) so any downstream consumer — chain.toml
+// republish, downloader Seed, the inventory's BlockFiles view — only
+// sees a file when its full .seg + .idx pair is verified.
+//
+// nil-safe (BuildOnBatchValidation passes through nil callbacks
+// unchanged).
+type OnAdvertised func(names []string)
+
 func BuildOnBatchValidation(chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) Handler {
+	return BuildOnBatchValidationWithHook(chain, inv, logger, nil)
+}
+
+// BuildOnBatchValidationWithHook is the OnAdvertised-aware variant.
+// Production wiring calls this and passes a NotifyOnFilesChange
+// trampoline; the no-hook form remains for tests that don't care.
+func BuildOnBatchValidationWithHook(chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger, onAdvertised OnAdvertised) Handler {
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
 		// Dispatch by file kind:
 		//   - state file (Domain != "") → step-axis grouping
 		//   - block file (FromBlock/ToBlock set) → block-range axis
 		//   - everything else (caplin, meta, salt) → singleton path
 		if e.Domain != "" {
-			return runStepGroup(ctx, e, chain, inv, logger)
+			return runStepGroup(ctx, e, chain, inv, logger, onAdvertised)
 		}
 		if !e.BlockKey().IsZero() {
-			return runBlockGroup(ctx, e, chain, inv, logger)
+			return runBlockGroup(ctx, e, chain, inv, logger, onAdvertised)
 		}
 		// Singleton: advance directly.
-		if inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) && logger != nil {
-			logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable")
+		if inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) {
+			if logger != nil {
+				logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable")
+			}
+			if onAdvertised != nil {
+				onAdvertised([]string{e.Name})
+			}
 		}
 		return nil
 	}
 }
 
-func runStepGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) error {
+func runStepGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger, onAdvertised OnAdvertised) error {
 	key := e.StepKey()
 	group := inv.FilesAtStep(key)
 	if len(group.Files) == 0 {
@@ -136,6 +159,9 @@ func runStepGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.S
 				"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
 				"files", len(advanced))
 		}
+		if onAdvertised != nil && len(advanced) > 0 {
+			onAdvertised(advanced)
+		}
 	}
 
 	// Pass 2: extras, once full step is Indexed.
@@ -149,11 +175,14 @@ func runStepGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.S
 				"from", key.FromStep, "to", key.ToStep, "domain", string(key.Domain),
 				"files", len(advanced))
 		}
+		if onAdvertised != nil && len(advanced) > 0 {
+			onAdvertised(advanced)
+		}
 	}
 	return nil
 }
 
-func runBlockGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger) error {
+func runBlockGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.StepChain, inv *snapshot.Inventory, logger log.Logger, onAdvertised OnAdvertised) error {
 	key := e.BlockKey()
 
 	// Block files advance only after a commitment-derived
@@ -184,6 +213,9 @@ func runBlockGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.
 				"fromBlock", key.FromBlock, "toBlock", key.ToBlock,
 				"files", len(advanced))
 		}
+		if onAdvertised != nil && len(advanced) > 0 {
+			onAdvertised(advanced)
+		}
 	}
 
 	// Pass 2: extras (bodies, transactions, accessors).
@@ -196,6 +228,9 @@ func runBlockGroup(ctx context.Context, e *snapshot.FileEntry, chain validation.
 			logger.Info("[storage-lifecycle] block-range extras advanced",
 				"fromBlock", key.FromBlock, "toBlock", key.ToBlock,
 				"files", len(advanced))
+		}
+		if onAdvertised != nil && len(advanced) > 0 {
+			onAdvertised(advanced)
 		}
 	}
 	return nil
