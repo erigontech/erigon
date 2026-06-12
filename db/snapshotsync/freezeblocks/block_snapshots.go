@@ -371,22 +371,29 @@ func (br *BlockRetire) retireBlocks(
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
-		// NotifyOnFilesChange is NOT called here. The retire dump only
-		// produces the .seg; its accessor builds asynchronously (or
-		// via the lifecycle driver) and may fail (recsplit collision,
-		// crash mid-build). Firing the notification now would advertise
-		// a .seg whose .idx may never materialise — the iter-2 wedge of
-		// the 2026-06-12 5-iter soak hit exactly this pattern. The
-		// lifecycle driver's OnValidation handler now fires the notify
-		// when each file enters LifecycleAdvertisable (i.e. .seg + .idx
-		// pair both verified) — see
-		// lifecycle.BuildOnBatchValidationWithHook.
+		// Two-arm announcement to handle both lifecycle modes:
 		//
-		// producedFiles is still computed so the legacy notifier wire
-		// (OnNewSnapshot above) and any future per-file logging stays
-		// available; the rename of br.filesNotifier in favour of the
-		// lifecycle hook is the actual layering change.
-		_ = producedFiles
+		//   - LifecycleDrivenByStorage=ON: the lifecycle driver runs
+		//     async validation; new files land at LifecycleIndexed and
+		//     advance to Advertisable once their accessor + cross-file
+		//     bindings verify. The Advertisable-transition hook
+		//     (lifecycle.BuildOnBatchValidationWithHook in provider.go)
+		//     fires NotifyOnFilesChange then.
+		//
+		//   - LifecycleDrivenByStorage=OFF (legacy / soak default):
+		//     no async validation path exists. retireBlocks just
+		//     completed BuildMissedIndicesIfNeed inline (see end of
+		//     RetireBlocks); by the time we get here the .seg + .idx
+		//     pair is on disk. Fire the notify directly so the OnFiles-
+		//     Change callback's inv.AddFile / seeder.Seed / chain.toml
+		//     republish path picks the files up.
+		//
+		// OnFilesChange is idempotent on duplicate names (it checks
+		// inv.LifecycleState before AddFile), so both arms firing for
+		// the same file is harmless.
+		if br.filesNotifier != nil && len(producedFiles) > 0 {
+			br.filesNotifier.NotifyOnFilesChange(producedFiles)
+		}
 	}
 
 	merged, err := br.MergeBlocks(ctx, lvl, seeder)
