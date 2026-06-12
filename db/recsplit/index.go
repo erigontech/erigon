@@ -26,6 +26,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -96,6 +97,9 @@ type Index struct {
 	recMask              uint64
 	bytesPerRec          int
 	salt                 uint32
+	leafRecip            uint64 // multiply-shift reciprocals (exact for 16-bit dividends)
+	primaryRecip         uint64
+	secondaryRecip       uint64
 	leafSize             uint16 // Leaf size for recursive split algorithms
 	secondaryAggrBound   uint16 // The lower bound for secondary key aggregation (computed from leadSize)
 	primaryAggrBound     uint16 // The lower bound for primary key aggregation (computed from leafSize)
@@ -210,6 +214,9 @@ func (idx *Index) init() (err error) {
 	} else {
 		idx.secondaryAggrBound = idx.primaryAggrBound * uint16(math.Ceil(0.21*float64(idx.leafSize)+9./10.))
 	}
+	idx.leafRecip = reciprocal16(idx.leafSize)
+	idx.primaryRecip = reciprocal16(idx.primaryAggrBound)
+	idx.secondaryRecip = reciprocal16(idx.secondaryAggrBound)
 	// Salt
 	idx.salt = binary.BigEndian.Uint32(idx.data[offset:])
 	offset += 4
@@ -388,6 +395,15 @@ func (idx *Index) Close() {
 	idx.f = nil
 }
 
+func reciprocal16(d uint16) uint64 {
+	return (1<<32)/uint64(d) + 1
+}
+
+// div16 computes x/d via the reciprocal from reciprocal16(d); exact for any 16-bit x
+func div16(x uint16, recip uint64) uint16 {
+	return uint16((uint64(x) * recip) >> 32)
+}
+
 func (idx *Index) skipBits(m uint16) int {
 	return int(idx.golombRice[m] & 0xffff)
 }
@@ -439,12 +455,17 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	bucket := remap(bucketHash, idx.bucketCount)
 	cumKeys, cumKeysNext, bitPos := idx.ef.Get3(bucket)
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
+	if idx.enums {
+		// touch the fixed-bits word so its miss overlaps the unary-word miss in ReadReset
+		fixedWord := gr.data[bitPos>>6]
+		runtime.KeepAlive(fixedWord)
+	}
 	gr.ReadReset(int(bitPos), idx.skipBits(m))
 	var level int
 	for m > idx.secondaryAggrBound { // fanout = 2
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
-		split := (((m+1)/2 + idx.secondaryAggrBound - 1) / idx.secondaryAggrBound) * idx.secondaryAggrBound
+		split := div16((m+1)/2+idx.secondaryAggrBound-1, idx.secondaryRecip) * idx.secondaryAggrBound
 		if hmod < split {
 			m = split
 		} else {
@@ -457,7 +478,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if m > idx.primaryAggrBound {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
-		part := hmod / idx.primaryAggrBound
+		part := div16(hmod, idx.primaryRecip)
 		m = min(idx.primaryAggrBound, m-part*idx.primaryAggrBound)
 		cumKeys += uint64(idx.primaryAggrBound * part)
 		if part != 0 {
@@ -469,7 +490,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if m > idx.leafSize {
 		d := gr.ReadNext(idx.golombParam(m))
 		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
-		part := hmod / idx.leafSize
+		part := div16(hmod, idx.leafRecip)
 		m = min(idx.leafSize, m-part*idx.leafSize)
 		cumKeys += uint64(idx.leafSize * part)
 		if part != 0 {
@@ -477,6 +498,15 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		}
 		level++
 	}
+	// rec is confined to [cumKeys, cumKeys+m); touch both ends of that range so the
+	// final offset load overlaps the remaining Golomb-Rice reads instead of following them
+	if idx.enums {
+		base := unsafe.Pointer(unsafe.SliceData(idx.data))
+		prefetch := *(*byte)(unsafe.Add(base, uintptr(1+8+idx.bytesPerRec*int(cumKeys+1))))
+		prefetch += *(*byte)(unsafe.Add(base, uintptr(1+8+idx.bytesPerRec*int(cumKeys+uint64(m)))))
+		runtime.KeepAlive(prefetch)
+	}
+
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
