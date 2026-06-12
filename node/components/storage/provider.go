@@ -443,15 +443,33 @@ func (p *Provider) Initialize(deps Deps) error {
 							inv.AdvanceTo(name, snapshot.LifecycleAdvertisable)
 						}
 					} else {
-						// First time we hear about this file. Minimal
-						// entry — Domain/Kind/Size land via the disk
-						// scan path when the lifecycle driver populates
-						// Inventory more thoroughly.
-						inv.AddFile(&snapshot.FileEntry{
+						// First time we hear about this file. For
+						// block snapshots, parse FromBlock/ToBlock from
+						// the name so range-based queries
+						// (Inventory.BlockFiles iterated by
+						// straddleBlockFileForType etc.) see a complete
+						// entry. State / domain files still land
+						// minimally — Domain/Kind/Size for those gets
+						// filled in by the disk scan path when the
+						// lifecycle driver populates Inventory more
+						// thoroughly. Without the block-side parse a
+						// freshly-published merged chunk lives in
+						// Inventory with FromBlock=0/ToBlock=0 and the
+						// straddle-finder's `FromBlock>toBlock ||
+						// ToBlock<=toBlock` filter silently drops it —
+						// stale sub-chunks from preverified then win
+						// the widest-range race and rebuild fails
+						// opening a name that's no longer on disk.
+						entry := &snapshot.FileEntry{
 							Name:         name,
 							Local:        true,
 							Advertisable: true,
-						})
+						}
+						if info, _, ok := snaptypelib.ParseFileName(p.snapDir, name); ok {
+							entry.FromBlock = info.From
+							entry.ToBlock = info.To
+						}
+						inv.AddFile(entry)
 					}
 				}
 			}
