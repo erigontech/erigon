@@ -20,11 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
@@ -107,6 +111,25 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	}
 	if opts.Tx == nil {
 		return fmt.Errorf("storage.Provider.Unwind: opts.Tx is nil")
+	}
+
+	// Pre-condition: every block-snapshot .seg file on disk past
+	// toBlock MUST be known to Inventory. Without this, the trim
+	// pass below silently misses the on-disk file (collectFilesPastBlock
+	// iterates Inventory.BlockFiles), no-ops the snapshot side, and the
+	// commitment anchor still applies — leaving the writable DB at
+	// toBlock while on-disk snapshots cover past it. Caller wedges
+	// trying to recover. Refuse loud and early instead. Live-caught
+	// 2026-06-12 in the 5-iter soak when retire output from a prior
+	// session left orphan v1.1-*.seg files whose .torrent never built
+	// and whose announcement never fired.
+	if orphans, err := p.findInventoryOrphansPastBlock(toBlock); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: inventory pre-flight check: %w", err)
+	} else if len(orphans) > 0 {
+		return fmt.Errorf("storage.Provider.Unwind: refusing setHead — %d block-snapshot file(s) exist on disk past toBlock=%d but are NOT in Inventory (would be missed by trim): %v. "+
+			"Likely a prior retire crashed mid-build or its announcement was lost. "+
+			"Delete the orphan .seg/.idx pair(s) and let retire re-produce them, or restart erigon to re-trigger the publication path",
+			len(orphans), toBlock, orphans)
 	}
 
 	// 1. Probe-compute the commitment anchor. Two outcomes:
@@ -305,4 +328,57 @@ func (p *Provider) unwindWithReExec(ctx context.Context, tx kv.TemporalRwTx, toB
 	}
 
 	return recompute, nil
+}
+
+// findInventoryOrphansPastBlock scans the snapshots dir for top-level
+// v1.1-*.seg block snapshot files whose range falls strictly past
+// toBlock, then cross-checks against Inventory.BlockFiles(). Returns
+// the sorted list of file names that exist on disk but are NOT in
+// Inventory — the orphans Provider.Unwind would silently miss in its
+// strict-FromBlock-past collect pass.
+//
+// Returns nil + nil when SnapDir or Inventory are unset (tools and
+// tests that don't carry the full storage component) — those callers
+// don't have the architectural setup the check is guarding against.
+func (p *Provider) findInventoryOrphansPastBlock(toBlock uint64) ([]string, error) {
+	if p.snapDir == "" || p.Inventory == nil {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(p.snapDir)
+	if err != nil {
+		return nil, fmt.Errorf("read snapDir %s: %w", p.snapDir, err)
+	}
+	known := make(map[string]struct{})
+	for _, e := range p.Inventory.BlockFiles() {
+		known[e.Name] = struct{}{}
+	}
+	var orphans []string
+	for _, de := range entries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if !strings.HasSuffix(name, ".seg") {
+			continue
+		}
+		// Top-level v1.1-* are block snapshots. v2.0-* state-aggregator
+		// files live in subdirs (domain/, history/, idx/) and never
+		// reach this top-level scan.
+		if !strings.HasPrefix(name, "v1.1-") {
+			continue
+		}
+		info, _, ok := snaptype.ParseFileName(p.snapDir, name)
+		if !ok {
+			continue
+		}
+		if info.From <= toBlock {
+			continue
+		}
+		if _, in := known[name]; in {
+			continue
+		}
+		orphans = append(orphans, name)
+	}
+	sort.Strings(orphans)
+	return orphans, nil
 }
