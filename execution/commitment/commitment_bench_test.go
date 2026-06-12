@@ -382,6 +382,95 @@ func BenchmarkHashSort_ModeDirect(b *testing.B) {
 	}
 }
 
+// BenchmarkEncodeBranch measures EncodeBranch with varying cell counts (2, 8, 16).
+// bitmap=afterMap so all cells are encoded (complete BranchData).
+//
+// Baseline (before complete-encoding change):
+//
+//	cells=2:   ~97 ns/op   0 allocs/op
+//	cells=8:   ~353 ns/op  0 allocs/op
+//	cells=16:  ~793 ns/op  0 allocs/op
+func BenchmarkEncodeBranch(b *testing.B) {
+	for _, nCells := range []int{2, 8, 16} {
+		b.Run(fmt.Sprintf("cells=%d", nCells), func(b *testing.B) {
+			row, bm := generateCellRow(b, nCells)
+			be := NewBranchEncoder(1024)
+			cellData := generateCellEncodeDataRow(b, row, bm)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				_, err := be.EncodeBranch(bm, bm, bm, &cellData)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkCollectUpdate_EncodeMerge measures the old hot path: encode 1 touched cell (partial)
+// then merge with a complete prev BranchData. Varies prev size by N=2,8,16 cells.
+//
+// Baseline (before complete-encoding change):
+//
+//	prevCells=2:   ~180 ns/op  0 allocs/op
+//	prevCells=8:   ~482 ns/op  0 allocs/op
+//	prevCells=16:  ~905 ns/op  0 allocs/op
+func BenchmarkCollectUpdate_EncodeMerge(b *testing.B) {
+	for _, nCells := range []int{2, 8, 16} {
+		b.Run(fmt.Sprintf("prevCells=%d", nCells), func(b *testing.B) {
+			// Build a complete prev BranchData with nCells cells
+			row, bm := generateCellRow(b, nCells)
+			be := NewBranchEncoder(1024)
+			cellData := generateCellEncodeDataRow(b, row, bm)
+			prevEnc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+			require.NoError(b, err)
+			prev := BranchData(common.Copy(prevEnc))
+
+			// Build a partial update: encode only the first set cell (1 touched cell)
+			firstBit := bm & -bm // lowest set bit
+			partialData := cellData
+			merger := NewHexBranchMerger(4096)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				partial, err := be.EncodeBranch(firstBit, firstBit, bm, &partialData)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, err = merger.Merge(prev, partial)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkCollectUpdate_EncodeDirect measures the new hot path: encode all cells (complete),
+// no merge needed. Same setup as EncodeMerge for direct comparison.
+func BenchmarkCollectUpdate_EncodeDirect(b *testing.B) {
+	for _, nCells := range []int{2, 8, 16} {
+		b.Run(fmt.Sprintf("cells=%d", nCells), func(b *testing.B) {
+			row, bm := generateCellRow(b, nCells)
+			be := NewBranchEncoder(1024)
+			cellData := generateCellEncodeDataRow(b, row, bm)
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				// Encode complete: bitmap=afterMap, all cells included, no merge
+				_, err := be.EncodeBranch(bm, bm, bm, &cellData)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkHashSort_ModeUpdate(b *testing.B) {
 	for _, n := range []int{50, 5000, 50000} {
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
