@@ -73,6 +73,11 @@ type TemporalMemBatch struct {
 	// it's intentionally collapsed to one entry per real key so a pre-unwind
 	// value can be found by the same key the overlay uses.
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	// skipUnwindFallback disables the unwindChangeset fallback in getLatest.
+	// Used during forkchoice re-execution where the database has already been
+	// physically unwound, so the fallback would serve stale values from the
+	// old fork instead of correct values from the database.
+	skipUnwindFallback bool
 	// unwindChangesetRaw preserves every diff entry (distinct by Key+step) so
 	// Flush can replay a complete unwind against MDBX, including multiple
 	// step entries for the same real key (e.g. a commitment branch that was
@@ -226,6 +231,12 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 	if sd.unwindChangeset == nil {
 		return nil, 0, false
 	}
+	// Skip fallback during forkchoice re-execution when database is already unwound.
+	// In this case, the database contains correct new-fork state, and unwindChangeset
+	// holds stale old-fork values that should not be consulted.
+	if sd.skipUnwindFallback {
+		return nil, 0, false
+	}
 	if values := sd.unwindChangeset[domain]; values != nil {
 		if value, ok2 := values[keyS]; ok2 {
 			keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
@@ -291,6 +302,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
 	sd.unwindChangesetRaw = nil
+	sd.skipUnwindFallback = false
 
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
@@ -299,6 +311,15 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.metrics.CachePutKeySize = 0
 	sd.metrics.CachePutValueSize = 0
 	sd.metrics.Domains = [kv.DomainLen]*changeset.DomainIOMetrics{}
+}
+
+// SetSkipUnwindFallback controls whether getLatest consults unwindChangeset.
+// Should be enabled during forkchoice re-execution where the database is
+// physically unwound and unwindChangeset contains stale old-fork values.
+func (sd *TemporalMemBatch) SetSkipUnwindFallback(skip bool) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+	sd.skipUnwindFallback = skip
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
@@ -639,6 +660,11 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
 		}
+	}
+
+	// Propagate skipUnwindFallback flag from other to sd
+	if other.skipUnwindFallback {
+		sd.skipUnwindFallback = true
 	}
 
 	other.Close()

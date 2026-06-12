@@ -337,6 +337,14 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
+// SetSkipUnwindFallback controls whether state reads consult unwindChangeset.
+// Enable this during forkchoice re-execution after RunUnwind has physically
+// rolled back the database, so reads come from the database instead of stale
+// old-fork values in unwindChangeset.
+func (sd *SharedDomains) SetSkipUnwindFallback(skip bool) {
+	sd.mem.SetSkipUnwindFallback(skip)
+}
+
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture

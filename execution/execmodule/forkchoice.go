@@ -354,6 +354,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 
+		// Skip unwindChangeset fallback during re-execution. The database has
+		// been physically unwound, so unwindChangeset contains stale old-fork
+		// values that should not be consulted. Reads should come from the database.
+		currentContext.SetSkipUnwindFallback(true)
+
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {

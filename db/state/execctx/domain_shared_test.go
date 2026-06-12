@@ -250,6 +250,135 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 		unwindTarget, writeTxNum, v)
 }
 
+// TestSharedDomain_SkipUnwindFallbackAfterForkchoiceUnwind validates the fix for issue #21681.
+// After a forkchoice unwind where the database is physically rolled back, the unwindChangeset
+// fallback must be skipped during re-execution. Otherwise, getLatest returns stale old-fork
+// values instead of correct new-fork values from the database, causing gas mismatches.
+func TestSharedDomain_SkipUnwindFallbackAfterForkchoiceUnwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(100)
+	db := newTestDb(t, stepSize)
+	ctx := context.Background()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	stateChangeset := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
+	key := composite(addr[:], slot[:])
+	preExistingValue := []byte{0xAA, 0xBB} // value before old fork
+	oldForkValue := []byte{0xDE, 0xAD}     // value written by old fork
+
+	const preWriteTxNum uint64 = 30  // pre-existing write before the fork
+	const unwindTarget uint64 = 50   // unwind point
+	const oldForkTxNum uint64 = 100  // old fork write
+
+	// 1. Write a pre-existing value at txNum 30 (before the fork divergence).
+	//    This ensures unwindChangeset will have a non-nil fallback value.
+	domains.SetTxNum(preWriteTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, preExistingValue, preWriteTxNum, nil))
+
+	// 2. Old fork writes a different value at txNum 100.
+	domains.SetTxNum(oldForkTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, oldForkValue, oldForkTxNum, nil))
+
+	// 3. Unwind to txNum 50. The overlay entry at txNum 100 is pruned.
+	//    unwindChangeset now contains {key -> preExistingValue} (the pre-overwrite value).
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(unwindTarget, &diffSet)
+
+	// 4. Read the key. The overlay at txNum 30 still exists (not pruned because
+	//    30 <= 50), so getLatest returns preExistingValue from the overlay.
+	domains.SetTxNum(unwindTarget)
+	v, _, err := domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, preExistingValue, v, "overlay entry at txNum 30 survives pruning")
+
+	// 5. Now simulate the scenario where the overlay entry has been flushed to
+	//    the database (as happens between execution cycles in forkchoice.go).
+	//    After ClearRam, the overlay is gone, but unwindChangeset is also gone.
+	//    We need to set up a fresh scenario that isolates the fallback behavior.
+	//
+	//    Reset and create a scenario where the key ONLY exists in unwindChangeset.
+	domains.ClearRam(true)
+	stateChangeset2 := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset2)
+
+	// Write only at txNum 100 (above unwind point) so it gets pruned from overlay.
+	domains.SetTxNum(oldForkTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, oldForkValue, oldForkTxNum, nil))
+
+	// Unwind to txNum 50. The overlay entry is pruned. unwindChangeset contains
+	// the pre-write value (nil in this case since the key wasn't in the overlay
+	// before this write). The changeset entry will have Value=nil.
+	var diffSet2 [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset2.Diffs {
+		diffSet2[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(unwindTarget, &diffSet2)
+
+	// 6. Without skipUnwindFallback, getLatest hits unwindChangeset and returns
+	//    ok=false (because Value is nil for a new key). Verify it returns empty.
+	domains.SetTxNum(unwindTarget)
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Empty(t, v, "fallback returns empty for key that was new on old fork")
+
+	// 7. Enable skip flag (as forkchoice does after RunUnwind) and write new
+	//    fork value. After enabling skip, the fallback is bypassed.
+	domains.SetSkipUnwindFallback(true)
+
+	const newForkTxNum uint64 = 60
+	newForkValue := []byte{0xBE, 0xEF}
+	domains.SetTxNum(newForkTxNum)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, newForkValue, newForkTxNum, nil))
+
+	// Read — should see new fork value from overlay
+	domains.SetTxNum(70)
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, newForkValue, v, "getLatest must return new fork value when skip is enabled")
+
+	// 8. Verify ClearRam resets the skip flag. Write a pre-existing value
+	//    before the overwrite so unwindChangeset has a non-nil entry. If the
+	//    flag is properly reset, the fallback returns the pre-existing value.
+	//    If it were still set, we'd get nil (from the empty database).
+	domains.ClearRam(true)
+	stateChangeset3 := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset3)
+	resetTestValue := []byte{0xCC, 0xDD}
+	domains.SetTxNum(40) // before unwind point
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, resetTestValue, 40, nil))
+	domains.SetTxNum(oldForkTxNum) // overwrite at txNum 100
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, oldForkValue, oldForkTxNum, nil))
+	var diffSet3 [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset3.Diffs {
+		diffSet3[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(unwindTarget, &diffSet3)
+	// The overlay still has the txNum 40 entry (40 <= 50). Read it to confirm
+	// the fallback is active (skip was reset by ClearRam).
+	domains.SetTxNum(unwindTarget)
+	v, _, err = domains.GetLatest(kv.StorageDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, resetTestValue, v, "after ClearRam, skip flag must be reset")
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
