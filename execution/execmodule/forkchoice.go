@@ -615,11 +615,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		currentContext.Close()
 		currentContext = nil
-		if e.fcuBackgroundCommit && e.currentContext != nil {
-			e.currentContext.Close()
-			e.lock.Lock()
-			e.currentContext = nil
-			e.lock.Unlock()
+		if e.fcuBackgroundCommit {
+			e.closeModuleContext()
 		}
 	} else {
 		status = ExecutionStatusSuccess
@@ -655,10 +652,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
 		// creates a fresh overlay for the next block cycle.
 		if hasOverlay {
-			e.currentContext.Close()
-			e.lock.Lock()
-			e.currentContext = nil
-			e.lock.Unlock()
+			e.closeModuleContext()
 		}
 
 		// Dispatch notifications from the SD overlay (before flush/commit).
