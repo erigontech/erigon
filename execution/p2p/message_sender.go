@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
@@ -67,6 +68,49 @@ func (ms *MessageSender) SendBlockRangeUpdate(ctx context.Context, req eth.Block
 	return ms.sendMessageAllPeers(ctx, sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, req)
 }
 
+func (ms *MessageSender) SendBlockHeaders(ctx context.Context, peerId *PeerId, req eth.BlockHeadersPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_BLOCK_HEADERS_66, req, peerId)
+}
+
+func (ms *MessageSender) SendBlockBodies(ctx context.Context, peerId *PeerId, req eth.BlockBodiesRLPPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_BLOCK_BODIES_66, req, peerId)
+}
+
+func (ms *MessageSender) SendReceipts66(ctx context.Context, peerId *PeerId, req eth.ReceiptsRLPPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_RECEIPTS_66, req, peerId)
+}
+
+func (ms *MessageSender) SendReceipts70(ctx context.Context, peerId *PeerId, req eth.ReceiptsRLPPacket70) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_RECEIPTS_70, req, peerId)
+}
+
+func (ms *MessageSender) SendBlockAccessLists(ctx context.Context, peerId *PeerId, req eth.BlockAccessListsPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, req, peerId)
+}
+
+func (ms *MessageSender) SendWitness(ctx context.Context, peerId *PeerId, req wit.WitnessPacketRLPPacket) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_BLOCK_WITNESS_W0, req, peerId)
+}
+
+func (ms *MessageSender) SendGetWitness(ctx context.Context, peerId *PeerId, req wit.GetWitnessPacket) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_GET_BLOCK_WITNESS_W0, req, peerId)
+}
+
+func (ms *MessageSender) SendGetWitnessToRandomPeers(ctx context.Context, maxPeers uint64, req wit.GetWitnessPacket) error {
+	rlpData, err := rlp.EncodeToBytes(req)
+	if err != nil {
+		return err
+	}
+	_, err = ms.sentryClient.SendMessageToRandomPeers(ctx, &sentryproto.SendMessageToRandomPeersRequest{
+		Data: &sentryproto.OutboundMessageData{
+			Id:   sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			Data: rlpData,
+		},
+		MaxPeers: maxPeers,
+	})
+	return err
+}
+
 func (ms *MessageSender) SupportsBlockRangeUpdate(ctx context.Context) (bool, error) {
 	reply, err := ms.sentryClient.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
@@ -98,7 +142,7 @@ func (ms *MessageSender) sendMessageToPeer(ctx context.Context, messageId sentry
 		}
 		return err
 	}
-	if len(sent.Peers) == 0 {
+	if len(sent.GetPeers()) == 0 {
 		return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
 	}
 

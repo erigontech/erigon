@@ -152,16 +152,13 @@ func TestGenerateChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m.ReceiveWg.Add(1)
 	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	m.ReceiveWg.Wait()
-
-	msg, err := m.SentMessage(0)
+	msg, err := m.WaitForSentMessage(0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -441,11 +441,9 @@ func TestSendBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r.ReceiveWg.Add(1)
 	for _, err = range r.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: s.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	r.ReceiveWg.Wait()
 }

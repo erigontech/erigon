@@ -77,11 +77,10 @@ func TestSendRawTransaction(t *testing.T) {
 	require.Error(err)
 	expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
-	m.ReceiveWg.Wait()
 	//TODO: make propagation easy to test - now race
 	//time.Sleep(time.Second)
 	//sent := m.SentMessage(0)
-	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+	//require.Equal(eth.ToProto[m.SentryClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {

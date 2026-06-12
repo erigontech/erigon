@@ -50,7 +50,9 @@ func TestFetcherFetchHeaders(t *testing.T) {
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
 			// should get filtered because it is from a different peer id
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: PeerIdFromUint64(2).H512(),
+			Data:   newMockBlockHeadersPacket66Bytes(t, requestId, 2),
 		},
 		{
 			// should get filtered because it is from a different request id
@@ -1071,16 +1073,13 @@ func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 		ft.requestResponseMocks[mock.requestId] = mock
 	}
 
-	inboundMessageStreamChan := make(chan *delayedMessage[*sentryproto.InboundMessage], numInboundMessages)
-	mockSentryInboundMessagesStream := &mockSentryMessagesStream[*sentryproto.InboundMessage]{
-		ctx:    ft.ctx,
-		stream: inboundMessageStreamChan,
-	}
+	router := newInboundMessagesRouter(ft.ctx, numInboundMessages)
+	inboundMessageStreamChan := router.input
 
 	ft.sentryClient.
 		EXPECT().
 		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(mockSentryInboundMessagesStream, nil).
+		DoAndReturn(router.messagesFactory()).
 		AnyTimes()
 	ft.sentryClient.
 		EXPECT().

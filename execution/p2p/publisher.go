@@ -80,6 +80,26 @@ func (p Publisher) PublishBlockRangeUpdate(packet eth.BlockRangeUpdatePacket) {
 	})
 }
 
+// PublishBlockHeaders sends a BlockHeaders response to the peer that requested them.
+func (p Publisher) PublishBlockHeaders(ctx context.Context, peerId *PeerId, packet eth.BlockHeadersPacket66) error {
+	return p.messageSender.SendBlockHeaders(ctx, peerId, packet)
+}
+
+// PublishBlockBodies sends a BlockBodies response to the peer that requested them.
+func (p Publisher) PublishBlockBodies(ctx context.Context, peerId *PeerId, packet eth.BlockBodiesRLPPacket66) error {
+	return p.messageSender.SendBlockBodies(ctx, peerId, packet)
+}
+
+// PublishReceipts66 sends a Receipts response (eth/68 and eth/69 encoding) to the peer that requested them.
+func (p Publisher) PublishReceipts66(ctx context.Context, peerId *PeerId, packet eth.ReceiptsRLPPacket66) error {
+	return p.messageSender.SendReceipts66(ctx, peerId, packet)
+}
+
+// PublishReceipts70 sends a Receipts response (eth/70 encoding) to the peer that requested them.
+func (p Publisher) PublishReceipts70(ctx context.Context, peerId *PeerId, packet eth.ReceiptsRLPPacket70) error {
+	return p.messageSender.SendReceipts70(ctx, peerId, packet)
+}
+
 func (p Publisher) Run(ctx context.Context) error {
 	p.logger.Info("[p2p-publisher] running publisher component")
 

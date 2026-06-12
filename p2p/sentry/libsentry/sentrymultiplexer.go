@@ -228,6 +228,18 @@ func AsPeerIdString(peerId *typesproto.H512) string {
 	return hex.EncodeToString(peerHash[:])
 }
 
+// minSendProtocol resolves the minimum-protocol gate for an outbound message.
+// wit/0 ids carry no eth protocol version — any sentry that knows the peer may
+// hold its wit stream — so they pass ungated (-1) and the per-sentry server
+// decides whether the peer actually speaks wit.
+func minSendProtocol(id sentryproto.MessageId) (sentryproto.Protocol, error) {
+	minProtocol := MinProtocol(id)
+	if minProtocol < 0 && !IsWitMessageId(id) {
+		return -1, fmt.Errorf("unknown protocol for: %s", id.String())
+	}
+	return minProtocol, nil
+}
+
 func (m *sentryMultiplexer) SendMessageById(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	if in.Data == nil {
 		return nil, fmt.Errorf("no data")
@@ -237,10 +249,9 @@ func (m *sentryMultiplexer) SendMessageById(ctx context.Context, in *sentryproto
 		return nil, fmt.Errorf("no peer")
 	}
 
-	minProtocol := MinProtocol(in.Data.Id)
-
-	if minProtocol < 0 {
-		return nil, fmt.Errorf("unknown protocol for: %s", in.Data.Id.String())
+	minProtocol, err := minSendProtocol(in.Data.Id)
+	if err != nil {
+		return nil, err
 	}
 
 	peerReplies, err := m.peersByClient(ctx, minProtocol, opts...)
@@ -294,10 +305,9 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 		return nil, fmt.Errorf("no data")
 	}
 
-	minProtocol := MinProtocol(in.Data.Id)
-
-	if minProtocol < 0 {
-		return nil, fmt.Errorf("unknown protocol for: %s", in.Data.Id.String())
+	minProtocol, err := minSendProtocol(in.Data.Id)
+	if err != nil {
+		return nil, err
 	}
 
 	peerReplies, err := m.peersByClient(ctx, minProtocol, opts...)

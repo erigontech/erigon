@@ -41,6 +41,13 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 	return -1
 }
 
+// IsWitMessageId reports whether the message belongs to the wit/0 sideprotocol,
+// which is negotiated independently of the eth protocol version.
+func IsWitMessageId(m sentryproto.MessageId) bool {
+	_, ok := ProtoIds[sentryproto.Protocol_WIT0][m]
+	return ok
+}
+
 var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
 	sentryproto.Protocol_ETH68: {
 		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},

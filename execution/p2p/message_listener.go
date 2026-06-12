@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
@@ -69,31 +70,49 @@ func NewMessageListener(
 	peerPenalizer *PeerPenalizer,
 ) *MessageListener {
 	return &MessageListener{
-		logger:                    logger,
-		sentryClient:              sentryClient,
-		statusDataFactory:         statusDataFactory,
-		peerPenalizer:             peerPenalizer,
-		newBlockObservers:         event.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
-		newBlockHashesObservers:   event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
-		blockHeadersObservers:     event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
-		blockBodiesObservers:      event.NewObservers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]](),
-		blockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]](),
-		peerEventObservers:        event.NewObservers[*sentryproto.PeerEvent](),
+		logger:                       logger,
+		sentryClient:                 sentryClient,
+		statusDataFactory:            statusDataFactory,
+		peerPenalizer:                peerPenalizer,
+		newBlockObservers:            event.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
+		newBlockHashesObservers:      event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
+		blockHeadersObservers:        event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
+		blockBodiesObservers:         event.NewObservers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]](),
+		blockAccessListsObservers:    event.NewObservers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]](),
+		blockRangeUpdateObservers:    event.NewObservers[*DecodedInboundMessage[*eth.BlockRangeUpdatePacket]](),
+		newWitnessObservers:          event.NewObservers[*DecodedInboundMessage[*wit.NewWitnessPacket]](),
+		witnessObservers:             event.NewObservers[*DecodedInboundMessage[*wit.WitnessPacketRLPPacket]](),
+		getBlockHeadersObservers:     event.NewObservers[*DecodedInboundMessage[*eth.GetBlockHeadersPacket66]](),
+		getBlockBodiesObservers:      event.NewObservers[*DecodedInboundMessage[*eth.GetBlockBodiesPacket66]](),
+		getReceiptsObservers:         event.NewObservers[*DecodedInboundMessage[*eth.GetReceiptsPacket66]](),
+		getReceipts70Observers:       event.NewObservers[*DecodedInboundMessage[*eth.GetReceiptsPacket70]](),
+		getBlockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[*eth.GetBlockAccessListsPacket66]](),
+		getWitnessObservers:          event.NewObservers[*DecodedInboundMessage[*wit.GetWitnessPacket]](),
+		peerEventObservers:           event.NewObservers[*sentryproto.PeerEvent](),
 	}
 }
 
 type MessageListener struct {
-	logger                    log.Logger
-	sentryClient              sentryproto.SentryClient
-	statusDataFactory         libsentry.StatusDataFactory
-	peerPenalizer             *PeerPenalizer
-	newBlockObservers         *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
-	newBlockHashesObservers   *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
-	blockHeadersObservers     *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
-	blockBodiesObservers      *event.Observers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
-	blockAccessListsObservers *event.Observers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]
-	peerEventObservers        *event.Observers[*sentryproto.PeerEvent]
-	stopWg                    sync.WaitGroup
+	logger                       log.Logger
+	sentryClient                 sentryproto.SentryClient
+	statusDataFactory            libsentry.StatusDataFactory
+	peerPenalizer                *PeerPenalizer
+	newBlockObservers            *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
+	newBlockHashesObservers      *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
+	blockHeadersObservers        *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
+	blockBodiesObservers         *event.Observers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
+	blockAccessListsObservers    *event.Observers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]
+	blockRangeUpdateObservers    *event.Observers[*DecodedInboundMessage[*eth.BlockRangeUpdatePacket]]
+	newWitnessObservers          *event.Observers[*DecodedInboundMessage[*wit.NewWitnessPacket]]
+	witnessObservers             *event.Observers[*DecodedInboundMessage[*wit.WitnessPacketRLPPacket]]
+	getBlockHeadersObservers     *event.Observers[*DecodedInboundMessage[*eth.GetBlockHeadersPacket66]]
+	getBlockBodiesObservers      *event.Observers[*DecodedInboundMessage[*eth.GetBlockBodiesPacket66]]
+	getReceiptsObservers         *event.Observers[*DecodedInboundMessage[*eth.GetReceiptsPacket66]]
+	getReceipts70Observers       *event.Observers[*DecodedInboundMessage[*eth.GetReceiptsPacket70]]
+	getBlockAccessListsObservers *event.Observers[*DecodedInboundMessage[*eth.GetBlockAccessListsPacket66]]
+	getWitnessObservers          *event.Observers[*DecodedInboundMessage[*wit.GetWitnessPacket]]
+	peerEventObservers           *event.Observers[*sentryproto.PeerEvent]
+	stopWg                       sync.WaitGroup
 }
 
 func (ml *MessageListener) Run(ctx context.Context) error {
@@ -101,6 +120,8 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
+		ml.listenInboundGetHeadersMessages,
+		ml.listenInboundUploadMessages,
 		ml.listenPeerEventsBackground,
 	}
 
@@ -122,6 +143,15 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 	ml.blockHeadersObservers.Close()
 	ml.blockBodiesObservers.Close()
 	ml.blockAccessListsObservers.Close()
+	ml.blockRangeUpdateObservers.Close()
+	ml.newWitnessObservers.Close()
+	ml.witnessObservers.Close()
+	ml.getBlockHeadersObservers.Close()
+	ml.getBlockBodiesObservers.Close()
+	ml.getReceiptsObservers.Close()
+	ml.getReceipts70Observers.Close()
+	ml.getBlockAccessListsObservers.Close()
+	ml.getWitnessObservers.Close()
 	return ctx.Err()
 }
 
@@ -143,6 +173,44 @@ func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*
 
 func (ml *MessageListener) RegisterBlockAccessListsObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]) UnregisterFunc {
 	return ml.blockAccessListsObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterBlockRangeUpdateObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockRangeUpdatePacket]]) UnregisterFunc {
+	return ml.blockRangeUpdateObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterNewWitnessObserver(observer event.Observer[*DecodedInboundMessage[*wit.NewWitnessPacket]]) UnregisterFunc {
+	return ml.newWitnessObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterWitnessObserver(observer event.Observer[*DecodedInboundMessage[*wit.WitnessPacketRLPPacket]]) UnregisterFunc {
+	return ml.witnessObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterGetBlockHeadersObserver(observer event.Observer[*DecodedInboundMessage[*eth.GetBlockHeadersPacket66]]) UnregisterFunc {
+	return ml.getBlockHeadersObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterGetBlockBodiesObserver(observer event.Observer[*DecodedInboundMessage[*eth.GetBlockBodiesPacket66]]) UnregisterFunc {
+	return ml.getBlockBodiesObservers.Register(observer)
+}
+
+// RegisterGetReceiptsObserver delivers both eth/68 and eth/69 GetReceipts requests;
+// observers can tell them apart via the embedded InboundMessage.Id.
+func (ml *MessageListener) RegisterGetReceiptsObserver(observer event.Observer[*DecodedInboundMessage[*eth.GetReceiptsPacket66]]) UnregisterFunc {
+	return ml.getReceiptsObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterGetReceipts70Observer(observer event.Observer[*DecodedInboundMessage[*eth.GetReceiptsPacket70]]) UnregisterFunc {
+	return ml.getReceipts70Observers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterGetBlockAccessListsObserver(observer event.Observer[*DecodedInboundMessage[*eth.GetBlockAccessListsPacket66]]) UnregisterFunc {
+	return ml.getBlockAccessListsObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterGetWitnessObserver(observer event.Observer[*DecodedInboundMessage[*wit.GetWitnessPacket]]) UnregisterFunc {
+	return ml.getWitnessObservers.Register(observer)
 }
 
 func (ml *MessageListener) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent], opts ...RegisterOpt) UnregisterFunc {
@@ -168,6 +236,9 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 				sentryproto.MessageId_BLOCK_HEADERS_66,
 				sentryproto.MessageId_BLOCK_BODIES_66,
 				sentryproto.MessageId_BLOCK_ACCESS_LISTS_71,
+				sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+				sentryproto.MessageId_NEW_WITNESS_W0,
+				sentryproto.MessageId_BLOCK_WITNESS_W0,
 			},
 		}
 
@@ -186,6 +257,72 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
 		case sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
 			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockAccessListsObservers, message)
+		case sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockRangeUpdateObservers, message)
+		case sentryproto.MessageId_NEW_WITNESS_W0:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newWitnessObservers, message)
+		case sentryproto.MessageId_BLOCK_WITNESS_W0:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.witnessObservers, message)
+		default:
+			return nil
+		}
+	})
+}
+
+// listenInboundGetHeadersMessages pumps GetBlockHeaders requests on a dedicated
+// stream because header serving speed is important for network health.
+func (ml *MessageListener) listenInboundGetHeadersMessages(ctx context.Context) {
+	streamFactory := func(ctx context.Context, sentryClient sentryproto.SentryClient) (grpc.ClientStream, error) {
+		messagesRequest := sentryproto.MessagesRequest{
+			Ids: []sentryproto.MessageId{
+				sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+			},
+		}
+
+		return sentryClient.Messages(ctx, &messagesRequest, grpc.WaitForReady(true))
+	}
+
+	streamMessages(ctx, ml, "InboundGetHeadersMessages", streamFactory, func(message *sentryproto.InboundMessage) error {
+		switch message.Id {
+		case sentryproto.MessageId_GET_BLOCK_HEADERS_66:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.getBlockHeadersObservers, message)
+		default:
+			return nil
+		}
+	})
+}
+
+// listenInboundUploadMessages pumps the potentially heavy "get" requests
+// (bodies, receipts, BALs, witnesses) on their own stream so that slow serving
+// does not hold back the other message streams.
+func (ml *MessageListener) listenInboundUploadMessages(ctx context.Context) {
+	streamFactory := func(ctx context.Context, sentryClient sentryproto.SentryClient) (grpc.ClientStream, error) {
+		messagesRequest := sentryproto.MessagesRequest{
+			Ids: []sentryproto.MessageId{
+				sentryproto.MessageId_GET_BLOCK_BODIES_66,
+				sentryproto.MessageId_GET_RECEIPTS_66,
+				sentryproto.MessageId_GET_RECEIPTS_69,
+				sentryproto.MessageId_GET_RECEIPTS_70,
+				sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71,
+				sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+			},
+		}
+
+		return sentryClient.Messages(ctx, &messagesRequest, grpc.WaitForReady(true))
+	}
+
+	streamMessages(ctx, ml, "InboundUploadMessages", streamFactory, func(message *sentryproto.InboundMessage) error {
+		switch message.Id {
+		case sentryproto.MessageId_GET_BLOCK_BODIES_66:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.getBlockBodiesObservers, message)
+		case sentryproto.MessageId_GET_RECEIPTS_66, sentryproto.MessageId_GET_RECEIPTS_69:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.getReceiptsObservers, message)
+		case sentryproto.MessageId_GET_RECEIPTS_70:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.getReceipts70Observers, message)
+		case sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.getBlockAccessListsObservers, message)
+		case sentryproto.MessageId_GET_BLOCK_WITNESS_W0:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.getWitnessObservers, message)
 		default:
 			return nil
 		}

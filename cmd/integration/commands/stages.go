@@ -80,8 +80,6 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -1182,7 +1180,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	vmConfig := &vm.Config{}
 
 	genesis := readGenesis(chain)
-	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)
+	chainConfig, _, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
@@ -1224,33 +1222,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
 
-	statusDataProvider := sentry.NewStatusDataProvider(
-		db,
-		chainConfig,
-		genesisBlock,
-		chainConfig.ChainID.Uint64(),
-		logger,
-		blockReader,
-	)
-
-	sentryControlServer, err := sentry_multi_client.NewMultiClient(
-		dirs,
-		db,
-		chainConfig,
-		engine,
-		nil,
-		blockReader,
-		statusDataProvider,
-		false,
-		false, /* enableWitProtocol */
-		logger,
-	)
-	if err != nil {
-		panic(err)
-	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
+	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, chainConfig, engine, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, engine, vmConfig, sync
 }

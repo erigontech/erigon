@@ -19,6 +19,7 @@ package p2p
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
@@ -229,11 +231,141 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	})
 }
 
+// TestMessageListenerRoutesResponderMessages covers subscription + dispatch for
+// every message id added for the responder components: each id must arrive on
+// the right stream, decode, and reach its observer registry.
+func TestMessageListenerRoutesResponderMessages(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	blockHash := common.HexToHash("0xdeadbeef")
+	test := newMessageListenerTest(t)
+	test.mockSentryStreams()
+	test.run(func(ctx context.Context, t *testing.T) {
+		mustEncode := func(packet any) []byte {
+			encoded, err := rlp.EncodeToBytes(packet)
+			require.NoError(t, err)
+			return encoded
+		}
+		expected := map[sentryproto.MessageId]*atomic.Bool{
+			sentryproto.MessageId_GET_BLOCK_HEADERS_66:      {},
+			sentryproto.MessageId_GET_BLOCK_BODIES_66:       {},
+			sentryproto.MessageId_GET_RECEIPTS_66:           {},
+			sentryproto.MessageId_GET_RECEIPTS_69:           {},
+			sentryproto.MessageId_GET_RECEIPTS_70:           {},
+			sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71: {},
+			sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:     {},
+			sentryproto.MessageId_GET_BLOCK_WITNESS_W0:      {},
+			sentryproto.MessageId_BLOCK_WITNESS_W0:          {},
+			sentryproto.MessageId_NEW_WITNESS_W0:            {},
+		}
+		seen := func(id sentryproto.MessageId) {
+			expected[id].Store(true)
+		}
+		t.Cleanup(test.messageListener.RegisterGetBlockHeadersObserver(func(message *DecodedInboundMessage[*eth.GetBlockHeadersPacket66]) {
+			require.Equal(t, uint64(11), message.Decoded.RequestId)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterGetBlockBodiesObserver(func(message *DecodedInboundMessage[*eth.GetBlockBodiesPacket66]) {
+			require.Equal(t, uint64(12), message.Decoded.RequestId)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterGetReceiptsObserver(func(message *DecodedInboundMessage[*eth.GetReceiptsPacket66]) {
+			require.Equal(t, uint64(13), message.Decoded.RequestId)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterGetReceipts70Observer(func(message *DecodedInboundMessage[*eth.GetReceiptsPacket70]) {
+			require.Equal(t, uint64(14), message.Decoded.RequestId)
+			require.Equal(t, uint64(5), message.Decoded.FirstBlockReceiptIndex)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterGetBlockAccessListsObserver(func(message *DecodedInboundMessage[*eth.GetBlockAccessListsPacket66]) {
+			require.Equal(t, uint64(15), message.Decoded.RequestId)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterBlockRangeUpdateObserver(func(message *DecodedInboundMessage[*eth.BlockRangeUpdatePacket]) {
+			require.Equal(t, uint64(16), message.Decoded.Latest)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterGetWitnessObserver(func(message *DecodedInboundMessage[*wit.GetWitnessPacket]) {
+			require.Equal(t, uint64(17), message.Decoded.RequestId)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterWitnessObserver(func(message *DecodedInboundMessage[*wit.WitnessPacketRLPPacket]) {
+			require.Equal(t, uint64(18), message.Decoded.RequestId)
+			seen(message.Id)
+		}))
+		t.Cleanup(test.messageListener.RegisterNewWitnessObserver(func(message *DecodedInboundMessage[*wit.NewWitnessPacket]) {
+			require.NotNil(t, message.Decoded.Witness)
+			seen(message.Id)
+		}))
+		witness := createTestWitness(t, &types.Header{Number: *uint256.NewInt(100)})
+		payloads := map[sentryproto.MessageId][]byte{
+			sentryproto.MessageId_GET_BLOCK_HEADERS_66: mustEncode(eth.GetBlockHeadersPacket66{
+				RequestId:             11,
+				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 1}, Amount: 2},
+			}),
+			sentryproto.MessageId_GET_BLOCK_BODIES_66: mustEncode(eth.GetBlockBodiesPacket66{
+				RequestId:            12,
+				GetBlockBodiesPacket: eth.GetBlockBodiesPacket{blockHash},
+			}),
+			sentryproto.MessageId_GET_RECEIPTS_66: mustEncode(eth.GetReceiptsPacket66{
+				RequestId:         13,
+				GetReceiptsPacket: eth.GetReceiptsPacket{blockHash},
+			}),
+			sentryproto.MessageId_GET_RECEIPTS_69: mustEncode(eth.GetReceiptsPacket66{
+				RequestId:         13,
+				GetReceiptsPacket: eth.GetReceiptsPacket{blockHash},
+			}),
+			sentryproto.MessageId_GET_RECEIPTS_70: mustEncode(eth.GetReceiptsPacket70{
+				RequestId:              14,
+				FirstBlockReceiptIndex: 5,
+				GetReceiptsPacket:      eth.GetReceiptsPacket{blockHash},
+			}),
+			sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71: mustEncode(eth.GetBlockAccessListsPacket66{
+				RequestId:                 15,
+				GetBlockAccessListsPacket: eth.GetBlockAccessListsPacket{blockHash},
+			}),
+			sentryproto.MessageId_BLOCK_RANGE_UPDATE_69: mustEncode(eth.BlockRangeUpdatePacket{
+				Earliest:   1,
+				Latest:     16,
+				LatestHash: blockHash,
+			}),
+			sentryproto.MessageId_GET_BLOCK_WITNESS_W0: mustEncode(wit.GetWitnessPacket{
+				RequestId:         17,
+				GetWitnessRequest: &wit.GetWitnessRequest{WitnessPages: []wit.WitnessPageRequest{{Hash: blockHash, Page: 0}}},
+			}),
+			sentryproto.MessageId_BLOCK_WITNESS_W0: mustEncode(wit.WitnessPacketRLPPacket{
+				RequestId:             18,
+				WitnessPacketResponse: wit.WitnessPacketResponse{{Hash: blockHash, Page: 0, TotalPages: 1, Data: []byte{0x01}}},
+			}),
+			sentryproto.MessageId_NEW_WITNESS_W0: mustEncode(wit.NewWitnessPacket{Witness: witness}),
+		}
+		for id, payload := range payloads {
+			test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+				message: &sentryproto.InboundMessage{
+					Id:     id,
+					PeerId: peerId.H512(),
+					Data:   payload,
+				},
+			}
+		}
+		require.Eventually(t, func() bool {
+			for _, done := range expected {
+				if !done.Load() {
+					return false
+				}
+			}
+			return true
+		}, 2*time.Second, 5*time.Millisecond)
+	})
+}
+
 func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
-	inboundMessagesStream := make(chan *delayedMessage[*sentryproto.InboundMessage])
+	router := newInboundMessagesRouter(ctx, 0)
 	peerEventsStream := make(chan *delayedMessage[*sentryproto.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
@@ -247,7 +379,8 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 		logger:                logger,
 		sentryClient:          sentryClient,
 		messageListener:       NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer),
-		inboundMessagesStream: inboundMessagesStream,
+		router:                router,
+		inboundMessagesStream: router.input,
 		peerEventsStream:      peerEventsStream,
 	}
 }
@@ -259,6 +392,7 @@ type messageListenerTest struct {
 	logger                log.Logger
 	sentryClient          *direct.MockSentryClient
 	messageListener       *MessageListener
+	router                *inboundMessagesRouter
 	inboundMessagesStream chan *delayedMessage[*sentryproto.InboundMessage]
 	peerEventsStream      chan *delayedMessage[*sentryproto.PeerEvent]
 }
@@ -311,10 +445,7 @@ func (mlt *messageListenerTest) mockSentryStreams() {
 	mlt.sentryClient.
 		EXPECT().
 		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&mockSentryMessagesStream[*sentryproto.InboundMessage]{
-			ctx:    mlt.ctx,
-			stream: mlt.inboundMessagesStream,
-		}, nil).
+		DoAndReturn(mlt.router.messagesFactory()).
 		AnyTimes()
 	mlt.sentryClient.
 		EXPECT().
@@ -329,6 +460,88 @@ func (mlt *messageListenerTest) mockSentryStreams() {
 type delayedMessage[M any] struct {
 	message       M
 	responseDelay time.Duration
+}
+
+// inboundMessagesRouter mimics the sentry server's subscription semantics for
+// tests: each Messages call gets its own stream receiving only the message ids
+// it subscribed to. Needed because the MessageListener opens several streams
+// with disjoint id sets over one mocked sentry client.
+type inboundMessagesRouter struct {
+	ctx   context.Context
+	mu    sync.Mutex
+	subs  []*inboundMessagesSub
+	input chan *delayedMessage[*sentryproto.InboundMessage]
+}
+
+type inboundMessagesSub struct {
+	ids map[sentryproto.MessageId]struct{}
+	ch  chan *delayedMessage[*sentryproto.InboundMessage]
+}
+
+func newInboundMessagesRouter(ctx context.Context, bufSize int) *inboundMessagesRouter {
+	r := &inboundMessagesRouter{
+		ctx:   ctx,
+		input: make(chan *delayedMessage[*sentryproto.InboundMessage], bufSize),
+	}
+	go r.dispatch()
+	return r
+}
+
+func (r *inboundMessagesRouter) messagesFactory() func(ctx context.Context, req *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+	return func(_ context.Context, req *sentryproto.MessagesRequest, _ ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+		ids := make(map[sentryproto.MessageId]struct{}, len(req.Ids))
+		for _, id := range req.Ids {
+			ids[id] = struct{}{}
+		}
+		sub := &inboundMessagesSub{
+			ids: ids,
+			ch:  make(chan *delayedMessage[*sentryproto.InboundMessage], 128),
+		}
+		r.mu.Lock()
+		r.subs = append(r.subs, sub)
+		r.mu.Unlock()
+		return &mockSentryMessagesStream[*sentryproto.InboundMessage]{ctx: r.ctx, stream: sub.ch}, nil
+	}
+}
+
+func (r *inboundMessagesRouter) dispatch() {
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case msg := <-r.input:
+			// retry until a subscriber for this message id appears (streams
+			// subscribe asynchronously after the listener starts)
+			for !r.trySend(msg) {
+				select {
+				case <-r.ctx.Done():
+					return
+				case <-time.After(time.Millisecond):
+				}
+			}
+		}
+	}
+}
+
+func (r *inboundMessagesRouter) trySend(msg *delayedMessage[*sentryproto.InboundMessage]) bool {
+	r.mu.Lock()
+	var targets []chan *delayedMessage[*sentryproto.InboundMessage]
+	for _, sub := range r.subs {
+		if _, ok := sub.ids[msg.message.Id]; ok {
+			targets = append(targets, sub.ch)
+		}
+	}
+	r.mu.Unlock()
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		select {
+		case <-r.ctx.Done():
+		case target <- msg:
+		}
+	}
+	return true
 }
 
 type mockSentryMessagesStream[M any] struct {

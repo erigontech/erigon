@@ -108,7 +108,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -662,16 +661,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
-	// MultiClient is the late-binding half of the Sentry Provider — it needs
-	// the consensus engine which is only available after polygon + engine
+	// The responders are the late-binding half of the Sentry Provider — they
+	// need the consensus engine which is only available after polygon + engine
 	// construction above.
-	if err := backend.sentryProvider.BuildMultiClient(sentrycomp.MultiClientDeps{
+	var witnessBuffer *stagedsync.WitnessBuffer
+	if chainConfig.Bor != nil && stack.Config().P2P.EnableWitProtocol {
+		witnessBuffer = stagedsync.NewWitnessBuffer()
+	}
+	responderDeps := sentrycomp.ResponderDeps{
 		Dirs:        stack.Config().Dirs,
 		Engine:      backend.engine,
 		LogPeerInfo: stack.Config().SentryLogPeerInfo,
-	}); err != nil {
-		return nil, err
 	}
+	if witnessBuffer != nil {
+		responderDeps.WitnessBuffer = witnessBuffer
+	}
+	backend.sentryProvider.BuildResponders(responderDeps)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -698,7 +703,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
-		sentries := backend.sentryProvider.Client.Sentries()
+		sentries := backend.sentryProvider.Sentries
 		blockBuilderNotifyNewTxns := func() {
 			select {
 			case backend.blockBuilderNotifyNewTxns <- struct{}{}:
@@ -898,8 +903,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			case b := <-backend.minedBlocks:
 				backend.minedBlockObservers.Notify(b)
 
-				//p2p
-				//backend.sentryProvider.Client.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
 				if err := backend.miningRPC.BroadcastMinedBlock(b); err != nil {
 					logger.Error("txpool rpc mined block broadcast", "err", err)
@@ -934,23 +937,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
+	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, chainConfig, backend.engine, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, chainConfig, backend.engine, witnessBuffer, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
-	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
+	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, chainConfig, backend.engine,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
@@ -1210,7 +1213,7 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
 	s.logger.Trace("sentry", "peer count", sentryPc)
-	for _, sc := range s.sentryProvider.Client.Sentries() {
+	for _, sc := range s.sentryProvider.Sentries {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &sentryproto.PeerCountRequest{})
 		if err != nil {
@@ -1224,7 +1227,7 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
-	sentries := s.sentryProvider.Client.Sentries()
+	sentries := s.sentryProvider.Sentries
 	if limit == 0 || limit > len(sentries) {
 		limit = len(sentries)
 	}
@@ -1332,7 +1335,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 func (s *Ethereum) Peers(ctx context.Context) (*remoteproto.PeersReply, error) {
 	var reply remoteproto.PeersReply
-	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Sentries {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.Peers error: %w", err)
@@ -1344,7 +1347,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remoteproto.PeersReply, error) {
 }
 
 func (s *Ethereum) AddPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
-	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Sentries {
 		_, err := sentryClient.AddPeer(ctx, &sentryproto.AddPeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.AddPeers error: %w", err)
@@ -1354,7 +1357,7 @@ func (s *Ethereum) AddPeer(ctx context.Context, req *remoteproto.AddPeerRequest)
 }
 
 func (s *Ethereum) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
-	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Sentries {
 		_, err := sentryClient.RemovePeer(ctx, &sentryproto.RemovePeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.RemovePeers error: %w", err)
@@ -1364,7 +1367,7 @@ func (s *Ethereum) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRe
 }
 
 func (s *Ethereum) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
-	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Sentries {
 		_, err := sentryClient.AddTrustedPeer(ctx, &sentryproto.AddPeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.AddTrustedPeer error: %w", err)
@@ -1374,7 +1377,7 @@ func (s *Ethereum) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerR
 }
 
 func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
-	for _, sentryClient := range s.sentryProvider.Client.Sentries() {
+	for _, sentryClient := range s.sentryProvider.Sentries {
 		_, err := sentryClient.RemoveTrustedPeer(ctx, &sentryproto.RemovePeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.RemoveTrustedPeer error: %w", err)
@@ -1409,7 +1412,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
-	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
 
 	currentTDProvider := func() *uint256.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
@@ -1573,10 +1576,6 @@ func (s *Ethereum) Notifications() *shards.Notifications {
 
 func (s *Ethereum) SentryCtx() context.Context {
 	return s.sentryCtx
-}
-
-func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
-	return s.sentryProvider.Client
 }
 
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {

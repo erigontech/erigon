@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -80,7 +81,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -108,16 +108,15 @@ type ExecModuleTester struct {
 	MiningSync      *stagedsync.Sync
 	PendingBlocks   chan *types.Block
 	MinedBlocks     chan *types.BlockWithReceipts
-	sentriesClient  *sentry_multi_client.MultiClient
 	Key             *ecdsa.PrivateKey
 	Genesis         *types.Block
 	SentryClient    direct.SentryClient
 	PeerId          *typesproto.H512
 	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	streamsMu       sync.Mutex
 	sentMessagesMu  sync.Mutex
 	sentMessages    []*sentryproto.OutboundMessageData
 	StreamWg        sync.WaitGroup
-	ReceiveWg       sync.WaitGroup
 	Address         common.Address
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
@@ -164,7 +163,10 @@ func (emt *ExecModuleTester) Close() {
 // Stream returns stream, waiting if necessary
 func (emt *ExecModuleTester) Send(req *sentryproto.InboundMessage) (errs []error) {
 	emt.StreamWg.Wait()
-	for _, stream := range emt.streams[req.Id] {
+	emt.streamsMu.Lock()
+	streams := emt.streams[req.Id]
+	emt.streamsMu.Unlock()
+	for _, stream := range streams {
 		if err := stream.Send(req); err != nil {
 			errs = append(errs, err)
 		}
@@ -205,7 +207,7 @@ func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.S
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
-	return nil, nil
+	return &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}, nil
 }
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
@@ -228,14 +230,36 @@ func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageDat
 	return emt.sentMessages[i], nil
 }
 
+// WaitForSentMessage polls until the i-th outbound message has been recorded.
+// Messages are served asynchronously by the execution-P2P responders, so tests
+// must wait for the response instead of assuming it was sent inline.
+func (emt *ExecModuleTester) WaitForSentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		msg, err := emt.SentMessage(i)
+		if err == nil {
+			return msg, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for sent message %d", i)
+		}
+		select {
+		case <-emt.Ctx.Done():
+			return nil, emt.Ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func (emt *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
+	emt.streamsMu.Lock()
 	if emt.streams == nil {
 		emt.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
 	}
-
 	for _, id := range req.Ids {
 		emt.streams[id] = append(emt.streams[id], stream)
 	}
+	emt.streamsMu.Unlock()
 	emt.StreamWg.Done()
 	select {
 	case <-emt.Ctx.Done():
@@ -255,7 +279,14 @@ func (emt *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequ
 	return &sentryproto.PeerByIdReply{}, nil
 }
 func (emt *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
-	return nil
+	// block until shutdown: returning immediately would make the message
+	// listener's peer-events pump reconnect in a tight loop
+	select {
+	case <-emt.Ctx.Done():
+		return nil
+	case <-server.Context().Done():
+		return nil
+	}
 }
 
 func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
@@ -553,7 +584,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			func() {}, /* builderNotifyNewTxns */
 			logger,
 			nil,
-			//txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
@@ -581,25 +611,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.BlockReader,
 	)
 
-	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
-		mock.Dirs,
-		mock.DB,
-		mock.ChainConfig,
-		mock.Engine,
-		sentries,
-		mock.BlockReader,
-		statusDataProvider,
-		false,
-		false, /* enableWitProtocol */
-		logger,
-	)
-	if err != nil {
-		if tb != nil {
-			tb.Fatal(err)
-		} else {
-			panic(err)
-		}
-	}
+	peerPenalizer := execp2p.NewPeerPenalizer(mock.SentryClient)
+	messageListener := execp2p.NewMessageListener(logger, mock.SentryClient, statusDataProvider.GetStatusData, peerPenalizer)
+	messageSender := execp2p.NewMessageSender(mock.SentryClient)
+	peerTracker := execp2p.NewPeerTracker(logger, messageListener)
+	publisher := execp2p.NewPublisher(logger, messageSender, peerTracker)
+	blockResponder := execp2p.NewBlockResponder(logger, messageListener, publisher, mock.DB, mock.BlockReader, mock.ChainConfig, mock.ReceiptsReader)
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
@@ -689,12 +706,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.ChainConfig, mock.Engine, nil, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.
 	validationNotifications := shards.NewNotifications(nil)
-	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
+	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.ChainConfig, mock.Engine,
 		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
@@ -730,22 +747,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
-	mock.StreamWg.Add(1)
+	// the message listener opens three inbound message streams
+	mock.StreamWg.Add(3)
 	mock.bgComponentsEg.Go(func() error {
-		mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
-		return nil
+		return messageListener.Run(mock.Ctx)
 	})
-	mock.StreamWg.Wait()
-	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
-		mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
-		return nil
-	})
-	mock.StreamWg.Wait()
-	mock.StreamWg.Add(1)
-	mock.bgComponentsEg.Go(func() error {
-		mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
-		return nil
+		return blockResponder.Run(mock.Ctx)
 	})
 	mock.StreamWg.Wait()
 

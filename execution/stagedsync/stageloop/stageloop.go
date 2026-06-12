@@ -44,10 +44,16 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 )
+
+// StatusGetter supplies the current sentry status data; implemented by
+// p2p/sentry.StatusDataProvider.
+type StatusGetter interface {
+	GetStatusData(ctx context.Context) (*sentryproto.StatusData, error)
+}
 
 // NotificationSender abstracts notification dispatch so Hook can delegate to
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
@@ -64,7 +70,7 @@ type Hook struct {
 	logger                              log.Logger
 	dispatcher                          NotificationSender
 	updateHead                          func(ctx context.Context)
-	statusDataGetter                    sentry_multi_client.StatusGetter
+	statusDataGetter                    StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
 	lastAnnouncedBlockRangeLatestNumber uint64
 	lastAnnouncedBlockRangeTime         time.Time
@@ -78,7 +84,7 @@ func NewHook(
 	logger log.Logger,
 	dispatcher NotificationSender,
 	updateHead func(ctx context.Context),
-	statusDataGetter sentry_multi_client.StatusGetter,
+	statusDataGetter StatusGetter,
 	blockRangePublisher *execp2p.Publisher,
 ) *Hook {
 	return &Hook{
@@ -320,7 +326,8 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 func NewDefaultStages(ctx context.Context,
 	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
-	controlServer *sentry_multi_client.MultiClient,
+	chainConfig *chain.Config,
+	engine rules.Engine,
 	notifications *shards.Notifications,
 	snapDownloader downloader.Client,
 	blockReader services.FullBlockReader,
@@ -337,12 +344,12 @@ func NewDefaultStages(ctx context.Context,
 	blockWriter := blockio.NewBlockWriter()
 	return stagedsync.DefaultStages(
 		ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSnapshotsCfg(db, chainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageHeadersCfg(blockReader),
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageBodiesCfg(blockReader, blockWriter),
-		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageSendersCfg(chainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, chainConfig, engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
 	)
@@ -351,7 +358,9 @@ func NewDefaultStages(ctx context.Context,
 func NewPipelineStages(ctx context.Context,
 	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
-	controlServer *sentry_multi_client.MultiClient,
+	chainConfig *chain.Config,
+	engine rules.Engine,
+	witnessBuffer *stagedsync.WitnessBuffer,
 	notifications *shards.Notifications,
 	snapDownloader downloader.Client,
 	blockReader services.FullBlockReader,
@@ -374,13 +383,13 @@ func NewPipelineStages(ctx context.Context,
 	_ = depositContract
 
 	return stagedsync.PipelineStages(ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSnapshotsCfg(db, chainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
-		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageSendersCfg(chainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, chainConfig, engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
-		stagedsync.StageWitnessProcessingCfg(controlServer.ChainConfig, controlServer.WitnessBuffer),
+		stagedsync.StageWitnessProcessingCfg(chainConfig, witnessBuffer),
 	)
 }
 
@@ -388,7 +397,8 @@ func NewInMemoryExecution(
 	ctx context.Context,
 	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
-	controlServer *sentry_multi_client.MultiClient,
+	chainConfig *chain.Config,
+	engine rules.Engine,
 	notifications *shards.Notifications,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
@@ -401,8 +411,8 @@ func NewInMemoryExecution(
 			stagedsync.StageHeadersCfg(blockReader),
 			stagedsync.StageBodiesCfg(blockReader, blockWriter),
 			stagedsync.StageBlockHashesCfg(cfg.Dirs.Tmp, blockWriter),
-			stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, true /* badBlockHalt */, cfg.Dirs.Tmp, cfg.Prune, blockReader, readAheader),
-			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+			stagedsync.StageSendersCfg(chainConfig, cfg.Sync, true /* badBlockHalt */, cfg.Dirs.Tmp, cfg.Prune, blockReader, readAheader),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, chainConfig, engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */

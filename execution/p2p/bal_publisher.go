@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,30 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sentry_multi_client
+package p2p
 
 import (
 	"context"
 
-	"google.golang.org/grpc"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-// Methods of sentry called by Core
+func NewBALPublisher(messageSender *MessageSender) *BALPublisher {
+	return &BALPublisher{messageSender: messageSender}
+}
 
-func (cs *MultiClient) SetStatus(ctx context.Context) {
-	statusMsg, err := cs.statusDataProvider.GetStatusData(ctx)
-	if err != nil {
-		cs.logger.Error("MultiClient.SetStatus: GetStatusData error", "err", err)
-		return
-	}
+// BALPublisher sends out eth/71 (EIP-8159) block access list messages.
+type BALPublisher struct {
+	messageSender *MessageSender
+}
 
-	for _, sentry := range cs.sentries {
-		if ready, ok := sentry.(interface{ Ready() bool }); ok && !ready.Ready() {
-			continue
-		}
-
-		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
-			cs.logger.Error("Update status message for the sentry", "err", err)
-		}
-	}
+// PublishBlockAccessLists sends a BlockAccessLists response to the peer that requested them.
+func (p *BALPublisher) PublishBlockAccessLists(ctx context.Context, peerId *PeerId, packet eth.BlockAccessListsPacket66) error {
+	return p.messageSender.SendBlockAccessLists(ctx, peerId, packet)
 }

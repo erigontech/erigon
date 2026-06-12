@@ -245,7 +245,6 @@ func TestGetBlockHeaders(t *testing.T) {
 			expectedHeaders = append(expectedHeaders, block.Header())
 		}
 		backend.StreamWg.Wait()
-		backend.ReceiveWg.Add(1)
 		encodedMessage, err := rlp.EncodeToBytes(eth.GetBlockHeadersPacket66{RequestId: 1, GetBlockHeadersPacket: tt.query})
 		require.NoError(t, err)
 		for _, err = range backend.Send(&sentryproto.InboundMessage{Id: eth.ToProto[direct.ETH68][eth.GetBlockHeadersMsg], Data: encodedMessage, PeerId: backend.PeerId}) {
@@ -253,8 +252,7 @@ func TestGetBlockHeaders(t *testing.T) {
 		}
 		expect, err := rlp.EncodeToBytes(eth.BlockHeadersPacket66{RequestId: 1, BlockHeadersPacket: expectedHeaders})
 		require.NoError(t, err)
-		backend.ReceiveWg.Wait()
-		sentMessage, err := backend.SentMessage(i)
+		sentMessage, err := backend.WaitForSentMessage(i)
 		require.NoError(t, err)
 		require.Equal(t, eth.ToProto[backend.SentryClient.Protocol()][eth.BlockHeadersMsg], sentMessage.Id)
 		require.Equal(t, expect, sentMessage.Data)
@@ -329,7 +327,6 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	m.StreamWg.Wait()
 
-	m.ReceiveWg.Add(1)
 	// Send the hash request and verify the response
 	for _, err = range m.Send(&sentryproto.InboundMessage{Id: eth.ToProto[direct.ETH68][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
@@ -337,8 +334,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	m.ReceiveWg.Wait()
-	sent, err := m.SentMessage(0)
+	sent, err := m.WaitForSentMessage(0)
 	require.NoError(t, err)
 	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
 	require.Equal(t, expect, sent.Data)

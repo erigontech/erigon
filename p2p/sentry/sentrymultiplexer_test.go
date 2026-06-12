@@ -228,6 +228,62 @@ func TestSend(t *testing.T) {
 	require.Equal(t, 10, statusCount)
 }
 
+// TestSendWitnessMessages covers wit/0 ids: they belong to a sideprotocol with no
+// eth protocol version, so the multiplexer must route them by peer presence
+// instead of rejecting them as unknown.
+func TestSendWitnessMessages(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	var clients []sentryproto.SentryClient
+
+	var sentCount int
+	var mu sync.Mutex
+
+	for i := 0; i < 10; i++ {
+		client := newClient(ctrl, i, nil)
+		client.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				sentCount++
+				return &sentryproto.SentPeers{Peers: []*typesproto.H512{in.PeerId}}, nil
+			}).AnyTimes()
+
+		clients = append(clients, client)
+	}
+
+	mux := libsentry.NewSentryMultiplexer(clients)
+	require.NotNil(t, mux)
+
+	_, err := mux.HandShake(context.Background(), &emptypb.Empty{})
+	require.NoError(t, err)
+
+	for _, msgId := range []sentryproto.MessageId{sentryproto.MessageId_BLOCK_WITNESS_W0, sentryproto.MessageId_GET_BLOCK_WITNESS_W0} {
+		sendReply, err := mux.SendMessageById(context.Background(), &sentryproto.SendMessageByIdRequest{
+			Data: &sentryproto.OutboundMessageData{
+				Id: msgId,
+			},
+			PeerId: gointerfaces.ConvertHashToH512([64]byte{3}),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, sendReply)
+		require.Equal(t, 1, sentCount)
+
+		sentCount = 0
+	}
+
+	sendReply, err := mux.SendMessageToRandomPeers(context.Background(), &sentryproto.SendMessageToRandomPeersRequest{
+		Data: &sentryproto.OutboundMessageData{
+			Id: sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
+		},
+		MaxPeers: 1,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, sendReply)
+	require.Equal(t, 1, sentCount)
+}
+
 func TestMessages(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

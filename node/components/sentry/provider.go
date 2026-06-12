@@ -18,8 +18,8 @@
 // as part of the Erigon componentization effort.
 //
 // The Sentry component owns the node's P2P / DevP2P stack: sentry servers,
-// the multi-sentry client, the status-data provider, and the execution-P2P
-// layer (message listener, peer tracker, publisher). It supports two modes:
+// the status-data provider, and the execution-P2P layer (message listener,
+// peer tracker, publisher, responders). It supports two modes:
 //   - Local: in-process sentry servers per protocol version
 //   - Remote: gRPC connection(s) to external sentry processes via --sentry.api.addr
 //
@@ -35,13 +35,19 @@ package sentry
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -61,7 +67,7 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
 
 // Config captures the external dependencies the Sentry Provider needs to
@@ -79,23 +85,22 @@ type Config struct {
 	// External-sentry mode is triggered when P2P.SentryAddr is non-empty:
 	// the Provider dials these addresses via gRPC instead of building
 	// local servers. The fields below divide into two groups: those
-	// required in both modes (StatusDataProvider, MultiClient, Start
+	// required in both modes (StatusDataProvider, responders, Start
 	// subscriptions all need them) and those consulted only when
 	// building local servers.
 
 	// --- Required in both modes ---
 
 	// ChainDB is consumed by StatusDataProvider (status-message
-	// construction) and by the multi-sentry Client built via
-	// BuildMultiClient, which opens temporal read transactions for
-	// header validation during backward download. In local mode it
-	// additionally backs the readNodeInfo callback for ENR refresh.
-	// Must satisfy kv.TemporalRoDB.
+	// construction) and by the responders built via BuildResponders,
+	// which open read transactions to serve peer requests. In local
+	// mode it additionally backs the readNodeInfo callback for ENR
+	// refresh. Must satisfy kv.TemporalRoDB.
 	ChainDB kv.TemporalRoDB
 
 	// ChainConfig, GenesisHash, NetworkID are consumed by
 	// StatusDataProvider to construct status messages and by the
-	// MultiClient's stream pumps. In local mode they also feed the
+	// execution-P2P layer. In local mode they also feed the
 	// readNodeInfo closure so each sentry server can report up-to-date
 	// ENR metadata.
 	ChainConfig *chain.Config
@@ -165,15 +170,9 @@ type Provider struct {
 	// Sentries. Used by the execution-P2P layer and by polygon sync.
 	Multiplexer sentryproto.SentryClient
 
-	// Client is the multi-sentry client — ownership of the header and body
-	// downloaders, peer set broadcasting, and the sentry stream loops.
-	// Populated by BuildMultiClient, which is called after the consensus
-	// engine is ready (engine is an input the MultiClient needs).
-	Client *sentry_multi_client.MultiClient
-
 	// StatusDataProvider supplies up-to-date peer-handshake status payloads
 	// (genesis hash, fork ID, total difficulty, chain head). Consumed by the
-	// MultiClient, stageloop hook, and execution-P2P layer.
+	// stageloop hook and execution-P2P layer.
 	StatusDataProvider *sentry.StatusDataProvider
 
 	// ExecutionP2PMessageListener, ExecutionP2PPeerTracker,
@@ -193,6 +192,13 @@ type Provider struct {
 	started         bool           // guards Start from firing twice
 	eg              errgroup.Group // tracks background goroutines launched in Start
 	sharedP2PServer *p2p.Server    // shared p2p.Server backing all GrpcServers in local mode; Close() stops it
+	logPeerInfo     bool           // enables verbose peer connect/disconnect logging
+	responders      []namedRunnable
+}
+
+type namedRunnable struct {
+	name string
+	run  func(ctx context.Context) error
 }
 
 // Configure stores the Provider's configuration. Call before Initialize.
@@ -210,8 +216,7 @@ func (p *Provider) Configure(cfg Config) {
 // After this returns, p.Sentries is ready for multi-client construction,
 // p.Servers is the list of local servers (empty in external mode), and
 // p.StatusDataProvider / p.Multiplexer / the execution-P2P layer are
-// populated in both modes — MultiClient construction assumes these are
-// non-nil.
+// populated in both modes — BuildResponders assumes these are non-nil.
 //
 // Initialize does NOT start background goroutines — call Start for that.
 func (p *Provider) Initialize(ctx context.Context) error {
@@ -222,7 +227,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 	if len(p.cfg.P2P.SentryAddr) > 0 {
 		// External sentry: dial each address, collect the clients.
 		for _, addr := range p.cfg.P2P.SentryAddr {
-			sentryClient, err := sentry_multi_client.GrpcClient(p.cfg.SentryCtx, addr)
+			sentryClient, err := grpcSentryClient(p.cfg.SentryCtx, addr)
 			if err != nil {
 				return err
 			}
@@ -265,7 +270,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 	sharedCfg := p.buildSharedP2PConfig()
 
 	// Create one GrpcServer per protocol version. Each instance keeps its own
-	// statusData / message streams so the MultiClient can address them by
+	// statusData / message streams so the multiplexer can address them by
 	// protocol; the per-peer state lives in a shared PeerStore that
 	// startSharedP2PServer injects below (so wit/0, deduped to one sentry,
 	// shares PeerInfo with the eth Run that ran on a different sentry).
@@ -431,60 +436,114 @@ func (p *Provider) buildStatusAndExecutionP2P() {
 	)
 }
 
-// MultiClientDeps gathers the late-binding inputs needed to construct the
-// multi-sentry Client. These aren't known at Configure/Initialize time
-// because the consensus engine and the per-chain max-peers callback are
-// built AFTER sentries (polygon heimdall + engine rules come between).
-// Callers run BuildMultiClient once those are ready.
-type MultiClientDeps struct {
-	// Dirs is the datadir root; the MultiClient uses it for per-sentry
-	// peer persistence and any local caches.
+// ResponderDeps gathers the late-binding inputs needed to construct the
+// execution-P2P responder components. These aren't known at
+// Configure/Initialize time because the consensus engine is built AFTER
+// sentries (polygon heimdall + engine rules come between). Callers run
+// BuildResponders once those are ready.
+type ResponderDeps struct {
+	// Dirs is the datadir root; the receipts generator backing the block
+	// responder uses it for its caches.
 	Dirs datadir.Dirs
 
 	// Engine is the consensus engine (ethash, clique, Bor, Aura, etc).
-	// The MultiClient uses it to validate incoming headers during
-	// anchor-based backward download.
+	// The receipts generator uses it to regenerate receipts for peers.
 	Engine rules.Engine
 
-	// LogPeerInfo enables verbose peer-info logging in the MultiClient.
+	// LogPeerInfo enables verbose peer connect/disconnect logging.
 	LogPeerInfo bool
+
+	// WitnessBuffer, when non-nil, enables the witness fetcher which collects
+	// witnesses received from peers (Polygon chains with wit/0 enabled).
+	WitnessBuffer execp2p.WitnessBuffer
 }
 
-// BuildMultiClient constructs the multi-sentry Client. Must be called after
-// Initialize (which populates Sentries + StatusDataProvider) and once the
-// late-binding engine dep is ready.
-//
-// On success, p.Client is ready for consumers.
-func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
-	client, err := sentry_multi_client.NewMultiClient(
-		deps.Dirs,
-		p.cfg.ChainDB,
-		p.cfg.ChainConfig,
-		deps.Engine,
-		p.Sentries,
-		p.cfg.BlockReader,
-		p.StatusDataProvider,
-		deps.LogPeerInfo,
-		p.cfg.EnableWitProtocol,
+// BuildResponders constructs the components that answer peer requests (block,
+// BAL and witness responders), the witness fetcher and the block range update
+// handler. Must be called after Initialize (which populates Sentries +
+// StatusDataProvider + the execution-P2P layer) and once the late-binding
+// engine dep is ready. Start runs them.
+func (p *Provider) BuildResponders(deps ResponderDeps) {
+	p.logPeerInfo = deps.LogPeerInfo
+	receiptsGetter := receipts.NewGenerator(deps.Dirs, p.cfg.BlockReader, deps.Engine, nil, 5*time.Minute)
+	blockResponder := execp2p.NewBlockResponder(
 		p.logger,
+		p.ExecutionP2PMessageListener,
+		p.ExecutionP2PPublisher,
+		p.cfg.ChainDB,
+		p.cfg.BlockReader,
+		p.cfg.ChainConfig,
+		receiptsGetter,
 	)
-	if err != nil {
-		return fmt.Errorf("sentry: build multi-client: %w", err)
+	balResponder := execp2p.NewBALResponder(
+		p.logger,
+		p.ExecutionP2PMessageListener,
+		execp2p.NewBALPublisher(p.ExecutionP2PMessageSender),
+		p.cfg.ChainDB,
+		p.cfg.BlockReader,
+	)
+	witnessResponder := execp2p.NewWitnessResponder(
+		p.logger,
+		p.ExecutionP2PMessageListener,
+		execp2p.NewWitnessPublisher(p.ExecutionP2PMessageSender),
+		p.cfg.ChainDB,
+		p.cfg.BlockReader,
+	)
+	blockRangeUpdateHandler := execp2p.NewBlockRangeUpdateHandler(
+		p.logger,
+		p.Multiplexer,
+		p.ExecutionP2PPeerPenalizer,
+		p.ExecutionP2PMessageListener,
+	)
+	p.responders = []namedRunnable{
+		{name: "BlockResponder", run: blockResponder.Run},
+		{name: "BALResponder", run: balResponder.Run},
+		{name: "WitnessResponder", run: witnessResponder.Run},
+		{name: "BlockRangeUpdateHandler", run: blockRangeUpdateHandler.Run},
 	}
-	p.Client = client
-	return nil
+	if deps.WitnessBuffer != nil {
+		witnessFetcher := execp2p.NewWitnessFetcher(
+			p.logger,
+			p.ExecutionP2PMessageListener,
+			p.ExecutionP2PMessageSender,
+			p.cfg.ChainDB,
+			p.cfg.BlockReader,
+			deps.WitnessBuffer,
+		)
+		p.responders = append(p.responders, namedRunnable{name: "WitnessFetcher", run: witnessFetcher.Run})
+	}
+}
+
+// SetStatus pushes a fresh status message to all sentries. Used by the
+// stageloop hook to refresh sentry status when the chain head changes.
+// Failures are isolated per sentry so one unreachable sentry does not starve
+// the status refresh of the others.
+func (p *Provider) SetStatus(ctx context.Context) {
+	statusData, err := p.StatusDataProvider.GetStatusData(ctx)
+	if err != nil {
+		p.logger.Error("sentry: SetStatus: GetStatusData error", "err", err)
+		return
+	}
+	for _, sentryClient := range p.Sentries {
+		if ready, ok := sentryClient.(interface{ Ready() bool }); ok && !ready.Ready() {
+			continue
+		}
+		_, err = sentryClient.SetStatus(ctx, statusData)
+		if err != nil {
+			p.logger.Error("Update status message for the sentry", "err", err)
+		}
+	}
 }
 
 // Start kicks off background work:
-//   - MultiClient stream loops (the sentry→MultiClient gRPC pumps).
 //   - StatusDataProvider.Run, which refreshes its cached status message
 //     when the chain head or snapshot set changes.
 //   - Execution-P2P layer goroutines (MessageListener, PeerTracker,
-//     Publisher).
-//   - Peer-count logger (local-sentry mode only; logs the set of
-//     good-peer counts every 90 seconds).
+//     Publisher, responders).
+//   - Peer-event logger and peer-count logger (the latter local-sentry mode
+//     only; logs the set of good-peer counts every 90 seconds).
 //
-// Requires Initialize (and, for stream loops, BuildMultiClient) to have
+// Requires Initialize (and, for the responders, BuildResponders) to have
 // completed successfully. Subsequent calls are a no-op.
 //
 // The ctx passed here should be Config.SentryCtx in practice — it's the
@@ -496,14 +555,6 @@ func (p *Provider) Start(ctx context.Context) error {
 		return nil
 	}
 	p.started = true
-
-	// Stream loops — only meaningful if BuildMultiClient has run.
-	if p.Client != nil {
-		p.Client.StartStreamLoops(p.cfg.SentryCtx)
-		// Small sleep to keep startup-log order readable; identical to the
-		// legacy backend.go behaviour.
-		time.Sleep(10 * time.Millisecond)
-	}
 
 	// StatusDataProvider refresh loop, gated on Events being wired.
 	if p.StatusDataProvider != nil && p.cfg.Events != nil {
@@ -546,6 +597,19 @@ func (p *Provider) Start(ctx context.Context) error {
 			}
 			return err
 		})
+		p.ExecutionP2PMessageListener.RegisterPeerEventObserver(p.logPeerEvent)
+	}
+
+	// Responder components — only present if BuildResponders has run.
+	for _, responder := range p.responders {
+		p.eg.Go(func() error {
+			defer p.logger.Info("[p2p] " + responder.name + " goroutine terminated")
+			err := responder.run(p.cfg.SentryCtx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				p.logger.Error("[p2p] "+responder.name+" failed", "err", err)
+			}
+			return err
+		})
 	}
 
 	// Peer-count logger — local-sentry mode only (no local Servers in
@@ -557,6 +621,34 @@ func (p *Provider) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// logPeerEvent traces peer connect/disconnect events, enriching connect events
+// with node info when logPeerInfo is enabled.
+func (p *Provider) logPeerEvent(event *sentryproto.PeerEvent) {
+	eventID := event.EventId.String()
+	peerID := sentry.ConvertH512ToPeerID(event.PeerId)
+	peerIDStr := hex.EncodeToString(peerID[:])
+	if !p.logPeerInfo {
+		p.logger.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr)
+		return
+	}
+	var nodeURL string
+	var clientID string
+	var capabilities []string
+	if event.EventId == sentryproto.PeerEvent_Connect {
+		reply, err := p.Multiplexer.PeerById(p.cfg.SentryCtx, &sentryproto.PeerByIdRequest{PeerId: event.PeerId})
+		if err != nil {
+			p.logger.Debug("sentry.PeerById failed", "err", err)
+		}
+		if (reply != nil) && (reply.Peer != nil) {
+			nodeURL = reply.Peer.Enode
+			clientID = reply.Peer.Name
+			capabilities = reply.Peer.Caps
+		}
+	}
+	p.logger.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr,
+		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 }
 
 // runPeerCountLogger periodically emits the sum of "good peers" across all
@@ -615,4 +707,22 @@ func (p *Provider) Close() error {
 		p.sharedP2PServer = nil
 	}
 	return p.eg.Wait()
+}
+
+// grpcSentryClient dials an external sentry process over gRPC.
+func grpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
+	dialOpts := []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	return direct.NewSentryClientRemote(sentryproto.NewSentryClient(conn)), nil
 }
