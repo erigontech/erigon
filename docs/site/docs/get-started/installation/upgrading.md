@@ -21,15 +21,19 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 
 1. Backup your datadir.
 2. [Upgrade your Erigon installation](#upgrading-your-erigon-installation) whether from a binary, compiled source code, or Docker.
-3. To initiate the data upgrade, use the following command: `./build/bin/erigon snapshots reset --datadir /your/datadir`.
-4. Run Erigon, it will reuse existing data and sync only newer snapshots.
+3. Upgrade your snapshots using one of the [options below](#snapshots-upgrade-options).
+4. Run Erigon; it downloads any missing snapshots and resumes syncing.
 
 ### Snapshots Upgrade Options
 
-* `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
-* `erigon snapshots reset --datadir /your/datadir`: this command removes all old snapshots that have had performance improvements.
+* `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
+* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and the Heimdall / Polygon-bridge DBs) and resets `snapshots/` to the preverified set, then re-downloads them on the next start. Gives maximum performance, but discards local data and triggers a fresh re-sync from the preverified snapshots.
 
-Choose `upgrade` for a quicker process, or `reset` for maximum performance. If you choose `reset`, you'll need to wait for the new snapshots to download once Erigon starts.
+:::warning
+`erigon snapshots reset` does **not** reuse your existing local data — it wipes `chaindata/` and any locally generated snapshots and re-downloads the preverified set. Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+:::
+
+Choose `update-to-new-ver-format` to keep your data quickly, or `reset` for maximum performance at the cost of a full re-download.
 
 <details>
 
