@@ -129,61 +129,35 @@ func TestBranchCache_Stats(t *testing.T) {
 	require.True(t, strings.HasPrefix(s, "branch-cache "))
 }
 
-// TestBranchCache_UnwindTo_EvictsByTxNWatermark verifies that UnwindTo
-// evicts every entry whose txN > watermark across the root slot and tail
-// tier, and that entries with txN <= watermark survive untouched.
-func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
+// TestBranchCache_Unwind_DropsStaleAboveFloorLazily verifies Unwind drops
+// (lazily, on the next Get) every superseded-epoch entry whose txN is at or
+// above the unwind floor, while entries below the floor survive untouched.
+func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
 	tailKeyKeep := []byte{0xa0, 0xb0}
-	tailKeyEvict := []byte{0xa0, 0xb1}
+	tailKeyDrop := []byte{0xa0, 0xb1}
 
-	// txN=50 entries — these should survive a watermark of 60.
+	// txN=50 entries — below an unwind floor of 60, so they survive.
 	c.Put(rootKey, []byte("root-keep"), 0, 50)
 	c.Put(tailKeyKeep, []byte("tail-keep"), 0, 50)
+	// txN=100 entry — at/above floor 60, so it drops on its next Get.
+	c.Put(tailKeyDrop, []byte("tail-drop"), 0, 100)
 
-	// txN=100 tail entry — should be evicted at watermark=60.
-	c.Put(tailKeyEvict, []byte("tail-evict"), 0, 100)
-
-	evicted := c.UnwindTo(60)
-	require.Equal(t, 1, evicted, "only the txN=100 tail entry should be evicted")
+	c.Unwind(60)
 
 	_, _, ok := c.Get(rootKey)
-	require.True(t, ok, "root entry with txN=50 must survive watermark=60")
+	require.True(t, ok, "root entry with txN=50 must survive floor=60")
 	_, _, ok = c.Get(tailKeyKeep)
-	require.True(t, ok, "tail entry with txN=50 must survive watermark=60")
-	_, _, ok = c.Get(tailKeyEvict)
-	require.False(t, ok, "tail entry with txN=100 must be evicted by watermark=60")
+	require.True(t, ok, "tail entry with txN=50 must survive floor=60")
+	_, _, ok = c.Get(tailKeyDrop)
+	require.False(t, ok, "tail entry with txN=100 must drop at floor=60")
 }
 
-// TestBranchCache_UnwindTo_LatePutCaughtByNextUnwind documents the invariant
-// the concurrency contract relies on: a Put that lands after an UnwindTo's scan
-// has already passed (the acknowledged Put-vs-scan race) is not lost — a
-// subsequent UnwindTo with the same watermark still evicts it. So repeated
-// UnwindTo converges regardless of scan/Put interleaving. If a future change
-// breaks this (e.g. UnwindTo stops re-scanning), this test fails.
-func TestBranchCache_UnwindTo_LatePutCaughtByNextUnwind(t *testing.T) {
-	c := NewBranchCache(100)
-	key := []byte{0xa0, 0xb1}
-
-	// First UnwindTo evicts the stale entry.
-	c.Put(key, []byte("v1"), 0, 100)
-	require.Equal(t, 1, c.UnwindTo(60))
-	_, _, ok := c.Get(key)
-	require.False(t, ok)
-
-	// A Put that races in after that scan (txN still above the watermark) is
-	// caught by the next UnwindTo at the same watermark — no permanent stale entry.
-	c.Put(key, []byte("v2"), 0, 100)
-	require.Equal(t, 1, c.UnwindTo(60))
-	_, _, ok = c.Get(key)
-	require.False(t, ok, "a late Put above the watermark must be evicted by the next UnwindTo")
-}
-
-// TestBranchCache_UnwindTo_EvictsAcrossAllTiers verifies eviction reaches
-// the root slot, not just the LRU tail.
-func TestBranchCache_UnwindTo_EvictsAcrossAllTiers(t *testing.T) {
+// TestBranchCache_Unwind_AcrossAllTiers verifies lazy invalidation reaches the
+// root slot, not just the LRU tail.
+func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
 	c := NewBranchCache(100)
 
 	rootKey := []byte{0x00}
@@ -192,31 +166,57 @@ func TestBranchCache_UnwindTo_EvictsAcrossAllTiers(t *testing.T) {
 	c.Put(rootKey, []byte("root"), 0, 100)
 	c.Put(tailKey, []byte("tail"), 0, 100)
 
-	evicted := c.UnwindTo(50)
-	require.Equal(t, 2, evicted, "every entry with txN > watermark must be evicted")
+	c.Unwind(50)
 
 	_, _, ok := c.Get(rootKey)
-	require.False(t, ok, "root entry must be evicted")
+	require.False(t, ok, "root entry at txN>=floor must drop")
 	_, _, ok = c.Get(tailKey)
-	require.False(t, ok, "tail entry must be evicted")
+	require.False(t, ok, "tail entry at txN>=floor must drop")
 }
 
-// TestBranchCache_UnwindTo_BoundaryEqualsWatermark verifies the
-// inequality at the watermark itself: entries at exactly txN==watermark
-// are NOT evicted (the rule is txN > watermark).
-func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
+// TestBranchCache_Unwind_FloorBoundary verifies the >= rule at the floor: an
+// entry stamped exactly at the unwind floor belongs to a rolled-back block and
+// drops; an entry one txN below the floor survives.
+func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
 	c := NewBranchCache(100)
 
-	atKey := []byte{0xa0, 0xb0}
-	aboveKey := []byte{0xa0, 0xb1}
+	belowKey := []byte{0xa0, 0xb0}
+	atKey := []byte{0xa0, 0xb1}
+	c.Put(belowKey, []byte("below"), 0, 99)
 	c.Put(atKey, []byte("at"), 0, 100)
-	c.Put(aboveKey, []byte("above"), 0, 101)
 
-	evicted := c.UnwindTo(100)
-	require.Equal(t, 1, evicted, "only the txN=101 entry must be evicted; txN=100 stays")
+	c.Unwind(100)
 
-	_, _, ok := c.Get(atKey)
-	require.True(t, ok, "entry at txN==watermark must survive")
-	_, _, ok = c.Get(aboveKey)
-	require.False(t, ok, "entry at txN>watermark must be evicted")
+	_, _, ok := c.Get(belowKey)
+	require.True(t, ok, "entry at txN=floor-1 must survive")
+	_, _, ok = c.Get(atKey)
+	require.False(t, ok, "entry at txN==floor must drop (rolled-back block)")
+}
+
+// TestBranchCache_Unwind_CurrentEpochSurvives verifies the epoch disambiguates a
+// txN reused across forks: an entry rewritten AFTER the unwind (current epoch)
+// survives even when its txN is at/above the floor — only superseded-epoch
+// entries are stale.
+func TestBranchCache_Unwind_CurrentEpochSurvives(t *testing.T) {
+	c := NewBranchCache(100)
+
+	key := []byte{0xa0, 0xb0}
+	c.Put(key, []byte("old-fork"), 0, 100) // pre-unwind, old epoch
+	c.Unwind(50)
+	c.Put(key, []byte("new-fork"), 0, 100) // re-executed on the live fork, new epoch, same txN
+
+	v, _, ok := c.Get(key)
+	require.True(t, ok, "current-epoch entry must survive even with txN>=floor")
+	require.Equal(t, "new-fork", string(v), "must serve the re-executed value, not the dead-fork one")
+}
+
+// TestBranchCache_Unwind_FrozenSurvives verifies a frozen (txN=0) entry — e.g. a
+// preloaded trunk branch — is never dropped by an unwind to a positive txN.
+func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
+	c := NewBranchCache(100)
+	key := []byte{0xa0, 0xb0}
+	c.Put(key, []byte("frozen"), 0, 0)
+	c.Unwind(50)
+	_, _, ok := c.Get(key)
+	require.True(t, ok, "frozen txN=0 entry must survive any positive-txN unwind")
 }

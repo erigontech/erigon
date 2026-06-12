@@ -737,6 +737,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 func (pe *parallelExecutor) LogExecution() {
 	pe.progress.LogExecution(pe.rs.StateV3, pe)
+	pe.doms.PrintCacheStats()
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -1065,17 +1066,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	// Validate state cache before processing block - ensures cache is cleared after reorgs
-	// This matches the behavior in serial execution (exec3_serial.go)
-	if len(execRequest.tasks) > 0 {
-		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
-			parentHash := txTask.Header.ParentHash
-			blockHash := execRequest.blockHash
-			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(parentHash, blockHash)
-			}
-		}
-	}
+	// The state cache is a SharedDomain implementation detail: it is populated
+	// only at flush (committed, fork-agnostic state) and invalidated only on
+	// unwind (txNum/epoch — see StateCache.Unwind). The executor does not touch
+	// it during forward execution.
 
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
@@ -2493,7 +2487,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					if txTask.IsHistoric() {
 						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 					} else {
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+						// Use CachedReaderV3 with readCurrent=true so the
+						// finalize (including system TXs) reads from the
+						// BlockStateCache write buffer. This ensures the
+						// system TX sees all accumulated state from prior
+						// TXs in the block, not stale sd.mem values.
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
 					}
 				}
 
@@ -2754,7 +2753,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// the pre-block balance and stomped tx 28's in-block update.
 				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
 			}
 			pe.RUnlock()
 
@@ -3389,6 +3388,76 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				}
 			}
 		}
+	}
+
+	// CodePath travels with CodeHashPath. The CodeHashPath case and the
+	// fill-missing loop above both recover an account's codeHash from the
+	// versionMap, but CodePath has no equivalent recovery: the case above keeps
+	// it only when this tx's CodePath write is present at the validated
+	// incarnation (the incarnation filter), and the fill loop never emits it.
+	// So a tx whose validated writeset lacks a fresh CodePath — e.g. an EIP-7702
+	// delegating tx that re-executes: SetCode short-circuits because so.Code()
+	// already returns the designator written by the prior incarnation
+	// (bytes.Equal(prevcode, code)), so the validated incarnation emits no new
+	// CodePath — still recovers CodeHashPath here while CodePath is dropped. The
+	// account then persists a non-empty codeHash with no code bytes; a later
+	// block's GetCode/GetDelegatedDesignation reads empty, and for a 7702 sender
+	// the EIP-3607 check wrongly rejects the tx ("sender not an eoa"). Recover
+	// the designator code (versionMap, else the post-state via stateReader) and
+	// re-emit CodePath, mirroring CodeHashPath so a delegation's code can never
+	// be lost while its hash survives. Bounded to 7702 designators (see below)
+	// so we never re-emit ordinary unchanged contract code for a touched
+	// contract. NOTE: this prevents the drop during forward execution; it
+	// cannot repair state already collated into immutable snapshot files with
+	// codeHash-but-no-code (that needs a snapshot unwind).
+	codeInOutput := make(map[accounts.Address]bool)
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	for _, w := range filtered {
+		switch w.Path {
+		case state.CodePath:
+			codeInOutput[w.Address] = true
+		case state.CodeHashPath:
+			if h, ok := w.Val.(accounts.CodeHash); ok {
+				codeHashInOutput[w.Address] = h
+			}
+		}
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+			continue
+		}
+		// Recover the code whose hash this tx emitted. Prefer the versionMap
+		// (this batch's writes); on the SetCode short-circuit path — a
+		// re-executing 7702 delegation whose code equals the already-committed
+		// designator, so the validated incarnation writes no CodePath and the
+		// prior incarnation's versionMap entry was invalidated on re-exec — the
+		// versionMap holds nothing for this tx, so fall back to the post-state
+		// via stateReader.
+		var code []byte
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok {
+				code = c
+			}
+		}
+		if len(code) == 0 && stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				code = c
+			}
+		}
+		// Only recover EIP-7702 delegation designators — the demonstrated drop
+		// (a 7702 sender wrongly rejected as "not an eoa"). Gating on the
+		// designator shape keeps this from re-emitting ordinary unchanged
+		// contract code for every modified contract (write amplification with no
+		// correctness benefit) and never misattributes a callee's code.
+		if _, ok := types.ParseDelegation(code); !ok {
+			continue
+		}
+		filtered = append(filtered, &state.VersionedWrite{
+			Address: addr,
+			Path:    state.CodePath,
+			Val:     code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
+		})
 	}
 
 	// EIP-161 empty account removal: if an account has Balance=0, Nonce=0,

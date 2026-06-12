@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
@@ -64,6 +65,18 @@ type BranchCache struct {
 	rootHits, rootMisses atomic.Uint64
 	tailHits, tailMisses atomic.Uint64
 	bytesServed          atomic.Uint64
+	staleEvicted         atomic.Uint64 // entries dropped lazily on read after an unwind
+
+	// Cache coherence across unwinds is txN/epoch based — no block awareness,
+	// no diffset. An entry is valid iff it was written in the current epoch OR
+	// its txN is strictly below unwindFloor (the first unwound txN), so it
+	// predates every unwind seen and can't be stale. Unwind bumps the epoch and
+	// lowers the floor (O(1), no scan); stale entries are dropped lazily on
+	// their next Get. txNums are reused across forks, so the epoch — not the
+	// txN — is what tells a superseded entry from a live one. Mirrors
+	// execution/cache.GenericCache so every state cache honors one model (#21752).
+	epoch       atomic.Uint32
+	unwindFloor atomic.Uint64
 }
 
 type branchCacheEntry struct {
@@ -78,10 +91,15 @@ type branchCacheEntry struct {
 	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
 	step uint64
 
-	// txN is the high-water txN this entry is valid through. UnwindTo
-	// evicts every entry whose txN > watermark. 0 means "not tracked"
-	// (entry survives any watermark).
+	// txN is the txN the cached bytes are valid as of (an upper bound: the
+	// value's write txN). With epoch it gates reads after an unwind. 0 means
+	// "frozen/untracked" — predates any unwind, always served.
 	txN uint64
+
+	// epoch is the unwind generation the entry was written in. Disambiguates a
+	// txN reused across forks: an entry from a superseded epoch whose txN is at
+	// or above the unwind floor is dropped lazily on its next Get.
+	epoch uint32
 }
 
 // DefaultBranchCacheTailCapacity is the LRU tail size used when no
@@ -112,9 +130,13 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if err != nil {
 		panic(fmt.Sprintf("BranchCache: NewLRU: %s", err))
 	}
-	return &BranchCache{
+	bc := &BranchCache{
 		tail: tail,
 	}
+	// Before any unwind every entry's txN is at/below the floor, so the epoch
+	// check never strands a valid entry.
+	bc.unwindFloor.Store(math.MaxUint64)
+	return bc
 }
 
 // isRootPrefix reports whether prefix targets the pinned root slot. The
@@ -167,6 +189,16 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if !ok {
 		return nil, 0, false
 	}
+	// Lazy unwind invalidation: an entry from a superseded epoch whose txN is at
+	// or above the unwind floor reflects dead-fork state — drop it and miss so
+	// the read falls through to the reverted domain and repopulates. The floor
+	// is the first unwound txN (>= matches GenericCache: an entry stamped exactly
+	// at the floor belongs to a rolled-back block).
+	if entry.epoch != c.epoch.Load() && entry.txN >= c.unwindFloor.Load() {
+		c.Invalidate(prefix)
+		c.staleEvicted.Add(1)
+		return nil, 0, false
+	}
 	c.bytesServed.Add(uint64(len(entry.data)))
 	return entry.data, entry.step, true
 }
@@ -181,9 +213,10 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 	c.store(prefix, &branchCacheEntry{
-		data: dataCopy,
-		step: step,
-		txN:  txN,
+		data:  dataCopy,
+		step:  step,
+		txN:   txN,
+		epoch: c.epoch.Load(),
 	})
 }
 
@@ -198,24 +231,24 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	c.tail.Delete(prefix)
 }
 
-// UnwindTo evicts every cache entry whose txN > maxValidTxN across
-// the root slot and LRU tail. Returns the number of entries evicted.
-// Safe to call alongside concurrent reads; a Put racing with the scan
-// may insert an entry the scan already passed, but the next UnwindTo
-// will catch it.
-func (c *BranchCache) UnwindTo(maxValidTxN uint64) (evicted int) {
-	if entry := c.root.Load(); entry != nil && entry.txN > maxValidTxN {
-		c.root.Store(nil)
-		evicted++
-	}
-	c.tail.Range(func(hash uint64, entry *branchCacheEntry) bool {
-		if entry != nil && entry.txN > maxValidTxN {
-			c.tail.DeleteByHash(hash)
-			evicted++
+// Unwind invalidates entries that reflect dead-fork state. unwindToTxN is the
+// txN the chain is rewound to. O(1) and scan-free: bump the epoch (so entries
+// written in the new, live epoch stay valid) and lower the unwind floor to
+// unwindToTxN (so old-epoch entries at or above it are dropped lazily on their
+// next Get). The floor only ever decreases, so a shallow unwind cannot
+// resurrect entries a deeper one invalidated. Mirrors GenericCache.Unwind so
+// branch and state caches honor one (txN, epoch) model (#21752).
+func (c *BranchCache) Unwind(unwindToTxN uint64) {
+	c.epoch.Add(1)
+	for {
+		cur := c.unwindFloor.Load()
+		if unwindToTxN >= cur {
+			break
 		}
-		return true
-	})
-	return evicted
+		if c.unwindFloor.CompareAndSwap(cur, unwindToTxN) {
+			break
+		}
+	}
 }
 
 // Clear empties the cache and resets stats counters across ALL tiers
@@ -230,6 +263,9 @@ func (c *BranchCache) Clear() {
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
+	c.staleEvicted.Store(0)
+	c.epoch.Store(0)
+	c.unwindFloor.Store(math.MaxUint64)
 }
 
 // Stats returns a one-line summary of root-tier and tail-tier hit/miss
@@ -247,9 +283,9 @@ func (c *BranchCache) Stats() string {
 		return 100.0 * float64(hit) / float64(total)
 	}
 	return fmt.Sprintf(
-		"branch-cache root hit=%d miss=%d (%.1f%%) | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB",
+		"branch-cache root hit=%d miss=%d (%.1f%%) | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | staleEvicted=%d",
 		rh, rm, pct(rh, rm),
 		th, tm, pct(th, tm), c.tail.Len(),
-		float64(bb)/1024/1024,
+		float64(bb)/1024/1024, c.staleEvicted.Load(),
 	)
 }

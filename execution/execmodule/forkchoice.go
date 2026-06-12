@@ -416,6 +416,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
 		}
+		// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
+		// the unwound txNum, so no whole-cache clear is needed here.
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 type iodir int
@@ -95,13 +96,13 @@ type TemporalMemBatch struct {
 	// above the unwind target.
 	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
-	metrics *changeset.DomainMetrics
+	metrics *kvmetrics.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           ioMetrics.(*changeset.DomainMetrics),
+		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
 	}
 	aggTx := AggTx(tx)
@@ -163,7 +164,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutKeySize += putKeySize
 			dm.CachePutValueSize += putValueSize
 		} else {
-			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
+			sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
 				CachePutCount:     1,
 				CachePutSize:      putKeySize + putValueSize,
 				CachePutKeySize:   putKeySize,
@@ -822,6 +823,21 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 		// distinguish (see SharedDomains.Flush, which Invalidate's on
 		// len(v)==0 and Put's otherwise).
 		for domain, cb := range cfg.DomainCallbacks {
+			// StorageDomain values live in the separate sd.storage btree, not
+			// sd.domains[StorageDomain] (see getLatest/DomainPut). Iterating
+			// sd.domains here would find an empty map for storage, so its cache
+			// would never be flush-updated and would serve stale slots on hit.
+			if domain == kv.StorageDomain {
+				sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
+					if len(history) == 0 {
+						return true
+					}
+					latest := history[len(history)-1]
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					return true
+				})
+				continue
+			}
 			for keyStr, history := range sd.domains[domain] {
 				if len(history) == 0 {
 					continue

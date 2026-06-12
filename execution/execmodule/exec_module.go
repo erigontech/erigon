@@ -281,6 +281,13 @@ func NewExecModule(
 		stopNode:                stopNode,
 	}
 
+	// Wire the process-global state cache into the read-ahead so its
+	// prefetches populate the same hashmap that SharedDomains.GetLatest
+	// probes on the EVM hot path. Reth's "same hashmap" pattern.
+	if readAheader != nil {
+		readAheader.SetStateCache(domainCache)
+	}
+
 	if stateCache != nil {
 		stateCache.execModule = em
 	}
@@ -541,11 +548,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, criticalError
 	}
 
-	// Clear state cache on invalid block
-	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if e.stateCache != nil && isInvalid {
-		e.stateCache.ClearWithHash(header.ParentHash)
-	}
+	// No cache invalidation needed on an invalid payload: the state cache is
+	// populated only at flush (committed, fork-agnostic state) and this
+	// validation path never flushes, so a rejected payload leaves nothing
+	// fork-specific in the cache. Reads during validation only add canonical
+	// committed bytes. (Cache invalidation happens solely on unwind.)
 
 	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
 	// its rollback. By design we do not persist validation-run writes — there
