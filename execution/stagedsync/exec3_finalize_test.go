@@ -1932,6 +1932,74 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	}
 }
 
+// The CREATE/CREATE2 variant of the codeHash-no-code drop: an ORDINARY contract
+// (not a 7702 designator) deployed this block, re-executed so the validated
+// incarnation's SetCode short-circuits and only the stale-incarnation CodePath
+// survives in the raw writeset (dropped by the incarnation filter) while
+// CodeHashPath is kept. The versionMap holds the code (written this block), so
+// recovery must fire for ordinary code too — the original ParseDelegation gate
+// would have skipped it, persisting a codeHash with no code (mainnet 25291004:
+// a SafeProxyFactory CREATE2 proxy, called and reverted 6785 blocks later at
+// 25297789).
+func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	contract := accounts.InternAddress([20]byte{0x8e, 0x75, 0x5f, 0x34})
+
+	// Ordinary contract bytecode (standard Solidity prologue) — NOT a 7702
+	// designator, so types.ParseDelegation rejects it.
+	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x34, 0x80, 0x15, 0x61, 0x00, 0x10}
+	if _, ok := types.ParseDelegation(code); ok {
+		t.Fatal("test fixture must not be a 7702 designator")
+	}
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+
+	const txIndex = 7
+
+	// Incarnation 0 deploys: code + its hash + nonce=1 (EIP-161 CREATE bump).
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: contract, Path: state.CodePath, Val: code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: contract, Path: state.CodeHashPath, Val: codeHash,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: contract, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}, true, "")
+
+	// Incarnation 1 (validated) re-executes; SetCode short-circuits → only nonce.
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: contract, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
+	}, true, "")
+
+	rawWrites := state.VersionedWrites{
+		{Address: contract, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
+		{Address: contract, Path: state.CodePath, Val: code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
+		{Address: contract, Path: state.CodeHashPath, Val: codeHash,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
+	}
+
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
+
+	var gotCode []byte
+	var gotHash *accounts.CodeHash
+	for _, w := range result {
+		switch w.Path {
+		case state.CodePath:
+			gotCode = w.Val.([]byte)
+		case state.CodeHashPath:
+			h := w.Val.(accounts.CodeHash)
+			gotHash = &h
+		}
+	}
+	require.NotNil(t, gotHash, "codeHash must be present")
+	assert.Equal(t, codeHash, *gotHash)
+	require.Equal(t, 1, countPath(result, state.CodePath),
+		"ordinary created-contract code must be recovered, not just 7702 designators")
+	assert.Equal(t, code, gotCode, "recovered code is the deployed bytecode")
+}
+
 // TestCalcFees_EmitsAddressPathForCoinbase pins the fix for the mainnet
 // block 25151825 tx 31 +25k gas bug. Background:
 //

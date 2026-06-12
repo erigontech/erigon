@@ -3413,22 +3413,26 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// fill-missing loop above both recover an account's codeHash from the
 	// versionMap, but CodePath has no equivalent recovery: the case above keeps
 	// it only when this tx's CodePath write is present at the validated
-	// incarnation (the incarnation filter), and the fill loop never emits it.
-	// So a tx whose validated writeset lacks a fresh CodePath — e.g. an EIP-7702
-	// delegating tx that re-executes: SetCode short-circuits because so.Code()
-	// already returns the designator written by the prior incarnation
-	// (bytes.Equal(prevcode, code)), so the validated incarnation emits no new
-	// CodePath — still recovers CodeHashPath here while CodePath is dropped. The
-	// account then persists a non-empty codeHash with no code bytes; a later
-	// block's GetCode/GetDelegatedDesignation reads empty, and for a 7702 sender
-	// the EIP-3607 check wrongly rejects the tx ("sender not an eoa"). Recover
-	// the designator code (versionMap, else the post-state via stateReader) and
-	// re-emit CodePath, mirroring CodeHashPath so a delegation's code can never
-	// be lost while its hash survives. Bounded to 7702 designators (see below)
-	// so we never re-emit ordinary unchanged contract code for a touched
-	// contract. NOTE: this prevents the drop during forward execution; it
-	// cannot repair state already collated into immutable snapshot files with
-	// codeHash-but-no-code (that needs a snapshot unwind).
+	// incarnation (the incarnation filter), and the fill loop never emits it. So a
+	// tx whose validated writeset lacks a fresh CodePath persists a non-empty
+	// codeHash with no code bytes (codeHash-no-code) — and a later block that
+	// CALLs the contract executes it as empty and diverges (wrong gas / wrong
+	// root). Two ways the fresh CodePath goes missing, both on re-execution where
+	// SetCode short-circuits (so.Code() already returns the prior incarnation's
+	// bytes, bytes.Equal):
+	//   - CREATE/CREATE2 of an ordinary contract (mainnet 25291004: a Safe proxy
+	//     deployed via the SafeProxyFactory, called 6785 blocks later at 25297789);
+	//   - an EIP-7702 delegating tx (the 7702 sender then fails EIP-3607 as "not an
+	//     eoa").
+	// Recover the code whose hash this tx emitted so code can never be lost while
+	// its hash survives. The versionMap holds CodePath iff the code was written in
+	// THIS block, so a versionMap hit is always genuine in-block code — recover it
+	// for any contract. Only the stateReader fallback (versionMap miss) is bounded
+	// to 7702 designators, since stateReader also returns an unchanged contract's
+	// existing code and re-emitting that for every touched contract would be write
+	// amplification with no correctness benefit. NOTE: forward-prevention only; it
+	// cannot repair codeHash-no-code already collated into immutable snapshot files
+	// (that needs a snapshot unwind).
 	codeInOutput := make(map[accounts.Address]bool)
 	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
 	for _, w := range filtered {
@@ -3441,42 +3445,39 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			}
 		}
 	}
-	for addr, h := range codeHashInOutput {
-		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
-			continue
-		}
-		// Recover the code whose hash this tx emitted. Prefer the versionMap
-		// (this batch's writes); on the SetCode short-circuit path — a
-		// re-executing 7702 delegation whose code equals the already-committed
-		// designator, so the validated incarnation writes no CodePath and the
-		// prior incarnation's versionMap entry was invalidated on re-exec — the
-		// versionMap holds nothing for this tx, so fall back to the post-state
-		// via stateReader.
-		var code []byte
-		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
-			if c, ok := rr.Value().([]byte); ok {
-				code = c
-			}
-		}
-		if len(code) == 0 && stateReader != nil {
-			if c, err := stateReader.ReadAccountCode(addr); err == nil {
-				code = c
-			}
-		}
-		// Only recover EIP-7702 delegation designators — the demonstrated drop
-		// (a 7702 sender wrongly rejected as "not an eoa"). Gating on the
-		// designator shape keeps this from re-emitting ordinary unchanged
-		// contract code for every modified contract (write amplification with no
-		// correctness benefit) and never misattributes a callee's code.
-		if _, ok := types.ParseDelegation(code); !ok {
-			continue
-		}
+	emit := func(addr accounts.Address, code []byte) {
 		filtered = append(filtered, &state.VersionedWrite{
 			Address: addr,
 			Path:    state.CodePath,
 			Val:     code,
 			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 		})
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+			continue
+		}
+		// versionMap hit = the code was written in THIS block (deploy / code change
+		// / 7702 designator); recover it for any contract — it's genuine in-block
+		// code, never an unchanged contract's bytes.
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok && len(c) > 0 {
+				emit(addr, c)
+				continue
+			}
+		}
+		// versionMap miss (e.g. a re-executing 7702 delegation whose prior
+		// incarnation's CodePath entry was invalidated): fall back to the committed
+		// post-state, bounded to 7702 designators — stateReader returns an
+		// unchanged contract's existing code too, and re-emitting that for every
+		// touched contract is write amplification with no correctness benefit.
+		if stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				if _, ok := types.ParseDelegation(c); ok {
+					emit(addr, c)
+				}
+			}
+		}
 	}
 
 	// EIP-161 empty account removal: if an account has Balance=0, Nonce=0,
