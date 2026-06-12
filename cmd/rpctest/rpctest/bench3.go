@@ -35,7 +35,8 @@ func Bench3(erigon_url, geth_url string) error {
 	req_id++
 	template := `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1", "%s", %d, true, true, true], "id":%d}`
 
-	page := common.Hash{}.Bytes()
+	zeroHash := common.Hash{}
+	page := zeroHash[:]
 
 	accRangeTG := make(map[common.Address]state.DumpAccount)
 
@@ -56,7 +57,7 @@ func Bench3(erigon_url, geth_url string) error {
 
 	accRangeGeth := make(map[common.Address]state.DumpAccount)
 
-	page = common.Hash{}.Bytes()
+	page = zeroHash[:]
 	for len(page) > 0 {
 		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange

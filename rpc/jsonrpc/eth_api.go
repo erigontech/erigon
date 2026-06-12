@@ -110,6 +110,7 @@ type EthAPI interface {
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
+	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
@@ -139,10 +140,11 @@ type BaseAPI struct {
 	stateCache kvcache.Cache
 	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
-	filters      *rpchelper.Filters
-	_chainConfig atomic.Pointer[chain.Config]
-	_genesis     atomic.Pointer[types.Block]
-	_pruneMode   atomic.Pointer[prune.Mode]
+	filters                   *rpchelper.Filters
+	_chainConfig              atomic.Pointer[chain.Config]
+	_genesis                  atomic.Pointer[types.Block]
+	_pruneMode                atomic.Pointer[prune.Mode]
+	_commitmentHistoryEnabled atomic.Pointer[bool]
 
 	_blockReader services.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -370,28 +372,34 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
+}
+
+// checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
+// that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
+func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+}
+
+func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
 	}
 	if p == nil {
-		// no prune info found
 		return nil
 	}
-	if p.History.Enabled() {
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api._blockReader, api.filters)
-		if err != nil {
-			return err
-		}
-		if latest <= 1 {
-			return nil
-		}
-		prunedTo := p.History.PruneTo(latest)
-		if block < prunedTo {
-			return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, block, prunedTo)
-		}
+	amount := field(p)
+	if !amount.Enabled() {
+		return nil
 	}
-
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return err
+	}
+	if block < amount.PruneTo(latest) {
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, amount.PruneTo(latest))
+	}
 	return nil
 }
 
@@ -422,6 +430,26 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	api._pruneMode.Store(&mode)
 
 	return &mode, nil
+}
+
+// commitmentHistoryEnabled returns whether --prune.include-commitment-history was set at node
+// startup. The flag is written once by checkAndSetCommitmentHistoryFlag and never changed, so
+// the result is cached after the first successful read.
+// Unlike pruneMode, false is not cached when the DB key is absent: during the brief boot window
+// before checkAndSetCommitmentHistoryFlag runs the key may not exist yet, and caching false
+// would shadow a subsequent true write. Each request during that window pays one DB lookup.
+func (api *BaseAPI) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
+	if p := api._commitmentHistoryEnabled.Load(); p != nil {
+		return *p, nil
+	}
+	enabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		api._commitmentHistoryEnabled.Store(&enabled)
+	}
+	return enabled, nil
 }
 
 type bridgeReader interface {

@@ -23,7 +23,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -45,10 +44,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	if config != nil {
 		var chainId uint256.Int
 		if config.ChainID != nil {
-			overflow := chainId.SetFromBig(config.ChainID)
-			if overflow {
-				panic("chainID higher than 2^256-1")
-			}
+			chainId.Set(config.ChainID)
 		}
 		signer.unprotected = true
 		switch {
@@ -117,13 +113,9 @@ func MakeFrontierSigner() *Signer {
 func LatestSigner(config *chain.Config) *Signer {
 	var signer Signer
 	signer.unprotected = true
-	chainId, overflow := uint256.FromBig(config.ChainID)
-	if overflow {
-		panic("chainID higher than 2^256-1")
-	}
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	if config.ChainID != nil {
+		signer.chainID.Set(config.ChainID)
+		signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
 		if config.CancunTime != nil {
 			signer.blob = true
 		}
@@ -153,18 +145,14 @@ func LatestSigner(config *chain.Config) *Signer {
 // Use this in transaction-handling code where the current block number and fork
 // configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
 // If you have a ChainConfig and know the current block number, use MakeSigner instead.
-func LatestSignerForChainID(chainID *big.Int) *Signer {
+func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	var signer Signer
 	signer.unprotected = true
 	if chainID == nil {
 		return &signer
 	}
-	chainId, overflow := uint256.FromBig(chainID)
-	if overflow {
-		panic("chainID higher than 2^256-1")
-	}
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Lsh(chainId, 1) // ×2
+	signer.chainID.Set(chainID)
+	signer.chainIDMul.Lsh(chainID, 1) // ×2
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true
@@ -175,7 +163,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 
 // SignTx signs the transaction using the given signer and private key.
 func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+	h := txn.SigningHash(&s.chainID)
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -185,7 +173,7 @@ func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, erro
 
 // SignNewTx creates a transaction and signs it.
 func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+	h := txn.SigningHash(&s.chainID)
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -234,7 +222,7 @@ func (sg Signer) Sender(tx Transaction) (accounts.Address, error) {
 func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (accounts.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
-	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
+	signChainID := &sg.chainID // This is reset to nil if txn is unprotected
 	// recoverPlain below will subtract 27 from V
 	switch t := txn.(type) {
 	case *LegacyTx:

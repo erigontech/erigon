@@ -63,7 +63,7 @@ type ttFork struct {
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
-func (tt *TransactionTest) Run(chainID *big.Int) error {
+func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {

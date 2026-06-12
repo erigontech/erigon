@@ -19,12 +19,16 @@ package forkchoice
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -270,4 +274,91 @@ func TestValidatePayloadWithEL_NoEngine(t *testing.T) {
 
 	err := f.validatePayloadWithEL(context.TODO(), envelope, block, common.Hash{})
 	require.NoError(t, err)
+}
+
+func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	for _, tt := range []struct {
+		name       string
+		status     execution_client.PayloadStatus
+		wantErr    bool
+		wantVerify bool
+	}{
+		{
+			name:       "validated",
+			status:     execution_client.PayloadStatusValidated,
+			wantVerify: true,
+		},
+		{
+			name:    "invalidated",
+			status:  execution_client.PayloadStatusInvalidated,
+			wantErr: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().
+				NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(tt.status, nil)
+
+			verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+			require.NoError(t, err)
+			executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+			require.NoError(t, err)
+			payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+			require.NoError(t, err)
+			executionPayloadGasLimit, err := lru.New[common.Hash, uint64](16)
+			require.NoError(t, err)
+
+			blockRoot := common.HexToHash("0x1234")
+			executionBlockHash := common.HexToHash("0xabcd")
+			invalidatedHeader := common.Hash{}
+			f := &ForkChoiceStore{
+				beaconCfg:                cfg,
+				engine:                   engine,
+				forkGraph:                payloadVoteForkGraph{invalidatedHeader: &invalidatedHeader},
+				verifiedExecutionPayload: verifiedExecutionPayload,
+				executionPayloadStatus:   executionPayloadStatus,
+				payloadStatusByRoot:      payloadStatusByRoot,
+				executionPayloadGasLimit: executionPayloadGasLimit,
+			}
+			envelope := &cltypes.ExecutionPayloadEnvelope{
+				Payload: &cltypes.Eth1Block{BlockHash: executionBlockHash},
+			}
+			body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+			body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
+				Message: &cltypes.ExecutionPayloadBid{
+					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+				},
+			}
+			block := &cltypes.SignedBeaconBlock{
+				Block: &cltypes.BeaconBlock{
+					Body: body,
+				},
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				done <- f.validatePayloadWithEL(context.Background(), envelope, block, blockRoot)
+			}()
+
+			select {
+			case err := <-done:
+				if tt.wantErr {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("validatePayloadWithEL blocked while forkchoice mutex was already held")
+			}
+			require.Equal(t, tt.wantVerify, f.IsPayloadVerified(blockRoot))
+			if tt.status == execution_client.PayloadStatusInvalidated {
+				require.Equal(t, blockRoot, invalidatedHeader)
+			}
+		})
+	}
 }

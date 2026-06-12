@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
@@ -82,6 +84,266 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		require.NoError(t, err)
 		defer idx.Close()
 	}
+}
+
+func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	require.NoError(t, c.AddWord([]byte{1}))
+	require.NoError(t, c.Compress())
+}
+
+func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, from, to uint64, names ...snaptype.Enum) {
+	t.Helper()
+	for _, name := range names {
+		_, err := os.Stat(filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)))
+		require.NoError(t, err)
+	}
+}
+
+// TestBlockRetireSkipsOnGap verifies that the block retirement
+// logic correctly prevents freezing when there is a gap between the last block available
+// in the snapshots and the first block still present in the database. If this gap exists,
+// we cannot retire blocks because the history is not contiguous.
+func TestBlockRetireSkipsOnGap(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	require.NoError(t, snapshots.OpenFolder())
+	defer snapshots.Close()
+	require.Equal(t, uint64(999), snapshots.SegmentsMax())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	prunedBoundaryHeader := &types.Header{Number: *uint256.NewInt(1001)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, prunedBoundaryHeader))
+	require.NoError(t, rwTx.Commit())
+
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.False(t, hasEnough)
+}
+
+// TestBlockRetireContiguous ensures that block retirement is allowed
+// to proceed when the database block history starts exactly where the snapshots end.
+// This is the correct, contiguous state where we can transition retired blocks.
+func TestBlockRetireContiguous(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	require.NoError(t, snapshots.OpenFolder())
+	defer snapshots.Close()
+	require.Equal(t, uint64(999), snapshots.SegmentsMax())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	nextHeader := &types.Header{Number: *uint256.NewInt(1000)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
+	require.NoError(t, rwTx.Commit())
+
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+}
+
+// TestBlockRetireFallback verifies that if a merged segment is written
+// to disk but its index is not generated yet, the node restart will not hide the smaller
+// subsegments. These subsegments must remain visible so that block retirement can keep
+// running without getting stuck (fixes issue #21472). Once the unindexed covering segment
+// is deleted or indexed, the visibility should remain stable.
+func TestBlockRetireFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Headers, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+
+	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
+
+	requireSegmentFilesExist(t, tmpDir, ver, 1, 1000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, tmpDir, ver, 1000, 2000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	nextHeader := &types.Header{Number: *uint256.NewInt(2000)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
+	require.NoError(t, rwTx.Commit())
+
+	// DB starts right after snapshots, retirement should be allowed.
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+
+	// Manually close snapshots here to simulate a node restart.
+	// The deferred Close() serves only as a fallback safety guard in case of early test failure.
+	snapshots.Close()
+
+	// Simulate a restart after a merged transaction segment landed on disk, but
+	// before its indexes were fully built. The smaller indexed subsegments must
+	// remain visible until the covering segment becomes indexed.
+	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+
+	reopenedSnapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
+	require.NoError(t, reopenedSnapshots.OpenFolder())
+	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
+	requireSegmentFilesExist(t, tmpDir, ver, 1, 1000, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, tmpDir, ver, 1000, 2000, snaptype2.Enums.Transactions)
+
+	blockReader = NewBlockReader(reopenedSnapshots, nil)
+	br = &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err = br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+	// Close reopenedSnapshots before removing the unindexed overlap to start the restore phase.
+	reopenedSnapshots.Close()
+
+	// Removing the unindexed overlap leaves the same indexed subsegments visible.
+	unindexedOverlap := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
+	require.NoError(t, dir.RemoveFile(unindexedOverlap))
+
+	restoredSnapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	require.NoError(t, restoredSnapshots.OpenFolder())
+	defer restoredSnapshots.Close()
+	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
+
+	blockReader = NewBlockReader(restoredSnapshots, nil)
+	br = &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err = br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
+}
+
+// TestBlockRetireAllOverlapped tests a scenario where all block
+// snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments
+// on disk. Under the alignMin setting, we must verify that all three types correctly
+// fall back to their indexed subsegments and maintain the correct visible range, allowing
+// block retirement to proceed (related to issue #21472).
+func TestBlockRetireAllOverlapped(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	ver := version.V1_0
+
+	// Create indexed subsegments for all types.
+	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
+		createTestSegmentFile(t, 1, 1000, enum, tmpDir, ver, logger)
+		createTestSegmentFile(t, 1000, 2000, enum, tmpDir, ver, logger)
+	}
+
+	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	genesisHeader := &types.Header{}
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	nextHeader := &types.Header{Number: *uint256.NewInt(2000)}
+	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
+	require.NoError(t, rwTx.Commit())
+	// Manually close snapshots here to simulate a node restart.
+	// The deferred Close() serves only as a fallback safety guard in case of early test failure.
+	snapshots.Close()
+
+	// Add unindexed covering segments for ALL types. With alignMin=true,
+	// RecalcVisibleSegments must fall back to indexed subsegments for every
+	// type, and SegmentsMax must take the correct minimum.
+	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
+		createTestSegmentOnlyFile(t, 1, 2000, enum, tmpDir, ver, logger)
+	}
+
+	reopened := NewRoSnapshots(cfg, tmpDir, logger)
+	require.NoError(t, reopened.OpenFolder())
+	defer reopened.Close()
+	require.Equal(t, uint64(1999), reopened.SegmentsMax())
+
+	blockReader := NewBlockReader(reopened, nil)
+	br := &BlockRetire{
+		db:          db,
+		blockReader: blockReader,
+		logger:      logger,
+	}
+	hasEnough, err := br.dbHasEnoughDataForBlocksRetire(t.Context())
+	require.NoError(t, err)
+	require.True(t, hasEnough)
 }
 
 // TestBlockReaderGenesisBlockWithSnapshots tests that the genesis block is always read from the database, even when snapshots exist

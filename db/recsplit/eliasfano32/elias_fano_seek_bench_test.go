@@ -145,7 +145,7 @@ func BenchmarkSeek(b *testing.B) {
 				b.ReportAllocs()
 				n := 0
 				for b.Loop() {
-					_, _ = ef.Seek(targets[n%nTargets])
+					_, _, _ = ef.Seek(targets[n%nTargets])
 					n++
 				}
 			})

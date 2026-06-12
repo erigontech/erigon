@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -57,7 +57,7 @@ type Publisher struct {
 	tasks         chan publishTask
 }
 
-func (p Publisher) PublishNewBlock(block *types.Block, td *big.Int) {
+func (p Publisher) PublishNewBlock(block *types.Block, td uint256.Int) {
 	p.enqueueTask(publishTask{
 		taskType: newBlockPublishTask,
 		block:    block,
@@ -197,7 +197,7 @@ func (p Publisher) processNewBlockHashesPublishTask(ctx context.Context, t publi
 type publishTask struct {
 	taskType         publishTaskType
 	block            *types.Block
-	td               *big.Int
+	td               uint256.Int
 	blockRangeUpdate *eth.BlockRangeUpdatePacket
 }
 

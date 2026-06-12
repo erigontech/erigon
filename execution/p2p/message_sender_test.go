@@ -18,7 +18,6 @@ package p2p
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -218,7 +217,7 @@ func TestMessageSenderSendNewBlock(t *testing.T) {
 	messageSender := NewMessageSender(sentryClient)
 	err := messageSender.SendNewBlock(ctx, PeerIdFromUint64(123), eth.NewBlockPacket{
 		Block: types.NewBlockWithHeader(header),
-		TD:    big.NewInt(2),
+		TD:    *uint256.NewInt(2),
 	})
 	require.NoError(t, err)
 }
@@ -236,7 +235,7 @@ func TestMessageSenderSendNewBlockErrPeerNotFound(t *testing.T) {
 	messageSender := NewMessageSender(sentryClient)
 	err := messageSender.SendNewBlock(ctx, PeerIdFromUint64(123), eth.NewBlockPacket{
 		Block: types.NewBlockWithHeader(header),
-		TD:    big.NewInt(2),
+		TD:    *uint256.NewInt(2),
 	})
 	require.ErrorIs(t, err, ErrPeerNotFound)
 }

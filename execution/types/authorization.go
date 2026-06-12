@@ -86,7 +86,7 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 		return nil, errors.New("invalid signature")
 	}
 
-	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
+	pubKey, err := crypto.Ecrecover(hash[:], sig[:])
 	if err != nil {
 		return nil, err
 	}

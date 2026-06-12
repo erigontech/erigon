@@ -85,7 +85,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 
 	// Load snapshot hashes
 	if p.cfg != nil && p.cfg.ChainName != "" {
-		if err := downloadercfg.LoadSnapshotsHashes(ctx, p.cfg.Dirs, p.cfg.ChainName); err != nil {
+		if err := downloadercfg.LoadSnapshotsHashes(ctx, p.cfg.Dirs, p.cfg.ChainName, p.snapshotCfg.ChainTomlURL); err != nil {
 			return fmt.Errorf("load snapshot hashes: %w", err)
 		}
 	}

@@ -302,6 +302,10 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 	if a.SlotNumber != nil {
 		slot = uint64(*a.SlotNumber)
 	}
+	var targetGasLimit uint64
+	if a.TargetGasLimit != nil {
+		targetGasLimit = uint64(*a.TargetGasLimit)
+	}
 	switch version {
 	case clparams.BellatrixVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:])
@@ -309,8 +313,8 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
 	case clparams.DenebVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
-	default:
-		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot)
+	default: // GloasVersion+
+		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
 	}
 }
 
@@ -336,14 +340,17 @@ func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)
 		a.ParentBeaconBlockRoot = &root
-	default:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot); err != nil {
+	default: // GloasVersion+
+		var targetGasLimit uint64
+		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot, &targetGasLimit); err != nil {
 			return err
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)
 		a.ParentBeaconBlockRoot = &root
 		slotNumber := hexutil.Uint64(slot)
 		a.SlotNumber = &slotNumber
+		tgl := hexutil.Uint64(targetGasLimit)
+		a.TargetGasLimit = &tgl
 	}
 	a.Timestamp = hexutil.Uint64(timestamp)
 	return nil

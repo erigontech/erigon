@@ -18,11 +18,16 @@ package sentry
 
 import (
 	"net"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/sentry"
 )
 
 // TestConfigureIsPure verifies Configure just stores the config without
@@ -60,53 +65,128 @@ func TestCloseIdempotent(t *testing.T) {
 	p.Close()
 }
 
-// TestSplitAddrIntoHostAndPort covers the port_util helper used by
-// Initialize to parse p2p.Config.ListenAddr.
-func TestSplitAddrIntoHostAndPort(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantHost string
-		wantPort int
-		wantErr  bool
-	}{
-		{name: "ipv4", input: "127.0.0.1:30303", wantHost: "127.0.0.1", wantPort: 30303},
-		{name: "hostname", input: "localhost:8080", wantHost: "localhost", wantPort: 8080},
-		{name: "zero-host", input: "0.0.0.0:30303", wantHost: "0.0.0.0", wantPort: 30303},
-		{name: "ipv6", input: "[::1]:30303", wantHost: "[::1]", wantPort: 30303},
-		{name: "no-colon", input: "localhost", wantErr: true},
-		{name: "non-numeric-port", input: "localhost:abc", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			host, port, err := splitAddrIntoHostAndPort(tt.input)
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.wantHost, host)
-			require.Equal(t, tt.wantPort, port)
-		})
-	}
+// helperGrpcServerWithProtocols returns a minimally-populated *sentry.GrpcServer
+// suitable for startSharedP2PServer dedup / reporter-wiring tests. It does
+// not start any network listeners.
+func helperGrpcServerWithProtocols(protocols ...p2p.Protocol) *sentry.GrpcServer {
+	ss := &sentry.GrpcServer{}
+	ss.Protocols = append(ss.Protocols, protocols...)
+	return ss
 }
 
-// TestCheckPortIsFree verifies checkPortIsFree returns true for a port
-// nothing is listening on, and false when a listener is bound.
-func TestCheckPortIsFree(t *testing.T) {
-	// Bind a listener on an ephemeral port, then probe it — should report busy.
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+// TestBuildSharedP2PConfig_NodeDatabaseUnified verifies that the shared
+// config uses a single nodes/eth path regardless of how many protocol
+// versions are configured.
+func TestBuildSharedP2PConfig_NodeDatabaseUnified(t *testing.T) {
+	// t.TempDir() gives an OS-native path; build the expected suffix with
+	// filepath.Join so the assertion holds on Windows (\) as well as Unix.
+	dir := t.TempDir()
+	p := &Provider{
+		logger: log.Root(),
+		cfg: Config{
+			NodesDir: dir,
+			P2P: p2p.Config{
+				ListenAddr: ":30303",
+			},
+		},
+	}
+	cfg := p.buildSharedP2PConfig()
+	require.Equal(t, filepath.Join(dir, "eth"), cfg.NodeDatabase)
+}
+
+// TestStartSharedP2PServer_ErrsOnEmptyServers documents the precondition.
+func TestStartSharedP2PServer_ErrsOnEmptyServers(t *testing.T) {
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	cfg := p2p.Config{}
+	err := p.startSharedP2PServer(&cfg, nil, "")
+	require.Error(t, err)
+}
+
+// TestStartSharedP2PServer_DedupesAndInjects is the integration test for
+// the central wiring: protocols collected from all GrpcServers are
+// deduplicated by (name, version), the shared p2p.Server is started once,
+// and that same Server is injected into every GrpcServer. Each GrpcServer
+// then reports peers from its own goodPeers subset — there is no
+// designated "reporter" sentry.
+func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
+	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	defer l.Close()
 
-	busyAddr := l.Addr().String()
-	require.False(t, checkPortIsFree(busyAddr), "port with active listener should report busy")
+	first := helperGrpcServerWithProtocols(
+		p2p.Protocol{Name: "eth", Version: 71, Length: 17},
+		p2p.Protocol{Name: "wit", Version: 0, Length: 5},
+	)
+	second := helperGrpcServerWithProtocols(
+		p2p.Protocol{Name: "eth", Version: 70, Length: 17},
+		p2p.Protocol{Name: "wit", Version: 0, Length: 5}, // duplicate, must be dropped
+	)
 
-	// Close the listener and probe again — should now report free.
-	// (The OS may not immediately free the port; this is a soft check.)
-	require.NoError(t, l.Close())
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	p.Servers = []*sentry.GrpcServer{first, second}
 
-	// Probe a very unlikely port (high ephemeral range with no listener).
-	// This is inherently racy but reliable enough in test contexts.
-	require.True(t, checkPortIsFree("127.0.0.1:1"), "port 1 should be free in test env")
+	cfg := p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+	}
+	require.NoError(t, p.startSharedP2PServer(&cfg, nil, ""))
+	t.Cleanup(func() { p.Close() })
+
+	require.NotNil(t, p.sharedP2PServer)
+	require.Len(t, cfg.Protocols, 3, "eth/71, eth/70, wit/0 — wit deduped")
+
+	require.Same(t, p.sharedP2PServer, first.GetP2PServer())
+	require.Same(t, p.sharedP2PServer, second.GetP2PServer())
+}
+
+// TestProviderClose_StopsSharedP2PServer mirrors the GrpcServer-side test:
+// Provider.Close must stop the shared p2p.Server it created (GrpcServer.Close
+// is a no-op for external servers by design). We bind an ephemeral listener
+// and dial it before/after Close — the connection must be refused once the
+// Provider has shut the listener down. Avoids relying on Start-after-Stop,
+// which p2p.Server documents as unsupported.
+func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	first := helperGrpcServerWithProtocols(
+		p2p.Protocol{Name: "eth", Version: 71, Length: 17},
+	)
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	p.Servers = []*sentry.GrpcServer{first}
+
+	cfg := p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+		ListenAddr:      "127.0.0.1:0",
+	}
+	require.NoError(t, p.startSharedP2PServer(&cfg, nil, ""))
+	srv := p.sharedP2PServer
+	require.NotNil(t, srv)
+
+	addr := srv.NodeInfo().ListenAddr
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	require.NoError(t, err, "listener should be up before Close")
+	c.Close()
+
+	require.NoError(t, p.Close())
+	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
+
+	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
 }

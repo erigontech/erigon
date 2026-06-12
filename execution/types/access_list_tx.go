@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -425,7 +424,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 }
 
 type accessListTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasPrice   *uint256.Int
 	Gas        uint64
@@ -435,7 +434,7 @@ type accessListTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *AccessListTx) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
 		&accessListTxSigHash{

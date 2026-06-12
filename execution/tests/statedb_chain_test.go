@@ -49,7 +49,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				ByzantiumBlock:        new(uint64),
 				ConstantinopleBlock:   new(uint64),

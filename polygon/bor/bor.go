@@ -360,7 +360,8 @@ func New(
 		accounts.ZeroAddress,
 		func(_ accounts.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: common.Address{}.Bytes()}
+			zeroAddr := common.Address{}
+			return nil, &heimdall.UnauthorizedSignerError{Number: 0, Signer: zeroAddr[:]}
 		},
 	})
 
@@ -849,7 +850,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 
 			for addr, account := range allocs {
 				c.logger.Trace("[bor] change contract code", "address", addr)
-				state.SetCode(accounts.InternAddress(addr), account.Code)
+				state.SetCode(accounts.InternAddress(addr), account.Code, tracing.CodeChangeUnspecified)
 			}
 		}
 	}

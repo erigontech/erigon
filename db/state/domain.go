@@ -157,16 +157,31 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if domainExistenceForceInMem {
+	switch {
+	case domainExistenceForceWillNeed:
+		accessor.ForceExistenceFilterWillNeed()
+	case domainExistenceForceNormal:
+		accessor.ForceExistenceFilterNormal()
+	case domainExistenceForceInMem:
 		accessor.ForceExistenceFilterInRAM()
 	}
-	if domainExistenceForceWillNeed {
-		accessor.ForceExistenceFilterWillNeed()
-	}
-	if domainExistenceForceNormal {
-		accessor.ForceExistenceFilterNormal()
-	}
 	return accessor, nil
+}
+
+func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
+	filter, err := existence.OpenFilter(fPath, false)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case domainExistenceForceWillNeed:
+		filter.MadvWillNeed()
+	case domainExistenceForceNormal:
+		filter.MadvNormal()
+	case domainExistenceForceInMem:
+		filter.ForceInMem()
+	}
+	return filter, nil
 }
 
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
@@ -551,10 +566,8 @@ func (d *Domain) beginForTests() *DomainRoTx {
 }
 
 // beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
-// aggregatorVisible generation, avoiding a torn cross-entity read.
+// aggregatorVisible generation, avoiding a torn cross-entity read
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	dv.files.refcntIncrement()
-
 	return &DomainRoTx{
 		name:              d.Name,
 		stepSize:          d.stepSize,
@@ -1427,9 +1440,7 @@ func (dt *DomainRoTx) Close() {
 		return
 	}
 	dt.closeValsCursor()
-	files := dt.files
 	dt.files = nil
-	files.refcntDecrement(dt.d.FilenameBase, dt.d.logger)
 	for _, r := range dt.mapReaders {
 		r.Close()
 	}
@@ -1476,7 +1487,7 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		dt.mapReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
 	if dt.mapReaders[i] == nil {
-		dt.mapReaders[i] = dt.files[i].src.index.GetReaderFromPool()
+		dt.mapReaders[i] = dt.files[i].src.index.Reader()
 	}
 	return dt.mapReaders[i]
 }
@@ -1882,7 +1893,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
-	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
+	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
 		return stat, err

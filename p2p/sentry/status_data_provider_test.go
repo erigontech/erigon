@@ -2,7 +2,6 @@ package sentry
 
 import (
 	"context"
-	"math/big"
 	"testing"
 	"time"
 
@@ -46,7 +45,7 @@ func seedTestHeader(t *testing.T, db kv.RwDB, number uint64, difficulty uint64) 
 	defer tx.Rollback()
 
 	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteTd(tx, hash, number, big.NewInt(int64(difficulty))))
+	require.NoError(t, rawdb.WriteTd(tx, hash, number, *uint256.NewInt(uint64(difficulty))))
 	rawdb.WriteHeadBlockHash(tx, hash)
 	require.NoError(t, tx.Commit())
 

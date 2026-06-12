@@ -293,19 +293,17 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	return ourCapabilities
 }
 
-func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {
 		return nil, err
 	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV1); ok {
-		return ret, err
-	}
-	return nil, err
+	ret, _ := resp.([]*engine_types.BlobAndProofV1)
+	return engine_types.BlobsBundleV1(ret), nil
 }
 
-func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
 	// GetBlobsV2 was actually introduced in Fusaka,
 	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
@@ -313,20 +311,16 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
-		return ret, err
-	}
-	return nil, err
+	ret, _ := resp.([]*engine_types.BlobAndProofV2)
+	return engine_types.BlobsBundleV2(ret), nil
 }
 
-func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err
 	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
-		return ret, err
-	}
-	return nil, err
+	ret, _ := resp.([]*engine_types.BlobAndProofV2)
+	return engine_types.BlobsBundleV2(ret), nil
 }

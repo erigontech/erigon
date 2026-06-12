@@ -513,6 +513,9 @@ func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersS
 // [New in Gloas:EIP7732]
 func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	signedBid := block.GetBody().GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("processExecutionPayloadBid: signed bid or bid message is nil")
+	}
 	bid := signedBid.Message
 	builderIndex := bid.BuilderIndex
 	amount := bid.Value
@@ -727,6 +730,9 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 // [New in Gloas:EIP7732]
 func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (bool, error) {
 	builders := s.GetBuilders()
+	if builders == nil || signedBid.Message.BuilderIndex >= uint64(builders.Len()) {
+		return false, fmt.Errorf("builder index %d out of range", signedBid.Message.BuilderIndex)
+	}
 	builder := builders.Get(int(signedBid.Message.BuilderIndex))
 
 	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, state.Epoch(s))
@@ -746,8 +752,14 @@ func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltyp
 // ProcessExecutionPayloadEnvelope processes the execution payload envelope for the Gloas fork.
 // [New in Gloas:EIP7732]
 func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: signed envelope or envelope message is nil")
+	}
 	envelope := signedEnvelope.Message
 	payload := envelope.Payload
+	if payload == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: envelope has nil payload")
+	}
 
 	// Verify signature
 	if I.FullValidation {
@@ -801,6 +813,9 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 
 	// Verify consistency with the committed bid
 	committedBid := s.GetLatestExecutionPayloadBid()
+	if committedBid == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: state has no latest execution payload bid")
+	}
 	if envelope.BuilderIndex != committedBid.BuilderIndex {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: builder_index %d != committed bid builder_index %d", envelope.BuilderIndex, committedBid.BuilderIndex)
 	}
@@ -842,7 +857,13 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 
 	// Verify consistency with expected withdrawals
 	payloadWithdrawals := payload.Withdrawals
+	if payloadWithdrawals == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: payload has nil withdrawals")
+	}
 	expectedWithdrawals := s.GetPayloadExpectedWithdrawals()
+	if expectedWithdrawals == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: state has nil expected withdrawals")
+	}
 	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash payload withdrawals: %w", err)
@@ -1640,9 +1661,7 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
 		_, isExistingValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
 		hasBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
-		// Check if there's a pending deposit with valid signature for this pubkey
-		isPendingValidator := state.IsPendingValidator(s, depositRequest.PubKey)
-		// isValidator includes both existing validators and pending validators with valid signatures
+		isPendingValidator := state.IsPendingValidator(s.BeaconConfig(), s.GetPendingDeposits(), depositRequest.PubKey)
 		isValidator := isExistingValidator || isPendingValidator
 
 		if isBuilder || (hasBuilderPrefix && !isValidator) {

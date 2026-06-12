@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -73,7 +72,7 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
-	SigningHash(chainID *big.Int) common.Hash
+	SigningHash(chainID *uint256.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
 	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
