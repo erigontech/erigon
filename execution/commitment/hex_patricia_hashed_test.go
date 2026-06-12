@@ -257,8 +257,32 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTrace(false)
 
-	// generate list of updates diverging from first nibble (good case for parallelization))
-	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 150)
+	// generate list of updates diverging from first nibble (good case for parallelization).
+	// Use a local fixed-seed RNG instead of generatePlainKeysWithSameHashPrefix: that helper
+	// seeds from a package-global counter shared by parallel tests, so the key set (and the
+	// resulting trie shape) depended on test interleaving and occasionally violated the
+	// CanDoConcurrentNext precondition (issue #21715). Seed 45 yields hashed keys covering
+	// all 16 first nibbles, with 13 keys under first nibble 0 diverging in 11 second nibbles.
+	rnd := rand.New(rand.NewSource(45))
+	plainKeysList := make([][]byte, 150)
+	firstNibbles := make(map[byte]struct{})      // distinct first nibbles of hashed keys
+	zeroSecondNibbles := make(map[byte]struct{}) // distinct second nibbles of hashed keys with first nibble 0
+	for i := range plainKeysList {
+		plainKeysList[i] = make([]byte, length.Addr)
+		rnd.Read(plainKeysList[i])
+		hashed := KeyToHexNibbleHash(plainKeysList[i])
+		firstNibbles[hashed[0]] = struct{}{}
+		if hashed[0] == 0 {
+			zeroSecondNibbles[hashed[1]] = struct{}{}
+		}
+	}
+	// CanDoConcurrentNext requires a root branch without extension (>=2 distinct first nibbles)
+	// and a branch node at nibble path [0] (>=2 keys under first nibble 0 diverging at the
+	// second nibble). Guard the fixture so a future change to key generation fails loudly here
+	// instead of flaking on the canParallel assertion below.
+	require.GreaterOrEqual(t, len(firstNibbles), 2, "fixture must hash to >=2 distinct first nibbles (root branch without extension)")
+	require.GreaterOrEqual(t, len(zeroSecondNibbles), 2, "fixture must have >=2 keys with first hashed nibble 0 diverging at the second nibble (branch at path [0])")
+
 	builder := NewUpdateBuilder()
 	for i := 0; i < len(plainKeysList); i++ {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))

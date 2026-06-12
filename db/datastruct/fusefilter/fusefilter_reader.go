@@ -308,13 +308,8 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 	return s.ContainsHash(v)
 }
 
-// ForceInMem clones the entire mmap region into anonymous heap memory in a
-// single allocation, then re-points each shard's Fingerprints slice into the
-// clone at the same byte offset. Avoids 256 separate allocations.
+// ForceInMem clones each shard's fingerprints into anonymous heap memory.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
-	if len(r.m) == 0 {
-		return 0
-	}
 	var res datasize.ByteSize
 	for i := range r.shards {
 		res += r.shards[i].ForceInMem()
