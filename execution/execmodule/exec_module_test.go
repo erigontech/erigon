@@ -356,17 +356,24 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 // fix it could race the next FCU's RunLoop, skip the execution stage and leave
 // the head behind ("Invalid chain after execution"). Run under -race.
 func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
-	for _, bgPrune := range []bool{false, true} {
-		name := "fg-prune"
+	modes := []struct {
+		name string
+		opt  execmoduletester.Option
+	}{
+		{name: "fg-prune"},
+		// bg-prune matches the hive erigon default (FcuBackgroundPrune=true): the
+		// background prune shares the pipeline sync with the next FCU's RunLoop.
+		// bg-commit hands the semaphore to its goroutine the same way; in both
+		// modes the handoff must not overlap the FCU goroutine's cleanup.
+		{name: "bg-prune", opt: execmoduletester.WithFcuBackgroundPrune()},
+		{name: "bg-commit", opt: execmoduletester.WithFcuBackgroundCommit()},
+	}
+	for _, mode := range modes {
 		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
-		if bgPrune {
-			// Match the hive erigon default (FcuBackgroundPrune=true): the
-			// background prune shares the pipeline sync with the next FCU's
-			// RunLoop, which is the access the fix serializes via the semaphore.
-			name = "bg-prune"
-			opts = append(opts, execmoduletester.WithFcuBackgroundPrune())
+		if mode.opt != nil {
+			opts = append(opts, mode.opt)
 		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(mode.name, func(t *testing.T) {
 			ctx := t.Context()
 			m := execmoduletester.New(t, opts...)
 
@@ -408,8 +415,8 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 				require.Equalf(t, h.Hash(), fwd.LatestValidHash, "forward re-org should make block %d the head", n)
 			}
 
-			// Let the last FCU's foreground commit and background prune settle
-			// before reading the committed head.
+			// Let the last FCU's commit and prune (foreground or background)
+			// settle before reading the committed head.
 			m.ExecModule.WaitIdle(ctx)
 			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
