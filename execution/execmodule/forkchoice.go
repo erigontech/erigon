@@ -666,12 +666,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
 		// so the next acquirer observes settled state whenever it gets in.
-		handOffSemaphore := func(work func()) {
+		handOffSemaphore := func(work func() error) {
 			shouldReleaseSema = false
 			cleanupBeforeSemaRelease()
 			go func() {
 				defer e.semaphore.Release(1)
-				work()
+				if err := work(); err != nil && !errors.Is(err, context.Canceled) {
+					e.logger.Error("Error running background post forkchoice", "err", err)
+				}
 			}()
 		}
 
@@ -684,21 +686,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			bgRoTx, bgSD := roTx, currentContext
 			roTx, currentContext = nil, nil
 			dispatcher := e.pipelineExecutor.Dispatcher()
-			handOffSemaphore(func() {
+			handOffSemaphore(func() error {
 				defer bgSD.Close()
 				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
 				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
 				// defer is a safety net — Rollback is idempotent.
 				defer bgRoTx.Rollback()
 				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					e.logger.Error("Error running background post forkchoice", "err", err)
-				}
 				// Signal that the DB commit is done — RPC consumers can
 				// drop their SD reference and read from committed DB.
 				if dispatcher != nil {
 					dispatcher.PublishOverlay(nil)
 				}
+				return err
 			})
 		} else {
 			// Foreground commit: pass the outer roTx so it gets released
@@ -717,11 +717,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				// Prune doesn't use the overlay/SD — tear down eagerly to free
 				// the RAM now and keep the outer defer out of the next FCU's way.
 				teardownOverlay()
-				handOffSemaphore(func() {
-					err := e.runPostForkchoice(nil, nil, finishProgressBefore, isSynced, initialCycle)
-					if err != nil && !errors.Is(err, context.Canceled) {
-						e.logger.Error("Error running background post forkchoice", "err", err)
-					}
+				handOffSemaphore(func() error {
+					return e.runPostForkchoice(nil, nil, finishProgressBefore, isSynced, initialCycle)
 				})
 			} else {
 				pruneTimings, err := e.runForkchoicePrune(initialCycle)
