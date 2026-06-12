@@ -39,7 +39,7 @@ import (
 
 var (
 	balsCacheLimit      = dbg.EnvInt("BAL_LRU", 1024) // ~100KiB avg encoded BAL → ~100MB RAM
-	balsExecConcurrency = dbg.EnvInt("BAL_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
+	balsExecConcurrency = max(1, dbg.EnvInt("BAL_EXEC_CONCURRENCY", runtime.GOMAXPROCS(0)/2))
 )
 
 // Regenerator reproduces Block Access Lists for blocks whose stored copy has
