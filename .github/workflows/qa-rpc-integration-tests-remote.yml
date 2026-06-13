@@ -89,14 +89,13 @@ jobs:
           ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR --persist.receipts --prune.experimental.include-commitment-history --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
 
           ERIGON_PID=$!          
-          ERIGON_EXIT_STATUS=$?
           echo "ERIGON_PID=$ERIGON_PID" >> $GITHUB_ENV
           echo "erigon_started=true" >> $GITHUB_OUTPUT
           
           sleep 15
           tail erigon.log
           
-          if [ $ERIGON_EXIT_STATUS -ne 0 ]; then            
+          if ! kill -0 "$ERIGON_PID" 2> /dev/null; then
             echo "Erigon failed to start"
             echo "::error::Error detected during tests: Erigon failed to start"
             exit 1
@@ -111,14 +110,13 @@ jobs:
           ./rpcdaemon --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > rpcdaemon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
-          RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
           tail rpcdaemon.log
           
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
+          if ! kill -0 "$RPC_DAEMON_PID" 2> /dev/null; then
             echo "RpcDaemon failed to start"
             echo "::error::Error detected during tests: RpcDaemon failed to start"
             exit 1
