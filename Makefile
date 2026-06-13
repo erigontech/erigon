@@ -17,12 +17,15 @@ DOCKER_BINARIES ?= "erigon"
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
 
-# Use git tag value for "release/" branches only. Otherwise it make no sense.
-ifeq (,$(findstring release/,$(GIT_BRANCH)))
-  GIT_TAG	:= .
-endif
+# GIT_TAG is the exact release tag at HEAD (e.g. v3.5.0) when building from a
+# tagged release, and empty otherwise. It is build provenance only; the
+# advertised version comes from db/version (see NodeVersion). Earlier this used
+# `git describe`, which on an untagged branch anchored to an unrelated older
+# tag and produced a misleading value. The grep allowlist keeps untrusted tag
+# names (git refs permit shell metacharacters) out of the -ldflags shell line.
+# Override via the environment.
+GIT_TAG    ?= $(shell git tag --points-at HEAD --list 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$' | head -n 1)
 
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
@@ -272,9 +275,9 @@ test-fixtures-zkevm:
 # .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
 # "-race" dispatch through the race-instrumented evm.race binary so race
-# coverage works without polluting the non-race shards. zkevm-* shards provision
-# the eest_zkevm corpus (test-fixtures-zkevm); all others provision the
-# eest_{stable,devnet,benchmark} corpora (test-fixtures-eest).
+# coverage works without polluting the non-race shards. Each shard provisions
+# only its own fixture set (via tools/run-eest-spec-test.sh); all corpora
+# together are 20G+ extracted and don't fit on the smaller CI runner disks.
 .PHONY: evm.race
 evm.race:
 	$(GO_BUILD_ENV) $(GO) build -race $(GO_FLAGS) -tags $(BUILD_TAGS) -o $(GOBIN)/evm.race ./cmd/evm
@@ -284,23 +287,15 @@ evm.race:
 ifneq ($(filter eest-spec-%,$(MAKECMDGOALS)),)
 $(call check_tools,yq jq,eest-spec targets)
 
-EEST_SPEC_RACE_SHARDS       := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race")) | select(test("^zkevm") | not)')
-EEST_SPEC_SHARDS            := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race") | not) | select(test("^zkevm") | not)')
-EEST_SPEC_ZKEVM_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race"))')
-EEST_SPEC_ZKEVM_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("^zkevm")) | select(test("-race") | not)')
+EEST_SPEC_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race"))')
+EEST_SPEC_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race") | not)')
 
-.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_RACE_SHARDS))
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS))
 
-$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
+$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: evm
 	@bash tools/run-eest-spec-test.sh "$*"
 
-$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
-	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
-
-$(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_SHARDS)): eest-spec-%: test-fixtures-zkevm evm
-	@bash tools/run-eest-spec-test.sh "$*"
-
-$(addprefix eest-spec-,$(EEST_SPEC_ZKEVM_RACE_SHARDS)): eest-spec-%: test-fixtures-zkevm evm.race
+$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 endif
 

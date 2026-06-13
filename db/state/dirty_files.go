@@ -420,7 +420,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
-				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				if item.index, err = d.openHashMapAccessor(fPath); err != nil {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -452,7 +452,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
-				if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+				if item.existence, err = d.openExistenceFilter(fPath); err != nil {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -525,7 +525,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 			if ok {
 				fName := filepath.Base(fPath)
 				h.FileVersion.AccessorVI.MustSupport(fileVer, fName)
-				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				if item.index, err = h.openHashMapAccessor(fPath); err != nil {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -588,7 +588,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 			if ok {
 				fName := filepath.Base(fPath)
 				ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
-				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}

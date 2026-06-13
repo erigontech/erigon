@@ -1,7 +1,7 @@
 ---
 title: "TLS Authentication"
 description: "Mutual TLS setup for securing gRPC and RPC daemon endpoints."
-sidebar_position: 13
+sidebar_position: 18
 ---
 
 
@@ -102,9 +102,9 @@ On the RPC Daemon machine, these three files must also be placed in the /erigon 
 
 `CA-cert.pem`
 
-`RPC key.pem`
+`RPC-key.pem`
 
-`RPC.crtv`
+`RPC.crt`
 
 ## 6. Run Erigon and RPC Daemon with the correct tags
 
