@@ -124,9 +124,18 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		}
 	}
 
-	if err := rawdb.TruncateTd(tx, toBlock+1); err != nil {
-		return fmt.Errorf("TruncateTd(%d): %w", toBlock+1, err)
-	}
+	// kv.HeaderTD is intentionally NOT truncated. TD records are
+	// hash-keyed and idempotent (same hash → same TD always), and
+	// Caplin's BlockCollector consults them for parent.TD when
+	// inserting the first block past the unwind target. Wiping them
+	// across the post-toBlock range removes the parent.TD entry for
+	// the immediate-post-snapshot block, which produces a
+	// "parent's total difficulty not found" wedge that no FCU nudge
+	// can recover from (the chain's growth path requires that TD).
+	// See execution/stagedsync/rawdbreset/reset_stages.go for the
+	// matching design rule. The orphan TD entries past the canonical
+	// post-unwind head are inert — they don't affect canonical
+	// assignment and don't block startup checks.
 
 	// Reset every chain-block-following stage's progress to toBlock.
 	// Stages whose progress tracks the chain head — Headers, Bodies,

@@ -141,7 +141,6 @@ func TestUnwindDBPastBlock_PreservesHeadersForBlocksUpToTarget(t *testing.T) {
 
 	require.NoError(t, deleteHeaderNumbersPastBlock(tx, toBlock))
 	require.NoError(t, rawdb.TruncateBlocks(ctx, tx, toBlock+1))
-	require.NoError(t, rawdb.TruncateTd(tx, toBlock+1))
 
 	// Survival check: every block 0..toBlock must still have a kv.Headers
 	// row at its composite key (num || hash).
@@ -198,9 +197,14 @@ func TestUnwindDBPastBlock_CoreTablesAreEmptyPastTarget(t *testing.T) {
 
 	require.NoError(t, deleteHeaderNumbersPastBlock(tx, toBlock))
 	require.NoError(t, rawdb.TruncateBlocks(ctx, tx, toBlock+1))
-	require.NoError(t, rawdb.TruncateTd(tx, toBlock+1))
 
-	tables := []string{kv.Headers, kv.BlockBody, kv.HeaderTD}
+	// kv.HeaderTD is intentionally NOT wiped by unwindDBPastBlock — it
+	// is hash-keyed, idempotent, and consulted by Caplin's
+	// BlockCollector for parent.TD when inserting forward blocks. The
+	// startup wedge that motivated the wipe was in kv.Headers (which
+	// TruncateBlocks handles); HeaderTD orphans past toBlock are
+	// inert. See TestUnwindDBPastBlock_PreservesHeaderTDForCaplinParentLookup.
+	tables := []string{kv.Headers, kv.BlockBody}
 	for _, table := range tables {
 		c, err := tx.Cursor(table) //nolint:gocritic // explicit close at end of loop body; defer would accumulate cursors across the loop
 		require.NoError(t, err)
@@ -225,5 +229,61 @@ func TestUnwindDBPastBlock_CoreTablesAreEmptyPastTarget(t *testing.T) {
 		got, err := tx.GetOne(kv.HeaderNumber, func() []byte { h := hashAt(n); return h[:] }())
 		require.NoError(t, err)
 		require.NotEmpty(t, got, "HeaderNumber at block %d (≤ toBlock) must survive", n)
+	}
+}
+
+// TestUnwindDBPastBlock_PreservesHeaderTDForCaplinParentLookup pins
+// the design rule: kv.HeaderTD MUST NOT be wiped by the post-toBlock
+// truncation sequence. TD records are hash-keyed and idempotent, and
+// Caplin's BlockCollector reads them as parent.TD when inserting the
+// first block past the unwind target. Live-caught 2026-06-13 on hoodi:
+// mode-B unwind to 2,993,949 wiped TD(2,993,999) which had been
+// populated by FillDBFromSnapshots; Caplin then tried to insert block
+// 2,994,000 whose parent is the canonical 2,993,999 and the EL
+// returned "parent's total difficulty not found with hash <h> and
+// height 2993999" — no FCU nudge could recover.
+//
+// Replicates the helpers unwindDBPastBlock invokes (deleteHeaderNumbersPastBlock
+// + TruncateBlocks) and asserts that every seeded HeaderTD entry past
+// toBlock survives — pre-fix this test would fail because
+// unwindDBPastBlock called rawdb.TruncateTd(toBlock+1).
+func TestUnwindDBPastBlock_PreservesHeaderTDForCaplinParentLookup(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+
+	hashAt := func(n uint64) common.Hash {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[:8], n)
+		copy(h[24:], "td-preserve-pad")
+		return h
+	}
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const toBlock = uint64(100)
+	for n := uint64(0); n <= 110; n++ {
+		seedHeaderAt(t, tx, n, hashAt(n))
+	}
+
+	require.NoError(t, deleteHeaderNumbersPastBlock(tx, toBlock))
+	require.NoError(t, rawdb.TruncateBlocks(ctx, tx, toBlock+1))
+
+	// Past-toBlock HeaderTD entries — the boundary block 101 is the
+	// critical one Caplin's BlockCollector reads when inserting block
+	// 102's parent TD. Every seeded TD past toBlock must survive
+	// because they were written canonically (FillDBFromSnapshots
+	// would have re-written them on boot, but Provider.Unwind runs
+	// during normal operation and there's no rebuild step after).
+	for n := toBlock + 1; n <= 110; n++ {
+		td, err := rawdb.ReadTd(tx, hashAt(n), n)
+		require.NoError(t, err)
+		require.NotNil(t, td,
+			"kv.HeaderTD at block %d (> toBlock=%d) MUST survive — Caplin's BlockCollector needs parent.TD for forward insertion",
+			n, toBlock)
+		require.Equal(t, uint256.NewInt(n*10), td,
+			"kv.HeaderTD value at block %d must match the seeded difficulty", n)
 	}
 }
