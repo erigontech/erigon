@@ -35,11 +35,16 @@ func keccak256(ds ...[]byte) []byte {
 }
 
 func hashWithPrefix(p byte, b []byte) []byte {
-	return keccak256(append([]byte{p}, b...))
+	buf := make([]byte, 1+len(b))
+	buf[0] = p
+	copy(buf[1:], b)
+	return keccak256(buf)
 }
 
 func Hash1(b []byte) *blst.P1Affine {
-	bWithPrefix := append([]byte{1}, b...)
+	bWithPrefix := make([]byte, 1+len(b))
+	bWithPrefix[0] = 1
+	copy(bWithPrefix[1:], b)
 	p := blst.HashToG1(bWithPrefix, []byte(HashToG1DST))
 	return p.ToAffine()
 }
