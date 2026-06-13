@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -32,7 +33,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -52,6 +52,13 @@ const BtreeLogPrefix = "btree"
 var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
+const (
+	// old layout: [EF][nodesCount(8)][nodes...]; EF count's MSB is always 0x00 for realistic datasets.
+	btIndexVersion0 = byte(0x00)
+	// new layout: [version][nodesCount(8)][nodes...][EF]; nodes stream during ETL Load, EF written last.
+	btIndexVersion1 = byte(0x01)
+)
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
@@ -169,12 +176,13 @@ func (c *Cursor) readKV() error {
 }
 
 type BtIndexWriter struct {
-	maxOffset  uint64
-	prevOffset uint64
-	minDelta   uint64
-	indexF     *os.File
-	ef         *eliasfano32.EliasFano
-	collector  *etl.Collector
+	maxOffset    uint64
+	prevOffset   uint64
+	minDelta     uint64
+	indexF       *os.File
+	ef           *eliasfano32.EliasFano
+	collector    *etl.Collector
+	nodesWritten uint64 // count of M-th keys kept as B-tree nodes
 
 	args BtIndexWriterArgs
 
@@ -244,6 +252,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 	var k []byte
 	if keepKey {
 		k = key
+		btw.nodesWritten++
 	}
 
 	if err := btw.collector.Collect(btw.numBuf[:], k); err != nil {
@@ -271,17 +280,39 @@ func (btw *BtIndexWriter) Build() error {
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
 	if btw.keysWritten > 0 {
-		btw.ef = eliasfano32.NewEliasFano(btw.keysWritten, btw.maxOffset)
+		efBuilder, err := eliasfano32.NewEliasFanoOffHeap(btw.keysWritten, btw.maxOffset, btw.args.TmpDir)
+		if err != nil {
+			return fmt.Errorf("[index] create offheap ef: %w", err)
+		}
+		defer efBuilder.Close()
+		btw.ef = efBuilder.EliasFano
 
-		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
+		if _, err = indexW.Write([]byte{btIndexVersion1}); err != nil {
+			return fmt.Errorf("[index] write version: %w", err)
+		}
+		binary.BigEndian.PutUint64(btw.numBuf[:], btw.nodesWritten)
+		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
+			return fmt.Errorf("[index] write nodes count: %w", err)
+		}
+		var nodeBuf [10]byte // di (8) + keyLen (2)
 		var ki uint64
 		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
 
-			if len(k) > 0 { // for every M-th key, keep the key
-				nodes = append(nodes, Node{key: common.Copy(k), di: ki})
+			if len(k) > 0 {
+				if len(k) > math.MaxUint16 {
+					return fmt.Errorf("[index] node key too long: %d bytes", len(k))
+				}
+				binary.BigEndian.PutUint64(nodeBuf[:8], ki)
+				binary.BigEndian.PutUint16(nodeBuf[8:10], uint16(len(k)))
+				if _, werr := indexW.Write(nodeBuf[:10]); werr != nil {
+					return fmt.Errorf("[index] write node header: %w", werr)
+				}
+				if _, werr := indexW.Write(k); werr != nil {
+					return fmt.Errorf("[index] write node key: %w", werr)
+				}
 			}
-			ki++ // we need to keep key ordinal so count every key
+			ki++
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
@@ -290,9 +321,6 @@ func (btw *BtIndexWriter) Build() error {
 
 		if err := btw.ef.Write(indexW); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
-		}
-		if err = encodeListNodes(nodes, indexW); err != nil {
-			return fmt.Errorf("[index] write nodes: %w", err)
 		}
 	}
 
@@ -497,30 +525,41 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	idx.data = idx.m[:idx.size]
 
 	var pos int
-	if len(idx.data[pos:]) == 0 {
-		return idx, nil
+	var nodes []Node
+	switch idx.data[pos] {
+	case btIndexVersion1:
+		pos++
+		var nodesBytes int
+		nodes, nodesBytes, err = decodeListNodes(idx.data[pos:])
+		if err != nil {
+			return nil, err
+		}
+		pos += nodesBytes
+		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
+	case btIndexVersion0:
+		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
+		if len(idx.data[pos:]) > 0 {
+			nodes, _, err = decodeListNodes(idx.data[pos:])
+			if err != nil {
+				return nil, err
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported btree index version %d in %s: upgrade Erigon", idx.data[pos], indexPath)
 	}
 
-	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
-	idx.pool = sync.Pool{}
 	idx.pool.New = func() any {
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if len(idx.data[pos:]) == 0 {
+	if len(nodes) == 0 {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
-		idx.bplus.cursorGetter = idx.newCursor
-		// fallback for files without nodes encoded
 	} else {
-		nodes, err := decodeListNodes(idx.data[pos:])
-		if err != nil {
-			return nil, err
-		}
 		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, nodes)
-		idx.bplus.cursorGetter = idx.newCursor
 	}
+	idx.bplus.cursorGetter = idx.newCursor
 
 	validationPassed = true
 	return idx, nil
