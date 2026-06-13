@@ -470,13 +470,16 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
-	// connect to static peers every one minute
 	go func() {
 		for {
 			if err := s.connectWithAllPeers(peers); err != nil {
 				log.Debug("[Sentinel] Could not connect with static peers", "err", err)
 			}
-			time.Sleep(3 * time.Minute)
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(3 * time.Minute):
+			}
 		}
 	}()
 }
