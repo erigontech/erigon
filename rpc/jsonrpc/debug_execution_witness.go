@@ -712,8 +712,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Build merkle proofs for all accessed accounts
-	// Use the proof infrastructure from the commitment context
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
+	// Use the proof infrastructure from the commitment context.
+	// Witness generation requires the sequential HexPatriciaHashed (Witness()
+	// type-asserts it); the parallel trie cannot serve it.
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
@@ -1303,8 +1305,9 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	expectedState := make(map[common.Address]*accounts.Account)
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
-	// Create commitment context for accurate storage roots (since they are not stored explicitly)
-	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
+	// Create commitment context for accurate storage roots (since they are not stored explicitly).
+	// Witness/proof generation requires the sequential HexPatriciaHashed; force it.
+	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
 	}

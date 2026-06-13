@@ -67,6 +67,13 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	return val, true, nil
 }
 
+// storageEnumerator lists every storage slot the persisted trie holds under
+// an address, so a self-destruct deletes the whole subtree — matching
+// serial's DomainDelPrefix — not just the slots the EVM touched this block.
+type storageEnumerator interface {
+	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
+}
+
 // calcState is the commitment calculator's local state accumulator.
 // It maintains the current state for every account/storage key that has been
 // touched. On first touch, values are lazy-loaded from the domain via the
@@ -81,6 +88,10 @@ type calcState struct {
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
+
+	// storageEnum enumerates an account's persisted storage subtree for
+	// self-destruct. Nil in tests that don't exercise the subtree wipe.
+	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
 	// ensureStorage. Sticky — never cleared — so the calculator can fail the
@@ -104,6 +115,7 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
+		storageEnum:  &asOfStorageEnumerator{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
 	}
@@ -282,17 +294,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				acc.Nonce = 0
 				acc.CodeHash = empty.CodeHash
 				acc.Incarnation = 0
-				// Zero every tracked storage slot and mark dirty so
-				// FlushToUpdates emits DeleteUpdate per slot.
-				if slots, ok := cs.storageState[w.Address]; ok {
-					if cs.storageDirty[w.Address] == nil {
-						cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
-					}
-					for key := range slots {
-						slots[key] = uint256.Int{}
-						cs.storageDirty[w.Address][key] = true
-					}
-				}
+				cs.deleteStorageSubtree(w.Address)
 			}
 		case state.StoragePath:
 			v := w.Val.(uint256.Int)
@@ -306,6 +308,49 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc := cs.ensureAccount(w.Address)
 			acc.Incarnation = w.Val.(uint64)
 			acc.dirty = true
+		}
+	}
+}
+
+// deleteStorageSubtree zeroes and dirties every storage slot under a
+// self-destructed account so FlushToUpdates emits DeleteUpdate per slot,
+// matching serial's DomainDelPrefix(StorageDomain, addr). It covers both the
+// slots already tracked this block and the untouched on-disk slots the EVM
+// never read (which therefore never entered the writes stream); the latter
+// are pulled from the persisted subtree via storageEnum. A later same-block
+// write to a recreated slot overwrites the zero via last-write-wins.
+func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
+	slots := cs.storageState[addr]
+	if slots == nil {
+		slots = make(map[accounts.StorageKey]uint256.Int)
+		cs.storageState[addr] = slots
+	}
+	dirty := cs.storageDirty[addr]
+	if dirty == nil {
+		dirty = make(map[accounts.StorageKey]bool)
+		cs.storageDirty[addr] = dirty
+	}
+	for key := range slots {
+		slots[key] = uint256.Int{}
+		dirty[key] = true
+	}
+	if cs.storageEnum == nil {
+		return
+	}
+	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
+		if _, ok := slots[key]; !ok {
+			slots[key] = uint256.Int{}
+			dirty[key] = true
+		}
+		return nil
+	}); err != nil {
+		// Sticky — a partial subtree wipe yields a wrong root, so fail the
+		// next compute rather than silently leaving stale slots.
+		if cs.lazyLoadErr == nil {
+			cs.lazyLoadErr = fmt.Errorf("deleteStorageSubtree(%x): %w", addr.Value(), err)
+		}
+		if cs.logger != nil {
+			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
 		}
 	}
 }
