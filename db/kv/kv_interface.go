@@ -297,6 +297,22 @@ type RwCursorDupSort interface {
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
+
+	// DeleteKeysBefore deletes all rows (across all dup values) whose primary
+	// key is strictly less than k. Returns the number of dup values deleted.
+	// Atomic on the cursor — does not call the application loop.
+	DeleteKeysBefore(k []byte) (uint64, error)
+
+	// DeleteDupBefore deletes all dup values of `key` whose bytes are strictly
+	// less than `val`. Returns the number of dup values deleted. Atomic.
+	DeleteDupBefore(key, val []byte) (uint64, error)
+
+	// DeleteDupAfter deletes all dup values of `key` whose bytes are greater
+	// than or equal to `val`. Returns the number of dup values deleted.
+	// Atomic. The "or equal" half of the boundary is needed by callers that
+	// store inverted sort keys (e.g. ~step_BE) and want to delete all dups
+	// from a target downward.
+	DeleteDupAfter(key, val []byte) (uint64, error)
 }
 
 type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
@@ -309,6 +325,16 @@ type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (us
 	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
 
 	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+
+	// DeleteDupBefore deletes all dup values of `key` whose bytes are strictly
+	// less than `val`. Returns the number of dup values deleted. For non-DupSort
+	// tables (single value per key) this is a no-op returning 0.
+	DeleteDupBefore(key, val []byte) (uint64, error)
+
+	// DeleteDupAfter deletes all dup values of `key` whose bytes are greater
+	// than or equal to `val`. Returns the number of dup values deleted. For
+	// non-DupSort tables this is a no-op returning 0.
+	DeleteDupAfter(key, val []byte) (uint64, error)
 }
 
 // RwCursorPseudoDupSort wraps any RwCursor to satisfy PseudoDupSortRwCursor
@@ -340,6 +366,12 @@ func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 }
 func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
+}
+func (c *RwCursorPseudoDupSort) DeleteDupBefore(_, _ []byte) (uint64, error) {
+	return 0, nil
+}
+func (c *RwCursorPseudoDupSort) DeleteDupAfter(_, _ []byte) (uint64, error) {
+	return 0, nil
 }
 
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
