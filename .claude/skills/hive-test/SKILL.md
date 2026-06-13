@@ -57,7 +57,7 @@ The user may specify one or more test suites in any combination:
 
 Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
 entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
-(`max-failures`, default 0) for eest shards.
+(`max-failures` per matrix entry, currently 0 everywhere) for eest shards.
 
 | Suite | Max Allowed Failures |
 |-------|---------------------|
@@ -69,12 +69,12 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-engine) | 0 |
 | eest-rlp | 0 |
-| eest-devnet (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
+| eest-devnet (CI shard: `glamsterdam-devnet`) | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
 The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
 against the URL and hive `branch` pinned under the `eest_devnet`
-entry in `test-fixtures.json` (currently `bal@v5.7.0` / `devnets/bal/4`),
+entry in `test-fixtures.json` (currently `tests-bal@v7.3.0` / `devnets/bal/7`),
 with `--experimental.bal` enabled on the erigon side. Reproduce locally by
 aligning the invocation with those values — `make eest-devnet` reads them
 from the manifest via `jq` and applies them automatically.
