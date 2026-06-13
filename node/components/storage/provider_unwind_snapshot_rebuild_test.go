@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // TestChunkAlignedToBlock pins the 1000-boundary rounding semantics.
@@ -473,4 +474,102 @@ func TestSliceStraddleSeg_RejectsBadInputs(t *testing.T) {
 			require.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
+}
+
+// TestStraddleBlockFileForType_NoInventory pins that a Provider
+// without an Inventory returns (nil, nil) — tools and tests that
+// construct a bare Provider take this short-circuit cleanly.
+func TestStraddleBlockFileForType_NoInventory(t *testing.T) {
+	t.Parallel()
+	p := &Provider{}
+	got, err := p.straddleBlockFileForType(2_912_999, snaptype2.Enums.Headers)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+// TestStraddleBlockFileForType_NoCandidate pins the no-straddle case:
+// when no inventory entry covers toBlock, the function returns nil.
+func TestStraddleBlockFileForType_NoCandidate(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	for _, e := range []*snapshot.FileEntry{
+		{Name: "v1.1-002900-002910-headers.seg", Local: true},
+		{Name: "v1.1-002910-002920-headers.seg", Local: true},
+	} {
+		require.NoError(t, inv.AddFile(e))
+	}
+	p := &Provider{Inventory: inv}
+	// toBlock=2,925,000 sits past every range above (all end at 2,920,000).
+	got, err := p.straddleBlockFileForType(2_925_000, snaptype2.Enums.Headers)
+	require.NoError(t, err)
+	require.Nil(t, got, "no entry covers toBlock — must return nil")
+}
+
+// TestStraddleBlockFileForType_SingleStraddleWins pins the simple case:
+// exactly one inventory entry straddles toBlock and is returned.
+func TestStraddleBlockFileForType_SingleStraddleWins(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	for _, e := range []*snapshot.FileEntry{
+		{Name: "v1.1-002900-002910-headers.seg", Local: true},
+		{Name: "v1.1-002910-002920-headers.seg", Local: true}, // straddles 2,912,999
+		{Name: "v1.1-002920-002930-headers.seg", Local: true},
+	} {
+		require.NoError(t, inv.AddFile(e))
+	}
+	p := &Provider{Inventory: inv}
+	got, err := p.straddleBlockFileForType(2_912_999, snaptype2.Enums.Headers)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(2_910_000), got.From)
+	require.Equal(t, uint64(2_920_000), got.To)
+}
+
+// TestStraddleBlockFileForType_WidestWins pins the post-merge-window
+// contract: when the merged superset chunk and the unmerged sub-chunks
+// both straddle toBlock at once, the widest range wins. Without this
+// the rebuild path resolved the straddle to a stale sub-chunk name
+// whose file had been merged away — live wedge 2026-06-12 (commit
+// 12717aae54).
+func TestStraddleBlockFileForType_WidestWins(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	for _, e := range []*snapshot.FileEntry{
+		// Sub-chunks the merger superseded — still in inventory:
+		{Name: "v1.1-002990-002991-headers.seg", Local: true},
+		{Name: "v1.1-002991-002992-headers.seg", Local: true},
+		// Stale 1k sub-chunk that would mis-name the straddle:
+		{Name: "v1.1-002996-002997-headers.seg", Local: true},
+		// Merged 100k-chunk — wider, must win:
+		{Name: "v1.1-002900-003000-headers.seg", Local: true},
+	} {
+		require.NoError(t, inv.AddFile(e))
+	}
+	p := &Provider{Inventory: inv}
+	got, err := p.straddleBlockFileForType(2_996_374, snaptype2.Enums.Headers)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(2_900_000), got.From, "merged 100k-chunk has the widest span — must be picked over the stale 1k sub-chunk")
+	require.Equal(t, uint64(3_000_000), got.To)
+}
+
+// TestStraddleBlockFileForType_FiltersByType pins that the type filter
+// is honoured — a Bodies file straddling toBlock is not returned for a
+// Headers query.
+func TestStraddleBlockFileForType_FiltersByType(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	for _, e := range []*snapshot.FileEntry{
+		{Name: "v1.1-002910-002920-bodies.seg", Local: true},   // straddles 2,912,999 but wrong type
+		{Name: "v1.1-002910-002920-headers.seg", Local: true},  // straddles + right type
+	} {
+		require.NoError(t, inv.AddFile(e))
+	}
+	p := &Provider{Inventory: inv}
+	got, err := p.straddleBlockFileForType(2_912_999, snaptype2.Enums.Headers)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, snaptype2.Enums.Headers, got.Type.Enum(),
+		"only the headers file should be returned for a Headers query")
+	require.Equal(t, "v1.1-002910-002920-headers.seg", got.Name())
 }
