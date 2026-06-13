@@ -24,6 +24,12 @@ Before committing, always verify changes with: `make lint && make erigon integra
 - `snapshots` are immutable
 - `Unwind` beyond data in snapshots not allowed
 
+## Local Spec Maps
+
+For consensus-critical changes, especially under `cl/`, follow the local
+`CLAUDE.md` spec maps required by the component `agents.md`. Local tests are
+not sufficient evidence of consensus correctness.
+
 ## Key Directories
 
 | Directory | Purpose | Component Docs |
