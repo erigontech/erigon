@@ -503,14 +503,19 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain the validation SD to currentContext when the payload extends the
-	// canonical head. FCU's MergeExtendingFork leaves the latest state in
-	// currentContext.mem; MDBX is committed only later under memory pressure,
-	// so between an FCU and the next newPayload this fresh doms would
-	// otherwise read stale MDBX and compute a wrong trie root. Head-extending
-	// payloads only — a fork payload needs unwindToCommonCanonical to revert
-	// doms to the common ancestor, which the parent link would shadow.
-	if e.currentContext != nil && header.ParentHash == rawdb.ReadHeadBlockHash(tx) {
+	// Chain the validation SD to the canonical generation (currentContext) so
+	// the parent link is available for two cases:
+	//  1. Head-extending payloads read the canonical generation's
+	//     not-yet-committed domain state instead of stale MDBX.
+	//  2. Fork payloads: unwindToCommonCanonical builds an unwind set from the
+	//     unwound canonical blocks' diffsets, which live in the canonical
+	//     generation's pastChangesAccumulator — reachable only through this
+	//     parent (GetDiffset chains to it). Without it the unwind runs with no
+	//     unwind set, leaving the BranchCache unmasked and corrupting the root.
+	// The parent does not shadow the unwound base: after unwindToCommonCanonical,
+	// doms.mem.unwindChangeset holds every unwound key and getLatest resolves
+	// those before consulting the parent.
+	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
 

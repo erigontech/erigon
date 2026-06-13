@@ -464,12 +464,60 @@ type DomainIOMetrics struct {
 	DbReadDuration    time.Duration
 	FileReadCount     int64
 	FileReadDuration  time.Duration
+	// UniqueFileReadCount tracks distinct prefixes that ever fell through
+	// to a file read (process-cumulative). The ratio FileReadCount /
+	// UniqueFileReadCount is the read amplification factor: how many
+	// times each unique prefix was re-read from the file layer (cache
+	// misses on the same prefix). Updated by UpdateFileReadsUnique;
+	// gated by dbg.KVReadLevelledMetrics same as FileReadCount.
+	UniqueFileReadCount int64
+	// UniqueLenBuckets is the byte-length distribution of distinct
+	// prefixes seen by UpdateFileReadsUnique. The compact-encoded
+	// prefix length is 1 + ⌈depth/2⌉ bytes (HP encoding), so byte
+	// length maps to trie depth as follows:
+	//   0 : 1 byte    (depth 0-1, root)
+	//   1 : 2-4 bytes (depth 2-7, top trunk)
+	//   2 : 5-8 bytes (depth 8-15)
+	//   3 : 9-16 bytes (depth 16-31)
+	//   4 : 17-32 bytes (depth 32-63, near account leaf)
+	//   5 : 33 bytes (depth 64, storage subtree root)
+	//   6 : 34-36 bytes (depth 65-70, storage subtree top)
+	//   7 : 37-44 bytes (depth 71-86, mid storage)
+	//   8 : 45-64 bytes (depth 87-127, leaf-parents and deep)
+	//   9 : 65+ bytes (out of range)
+	// Used to localise where the per-block file reads concentrate —
+	// e.g., are the 25K commitment reads on bloat workload
+	// storage-subtree-trunk (where per-contract pinning helps) or
+	// leaf-parents (where it doesn't)?
+	UniqueLenBuckets [10]int64
+
+	// StateCache hit/miss tracks the SharedDomains.stateCache layer
+	// specifically (the per-execution Account/Storage/Code cache), distinct
+	// from CacheReadCount which counts sd.mem and sd.parent.mem hits.
+	// Hit means stateCache.Get returned ok (we skipped MDBX+files).
+	// Miss means stateCache.Get returned !ok and we fell through to aggTx.
+	StateCacheHitCount  int64
+	StateCacheMissCount int64
 }
 
 type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
+
+	// seenFileReads is a process-cumulative dedup set for
+	// UpdateFileReadsUnique. Keys are (domain.String() + prefixBytes);
+	// LoadOrStore on each read decides whether the prefix is new and
+	// therefore contributes to UniqueFileReadCount. Held outside the
+	// mutex (sync.Map handles its own concurrency) so the unique check
+	// doesn't serialise with other metric updates.
+	//
+	// Trade-off: this grows to one entry per distinct prefix ever file-read
+	// (unbounded over a long run) and is intentionally NOT capped — a cap would
+	// re-count already-seen prefixes and corrupt UniqueFileReadCount. It only
+	// accumulates when dbg.KVReadLevelledMetrics is enabled, a short-lived
+	// diagnostic toggle rather than a production long-running setting.
+	seenFileReads sync.Map
 }
 
 func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
@@ -506,6 +554,28 @@ func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	}
 }
 
+func (dm *DomainMetrics) UpdateStateCacheHit(domain kv.Domain) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.StateCacheHitCount++
+	if d, ok := dm.Domains[domain]; ok {
+		d.StateCacheHitCount++
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{StateCacheHitCount: 1}
+	}
+}
+
+func (dm *DomainMetrics) UpdateStateCacheMiss(domain kv.Domain) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.StateCacheMissCount++
+	if d, ok := dm.Domains[domain]; ok {
+		d.StateCacheMissCount++
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{StateCacheMissCount: 1}
+	}
+}
+
 func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
@@ -520,5 +590,77 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 			FileReadCount:    1,
 			FileReadDuration: readDuration,
 		}
+	}
+}
+
+// lenBucket maps a prefix byte-length to its UniqueLenBuckets index.
+// See DomainIOMetrics.UniqueLenBuckets for the bucket layout. Buckets
+// 5-8 sub-divide the storage subtree (depths 64-127) so per-contract
+// trunk vs deep leaf-parent reads are distinguishable.
+func lenBucket(n int) int {
+	switch {
+	case n <= 1:
+		return 0
+	case n <= 4:
+		return 1
+	case n <= 8:
+		return 2
+	case n <= 16:
+		return 3
+	case n <= 32:
+		return 4
+	case n == 33:
+		return 5
+	case n <= 36:
+		return 6
+	case n <= 44:
+		return 7
+	case n <= 64:
+		return 8
+	default:
+		return 9
+	}
+}
+
+// UpdateFileReadsUnique records a file read while also tracking whether
+// the prefix has been seen before for this domain. Same gate as
+// UpdateFileReads (dbg.KVReadLevelledMetrics); call this instead when
+// the read-amplification ratio (FileReadCount / UniqueFileReadCount)
+// is wanted on the metric output. The key bytes are copied into the
+// internal dedup map; do not mutate after the call.
+func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
+	// Composite "<domain>:<key>" so two domains can hold the same prefix
+	// shape (commitment compact-encoded paths vs accounts plain addresses)
+	// without colliding.
+	domainKey := domain.String() + ":" + string(key)
+	_, alreadySeen := dm.seenFileReads.LoadOrStore(domainKey, struct{}{})
+	bucket := lenBucket(len(key))
+
+	dm.Lock()
+	defer dm.Unlock()
+	dm.FileReadCount++
+	readDuration := time.Since(start)
+	dm.FileReadDuration += readDuration
+	if !alreadySeen {
+		dm.UniqueFileReadCount++
+		dm.UniqueLenBuckets[bucket]++
+	}
+	if d, ok := dm.Domains[domain]; ok {
+		d.FileReadCount++
+		d.FileReadDuration += readDuration
+		if !alreadySeen {
+			d.UniqueFileReadCount++
+			d.UniqueLenBuckets[bucket]++
+		}
+	} else {
+		newD := &DomainIOMetrics{
+			FileReadCount:    1,
+			FileReadDuration: readDuration,
+		}
+		if !alreadySeen {
+			newD.UniqueFileReadCount = 1
+			newD.UniqueLenBuckets[bucket] = 1
+		}
+		dm.Domains[domain] = newD
 	}
 }

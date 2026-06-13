@@ -144,13 +144,10 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to save block hashes stage progress: %w", err)
 	}
 
-	// Flush and commit
-	if err := sd.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("failed to flush shared domains: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	// sd.Commit flushes + commits as one unit and applies the BranchCache only
+	// after the commit succeeds, so a failed commit can't leave it poisoned.
+	if err := sd.Commit(ctx, tx); err != nil {
+		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)

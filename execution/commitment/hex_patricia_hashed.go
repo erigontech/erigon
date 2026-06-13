@@ -99,9 +99,11 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// Warmup cache for serving reads from pre-warmed data
-	cache             *WarmupCache
-	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
+	// branchCache is the BranchCache instance attached via SetBranchCache.
+	// Production wires the aggregator-scope instance through
+	// InitializeTrieAndUpdates; tests/benchmarks may pass a per-init
+	// fallback. See branch_cache.go's concurrency contract.
+	branchCache *BranchCache
 
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
 	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
@@ -150,7 +152,6 @@ func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
-	hph.enableWarmupCache = cfg.EnableWarmupCache
 	hph.memoizationOff = cfg.MemoizationOff
 	hph.metrics.SetCsvMetrics(cfg.CsvMetricsFilePrefix)
 }
@@ -205,10 +206,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.mounted = false
 	hph.mountedNib = 0
 
-	// warmup cache
-	hph.cache = nil
-	hph.enableWarmupCache = false
-
 	// tracing / capture
 	hph.capture = nil
 	hph.trace = false
@@ -222,10 +219,9 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
 
-	// branch encoder: clear deferred updates, reset buffer, nil cache
+	// branch encoder: clear deferred updates, reset buffer
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
-	hph.branchEncoder.cache = nil
 	hph.branchEncoder.setDeferUpdates(false) // will be re-set by applyConfig
 
 	// reset config to zero — caller sets via applyConfig after pool get
@@ -595,117 +591,6 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 		}
 	}
 	return pos
-}
-
-// extractBranchCellAddresses extracts account/storage addresses from branch data.
-// pathNibble is the nibble on the update path (-1 if none) - its addresses are always
-// extracted since that cell will have stateHash cleared during update.
-// Sibling cells with stateHash (memoized) are skipped.
-func extractBranchCellAddresses(branchData []byte, pathNibble int) (accountAddrs [][]byte, storageAddrs [][]byte) {
-	if len(branchData) < 4 {
-		return nil, nil
-	}
-	// Skip touch map (first 2 bytes)
-	branchData = branchData[2:]
-	bitmap := binary.BigEndian.Uint16(branchData[0:2])
-	pos := 2
-
-	// Iterate over all cells in the branch
-	for bitset := bitmap; bitset != 0; {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		bitset ^= bit
-
-		if pos >= len(branchData) {
-			break
-		}
-		fieldBits := branchData[pos]
-		pos++
-
-		// Cell on update path will have stateHash cleared - always extract its addresses.
-		// Sibling cells with stateHash (bit 4) are memoized - skip them.
-		isOnPath := nibble == pathNibble
-		hasMemoizedHash := fieldBits&16 != 0
-		shouldExtract := isOnPath || !hasMemoizedHash
-
-		// Parse each field
-		// extension (bit 0)
-		if fieldBits&1 != 0 {
-			if pos >= len(branchData) {
-				break
-			}
-			l, n := binary.Uvarint(branchData[pos:])
-			if n <= 0 {
-				break
-			}
-			pos += n + int(l)
-		}
-
-		// accountAddr (bit 1)
-		if fieldBits&2 != 0 {
-			if pos >= len(branchData) {
-				break
-			}
-			l, n := binary.Uvarint(branchData[pos:])
-			if n <= 0 {
-				break
-			}
-			pos += n
-			if l > 0 && pos+int(l) <= len(branchData) {
-				if shouldExtract {
-					addr := make([]byte, l)
-					copy(addr, branchData[pos:pos+int(l)])
-					accountAddrs = append(accountAddrs, addr)
-				}
-				pos += int(l)
-			}
-		}
-
-		// storageAddr (bit 2)
-		if fieldBits&4 != 0 {
-			if pos >= len(branchData) {
-				break
-			}
-			l, n := binary.Uvarint(branchData[pos:])
-			if n <= 0 {
-				break
-			}
-			pos += n
-			if l > 0 && pos+int(l) <= len(branchData) {
-				if shouldExtract {
-					addr := make([]byte, l)
-					copy(addr, branchData[pos:pos+int(l)])
-					storageAddrs = append(storageAddrs, addr)
-				}
-				pos += int(l)
-			}
-		}
-
-		// hash (bit 3)
-		if fieldBits&8 != 0 {
-			if pos >= len(branchData) {
-				break
-			}
-			l, n := binary.Uvarint(branchData[pos:])
-			if n <= 0 {
-				break
-			}
-			pos += n + int(l)
-		}
-
-		// stateHash (bit 4)
-		if fieldBits&16 != 0 {
-			if pos >= len(branchData) {
-				break
-			}
-			l, n := binary.Uvarint(branchData[pos:])
-			if n <= 0 {
-				break
-			}
-			pos += n + int(l)
-		}
-	}
-	return accountAddrs, storageAddrs
 }
 
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
@@ -1763,28 +1648,19 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
 	}
 	hph.branchBefore[row] = true
-	bitmap := binary.BigEndian.Uint16(branchData[0:])
-	pos := 2
-	if deleted { // All cells come as deleted (touched but not present after)
-		hph.touchMap[row], hph.afterMap[row] = bitmap, 0
-	} else {
-		hph.touchMap[row], hph.afterMap[row] = 0, bitmap
+	maps, err := DecodeBranchInto(branchData, deleted, &hph.grid[row])
+	if err != nil {
+		return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 	}
-	//fmt.Printf("unfoldBranchNode prefix '%x' [%x], afterMap = [%016b], touchMap = [%016b]\n", key, branchData, hph.afterMap[row], hph.touchMap[row])
-	// Loop iterating over the set bits of modMask
-	for bitset, j := bitmap, 0; bitset != 0; j++ {
+	hph.touchMap[row] = maps.TouchMap
+	hph.afterMap[row] = maps.AfterMap
+	for bitset := maps.Bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
-		fieldBits := branchData[pos]
-		pos++
-		if pos, err = cell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
-			return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
-		}
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-
 		// relies on plain account/storage key so need to be dereferenced before hashing
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return err
@@ -1873,6 +1749,8 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 	return !bytes.HasPrefix(hashedKey, hph.currentKey[:hph.currentKeyLen])
 }
 
+// Process-cumulative trie-compute counters feeding the KVReadLevelledMetrics
+// "skip ratio"/"reset ratio" Debug log at the end of ComputeCommitment.
 var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
@@ -2234,9 +2112,6 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evi
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil); err != nil {
 			return fmt.Errorf("failed to encode leaf node update: %w", err)
 		}
-		if evictCache && hph.cache != nil {
-			hph.cache.EvictBranch(updateKey)
-		}
 	}
 	return nil
 }
@@ -2512,6 +2387,40 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+// unfoldKeyPath drives hph.unfold in a loop until the trie is unfolded
+// far enough that the cell at hashedKey can be updated — i.e. until
+// needUnfolding returns 0. This is the per-key traversal primitive
+// that follows the fold step in followAndUpdate.
+//
+// Extracted as a primitive so future orchestrators can drive
+// unfold-only traversals (e.g. cache populators that walk a touched-key
+// path to fill cell state without doing a fold/update). HashSort's
+// per-key followAndUpdate is the sequential orchestrator over this
+// primitive today; future concurrent / parallel orchestrators (each
+// with their own HexPatriciaHashed instance) can reuse it.
+//
+// plainKey is used only for per-key metrics labelling (StartUnfolding).
+// Pass an empty/nil slice if no metric attribution is needed.
+func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
+	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
+		var unfoldDone func()
+		if dbg.KVReadLevelledMetrics {
+			unfoldDone = hph.metrics.StartUnfolding(plainKey)
+		}
+		if err := hph.unfold(hashedKey, unfolding); err != nil {
+			return fmt.Errorf("unfold: %w", err)
+		}
+		if unfoldDone != nil {
+			unfoldDone()
+		}
+		if printLater {
+			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
+		}
+	}
+	return nil
+}
+
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.trace {
 	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
@@ -2529,23 +2438,9 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			foldDone()
 		}
 	}
-	// Now unfold until we step on an empty cell
-	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
-		var unfoldDone func()
-		if dbg.KVReadLevelledMetrics {
-			unfoldDone = hph.metrics.StartUnfolding(plainKey)
-		}
-		if err := hph.unfold(hashedKey, unfolding); err != nil {
-			return fmt.Errorf("unfold: %w", err)
-		}
-		if unfoldDone != nil {
-			unfoldDone()
-		}
-		if printLater {
-			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
-		}
-		// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	// Now unfold the path so the cell at hashedKey is reachable.
+	if err := hph.unfoldKeyPath(hashedKey, plainKey); err != nil {
+		return err
 	}
 
 	if stateUpdate == nil {
@@ -2791,22 +2686,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
-		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
-		// Set cache on trie if warmup cache is enabled
-		if warmup.EnableWarmupCache {
-			hph.cache = warmuper.Cache()
-			hph.branchEncoder.SetCache(hph.cache)
-			defer func() {
-				hph.cache = nil
-				hph.branchEncoder.SetCache(nil)
-			}()
-		} else {
-			hph.cache = nil
-			hph.branchEncoder.SetCache(nil)
-		}
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -2943,10 +2825,20 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
-func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) {
-	hph.enableWarmupCache = enable
-	hph.cfg.EnableWarmupCache = enable
+
+// SetBranchCache attaches a BranchCache for branch read-through and
+// write-through. Also propagates to the trie's BranchEncoder so encoder
+// writes update the cache via mark-dirty-then-Put (see CollectUpdate).
+//
+// nil disables — both this trie's branchFromCacheOrDB Level-2 and the
+// encoder's cache write-back become no-ops.
+func (hph *HexPatriciaHashed) SetBranchCache(c *BranchCache) {
+	hph.branchCache = c
+	hph.branchEncoder.branchCache = c
 }
+
+// BranchCache returns the attached BranchCache, or nil if none is set.
+func (hph *HexPatriciaHashed) BranchCache() *BranchCache { return hph.branchCache }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
@@ -2997,7 +2889,9 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	hph.leaveDeferredForCaller = leave
 }
 
-// Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
+// Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
+// The aggregator-scope BranchCache is intentionally not cleared here;
+// SharedDomains.Unwind handles correctness via txN-tagged eviction.
 func (hph *HexPatriciaHashed) Reset() {
 	hph.root.reset()
 	hph.rootTouched = false
@@ -3009,57 +2903,24 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
-// Cache returns the active warmup cache, or nil if none is set.
-func (hph *HexPatriciaHashed) Cache() *WarmupCache {
-	return hph.cache
-}
-
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
+// branchFromCacheOrDB reads branch data via ctx.Branch, which goes
+// through sd.mem -> sd.parent.mem -> aggregator-scope BranchCache -> MDBX.
+// BranchCache is the only branch cache.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
-	if hph.cache != nil {
-		if data, found := hph.cache.GetBranch(key); found {
-			if hph.metrics != nil {
-				hph.metrics.cacheBranch.Add(1)
-			}
-			return data, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missBranch.Add(1)
-		}
-	}
 	data, _, err := hph.ctx.Branch(key)
 	return data, err
 }
 
-// accountFromCacheOrDB reads account data from cache if available, otherwise from DB.
+// accountFromCacheOrDB reads account data via ctx.Account. There is no Go-side
+// caching layer; accounts go straight to the BTree-backed AccountsDomain via
+// SD, with the OS page cache as the only caching layer.
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
-	if hph.cache != nil {
-		if update, found := hph.cache.GetAccount(plainKey); found {
-			if hph.metrics != nil {
-				hph.metrics.cacheAccount.Add(1)
-			}
-			return update, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missAccount.Add(1)
-		}
-	}
 	return hph.ctx.Account(plainKey)
 }
 
-// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB.
+// storageFromCacheOrDB reads storage data via ctx.Storage. No Go-side
+// caching layer (see accountFromCacheOrDB).
 func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
-	if hph.cache != nil {
-		if update, found := hph.cache.GetStorage(plainKey); found {
-			if hph.metrics != nil {
-				hph.metrics.cacheStorage.Add(1)
-			}
-			return update, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missStorage.Add(1)
-		}
-	}
 	return hph.ctx.Storage(plainKey)
 }
 

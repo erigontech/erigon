@@ -342,6 +342,20 @@ func (a *Aggregator) ConfigureDomains() error {
 	}
 	a.configured = true
 
+	// Attach the long-lived commitment branch cache to the commitment
+	// domain. Lifetime = aggregator lifetime; shared by every
+	// SharedDomains derived from this aggregator. Idempotent across
+	// repeated ConfigureDomains calls (early return above). The BranchCache
+	// is a state cache, so it rides the same USE_STATE_CACHE switch as the
+	// account/storage StateCache: one operator switch turns all caching off
+	// (e.g. when bisecting a state-root mismatch), and a nil cache is the
+	// documented "disabled" path that every consumer already tolerates.
+	if dbg.UseStateCache {
+		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
+			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+		}
+	}
+
 	if a.disableFsync {
 		for _, d := range a.d {
 			if d != nil {
@@ -2353,6 +2367,18 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
+// BranchCache returns the long-lived commitment branch cache attached to
+// this aggregator's commitment domain. Implements
+// commitment.BranchCacheProvider so the SharedDomains construction path
+// can fetch the cache via a tx.AggTx() type assertion without forcing
+// db/state/execctx to import db/state (which would create a cycle).
+func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
+	if at.d[kv.CommitmentDomain] == nil {
+		return nil
+	}
+	return at.d[kv.CommitmentDomain].d.branchCache
+}
+
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }
 func (at *AggregatorRoTx) standaloneIIs() []*InvertedIndexRoTx { return at.iis[:at.iisCount] }
 
@@ -2401,31 +2427,50 @@ func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx,
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
+// MeteredGetLatestWithTxN returns the high-water txN alongside (value,
+// step) for tagging BranchCache entries so UnwindTo can evict by
+// watermark. Non-CommitmentDomain reads return txN=0.
+func (at *AggregatorRoTx) MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
+	return at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
+}
+
 func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+	v, step, _, ok, err = at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
+	return v, step, ok, err
+}
+
+func (at *AggregatorRoTx) getLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
+		v, step, ok, err = at.d[domain].getLatest(k, tx, maxStep, metrics, start)
+		return v, step, 0, ok, err
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
-		return nil, kv.Step(0), false, err
+		return nil, kv.Step(0), 0, false, err
 	}
 	if ok && step <= maxStep {
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		return v, step, true, nil
+		// DB-sourced: tag with the step's high-water; the exact write
+		// txN isn't recoverable from the step-keyed record.
+		return v, step, lastTxNumOfStep(step, at.StepSize()), true, nil
 	}
 
 	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
 	if !found {
-		return nil, kv.Step(0), false, err
+		return nil, kv.Step(0), 0, false, err
 	}
 	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(domain, start)
+		// UpdateFileReadsUnique tracks total + distinct prefixes; the
+		// ratio is the read amplification factor (hot prefixes re-read).
+		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	// File-sourced: tag with fileEndTxNum; snapshots are immutable and
+	// unwind can't cross them, so this is always <= any legal watermark.
+	return v, kv.Step(fileEndTxNum / at.StepSize()), fileEndTxNum, found, err
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {

@@ -79,6 +79,7 @@ func (b *Filter) AddHash(hash uint64) error {
 	b.filter.AddHash(hash)
 	return nil
 }
+
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
 	if b.empty {
 		return true
@@ -86,7 +87,6 @@ func (b *Filter) ContainsHash(hashedKey uint64) bool {
 	if b.useFuse {
 		return b.fuseReader.ContainsHash(hashedKey)
 	}
-
 	return b.filter.ContainsHash(hashedKey)
 }
 func (b *Filter) Contains(v hash.Hash64) bool {

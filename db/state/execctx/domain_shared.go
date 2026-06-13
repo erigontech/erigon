@@ -124,41 +124,23 @@ type SharedDomains struct {
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
-	// changesetMu guards the global current-changeset-accumulator pointer
-	// against concurrent mutation while other writers are recording into it.
-	//
-	// Why this exists (the layering violation we are NOT fixing here):
-	//
-	// The "current accumulator" is unwind-side machinery: a sidecar that
-	// records per-block prev-value diffs so a later unwind can reconstruct
-	// the pre-block state. Execution should be forward-only and not be
-	// concerned with it at all. The proper architecture is to ignore the
-	// accumulator during execution and derive the per-block changesets
-	// post-hoc from sd entries (which are now tx-granular) at sd.Flush time.
-	// That decoupling is a larger refactor than this PR is taking on.
-	//
-	// The acute symptom that forces this band-aid: the parallel commitment
-	// calculator briefly swaps the global accumulator pointer to route its
-	// own per-block branch writes into block N's saved changeset (see
-	// committer.go computeWithBlockAccumulator). During that swap window,
-	// the apply goroutine continues calling DomainPut for block N+1's
-	// account/storage writes, and those land in block N's CS instead of
-	// block N+1's. On a later unwind, block N+1's CS lacks the prev-value
-	// for those writes and the executor reads stale state, producing wrong
-	// trie roots in reorg/fork tests (TestBlockchainHeaderchainReorgConsistency
-	// + the off-by-one cluster).
-	//
-	// Until the architectural fix lands, serialize the swap window: the
-	// calculator takes Lock around its swap+compute+restore, and DomainPut
-	// / DomainDel take Lock during the brief window they record into the
-	// accumulator. Functionally correct; perf-suboptimal.
-	//
-	// PERF FOLLOW-UP DRIVER: this lock is the concrete reason to move the
-	// accumulator out of the execution path. The goal is lock-free
-	// execution: derive per-block changesets post-hoc from sd entries
-	// (now tx-granular) at sd.Flush time, and delete this Mutex + the
-	// SetChangesetAccumulator/GetChangesetAccumulator API entirely.
+	// changesetMu serializes the parallel commitment calculator's swap of the
+	// global current-changeset-accumulator pointer against DomainPut/DomainDel.
+	// Without it, account/storage writes for block N+1 can land in block N's
+	// changeset during the calculator's swap+compute+restore window, so a later
+	// unwind reads stale prev-values and computes wrong roots (reorg/fork tests).
+	// A band-aid for execution being coupled to unwind-side accumulator
+	// machinery; removable once per-block changesets are derived post-hoc from
+	// the (now tx-granular) sd entries at Flush time.
 	changesetMu sync.Mutex
+
+	// branchCache is the aggregator-scope commitment-branch cache. It sits
+	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
+	// both miss, before the aggTx files/MDBX read), so writers' in-flight
+	// bytes always mask the cache and cross-SD pollution is impossible.
+	// May be nil for test setups whose AggTx doesn't implement
+	// commitment.BranchCacheProvider.
+	branchCache *commitment.BranchCache
 }
 
 // PickTrieVariant returns the commitment trie variant selected by the
@@ -190,7 +172,17 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
+	// Fetch the aggregator-scope branch cache (lives on the commitment
+	// Domain, shared across all SharedDomains derived from this
+	// aggregator). The duck-typed BranchCacheProvider lookup avoids
+	// importing db/state directly — db/state already imports execctx, so
+	// the reverse import would create a cycle.
+	var branchCache *commitment.BranchCache
+	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
+		branchCache = p.BranchCache()
+	}
+	sd.branchCache = branchCache
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg, branchCache)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -507,11 +499,26 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
-	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
+	d, ok, err := sd.mem.GetDiffset(tx, blockHash, blockNumber)
+	if ok || err != nil {
+		return d, ok, err
+	}
+	// Resolve through the parent chain: a fork-validation SD is freshly
+	// constructed with an empty mem batch, so the diffsets of the canonical
+	// blocks it must unwind live in the canonical generation's
+	// pastChangesAccumulator, reachable only via the parent link. Without
+	// this an unwind silently runs with no unwind set.
+	if sd.parent != nil {
+		return sd.parent.GetDiffset(tx, blockHash, blockNumber)
+	}
+	return d, ok, err
 }
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	if sd.branchCache != nil {
+		sd.branchCache.UnwindTo(txNumUnwindTo)
+	}
 }
 
 func (sd *SharedDomains) Trace() bool {
@@ -659,9 +666,24 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
+// The state caches (the account/storage StateCache and the commitment
+// BranchCache) are an internal implementation detail of SharedDomains. No
+// external entity accesses or mutates them directly — callers drive state
+// through Flush / Commit / GetLatest / DomainPut, and the cache lifecycle
+// (population, invalidation, commit-gating) is owned entirely here.
+
+// Flush writes the in-memory batch into tx without committing. It deliberately
+// does NOT touch the caches: a cache entry may only ever reflect committed
+// state, and plain Flush leaves the commit to the caller (who may still roll
+// back). Cache population is owned by Commit, which applies it only after a
+// successful commit. Callers that flush a tx they commit themselves get a
+// cache-safe (cold-but-correct) result; use Commit to also keep the cache warm.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	return sd.flushMem(ctx, tx)
+}
 
+func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
@@ -674,7 +696,58 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	return sd.mem.Flush(ctx, tx)
+	return sd.mem.Flush(ctx, tx, opts...)
+}
+
+type branchCacheUpdate struct {
+	key  []byte
+	val  []byte
+	step kv.Step
+	txN  uint64
+}
+
+// Commit flushes the in-memory batch into tx, commits tx, and only then applies
+// the flushed commitment branches to the BranchCache. The flush is implicit in
+// committing the shared-domain state. Tying cache population to commit success
+// makes it impossible by construction for the aggregator-lifetime cache to hold
+// a value a failed commit rolled back — so no caller clears the cache or reaches
+// into the SD's internal caches after committing. tx MUST be a flush-specific
+// transaction: it is committed here.
+func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
+
+	if sd.branchCache == nil {
+		if err := sd.flushMem(ctx, tx); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	// Stash the committed-domain branch tuples during the flush; apply them to
+	// the cache only after the commit succeeds. On a failed commit the stash is
+	// discarded, so the cache is never advanced past durable MDBX state.
+	var pending []branchCacheUpdate
+	if err := sd.flushMem(ctx, tx, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+		pending = append(pending, branchCacheUpdate{
+			key: append([]byte(nil), k...), val: append([]byte(nil), v...), step: step, txN: txNum,
+		})
+	})); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for i := range pending {
+		u := &pending[i]
+		if len(u.val) == 0 {
+			sd.branchCache.Invalidate(u.key)
+			continue
+		}
+		// Stamp the value's per-key write txNum (not the batch high-water) so
+		// unwind invalidation is tx-precise.
+		sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
+	}
+	return nil
 }
 
 // TemporalDomain satisfaction
@@ -719,11 +792,25 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
+	// MeteredGetterWithTxN exposes the txN of the read so the
+	// BranchCache entry can be tagged; falls back to MeteredGetter
+	// when only the legacy interface is implemented (test stubs).
+	type MeteredGetterWithTxN interface {
+		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
+	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
 	if sd.stateCache != nil {
-		if v, ok := sd.stateCache.Get(domain, k); ok {
+		v, ok := sd.stateCache.Get(domain, k)
+		if dbg.KVReadLevelledMetrics {
+			if ok {
+				sd.metrics.UpdateStateCacheHit(domain)
+			} else {
+				sd.metrics.UpdateStateCacheMiss(domain)
+			}
+		}
+		if ok {
 			if dbg.AssertStateCache {
 				// Fetch authoritative value from the backing tx and panic on any divergence.
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
@@ -743,9 +830,27 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+	// branchCache sits between sd.mem/parent.mem and the aggTx files for
+	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
+	// bytes are held in sd.mem above, so a cache hit here is always
+	// equivalent to reading from MDBX. Refreshed per-key by sd.Flush and
+	// evicted by txN watermark on unwind, so a cache hit never coexists
+	// with a newer MDBX state.
+	if domain == kv.CommitmentDomain && sd.branchCache != nil {
+		if cv, cstep, ok := sd.branchCache.Get(k); ok {
+			return cv, kv.Step(cstep), nil
+		}
+	}
+
+	var readTxN uint64
+	var txNKnown bool
+	switch aggTx := tx.AggTx().(type) {
+	case MeteredGetterWithTxN:
+		v, step, readTxN, _, err = aggTx.MeteredGetLatestWithTxN(domain, k, tx, maxStep, &sd.metrics, start)
+		txNKnown = true
+	case MeteredGetter:
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
-	} else {
+	default:
 		v, step, err = tx.GetLatest(domain, k)
 	}
 	if err != nil {
@@ -755,6 +860,12 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
+	}
+	// Only cache a branch when the read's txN is known: a txN=0 entry would
+	// be treated as immortal by UnwindTo, so skip the Put rather than insert
+	// an entry that can never be unwind-evicted.
+	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
+		sd.branchCache.Put(k, v, uint64(step), readTxN)
 	}
 
 	return v, step, nil
@@ -779,6 +890,14 @@ func (sd *SharedDomains) LogMetrics() []any {
 			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
+	if hits, misses := sd.metrics.StateCacheHitCount, sd.metrics.StateCacheMissCount; hits+misses > 0 {
+		metrics = append(metrics, "stateCache",
+			fmt.Sprintf("hit=%s miss=%s rate=%.0f%%",
+				common.PrettyCounter(hits),
+				common.PrettyCounter(misses),
+				100*float64(hits)/float64(hits+misses)))
+	}
+
 	if readCount := sd.metrics.DbReadCount; readCount > 0 {
 		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
 	}
@@ -801,6 +920,14 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 
 		if readCount := dm.CacheReadCount; readCount > 0 {
 			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.CacheReadDuration/time.Duration(readCount), 0))
+		}
+
+		if hits, misses := dm.StateCacheHitCount, dm.StateCacheMissCount; hits+misses > 0 {
+			metrics = append(metrics, "stateCache",
+				fmt.Sprintf("hit=%s miss=%s rate=%.0f%%",
+					common.PrettyCounter(hits),
+					common.PrettyCounter(misses),
+					100*float64(hits)/float64(hits+misses)))
 		}
 
 		if readCount := dm.DbReadCount; readCount > 0 {
@@ -1042,22 +1169,14 @@ func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 
-func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.EnableParaTrieDB(db)
-}
-
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // It requires a DB to be enabled via EnableParaTrieDB.
 func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
-func (sd *SharedDomains) EnableWarmupCache(enable bool) {
-	sd.sdCtx.EnableWarmupCache(enable)
-}
-
-func (sd *SharedDomains) ClearWarmupCache() {
-	sd.sdCtx.ClearWarmupCache()
+func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.EnableParaTrieDB(db)
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
