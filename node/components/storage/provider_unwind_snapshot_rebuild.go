@@ -174,6 +174,17 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 			}
 			continue
 		}
+		if newToBlock >= straddle.To {
+			// Aligned newTo lands at or past the straddle's upper
+			// bound — the entire file's range [From, To) is within
+			// the surviving range [0, newTo). No rebuild needed;
+			// no removal queued. The file stays in place untouched.
+			// Live-caught 2026-06-13 soak iter 1 mode_a2: target
+			// 3,010,999 chunk-aligns to newTo=3,011,000 == straddle
+			// v1.1-003010-003011's To boundary; sliceStraddleSeg
+			// then rejected it as "outside straddle (3010000, 3011000)".
+			continue
+		}
 		newFI, rerr := s.rebuild(ctx, *straddle, newToBlock, p.snapDir, p.snapTmpDir, p.ChainConfig, p.logger)
 		if rerr != nil {
 			return nil, nil, fmt.Errorf("rebuild %s straddle (%s → newTo=%d): %w", s.name, straddle.Name(), newToBlock, rerr)
