@@ -1160,7 +1160,75 @@ func (p *Provider) Initialize(deps Deps) error {
 		go p.watchInitialValidation(ctx, flow.InitialDownloadsCompleteChannel(p.eventBus), revalPolicy, initialSet)
 	}
 
+	// Unconditional startup scan for pre-existing block-snapshot files.
+	// The lifecycle.Driver's discoverNewFiles only runs when
+	// LifecycleDrivenByStorage is on; for the legacy (driver-off) path
+	// nothing else feeds already-on-disk block files into Inventory at
+	// startup. Without this, Inventory.BlockFiles() comes up empty for
+	// every v1.1-*.seg already on disk (chain.toml advertised them, the
+	// downloader has the .torrent, the files are local-ready — they
+	// just aren't in inv.blocks), and Provider.Unwind's
+	// findInventoryOrphansPastBlock precondition refuses every deeper
+	// setHead with "N file(s) exist on disk past toBlock but are NOT in
+	// Inventory." Live-caught 2026-06-13 in the 5-iter soak (iter 3
+	// mode_b at depth 30k refused after 15 stable v1.1-*.seg files
+	// were absent from Inventory).
+	//
+	// Idempotent vs the driver-on path: when the lifecycle Driver later
+	// runs discoverNewFiles, AddFile's existing-entry check short-
+	// circuits — these entries were already populated here.
+	if deps.Inventory != nil && p.snapDir != "" {
+		p.scanLocalBlockFilesAtStartup(deps.Inventory)
+	}
+
 	return nil
+}
+
+// scanLocalBlockFilesAtStartup walks the snapshots dir for top-level
+// v1.1-*.seg block-snapshot files and registers each one with
+// Inventory if it isn't already present. FromBlock/ToBlock are
+// populated from the filename via PopulateFromName (called inside
+// AddFile), keeping range-based queries — straddleBlockFileForType,
+// findInventoryOrphansPastBlock — accurate from the first sweep.
+//
+// State / domain files (v2.0-*) live in subdirs and don't reach this
+// scan; the Aggregator's OnFilesChange callback path fills the
+// Inventory entry for those at boot when the temporal DB opens.
+func (p *Provider) scanLocalBlockFilesAtStartup(inv *snapshot.Inventory) {
+	entries, err := os.ReadDir(p.snapDir)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("[snapshots] startup block-file scan: read snapDir failed",
+				"snapDir", p.snapDir, "err", err)
+		}
+		return
+	}
+	added := 0
+	for _, de := range entries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if !strings.HasSuffix(name, ".seg") {
+			continue
+		}
+		if !strings.HasPrefix(name, "v1.1-") {
+			continue
+		}
+		if _, exists := inv.LifecycleState(name); exists {
+			continue
+		}
+		_ = inv.AddFile(&snapshot.FileEntry{
+			Name:         name,
+			Local:        true,
+			Advertisable: true,
+		})
+		added++
+	}
+	if added > 0 && p.logger != nil {
+		p.logger.Info("[snapshots] startup block-file scan: registered local files",
+			"count", added, "snapDir", p.snapDir)
+	}
 }
 
 // BootstrapFromPreverified seeds the orchestrator with a synthetic
