@@ -152,7 +152,7 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := tb.Context()
 
@@ -227,7 +227,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	domains.Close()
 
 	// now do the squeeze
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
@@ -595,7 +595,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
 
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 

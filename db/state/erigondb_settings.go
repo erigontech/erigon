@@ -15,8 +15,15 @@ import (
 const ERIGONDB_SETTINGS_FILE = "erigondb.toml"
 
 type ErigonDBSettings struct {
-	StepSize          uint64 `toml:"step_size"`
-	StepsInFrozenFile uint64 `toml:"steps_in_frozen_file"`
+	StepSize                       uint64 `toml:"step_size"`
+	StepsInFrozenFile              uint64 `toml:"steps_in_frozen_file"`
+	ReferencesInCommitmentBranches *bool  `toml:"references_in_commitment_branches"`
+}
+
+// RefsInCommitmentBranches resolves the commitment "references in branches" regime,
+// treating an absent (nil) field as the default true.
+func (s *ErigonDBSettings) RefsInCommitmentBranches() bool {
+	return s.ReferencesInCommitmentBranches == nil || *s.ReferencesInCommitmentBranches
 }
 
 func readErigonDBSettings(path string) (*ErigonDBSettings, error) {
@@ -60,7 +67,13 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 		if err != nil {
 			return nil, err
 		}
-		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+		// Normalize an absent flag in memory only; the file is synced snapshot metadata and must not be rewritten.
+		if settings.ReferencesInCommitmentBranches == nil {
+			refs := config3.DefaultReferencesInCommitmentBranches
+			settings.ReferencesInCommitmentBranches = &refs
+		}
+		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
+			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
 		return settings, nil
 	}
 
@@ -71,12 +84,15 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 
 	// Legacy datadir (Erigon <= 3.3): write legacy settings so erigondb.toml exists on disk.
 	if preverifiedExists {
+		refs := config3.DefaultReferencesInCommitmentBranches
 		settings := &ErigonDBSettings{
-			StepSize:          config3.LegacyStepSize,
-			StepsInFrozenFile: config3.LegacyStepsInFrozenFile,
+			StepSize:                       config3.LegacyStepSize,
+			StepsInFrozenFile:              config3.LegacyStepsInFrozenFile,
+			ReferencesInCommitmentBranches: &refs,
 		}
 		logger.Info("Creating erigondb.toml with LEGACY settings",
-			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
+			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
 		if err := writeErigonDBSettings(settingsPath, settings); err != nil {
 			return nil, err
 		}
@@ -84,14 +100,17 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 	}
 
 	// Fresh datadir, no preverified.toml: use default settings.
+	refs := config3.DefaultReferencesInCommitmentBranches
 	settings := &ErigonDBSettings{
-		StepSize:          config3.DefaultStepSize,
-		StepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		StepSize:                       config3.DefaultStepSize,
+		StepsInFrozenFile:              config3.DefaultStepsInFrozenFile,
+		ReferencesInCommitmentBranches: &refs,
 	}
 	if noDownloader {
 		// No downloader to provide the real file — write defaults to disk now.
 		logger.Info("Initializing erigondb.toml with DEFAULT settings (nodownloader)",
-			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
+			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
 		if err := writeErigonDBSettings(settingsPath, settings); err != nil {
 			return nil, err
 		}

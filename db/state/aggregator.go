@@ -119,9 +119,10 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 
 	// Domain configuration state: ConfigureDomains() is a no-op once configured is true.
-	configured   bool
-	savedSalt    *uint32
-	disableFsync bool
+	configured             bool
+	savedSalt              *uint32
+	disableFsync           bool
+	commitmentRefsOverride *bool
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -260,8 +261,21 @@ func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 	a.erigondbDomainStepsInFrozenFile = steps
 }
 
-func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
-	a.d[domain].ReplaceKeysInValues = v
+func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v bool) {
+	a.d[domain].ReferencesInCommitmentBranches = v
+}
+
+// applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
+// consumes it via a local Schema copy) and updates the live commitment domain post-configure.
+func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
+	if !a.configured {
+		a.commitmentRefsOverride = &refs
+		return
+	}
+	if a.d[kv.CommitmentDomain] != nil &&
+		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches != refs {
+		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches = refs
+	}
 }
 func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
@@ -303,6 +317,7 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	}
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
+	a.applyReferencesInCommitmentBranches(settings.RefsInCommitmentBranches())
 
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
@@ -337,7 +352,13 @@ func (a *Aggregator) ConfigureDomains() error {
 	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(a.dirs, a.logger); err != nil {
 		return err
 	}
-	if err := statecfg.Configure(statecfg.Schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
+	// Local Schema copy with the per-datadir override: avoids racing global mutation
+	// with concurrent opens that resolve a different erigondb.toml value.
+	schema := statecfg.Schema
+	if a.commitmentRefsOverride != nil {
+		schema.CommitmentDomain.ReferencesInCommitmentBranches = *a.commitmentRefsOverride
+	}
+	if err := statecfg.Configure(schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
 	a.configured = true
@@ -1765,8 +1786,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	r := &Ranges{}
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
-	if commitmentUseReferencedBranches {
+	// Account/storage must stay range-aligned with commitment whenever referencing is active.
+	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches || at.commitmentVisibleFilesReferenced()
+	if commitmentMergeReferencing {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
 		lmrCom := at.d[kv.CommitmentDomain].files.LatestMergedRange(stepSize)
@@ -1785,7 +1807,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
 	}
 
-	if commitmentUseReferencedBranches && r.domain[kv.CommitmentDomain].values.needMerge {
+	if commitmentMergeReferencing && r.domain[kv.CommitmentDomain].values.needMerge {
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
@@ -1855,7 +1877,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	t := time.Now()
 
 	at.a.logger.Debug("[snapshots] merge state " + r.String())
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	// Gate on referencing, not the write flag: referenced inputs must be expanded even with the flag off, else stale offsets leak into the merged file.
+	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches ||
+		commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain], at.StepSize())
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1869,13 +1893,13 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 
 		id := id
 		kid := kv.Domain(id)
-		if commitmentUseReferencedBranches && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+		if commitmentMergeReferencing && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 			accStorageMerged.Add(1)
 		}
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
+			if commitmentMergeReferencing && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
 				accStorageMerged.Wait()
 
 				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
@@ -1888,7 +1912,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, at.a.ps)
-			if commitmentUseReferencedBranches {
+			if commitmentMergeReferencing {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
 				}

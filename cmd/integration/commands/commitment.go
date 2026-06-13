@@ -387,7 +387,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
