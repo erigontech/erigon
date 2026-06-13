@@ -115,7 +115,7 @@ func isBloomMagic(peek []byte) bool {
 
 // OpenFilter opens a .kvei existence filter file
 // the format is auto-detected from the file content (bloom vs fuse v0/v1).
-func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
+func OpenFilter(filePath string) (idx *Filter, err error) {
 	_, fileName := filepath.Split(filePath)
 	idx = &Filter{FilePath: filePath, FileName: fileName}
 	var validationPassed = false
