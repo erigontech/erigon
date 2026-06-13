@@ -146,7 +146,13 @@ type Node struct {
 }
 
 func decodeListNodes(data []byte) ([]Node, int, error) {
+	if len(data) < 8 {
+		return nil, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
+	}
 	count := binary.BigEndian.Uint64(data[:8])
+	if count > uint64(len(data)-8)/10 { // each node is at least 10 bytes (di+keyLen)
+		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
+	}
 	nodes := make([]Node, count)
 	pos := 8
 	for ni := 0; ni < int(count); ni++ {

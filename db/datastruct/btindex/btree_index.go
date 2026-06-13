@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -299,13 +300,16 @@ func (btw *BtIndexWriter) Build() error {
 			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
 
 			if len(k) > 0 {
+				if len(k) > math.MaxUint16 {
+					return fmt.Errorf("[index] node key too long: %d bytes", len(k))
+				}
 				binary.BigEndian.PutUint64(nodeBuf[:8], ki)
 				binary.BigEndian.PutUint16(nodeBuf[8:10], uint16(len(k)))
 				if _, werr := indexW.Write(nodeBuf[:10]); werr != nil {
-					return werr
+					return fmt.Errorf("[index] write node header: %w", werr)
 				}
 				if _, werr := indexW.Write(k); werr != nil {
-					return werr
+					return fmt.Errorf("[index] write node key: %w", werr)
 				}
 			}
 			ki++
