@@ -41,8 +41,12 @@ import (
 //
 //   - rawdbv3.TxNums.Last == toBlock (the canonical "where is the
 //     chain" cursor).
-//   - kv.Headers, kv.BlockBody, kv.HeaderTD, kv.Senders: no entry
-//     whose key encodes a blockNum > toBlock.
+//   - kv.Headers, kv.BlockBody, kv.Senders: no entry whose key
+//     encodes a blockNum > toBlock. kv.HeaderTD is intentionally
+//     excluded — TD records are hash-keyed and idempotent, and
+//     Caplin's BlockCollector reads them as parent.TD on the next
+//     forward block. See provider_unwind_db_reset.go for the
+//     matching design rule.
 //   - kv.EthTx: no entry whose key encodes a txnID > lastTxNum.
 //   - Stage progress for Execution / Headers / BlockHashes / Bodies /
 //     Senders / TxLookup / Finish: all ≤ toBlock. (Forward-leaning
@@ -77,7 +81,6 @@ func verifyPostUnwindDBImage(ctx context.Context, tx kv.Tx, toBlock, lastTxNum u
 	blockTables := []string{
 		kv.Headers,
 		kv.BlockBody,
-		kv.HeaderTD,
 		kv.Senders,
 	}
 	for _, t := range blockTables {

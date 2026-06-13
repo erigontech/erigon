@@ -69,12 +69,16 @@ func TestVerifyPostUnwindDBImage_CleanState(t *testing.T) {
 	// entry is enough — TxNums.Last just returns the highest blockNum).
 	require.NoError(t, rawdbv3.TxNums.Append(tx, toBlock, lastTxNum))
 
-	// kv.Headers / BlockBody / HeaderTD / Senders: a row at toBlock
-	// and one a few blocks below — all within range.
-	for _, table := range []string{kv.Headers, kv.BlockBody, kv.HeaderTD, kv.Senders} {
+	// kv.Headers / BlockBody / Senders: a row at toBlock and one a
+	// few blocks below — all within range. kv.HeaderTD is NOT checked
+	// by the verifier (see provider_unwind_db_reset.go for the
+	// preservation rule); seed a past-toBlock row there to confirm it
+	// does not trip the verifier.
+	for _, table := range []string{kv.Headers, kv.BlockBody, kv.Senders} {
 		seedBlockTableEntry(t, tx, table, toBlock-100, 0x11)
 		seedBlockTableEntry(t, tx, table, toBlock, 0x22)
 	}
+	seedBlockTableEntry(t, tx, kv.HeaderTD, toBlock+5, 0x77)
 
 	// kv.EthTx: keys are 8-byte uint64 txnIDs. Two entries at and
 	// below lastTxNum.
