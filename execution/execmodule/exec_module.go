@@ -300,6 +300,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	e.semaphore.Release(1)
 }
 
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
+}
+
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
