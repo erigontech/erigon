@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -3394,6 +3395,61 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 							Version: ver,
 						})
 					}
+				}
+			}
+		}
+	}
+
+	// CodePath must travel with CodeHashPath. The CodeHashPath case and the
+	// fill-missing loop recover a codeHash from the versionMap, but nothing
+	// recovers CodePath: a tx whose validated writeset lacks a fresh CodePath
+	// (SetCode short-circuits on re-execution — bytes.Equal of the prior
+	// incarnation's code) would persist a non-empty codeHash with no code, and a
+	// later CALL would execute it as empty (wrong gas/root). A versionMap hit means
+	// the code was written in this block — recover it for any contract. On a miss,
+	// fall back to committed state only for 7702 designators: stateReader also
+	// returns an unchanged contract's code, and re-emitting that for every touched
+	// contract is write amplification with no correctness benefit.
+	codeInOutput := make(map[accounts.Address]bool)
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	for _, w := range filtered {
+		switch w.Path {
+		case state.CodePath:
+			codeInOutput[w.Address] = true
+		case state.CodeHashPath:
+			if h, ok := w.Val.(accounts.CodeHash); ok {
+				codeHashInOutput[w.Address] = h
+			}
+		}
+	}
+	// emit recovers code only if it hashes to the codeHash being recovered:
+	// emitting code that doesn't match its hash would itself break code/codeHash
+	// consistency, so a mismatch is skipped.
+	emit := func(addr accounts.Address, code []byte, want accounts.CodeHash) bool {
+		if crypto.Keccak256Hash(code) != want.Value() {
+			return false
+		}
+		filtered = append(filtered, &state.VersionedWrite{
+			Address: addr,
+			Path:    state.CodePath,
+			Val:     code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
+		})
+		return true
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+			continue
+		}
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok && len(c) > 0 && emit(addr, c, h) {
+				continue
+			}
+		}
+		if stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				if _, ok := types.ParseDelegation(c); ok {
+					emit(addr, c, h)
 				}
 			}
 		}
