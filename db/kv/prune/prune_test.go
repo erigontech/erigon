@@ -555,7 +555,7 @@ func TestTableScanningPrune_DefaultMode_PartialOverlapFastPath(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "default",
-		0, txTo, 0, 0 /*stepSize unused*/, logEvery, log.New(),
+		0, txTo, 0 /*stepSize unused*/, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
 	)
 	require.NoError(t, err)
@@ -598,7 +598,7 @@ func TestTableScanningPrune_PrefixValMode_PartialOverlapFastPath(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "prefixval",
-		0, txTo, 0, 0, logEvery, log.New(),
+		0, txTo, 0, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.PrefixValStorageMode,
 	)
 	require.NoError(t, err)
@@ -651,7 +651,7 @@ func TestTableScanningPrune_DefaultMode_AllInRange(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "default-allinrange",
-		0, txTo, 0, 0, logEvery, log.New(),
+		0, txTo, 0, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
 	)
 	require.NoError(t, err)
@@ -690,7 +690,7 @@ func TestTableScanningPrune_DefaultMode_AllOutOfRange(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "default-outofrange",
-		0, 100, 0, 0, logEvery, log.New(),
+		0, 100, 0, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
 	)
 	require.NoError(t, err)
@@ -733,7 +733,7 @@ func TestTableScanningPrune_StepValueMode_PartialOverlap_Stats(t *testing.T) {
 
 	stat, err := prune.TableScanningPrune(
 		t.Context(), "test", "stepvalue-partial",
-		0, 64, 0, stepSize, logEvery, log.New(),
+		0, 64, stepSize, logEvery, log.New(),
 		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
 	)
 	require.NoError(t, err)
@@ -818,7 +818,7 @@ func TestTableScanningPrune_AllModes_BasicRoundTrip(t *testing.T) {
 
 			stat, err := prune.TableScanningPrune(
 				t.Context(), "test", tc.name,
-				0, txTo, 0, stepSize, logEvery, log.New(),
+				0, txTo, stepSize, logEvery, log.New(),
 				nil, cur, false, &prune.Stat{}, tc.mode,
 			)
 			require.NoError(t, err)
