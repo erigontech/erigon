@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -192,9 +193,29 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
+	go s.updatePeerMetrics()
 	//go s.forkWatcher()
 
 	return s.LocalNode(), nil
+}
+
+const peerMetricsUpdateInterval = 15 * time.Second
+
+// updatePeerMetrics periodically publishes the connected/disconnected peer
+// counts as the caplin_peer_count gauge. Runs only while the sentinel is up, so
+// the metric is absent when erigon uses an external CL.
+func (s *Sentinel) updatePeerMetrics() {
+	ticker := time.NewTicker(peerMetricsUpdateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			_, connected, _ := s.GetPeersCount()
+			recordPeerMetrics(connected)
+		}
+	}
 }
 
 func (s *Sentinel) Stop() {
