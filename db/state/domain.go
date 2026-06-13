@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -148,22 +149,42 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
-var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", true)
-var domainExistenceForceWillNeed = dbg.EnvBool("DOMAIN_EXISTENCE_WILLNEED", false)
-var domainExistenceForceNormal = dbg.EnvBool("DOMAIN_EXISTENCE_NORMAL", false)
+var domainExistenceForceInMem = dbg.EnvStrings("DOMAIN_EXISTENCE_MEM", ",", nil)
+var domainExistenceForceWillNeed = dbg.EnvStrings("DOMAIN_EXISTENCE_WILLNEED", ",", nil)
+var domainExistenceForceNormal = dbg.EnvStrings("DOMAIN_EXISTENCE_NORMAL", ",", nil)
+var domainExistenceForceRandom = dbg.EnvStrings("DOMAIN_EXISTENCE_RANDOM", ",", nil)
+
+func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
+	name := d.Name.String()
+	switch {
+	case slices.Contains(domainExistenceForceInMem, name):
+		return statecfg.ExistenceFilterInMem
+	case slices.Contains(domainExistenceForceNormal, name):
+		return statecfg.ExistenceFilterNormal
+	case slices.Contains(domainExistenceForceWillNeed, name):
+		return statecfg.ExistenceFilterWillNeed
+	case slices.Contains(domainExistenceForceRandom, name):
+		return statecfg.ExistenceFilterRandom
+	default:
+		return d.ExistenceFilter
+	}
+}
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case domainExistenceForceWillNeed:
-		accessor.ForceExistenceFilterWillNeed()
-	case domainExistenceForceNormal:
-		accessor.ForceExistenceFilterNormal()
-	case domainExistenceForceInMem:
+	mode := d.existenceFilterMode()
+	switch mode {
+	case statecfg.ExistenceFilterInMem:
 		accessor.ForceExistenceFilterInRAM()
+	case statecfg.ExistenceFilterNormal:
+		accessor.ForceExistenceFilterNormal()
+	case statecfg.ExistenceFilterWillNeed:
+		accessor.ForceExistenceFilterWillNeed()
+	case statecfg.ExistenceFilterRandom:
+		accessor.ForceExistenceFilterRandom()
 	}
 	return accessor, nil
 }
@@ -173,13 +194,16 @@ func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case domainExistenceForceWillNeed:
-		filter.MadvWillNeed()
-	case domainExistenceForceNormal:
-		filter.MadvNormal()
-	case domainExistenceForceInMem:
+	mode := d.existenceFilterMode()
+	switch mode {
+	case statecfg.ExistenceFilterInMem:
 		filter.ForceInMem()
+	case statecfg.ExistenceFilterNormal:
+		filter.MadvNormal()
+	case statecfg.ExistenceFilterWillNeed:
+		filter.MadvWillNeed()
+	case statecfg.ExistenceFilterRandom:
+		filter.MadvRandom()
 	}
 	return filter, nil
 }
