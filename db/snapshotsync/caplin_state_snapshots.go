@@ -398,10 +398,15 @@ func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
 
 	s.indexes = make([]*recsplit.Index, 1)
 
-	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
-	index, err := recsplit.OpenIndex(filePath)
+	indexPath := filePath
+	if strings.HasSuffix(indexPath, ".seg") {
+		indexPath = strings.TrimSuffix(indexPath, ".seg") + ".idx"
+	} else {
+		indexPath = indexPath + ".idx"
+	}
+	index, err := recsplit.OpenIndex(indexPath)
 	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, filePath)
+		return fmt.Errorf("%w, fileName: %s", err, indexPath)
 	}
 
 	s.indexes[0] = index
@@ -531,8 +536,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 				if sn.Decompressor == nil {
 					continue
 				}
-				_, name := filepath.Split(sn.FilePath())
-				if _, ok := protectFiles[name]; ok {
+				if _, ok := protectFiles[sn.FileName()]; ok {
 					continue
 				}
 				toClose = append(toClose, sn)
@@ -615,9 +619,7 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
-	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, fromSlot, toSlot)
-	// a little bit ugly.
-	segName = strings.ReplaceAll(segName, "beaconblocks", snapName)
+	segName := snaptype.FileName(snaptype.BeaconBlocks.Versions().Current, fromSlot, toSlot, snapName) + ".seg"
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
