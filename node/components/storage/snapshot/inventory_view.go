@@ -256,13 +256,37 @@ func (v *InventoryView) LocalBlockTip() uint64 {
 		if len(rs) == 0 {
 			return 0
 		}
-		sort.Slice(rs, func(i, j int) bool { return rs[i].from < rs[j].from })
+		// Sort by `from` then by `-to` (wider range first) so that
+		// equal-from ranges feed the walk in widest-first order. This
+		// makes the contiguity walk deterministic when a merged
+		// 100k-chunk coexists with the 10k-chunks it was built from
+		// (live during merge windows + the trim that restored the
+		// unmerged set), and ensures the merged chunk's wider coverage
+		// is what we walk through.
+		sort.Slice(rs, func(i, j int) bool {
+			if rs[i].from != rs[j].from {
+				return rs[i].from < rs[j].from
+			}
+			return rs[i].to > rs[j].to
+		})
 		tip := rs[0].to
 		for i := 1; i < len(rs); i++ {
-			if rs[i].from != tip {
+			if rs[i].from > tip {
+				// Genuine gap — contiguity stops here.
 				break
 			}
-			tip = rs[i].to
+			// rs[i].from <= tip: either touch (==) or overlap (<).
+			// Both extend the contiguous block coverage so long as the
+			// new range stretches farther than the current tip; an
+			// entirely-contained range is a no-op. Live-caught
+			// 2026-06-13: merged v1.1-002900-003000 + the 10k-chunks
+			// it superseded both Local on disk caused this loop to
+			// break and report a tip ~100k below the actual local
+			// coverage, mis-bounding Caplin's backward walker and
+			// wedging mode-B recovery.
+			if rs[i].to > tip {
+				tip = rs[i].to
+			}
 		}
 		return tip
 	}
