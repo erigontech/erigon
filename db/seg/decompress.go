@@ -258,10 +258,12 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 
 	d.version = d.data[0]
 
-	if d.version == FileCompressionFormatV1 {
+	if d.version == FileCompressionFormatV1 || d.version == FileCompressionFormatV2 {
 		// 1st byte: version,
 		// 2nd byte: defines how exactly the file is compressed
-		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+		// 3rd byte (optional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+		// Note: WordLevelKeyCompressionEnabled / WordLevelValCompressionEnabled bits in the bitmask are only
+		// reliable for V2+; V1 files may have those bits unset even when keys/vals are compressed.
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
 	}
@@ -546,6 +548,21 @@ func (s *Stats) Add(d *Decompressor) {
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
+// WordLevelCompression returns the word-level key/val compression flags from the file header.
+// ok=false means the file predates V2 and the header does not carry this information.
+func (d *Decompressor) WordLevelCompression() (c FileCompression, ok bool) {
+	if d.version < FileCompressionFormatV2 {
+		return CompressNone, false
+	}
+	if d.featureFlagBitmask.Has(WordLevelKeyCompressionEnabled) {
+		c |= CompressKeys
+	}
+	if d.featureFlagBitmask.Has(WordLevelValCompressionEnabled) {
+		c |= CompressVals
+	}
+	return c, true
+}
+
 func (d *Decompressor) Size() int64 {
 	return d.size
 }
@@ -789,6 +806,10 @@ func (g *Getter) Trace(t bool)        { g.trace = t }
 func (g *Getter) Count() int          { return g.d.Count() }
 func (g *Getter) FileName() string    { return g.fName }
 func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
+
+// WordLevelCompression returns the word-level key/val compression flags from the file header.
+// ok=false for pre-V2 files where the header does not carry this information.
+func (g *Getter) WordLevelCompression() (FileCompression, bool) { return g.d.WordLevelCompression() }
 
 // nextPosClean aligns to the next byte boundary then reads the next position.
 func (g *Getter) nextPosClean() uint64 {
