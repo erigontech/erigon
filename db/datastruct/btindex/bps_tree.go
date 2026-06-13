@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 	"unsafe"
 
@@ -146,33 +145,18 @@ type Node struct {
 	di  uint64 // key ordinal number in kv
 }
 
-func encodeListNodes(nodes []Node, w io.Writer) error {
-	numBuf := make([]byte, 8)
-	binary.BigEndian.PutUint64(numBuf, uint64(len(nodes)))
-	if _, err := w.Write(numBuf); err != nil {
-		return err
-	}
-
-	for ni := 0; ni < len(nodes); ni++ {
-		if _, err := w.Write(nodes[ni].Encode()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func decodeListNodes(data []byte) ([]Node, error) {
+func decodeListNodes(data []byte) ([]Node, int, error) {
 	count := binary.BigEndian.Uint64(data[:8])
 	nodes := make([]Node, count)
 	pos := 8
 	for ni := 0; ni < int(count); ni++ {
 		dp, err := nodes[ni].Decode(data[pos:])
 		if err != nil {
-			return nil, fmt.Errorf("decode node %d: %w", ni, err)
+			return nil, 0, fmt.Errorf("decode node %d: %w", ni, err)
 		}
 		pos += int(dp)
 	}
-	return nodes, nil
+	return nodes, pos, nil
 }
 
 func (n Node) Encode() []byte {
