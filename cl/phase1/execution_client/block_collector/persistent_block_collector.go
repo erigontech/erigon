@@ -437,7 +437,7 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 		bals[i] = bal
 	}
 
-	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals, true); err != nil {
+	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to insert blocks", "err", err)
 		return err
 	}

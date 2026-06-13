@@ -81,6 +81,18 @@ export default async function createConfig(): Promise<Config> {
 
     plugins: [
       [
+        '@docusaurus/plugin-client-redirects',
+        {
+          redirects: [
+            // NAT moved out of the CLI Reference subfolder to a top-level page.
+            {
+              from: '/fundamentals/configuring-erigon/nat',
+              to: '/fundamentals/nat',
+            },
+          ],
+        },
+      ],
+      [
         '@docusaurus/plugin-content-docs',
         {
           id: 'help-center',

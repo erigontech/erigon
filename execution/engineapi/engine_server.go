@@ -470,7 +470,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
 	// binaryTransactions cache so the downstream Block.RawBody() invocation
-	// inside InsertBlocksAndWaitWithAccessLists doesn't re-encode every tx
+	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
@@ -1002,7 +1002,7 @@ func (e *EngineServer) HandleNewPayload(
 	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
 		bals = [][]byte{blockAccessListBytes}
 	}
-	if err := e.chainRW.InsertBlocksAndWait(ctx, []*types.Block{block}, bals); err != nil {
+	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}, bals); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,

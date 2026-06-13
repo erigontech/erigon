@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -33,9 +34,9 @@ func uint64AsBytes(v *uint64) []byte {
 }
 
 const (
-	// DefaultCodeCacheBytes is the byte limit for code cache (512 MB)
-	DefaultCodeCacheBytes = 512 * datasize.MB
-	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
+	// DefaultCodeCacheBytes is the byte limit for code cache
+	DefaultCodeCacheBytes = 128 * datasize.MB
+	// DefaultAddrCacheBytes is the byte limit for address cache
 	DefaultAddrCacheBytes = 16 * datasize.MB
 )
 
