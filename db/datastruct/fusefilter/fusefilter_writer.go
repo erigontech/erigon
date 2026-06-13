@@ -20,7 +20,7 @@ import (
 // WriterOffHeap does write all keys to temporary mmap file - and using it as a source for `fusefilter` building
 type WriterOffHeap struct {
 	count    int
-	page     [512]uint64
+	page     [4096]uint64
 	features Features
 
 	tmpFile     *os.File
