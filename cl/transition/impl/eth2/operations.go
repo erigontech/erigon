@@ -1661,9 +1661,7 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
 		_, isExistingValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
 		hasBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
-		// Check if there's a pending deposit with valid signature for this pubkey
-		isPendingValidator := state.IsPendingValidator(s, depositRequest.PubKey)
-		// isValidator includes both existing validators and pending validators with valid signatures
+		isPendingValidator := state.IsPendingValidator(s.BeaconConfig(), s.GetPendingDeposits(), depositRequest.PubKey)
 		isValidator := isExistingValidator || isPendingValidator
 
 		if isBuilder || (hasBuilderPrefix && !isValidator) {

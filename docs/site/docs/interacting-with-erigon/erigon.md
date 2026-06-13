@@ -8,11 +8,11 @@ sidebar_position: 2
 
 Erigon provides several RPC namespaces that extend beyond the standard Ethereum JSON-RPC API, exposing Erigon-specific functionality and data structures. The primary Erigon-specific namespace is **`erigon_`** which offer extended blockchain data access methods.
 
-These methods must be explicitly enabled using the `--http.api` flag when starting the RPC daemon.
+These methods must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon.
 
 ### Namespace Availability
 
-* The `erigon_` namespace is enabled by default in the RPC daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
+* The `erigon_` namespace is enabled by default in the RPC Daemon and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
 
 ### Performance Considerations
 

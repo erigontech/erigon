@@ -1,6 +1,6 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:bal-devnet-3
+    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-4
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
@@ -32,6 +32,6 @@ ethereum_genesis_generator_params:
   image: ethpandaops/ethereum-genesis-generator:5.3.5
 additional_services: [spamoor, assertoor]
 assertoor_params:
-  run_stability_check: true
+  run_stability_check: false  # re-enable once go-eth2-client supports alpha.8 (#21442)
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:qu0b-gloas-bals-v2
+  image: ethpandaops/assertoor:master-0ad56fb  # switch to release tag when available (#21441)

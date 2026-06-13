@@ -357,10 +357,10 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	}
 
-	fullMode := prune.Mode{
+	legacyFull := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(pruneDistance),
-		Blocks:      prune.DefaultBlocksPruneMode,
+		Blocks:      prune.KeepPostMergeBlocksPruneMode,
 	}
 	minimalMode := prune.Mode{
 		Initialised: true,
@@ -368,11 +368,11 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 		Blocks:      prune.Distance(pruneDistance),
 	}
 
-	// In full mode, block bodies are in snapshots and DefaultBlocksPruneMode means no block-body
+	// In full mode, block bodies are in snapshots and KeepPostMergeBlocksPruneMode means no block-body
 	// gate — GetBlockByNumber must succeed even for blocks older than the state-history window.
 	t.Run("full_mode_old_block_accessible", func(t *testing.T) {
 		t.Parallel()
-		api := setup(t, fullMode)
+		api := setup(t, legacyFull)
 		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
 		require.NoError(t, err)
 		require.NotNil(t, b)

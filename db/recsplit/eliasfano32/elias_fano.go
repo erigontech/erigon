@@ -336,12 +336,12 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 	return currWord*64 + uint64(sel) - i
 }
 
-func Seek(data []byte, n uint64) (uint64, bool) {
+func Seek(data []byte, n uint64) (uint64, uint64, bool) {
 	ef, _ := ReadEliasFano(data) //for better perf: app-code can use ef.Reset(data).Seek(n)
 	return ef.Seek(n)
 }
 
-func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
+func (ef *EliasFano) searchForward(v uint64) (val uint64, pos uint64, ok bool) {
 	if v == 0 {
 		return ef.Min(), 0, true // .Min() touching `mmap`
 	}
@@ -363,10 +363,10 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	if !found {
 		lo = ef.searchUpperForward(hi)
 	}
-	for j := lo; j <= ef.count; j++ {
-		val, _, _, _, _ := ef.get(j)
+	for pos = lo; pos <= ef.count; pos++ {
+		val, _, _, _, _ = ef.get(pos)
 		if val >= v {
-			return val, j, true
+			return val, pos, true
 		}
 	}
 	return 0, 0, false
@@ -469,7 +469,7 @@ func (ef *EliasFano) searchUpperReverse(hi uint64) uint64 {
 	return lo + uint64(i)
 }
 
-func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
+func (ef *EliasFano) searchReverse(v uint64) (val uint64, pos uint64, ok bool) {
 	if v == 0 {
 		return 0, 0, ef.Min() == 0 // .Max() touching `mmap`
 	}
@@ -489,19 +489,18 @@ func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok boo
 		lo = ef.searchUpperReverse(hi)
 	}
 	for j := lo; j <= ef.count; j++ {
-		idx := ef.count - j
-		val, _, _, _, _ := ef.get(idx)
+		pos = ef.count - j
+		val, _, _, _, _ = ef.get(pos)
 		if val <= v {
-			return val, idx, true
+			return val, pos, true
 		}
 	}
 	return 0, 0, false
 }
 
-// Seek returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) Seek(v uint64) (uint64, bool) {
-	n, _, ok := ef.searchForward(v)
-	return n, ok
+// Seek returns the value and its 0-based position in the sequence, equal or greater than given value
+func (ef *EliasFano) Seek(v uint64) (uint64, uint64, bool) {
+	return ef.searchForward(v)
 }
 
 func (ef *EliasFano) Max() uint64 {

@@ -145,6 +145,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 		NewContractCreation(1, one, 1, one, nil),
 		NewTransaction(2, common.HexToAddress("0x2"), two, 2, two, nil),
 	}
+	postState := common.Hash{2}
 	var rSmall = Receipts{
 		&Receipt{
 			Status:            ReceiptStatusFailed,
@@ -158,7 +159,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 			GasUsed:         1,
 		},
 		&Receipt{
-			PostState:         common.Hash{2}.Bytes(),
+			PostState:         postState[:],
 			CumulativeGasUsed: 3,
 			Logs: []*Log{
 				{Address: common.BytesToAddress([]byte{0x22})},

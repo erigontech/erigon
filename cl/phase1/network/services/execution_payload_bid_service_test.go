@@ -16,10 +16,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
@@ -35,10 +37,12 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 	ethClockMock := eth_clock.NewMockEthereumClock(ctrl)
 	fcMock := forkchoice_mock.NewForkChoiceStorageMock(t)
 	epbsPool := pool.NewEpbsPool()
-	beaconCfg := &clparams.BeaconChainConfig{
-		SlotsPerEpoch:       32,
-		DomainBeaconBuilder: [4]byte{0x0B, 0x00, 0x00, 0x00},
-	}
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 32
+	beaconCfg.SlotsPerHistoricalRoot = 8192
+	beaconCfg.MinSeedLookahead = 1
+	beaconCfg.DomainBeaconBuilder = [4]byte{0x0B, 0x00, 0x00, 0x00}
+	fcMock.StateAtBlockRootVal[common.HexToHash("0xbbbb")] = newBidParentState(&beaconCfg, testDependentRoot)
 
 	seenCache, err := lru.New[seenBidKey, struct{}]("seen_bids_test", seenBidCacheSize)
 	require.NoError(t, err)
@@ -47,7 +51,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		syncedDataManager: mockSyncedData,
 		forkchoiceStore:   fcMock,
 		ethClock:          ethClockMock,
-		beaconCfg:         beaconCfg,
+		beaconCfg:         &beaconCfg,
 		epbsPool:          epbsPool,
 		emitters:          beaconevents.NewEventEmitter(),
 		seenCache:         seenCache,
@@ -67,6 +71,7 @@ func newTestSignedExecutionPayloadBid(slot uint64, builderIndex uint64, value ui
 			ParentBlockRoot:    common.HexToHash("0xbbbb"),
 			BlockHash:          common.HexToHash("0xcccc"),
 			GasLimit:           30_000_000,
+			FeeRecipient:       common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
 			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		},
 		Signature: common.Bytes96{},
@@ -75,16 +80,29 @@ func newTestSignedExecutionPayloadBid(slot uint64, builderIndex uint64, value ui
 
 // addPreferencesToPool adds a SignedProposerPreferences to the pool for the given slot.
 func addPreferencesToPool(epbsPool *pool.EpbsPool, slot uint64) {
+	addPreferencesToPoolWithRoot(epbsPool, slot, testDependentRoot)
+}
+
+func addPreferencesToPoolWithRoot(epbsPool *pool.EpbsPool, slot uint64, dependentRoot common.Hash) {
 	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-		Slot: slot,
+		Slot:          slot,
+		DependentRoot: dependentRoot,
 	}, &cltypes.SignedProposerPreferences{
 		Message: &cltypes.ProposerPreferences{
 			ProposalSlot:   slot,
 			ValidatorIndex: 99,
 			FeeRecipient:   common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
+			DependentRoot:  dependentRoot,
 		},
 	})
+}
+
+func newBidParentState(cfg *clparams.BeaconChainConfig, dependentRoot common.Hash) *state2.CachingBeaconState {
+	s := state2.New(cfg)
+	s.SetSlot(100)
+	s.SetBlockRootAt(63, dependentRoot)
+	return s
 }
 
 func TestExecutionPayloadBidServiceNames(t *testing.T) {
@@ -197,21 +215,122 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	require.False(t, found)
 }
 
-func TestExecutionPayloadBidServiceGasLimitMismatch(t *testing.T) {
+func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	wrongRoot := common.Hash{0xee}
+	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{Slot: 100, DependentRoot: wrongRoot}, &cltypes.SignedProposerPreferences{
+		Message: &cltypes.ProposerPreferences{
+			ProposalSlot:   100,
+			ValidatorIndex: 99,
+			FeeRecipient:   msg.Message.FeeRecipient,
+			TargetGasLimit: 30_000_000,
+			DependentRoot:  wrongRoot,
+		},
+	})
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	require.Equal(t, int32(1), service.pendingCount.Load())
+
+	addPreferencesToPool(epbsPool, 100)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+
+	service.processPendingBids()
+	require.Equal(t, int32(0), service.pendingCount.Load())
+	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	require.True(t, found)
+}
+
+func TestExecutionPayloadBidServiceWaitsForParentState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	addPreferencesToPool(epbsPool, 100)
+	delete(fcMock.StateAtBlockRootVal, msg.Message.ParentBlockRoot)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	require.Equal(t, int32(1), service.pendingCount.Load())
+
+	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = newBidParentState(service.beaconCfg, testDependentRoot)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+
+	service.processPendingBids()
+	require.Equal(t, int32(0), service.pendingCount.Load())
+	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	require.True(t, found)
+}
+
+func TestExecutionPayloadBidServiceAdvancesSkippedParentStateForDependentRoot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	parentState := state2.New(service.beaconCfg)
+	parentState.SetSlot(60)
+	fcMock.StateAtBlockRootVal[common.HexToHash("0xbbbb")] = parentState
+
+	validationState, err := parentState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(validationState, 64))
+	dependentRoot, err := state2.GetProposerDependentRoot(validationState, 3)
+	require.NoError(t, err)
+	addPreferencesToPoolWithRoot(epbsPool, 100, dependentRoot)
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	msg.Message.GasLimit = 99_999 // Different from preferences (30_000_000)
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	err = service.ProcessMessage(context.Background(), nil, msg)
+	require.NoError(t, err)
+	require.Equal(t, uint64(60), parentState.Slot())
+	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
+	require.True(t, found)
+}
+
+func TestExecutionPayloadBidServiceGasLimitIncompatible(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.GasLimit = 99_999 // Incompatible with target 30_000_000 given parent 30_000_000
 
 	addPreferencesToPool(epbsPool, 100)
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+
+	// Set up parent block hash as known with gas limit
+	fcMock.ExecutionPayloadStatusMap[common.HexToHash("0xaaaa")] = execution_client.PayloadStatusValidated
+	fcMock.ExecutionPayloadGasLimitMap[common.HexToHash("0xaaaa")] = 30_000_000
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrIgnore)) // REJECT
+	require.True(t, errors.Is(err, ErrIgnore)) // Now IGNORE, not REJECT
 	require.Contains(t, err.Error(), "gas_limit")
 }
 
@@ -484,6 +603,41 @@ func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
 
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
 	require.Error(t, err)
+}
+
+func TestExecutionPayloadBidServiceNonZeroExecutionPayment(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.ExecutionPayment = 500 // must be 0 at gossip time
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "execution_payment must be 0")
+}
+
+func TestExecutionPayloadBidServiceFeeRecipientMismatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.FeeRecipient = common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fee_recipient")
+	require.Contains(t, err.Error(), "does not match")
 }
 
 func TestExecutionPayloadBidServiceFailedValidationNotStored(t *testing.T) {

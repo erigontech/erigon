@@ -142,7 +142,7 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 }
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, 0, 0)
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	body, err := encodeCapabilities([]string{"engine_newPayloadV1"})
 	require.NoError(t, err)
 
@@ -160,7 +160,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 }
 
 func TestSSZRESTAdvertisedRoutes(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, 0, 0)
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	for _, route := range []struct {
 		method string
 		path   string
@@ -247,11 +247,13 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 	slotNumber := hexutil.Uint64(456)
+	targetGasLimit := hexutil.Uint64(36000000)
 	attrs := &engine_types.PayloadAttributes{
 		Timestamp:             1,
 		SuggestedFeeRecipient: common.HexToAddress("0x1234"),
 		Withdrawals:           nil,
 		SlotNumber:            &slotNumber,
+		TargetGasLimit:        &targetGasLimit,
 		SSZVersion:            clparams.GloasVersion,
 	}
 	state := engine_types.ForkChoiceState{}
@@ -266,10 +268,12 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 	require.NotNil(t, engineAttrs)
 	require.NotNil(t, engineAttrs.SlotNumber)
 	require.Equal(t, hexutil.Uint64(456), *engineAttrs.SlotNumber)
+	require.NotNil(t, engineAttrs.TargetGasLimit)
+	require.Equal(t, hexutil.Uint64(36000000), *engineAttrs.TargetGasLimit)
 }
 
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, 0, 0)
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")

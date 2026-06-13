@@ -118,6 +118,9 @@ const (
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
+	// ExecutionPayload transactions bounds from consensus specs.
+	MaxBytesPerTransactionDefault    uint64 = 1 << 30
+	MaxTransactionsPerPayloadDefault uint64 = 1 << 20
 )
 
 const (
@@ -695,6 +698,7 @@ type BeaconChainConfig struct {
 	ChurnLimitQuotientGloas         uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
 	ConsolidationChurnLimitQuotient uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"` // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
 	BuilderWithdrawalPrefix         ConfigByte `yaml:"-" json:"-"`
+	PayloadDueBps                   uint64     `yaml:"PAYLOAD_DUE_BPS" spec:"true" json:"PAYLOAD_DUE_BPS,string"`
 	PtcSize                         uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
 	MaxPayloadAttestations          uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
 	BuilderRegistryLimit            uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
@@ -818,13 +822,13 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	HysteresisUpwardMultiplier:       5,
 	MinEpochsForBlobSidecarsRequests: 4096,
 	FieldElementsPerBlob:             4096,
-	MaxBytesPerTransaction:           1073741824, // 1GB
+	MaxBytesPerTransaction:           MaxBytesPerTransactionDefault,
 	MaxExtraDataBytes:                32,
 	MaxRequestBlobSidecars:           768,
 	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
-	MaxTransactionsPerPayload:        1048576,
+	MaxTransactionsPerPayload:        MaxTransactionsPerPayloadDefault,
 	SubnetsPerNode:                   2,
 	VersionedHashVersionKzg:          ConfigByte(1),
 
@@ -1044,12 +1048,13 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ChurnLimitQuotientGloas:         1 << 15,
 	ConsolidationChurnLimitQuotient: 1 << 16,
 	BuilderWithdrawalPrefix:         0x03,
+	PayloadDueBps:                   7500,
 	PtcSize:                         512,
 	MaxPayloadAttestations:          4,
 	BuilderRegistryLimit:            1 << 40,
 	BuilderPendingWithdrawalsLimit:  1 << 20,
 	MaxBuildersPerWithdrawalsSweep:  1 << 14,
-	MinBuilderWithdrawabilityDelay:  64,
+	MinBuilderWithdrawabilityDelay:  8192,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1483,6 +1488,16 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
+}
+
+// MaxBlobsPerBlockUpperBound returns the largest blobs-per-block limit across every fork
+// and BPO schedule entry, so it safely upper-bounds the blob count of any block.
+func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
+	m := max(b.MaxBlobsPerBlock, b.MaxBlobsPerBlockElectra)
+	for _, p := range b.BlobSchedule {
+		m = max(m, p.MaxBlobsPerBlock)
+	}
+	return m
 }
 
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {

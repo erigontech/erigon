@@ -46,7 +46,7 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
 
     Copy
 
-    ```
+    ```text
      lighthouse \
      --network gnosis beacon_node \
      --datadir=data \
@@ -60,7 +60,7 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
 
     Copy
 
-    ```
+    ```text
      lighthouse \
      --network chiado \
      --datadir=data \

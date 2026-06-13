@@ -22,13 +22,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -193,6 +197,20 @@ func TestCompositeFiltersGetFilterChangesInitiallyEmpty(t *testing.T) {
 	ok, err = api.UninstallFilter(ctx, bf)
 	assert.NoError(err)
 	assert.True(ok)
+}
+
+func TestNewPendingTransactionIncludesFrom(t *testing.T) {
+	m := execmoduletester.New(t)
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	tx, err := types.SignTx(
+		types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+		*signer,
+		m.Key,
+	)
+	require.NoError(t, err)
+
+	rpcTx := newRPCPendingTransaction(tx, nil, nil)
+	require.Equal(t, m.Address, rpcTx.From)
 }
 
 func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
