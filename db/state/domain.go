@@ -163,6 +163,7 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	case domainExistenceForceNormal:
 		accessor.ForceExistenceFilterNormal()
 	case domainExistenceForceInMem:
+		log.Warn("[dbg] open", "in_mem", accessor.FileName())
 		accessor.ForceExistenceFilterInRAM()
 	}
 	return accessor, nil
