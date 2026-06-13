@@ -219,7 +219,8 @@ var Schema = SchemaGen{
 		Name: kv.StorageDomain, ValuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors: AccessorBTree | AccessorExistence,
+		Accessors:       AccessorBTree | AccessorExistence,
+		ExistenceFilter: ExistenceFilterWillNeed,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblStorageHistoryVals,
