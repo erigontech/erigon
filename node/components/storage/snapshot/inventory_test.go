@@ -592,3 +592,103 @@ func TestInventoryViewLocalBlockTipMixedSizes(t *testing.T) {
 	require.Equal(t, uint64(2970999), v.LocalBlockTip(),
 		"merged 10k + adjacent 1k segments give contiguous tip at 2,970,999 (if start-at-zero pruned modes are honored separately)")
 }
+
+// TestInventoryViewLocalBlockTipOverlappingMergedAndSubChunks pins the
+// 2026-06-13 wedge: disk had the merged 100k-chunk v1.1-002900-003000
+// AND the 10k/1k sub-chunks it superseded (v1.1-002900-002910,
+// v1.1-002910-002920, ...) simultaneously — both Local because the
+// merger races and the post-trim path can restore the unmerged set.
+// Before the fix, contiguousTip required rs[i].from == tip exactly and
+// broke on the first overlap, returning a tip ~100k below actual local
+// coverage. The walker consuming this as canonicalBlockTip stopped
+// the recovery walk too high, leaving a hole in BlockCollector's cache
+// and wedging the EL on parent-TD-not-found for the next block past
+// elHead. The corrected walk takes the union of overlapping ranges.
+func TestInventoryViewLocalBlockTipOverlappingMergedAndSubChunks(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		// Lower 100k-chunk: 2,800,000 → 2,900,000
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002800-002900-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// Merged 100k-chunk: 2,900,000 → 3,000,000
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002900-003000-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// 10k-chunks the merger superseded — still on disk and Local
+		// during the merge window / after a setHead trim:
+		//   2,900,000 → 2,910,000
+		//   2,910,000 → 2,920,000
+		//   2,920,000 → 2,930,000
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002900-002910-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002910-002920-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002920-002930-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(2999999), v.LocalBlockTip(),
+		"overlapping merged 100k + the 10k sub-chunks it superseded must take the union, capping tip at 2,999,999 (end of merged 100k)")
+}
+
+// TestInventoryViewLocalBlockTipContainedRange: a range fully contained
+// inside another (smaller within larger) is a no-op for tip — the larger
+// already covers everything, the contained one adds no new range.
+func TestInventoryViewLocalBlockTipContainedRange(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		// 0 → 100,000 (10k-blocks-K filename → block units via PopulateFromName)
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-000100-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// 10,000 → 20,000 — fully contained in the above
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000010-000020-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(99999), v.LocalBlockTip(),
+		"contained range is a no-op; tip is set by the wider range's end")
+}
+
+// TestInventoryViewLocalBlockTipEqualFromWidestWins pins the
+// widest-first sort tiebreak: when two ranges share the same `from`,
+// the wider one's `to` drives the walk.
+func TestInventoryViewLocalBlockTipEqualFromWidestWins(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		// Two ranges sharing from=0:
+		//   0 → 1000   (1k)
+		//   0 → 10000  (10k)
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-000001-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-000010-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		// Touch the wider's end so the walk can continue past it.
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000010-000011-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(10999), v.LocalBlockTip(),
+		"equal-from widest-first tiebreak picks the 10k range's to as the walk's starting tip, then the touching 1k extends it to 10999")
+}
