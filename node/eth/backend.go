@@ -1542,6 +1542,11 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
+	// The background block-snapshot merge holds DB read transactions, so it must drain before chainDB.Close().
+	if s.components != nil && s.components.Storage != nil && s.components.Storage.BlockRetire != nil {
+		s.components.Storage.BlockRetire.WaitForMerges()
+	}
+
 	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
