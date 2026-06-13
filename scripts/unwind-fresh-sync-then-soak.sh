@@ -98,11 +98,19 @@ echo "  launched pid=$!"
 
 # Phase 3: wait for sync to live tip. Strategy:
 #   a. wait for RPC alive (head > 0).
-#   b. poll head every 30s; record delta. When delta < 5 over a poll
-#      interval the chain is at live cadence.
-stage "Phase 3: wait for live tip (timeout ${SYNC_TIMEOUT_SEC}s)"
+#   b. record the first non-zero head as the "bootstrap floor" — this
+#      is typically the snapshot tip the EL bootstraps to BEFORE
+#      Caplin starts pushing forward blocks. A stable-at-bootstrap-floor
+#      head is NOT "live tip"; it's "EL wedged waiting for Caplin."
+#   c. poll head every 30s; require head > bootstrap_floor + LIVE_TIP_FORWARD
+#      AND delta in [0, 5] for 2 consecutive polls — i.e., EL has
+#      actually executed past the snapshot tip into Caplin-delivered
+#      territory and the chain is now at live cadence.
+LIVE_TIP_FORWARD="${LIVE_TIP_FORWARD:-100}"
+stage "Phase 3: wait for live tip (timeout ${SYNC_TIMEOUT_SEC}s; need head > bootstrap_floor + ${LIVE_TIP_FORWARD})"
 sync_end=$(( $(date +%s) + SYNC_TIMEOUT_SEC ))
 prev_head=0
+bootstrap_floor=0
 stable_count=0
 while [[ $(date +%s) -lt $sync_end ]]; do
     h_hex=$(eth_block_number)
@@ -114,15 +122,24 @@ while [[ $(date +%s) -lt $sync_end ]]; do
     if [[ $prev_head -eq 0 ]]; then
         echo "  $(date -u +%H:%M:%S) initial head=$head"
         prev_head=$head
+        if [[ $head -gt 0 ]]; then
+            bootstrap_floor=$head
+            echo "  bootstrap_floor=$bootstrap_floor (snapshot tip; not yet live tip)"
+        fi
         sleep 30
         continue
     fi
     delta=$((head - prev_head))
-    echo "  $(date -u +%H:%M:%S) head=$head delta=$delta"
-    if [[ $delta -le 5 && $delta -ge 0 && $head -gt 0 ]]; then
+    if [[ $bootstrap_floor -eq 0 && $head -gt 0 ]]; then
+        bootstrap_floor=$head
+        echo "  bootstrap_floor=$bootstrap_floor (snapshot tip; not yet live tip)"
+    fi
+    past_floor=$((head - bootstrap_floor))
+    echo "  $(date -u +%H:%M:%S) head=$head delta=$delta past_floor=$past_floor"
+    if [[ $delta -le 5 && $delta -ge 0 && $past_floor -ge $LIVE_TIP_FORWARD ]]; then
         stable_count=$((stable_count + 1))
         if [[ $stable_count -ge 2 ]]; then
-            echo "  live tip reached: head=$head delta=$delta (stable for 2 polls)"
+            echo "  live tip reached: head=$head delta=$delta past_floor=$past_floor (stable for 2 polls)"
             break
         fi
     else
