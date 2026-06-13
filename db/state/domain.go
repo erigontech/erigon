@@ -159,8 +159,10 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	}
 	switch {
 	case domainExistenceForceWillNeed:
+		log.Warn("[dbg] open", "will_need", accessor.FileName())
 		accessor.ForceExistenceFilterWillNeed()
 	case domainExistenceForceNormal:
+		log.Warn("[dbg] open", "normal", accessor.FileName())
 		accessor.ForceExistenceFilterNormal()
 	case domainExistenceForceInMem:
 		log.Warn("[dbg] open", "in_mem", accessor.FileName())
