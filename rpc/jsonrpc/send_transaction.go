@@ -21,7 +21,7 @@ import (
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, &rpc.InvalidParamsError{Message: err.Error()}
 	}
 
 	// If the transaction fee cap is already specified, ensure the

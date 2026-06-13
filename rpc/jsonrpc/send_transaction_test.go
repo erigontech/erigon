@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 
@@ -26,9 +27,11 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -114,5 +117,34 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
 		require.NoError(err)
 		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
+	}
+}
+
+func TestSendRawTransaction_InvalidParams_OnMalformedRLP(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithTxPool())
+	require := require.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	txPool := txpoolproto.NewTxpoolClient(conn)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
+
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"empty-list", "0xc0"},
+		{"truncated-short-list", "0xd4"},
+		{"unknown-tx-type", "0x09c0"},
+		{"eip4844-truncated-list", "0x03c0"},
+		{"eip7702-truncated-list", "0x04c0"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := api.SendRawTransaction(ctx, hexutil.MustDecode(tc.raw))
+			require.Error(err)
+			var invalid *rpc.InvalidParamsError
+			require.True(errors.As(err, &invalid), "expected *rpc.InvalidParamsError, got %T: %v", err, err)
+			require.Equal(-32602, invalid.ErrorCode(), "want InvalidParams (-32602), got %d (%v)", invalid.ErrorCode(), err)
+		})
 	}
 }
