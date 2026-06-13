@@ -684,7 +684,7 @@ func (c *dgramPipe) WriteToUDPAddrPort(b []byte, to netip.AddrPort) (n int, err 
 	if c.closed {
 		return 0, errors.New("closed")
 	}
-	c.queue = append(c.queue, dgram{to, b})
+	c.queue = append(c.queue, dgram{to, msg})
 	c.cond.Signal()
 	return len(b), nil
 }
