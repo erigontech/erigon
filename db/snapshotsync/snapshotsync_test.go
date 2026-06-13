@@ -17,8 +17,11 @@
 package snapshotsync
 
 import (
+	"math"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -218,5 +221,102 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 	}
 	if !sawPreMergeTx {
 		t.Error("expected at least one pre-merge tx segment to be blacklisted; got none")
+	}
+}
+
+func TestCommitmentHistoryMinStep(t *testing.T) {
+	cases := []struct {
+		name          string
+		maxStateStep  uint64
+		distanceSteps uint64
+		want          uint64
+	}{
+		{"unlimited-distance-disables-filter", 100, 0, 0},
+		{"distance-larger-than-maxstep-disables-filter", 5, 10, 0},
+		{"distance-equal-to-maxstep-disables-filter", 10, 10, 0},
+		{"normal-case", 100, 8, 92},
+		{"recent", 100, 1, 99},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, commitmentHistoryMinStep(tc.maxStateStep, tc.distanceSteps))
+		})
+	}
+}
+
+func TestBlocksToStepDistance(t *testing.T) {
+	cases := []struct {
+		name         string
+		olderBlocks  uint64
+		maxStateStep uint64
+		maxBlock     uint64
+		want         uint64
+	}{
+		{"zero-blocks-disables", 0, 100, 1_000_000, 0},
+		{"zero-maxStep-disables", 50_000, 0, 1_000_000, 0},
+		{"zero-maxBlock-disables", 50_000, 100, 0, 0},
+		// 100k blocks * 100 steps / 1M blocks = 10 steps
+		{"mainnet-like-100k-blocks-1M-chain", 100_000, 100, 1_000_000, 10},
+		// 100k blocks * 5 steps / 50k blocks = 10 steps (chain too young, but math is well-defined)
+		{"young-chain-blocks-exceed-maxBlock", 100_000, 5, 50_000, 10},
+		// 50k * 100 / 1M = 5 steps
+		{"half-window", 50_000, 100, 1_000_000, 5},
+		// olderBlocks*maxStateStep overflows uint64; rather than silently
+		// wrapping to a small (wrong) distance, return >= maxStateStep so
+		// commitmentHistoryMinStep disables filtering.
+		{"overflow-disables-filter", 2, math.MaxUint64, 3, math.MaxUint64},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, blocksToStepDistance(tc.olderBlocks, tc.maxStateStep, tc.maxBlock))
+		})
+	}
+}
+
+func TestGetMaxBlockInSnapshots(t *testing.T) {
+	pv := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "v1-000000-000500-headers.seg"},
+		{Name: "v1-000500-001000-headers.seg"},
+		{Name: "v1-000500-001000-bodies.seg"},
+		{Name: "v1-000500-001000-transactions.seg"},
+		// Consensus-layer segments carry slot-based "to" values (scaled here
+		// above the EL tip); they must not skew the EL max-block calculation.
+		{Name: "v1-001000-002000-beaconblocks.seg"},
+		{Name: "v1-002000-003000-blobsidecars.seg"},
+		// State segments are ignored too.
+		{Name: "domain/v1.0-commitment.0-64.kv"},
+	}}
+	assert.Equal(t, uint64(1_000_000), getMaxBlockInSnapshots(pv))
+}
+
+func TestShouldSkipCommitmentHistorySegment(t *testing.T) {
+	cases := []struct {
+		name    string
+		file    string
+		minStep uint64
+		skip    bool
+	}{
+		// Filtering disabled.
+		{"min-step-zero-keeps-everything", "history/v1.0-commitment.0-16.v", 0, false},
+
+		// Non-commitment files are never filtered.
+		{"non-commitment-history-kept", "history/v1.0-accounts.0-16.v", 50, false},
+		{"transactions-segment-kept", "v1.0-000000-000100-transactions.seg", 50, false},
+		{"unparseable-name-kept", "salt-blocks.txt", 50, false},
+
+		// Commitment domain files are never filtered (only history/idx/accessor).
+		{"commitment-domain-kept", "domain/v1.0-commitment.0-16.kv", 50, false},
+
+		// Commitment-history files: filter by .To <= minStep.
+		{"history-fully-below-window-skipped", "history/v1.0-commitment.0-16.v", 16, true},
+		{"history-straddling-window-kept", "history/v1.0-commitment.0-16.v", 15, false},
+		{"history-above-window-kept", "history/v1.0-commitment.16-32.v", 8, false},
+		{"idx-fully-below-window-skipped", "idx/v1.0-commitment.0-16.ef", 32, true},
+		{"accessor-fully-below-window-skipped", "accessor/v1.0-commitment.0-16.vi", 32, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.skip, shouldSkipCommitmentHistorySegment(tc.file, tc.minStep))
+		})
 	}
 }

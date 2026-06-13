@@ -1106,6 +1106,10 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
+	CommitmentHistoryOlderFlag = cli.Uint64Flag{
+		Name:  "prune.commitment-history.older",
+		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Allows to override changesets generation logic",
@@ -1884,6 +1888,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
+	}
+	if ctx.IsSet(CommitmentHistoryOlderFlag.Name) {
+		if !cfg.KeepExecutionProofs {
+			Fatalf("--%s requires --%s", CommitmentHistoryOlderFlag.Name, KeepExecutionProofsFlag.Name)
+		}
+		cfg.CommitmentHistoryOlder = ctx.Uint64(CommitmentHistoryOlderFlag.Name)
+		cfg.CommitmentHistoryOlderSet = true
 	}
 
 	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {

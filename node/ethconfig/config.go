@@ -306,4 +306,10 @@ type Sync struct {
 	ExperimentalConcurrentCommitment bool
 	PersistReceiptsCacheV2           bool
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
+	// CommitmentHistoryOlder keeps the last N blocks of commitment history.
+	// 0 means unlimited. Only meaningful when KeepExecutionProofs is true.
+	CommitmentHistoryOlder uint64
+	// CommitmentHistoryOlderSet records whether the operator passed the flag,
+	// distinguishing an explicit 0 from the zero default on restart.
+	CommitmentHistoryOlderSet bool
 }
