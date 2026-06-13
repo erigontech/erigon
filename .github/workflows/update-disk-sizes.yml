@@ -1,8 +1,8 @@
 name: Docs - Update disk sizes
 
-# Triggers after a successful sync-from-scratch run (full or minimal node).
+# Triggers after a successful sync-from-scratch run (archive, full, or minimal node).
 # Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
-# and opens (or updates) a draft PR against the measured run's branch.
+# and opens (or updates) a draft PR against a pinned base branch (release/3.5).
 on:
   # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.5 for workflow_run events
   workflow_run:
