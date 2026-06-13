@@ -1946,11 +1946,11 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
+		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
 	} else {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
 	}
@@ -2218,7 +2218,7 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 // If evictCache is true, it also evicts the branch from the cache.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evictCache bool) error {
 	if hph.branchBefore[row] {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil); err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
 			return fmt.Errorf("failed to encode leaf node update: %w", err)
 		}
 		if evictCache && hph.cache != nil {
