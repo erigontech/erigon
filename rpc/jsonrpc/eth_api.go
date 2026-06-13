@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -159,6 +160,7 @@ type BaseAPI struct {
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
+	balRegenerator      *bal.Regenerator
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
@@ -174,6 +176,11 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
+	var balRegenerator *bal.Regenerator
+	if fullEngine, ok := engine.(rules.Engine); ok {
+		balRegenerator = bal.NewRegenerator(blockReader, fullEngine, log.Root())
+	}
+
 	return &BaseAPI{
 		filters:             f,
 		stateCache:          stateCache,
@@ -185,6 +192,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
+		balRegenerator:      balRegenerator,
 		dirs:                dirs,
 		bridgeReader:        bridgeReader,
 		blockRangeLimit:     rangeLimit,

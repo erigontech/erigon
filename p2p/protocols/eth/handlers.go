@@ -179,6 +179,14 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 // empty (e.g. a chain without system contracts)".
 var notAvailableSentinel = rlp.RawValue{0x80}
 
+// BlockAccessListGetter regenerates a Block Access List by re-executing the
+// block against historical state. Returns (nil, nil) when no BAL applies
+// (pre-Amsterdam or unknown block) and an error when regeneration fails
+// (e.g. the required state history is pruned).
+type BlockAccessListGetter interface {
+	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error)
+}
+
 // AnswerGetBlockAccessListsQuery looks up the RLP-encoded Block Access List
 // for each requested block hash (EIP-7928 / EIP-8159 eth/71). The response is
 // positionally aligned with the request: entry i is the BAL bytes for query[i],
@@ -187,11 +195,16 @@ var notAvailableSentinel = rlp.RawValue{0x80}
 // rawdb.WriteBlockAccessListBytes, so we hand the bytes through unchanged as
 // rlp.RawValue. A genuinely empty BAL is stored as 0xc0 and returned as such.
 //
+// BALs are only kept in the database for the reorg window; older blocks are
+// regenerated on demand via balGetter (EIP-7928 requires serving BALs for the
+// weak subjectivity period). A nil balGetter or a getter failure degrades to
+// the sentinel.
+//
 // Limits mirror AnswerGetBlockBodiesQuery: softResponseLimit caps total reply
 // size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
 // reached, the response is truncated (not padded with 0x80) — the peer sees a
 // shorter array than requested, same convention as the BlockBodies handler.
-func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader services.HeaderReader, balGetter BlockAccessListGetter) []rlp.RawValue {
 	var bytes int
 	bals := make([]rlp.RawValue, 0, len(query))
 
@@ -200,7 +213,7 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 			lookups >= 2*MaxBlockAccessListsServe {
 			break
 		}
-		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
+		number, _ := blockReader.HeaderNumber(ctx, db, hash)
 		if number == nil {
 			// We don't know the block — peer can retry elsewhere.
 			bals = append(bals, notAvailableSentinel)
@@ -208,10 +221,13 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 			continue
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
+		if len(bal) == 0 && balGetter != nil {
+			bal, _ = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
+		}
 		if len(bal) == 0 {
-			// We have the block but no BAL stored (pre-Amsterdam, or pruned).
-			// Return 0x80 — unambiguously "not available", distinct from a
-			// genuinely empty BAL which would be stored as 0xc0.
+			// We have the block but no BAL: pre-Amsterdam, or pruned beyond
+			// the regenerable history window. Return 0x80 — unambiguously
+			// "not available", distinct from a genuinely empty BAL (0xc0).
 			bals = append(bals, notAvailableSentinel)
 			bytes += len(notAvailableSentinel)
 			continue
