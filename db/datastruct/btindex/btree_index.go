@@ -52,12 +52,10 @@ var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
-// btIndexVersion0: old layout [EF][nodesCount(8)][nodes...]. EF count's MSB is always 0x00
-// for any realistic dataset, so this byte reliably identifies old files.
-// btIndexVersion1: new layout [0x01][nodesCount(8)][nodes...][EF]. Nodes stream during ETL
-// Load; EF written last and self-delimits to end-of-file.
 const (
+	// old layout: [EF][nodesCount(8)][nodes...]; EF count's MSB is always 0x00 for realistic datasets.
 	btIndexVersion0 = byte(0x00)
+	// new layout: [version][nodesCount(8)][nodes...][EF]; nodes stream during ETL Load, EF written last.
 	btIndexVersion1 = byte(0x01)
 )
 
@@ -288,9 +286,6 @@ func (btw *BtIndexWriter) Build() error {
 		defer efBuilder.Close()
 		btw.ef = efBuilder.EliasFano
 
-		// file layout: [0x01 version][nodesCount(8)][node...][EF]
-		// nodes are written first so they can stream directly; EF (size known from count+maxOffset
-		// but requiring a 2-pass build) is written last and self-delimits to end-of-file.
 		if _, err = indexW.Write([]byte{btIndexVersion1}); err != nil {
 			return fmt.Errorf("[index] write version: %w", err)
 		}
@@ -526,10 +521,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	idx.data = idx.m[:idx.size]
 
 	var pos int
-	if len(idx.data[pos:]) == 0 {
-		return idx, nil
-	}
-
 	var nodes []Node
 	switch idx.data[pos] {
 	case btIndexVersion1:
@@ -553,7 +544,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		return nil, fmt.Errorf("unsupported btree index version %d in %s: upgrade Erigon", idx.data[pos], indexPath)
 	}
 
-	idx.pool = sync.Pool{}
 	idx.pool.New = func() any {
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
