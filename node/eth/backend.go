@@ -306,6 +306,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalConcurrentCommitment {
 			statecfg.ExperimentalConcurrentCommitment = true
 		}
+		if config.ExperimentalParallelCommitment {
+			statecfg.ExperimentalParallelCommitment = true
+		}
+		if config.ExperimentalStreamingCommitment {
+			statecfg.ExperimentalStreamingCommitment = true
+		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
