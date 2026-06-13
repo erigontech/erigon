@@ -17,7 +17,9 @@
 package rpchelper
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -42,6 +45,14 @@ func createLog() *remoteproto.SubscribeLogsReply {
 		TransactionIndex: 0,
 		Removed:          false,
 	}
+}
+
+func appliedLogsReply() *remoteproto.SubscribeLogsReply {
+	return filterack.LogsReply()
+}
+
+func appliedReceiptsReply() *remoteproto.SubscribeReceiptsReply {
+	return filterack.ReceiptsReply()
 }
 
 var (
@@ -317,14 +328,18 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	t.Parallel()
-	var lastFilterRequest *remoteproto.LogsFilterRequest
+	var (
+		f                 *Filters
+		lastFilterRequest *remoteproto.LogsFilterRequest
+	)
 	loadRequester := func(r *remoteproto.LogsFilterRequest) error {
 		lastFilterRequest = r
+		f.OnNewLogs(appliedLogsReply())
 		return nil
 	}
 
 	config := FiltersConfig{}
-	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f = New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
@@ -760,14 +775,18 @@ func TestFilters_ThreeReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testing.T) {
 	t.Parallel()
-	var lastFilterRequest *remoteproto.ReceiptsFilterRequest
+	var (
+		f                 *Filters
+		lastFilterRequest *remoteproto.ReceiptsFilterRequest
+	)
 	loadRequester := func(r *remoteproto.ReceiptsFilterRequest) error {
 		lastFilterRequest = r
+		f.OnReceipts(appliedReceiptsReply())
 		return nil
 	}
 
 	config := FiltersConfig{}
-	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f = New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 	f.receiptsRequestor.Store(loadRequester)
 
 	// First request: subscribe to all receipts
@@ -838,5 +857,270 @@ func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testi
 	// Request should be nil (no active subscriptions)
 	if lastFilterRequest.TransactionHashes != nil {
 		t.Error("6: expected transaction hashes to be nil with no subscriptions")
+	}
+}
+
+func TestFilters_FilterUpdateWaitsForAppliedAck(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	requestorCalled := make(chan struct{}, 1)
+
+	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		requestorCalled <- struct{}{}
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- f.sendReceiptsFilterUpdate()
+	}()
+
+	select {
+	case <-requestorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("expected receipts filter update to be sent")
+	}
+
+	select {
+	case err := <-done:
+		t.Fatalf("filter update returned before applied ack: %v", err)
+	default:
+	}
+
+	f.OnReceipts(appliedReceiptsReply())
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected successful filter update after applied ack, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected filter update to finish after applied ack")
+	}
+}
+
+func TestFilters_LateAppliedAckDoesNotSatisfyNextUpdate(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.filterUpdateAckTimeout = 20 * time.Millisecond
+
+	requestorCalled := make(chan struct{}, 2)
+	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		requestorCalled <- struct{}{}
+		return nil
+	})
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- f.sendReceiptsFilterUpdate()
+	}()
+
+	select {
+	case <-requestorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("expected first receipts filter update to be sent")
+	}
+
+	select {
+	case err := <-firstDone:
+		if err == nil {
+			t.Fatal("expected first update to time out")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected first update to time out")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- f.sendReceiptsFilterUpdate()
+	}()
+
+	select {
+	case <-requestorCalled:
+	case <-time.After(time.Second):
+		t.Fatal("expected second receipts filter update to be sent")
+	}
+
+	f.OnReceipts(appliedReceiptsReply())
+
+	select {
+	case err := <-secondDone:
+		t.Fatalf("second update returned after stale applied ack: %v", err)
+	default:
+	}
+
+	f.OnReceipts(appliedReceiptsReply())
+
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("expected successful second update after matching applied ack, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected second update to finish after matching applied ack")
+	}
+}
+
+func TestFilters_AppliedAckConcurrentWithTimeoutDoesNotFailUpdate(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.filterUpdateAckTimeout = 10 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() {
+		done <- f.waitForFilterUpdateApplied("receipts", f.receiptsFilterAppliedAck, &f.receiptsFilterAppliedCount, &f.receiptsFilterUpdateCount, &f.receiptsUpdateMu, func() error {
+			return nil
+		})
+	}()
+
+	deadline := time.After(time.Second)
+	for f.receiptsFilterUpdateCount.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("expected receipts filter update count to advance")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	f.receiptsFilterAppliedCount.Store(1)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected concurrently applied receipts filter update to succeed, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected receipts filter update to finish")
+	}
+}
+
+func TestFilters_LogsRequestorReadySendsCurrentFilterWithoutPendingFlag(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	_, _ = f.SubscribeLogs(1, filters.FilterCriteria{
+		Addresses: []common.Address{address1},
+		Topics:    [][]common.Hash{{topic1}},
+	})
+	f.pendingLogsUpdate.Store(false)
+
+	var sent *remoteproto.LogsFilterRequest
+	err := f.onLogsRequestorReady(func(req *remoteproto.LogsFilterRequest) error {
+		sent = req
+		f.OnNewLogs(appliedLogsReply())
+		return nil
+	}, log.New())
+	if err != nil {
+		t.Fatalf("expected logs ready refresh to succeed, got %v", err)
+	}
+	if sent == nil {
+		t.Fatal("expected logs ready refresh to send current filter")
+	}
+	if len(sent.Addresses) != 1 || gointerfaces.ConvertH160toAddress(sent.Addresses[0]) != address1 {
+		t.Fatalf("expected logs ready refresh to include subscribed address, got %v", sent.Addresses)
+	}
+	if len(sent.Topics) != 1 || gointerfaces.ConvertH256ToHash(sent.Topics[0]) != topic1 {
+		t.Fatalf("expected logs ready refresh to include subscribed topic, got %v", sent.Topics)
+	}
+}
+
+func TestFilters_ReceiptsRequestorReadySendsCurrentFilterWithoutPendingFlag(t *testing.T) {
+	t.Parallel()
+
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	_, _ = f.SubscribeReceipts(1, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{txHash1}})
+	f.pendingReceiptsUpdate.Store(false)
+
+	var sent *remoteproto.ReceiptsFilterRequest
+	err := f.onReceiptsRequestorReady(func(req *remoteproto.ReceiptsFilterRequest) error {
+		sent = req
+		f.OnReceipts(appliedReceiptsReply())
+		return nil
+	}, log.New())
+	if err != nil {
+		t.Fatalf("expected receipts ready refresh to succeed, got %v", err)
+	}
+	if sent == nil {
+		t.Fatal("expected receipts ready refresh to send current filter")
+	}
+	if len(sent.TransactionHashes) != 1 || gointerfaces.ConvertH256ToHash(sent.TransactionHashes[0]) != txHash1 {
+		t.Fatalf("expected receipts ready refresh to include subscribed transaction hash, got %v", sent.TransactionHashes)
+	}
+}
+
+// TestFilters_SubscribeLogsStaysActiveOnSendError checks that when the remote
+// filter-send fails (e.g. timeout waiting for ACK), the subscription channel
+// is NOT closed and logs are still distributed locally. Before the fix,
+// the failed send caused removeLogsFilter to be called, which closed the
+// channel; callers received a dead channel with no error.
+func TestFilters_SubscribeLogsStaysActiveOnSendError(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.logsRequestor.Store(func(_ *remoteproto.LogsFilterRequest) error {
+		return errors.New("injected send error")
+	})
+
+	ch, _ := f.SubscribeLogs(1, filters.FilterCriteria{})
+
+	// Channel must be open immediately after subscribe.
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			t.Fatal("SubscribeLogs returned a closed channel after a filter-send error")
+		}
+	default:
+	}
+
+	// Local distribution must still work even though the remote filter was not
+	// applied — the subscription is still registered in the aggregator.
+	f.OnNewLogs(createLog())
+	select {
+	case v := <-ch:
+		if v == nil {
+			t.Fatal("received nil log from subscription that should still be active")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected a log on the subscription channel, got nothing")
+	}
+}
+
+// TestFilters_SubscribeReceiptsStaysActiveOnSendError is the receipts analogue
+// of TestFilters_SubscribeLogsStaysActiveOnSendError.
+func TestFilters_SubscribeReceiptsStaysActiveOnSendError(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		return errors.New("injected send error")
+	})
+
+	ch, _ := f.SubscribeReceipts(1, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{}})
+
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			t.Fatal("SubscribeReceipts returned a closed channel after a filter-send error")
+		}
+	default:
+	}
+
+	// Local distribution must still work.
+	f.OnReceipts(createReceipt(common.Hash{}))
+	select {
+	case v := <-ch:
+		if v == nil {
+			t.Fatal("received nil receipt from subscription that should still be active")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected a receipt on the subscription channel, got nothing")
 	}
 }

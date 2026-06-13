@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -129,6 +130,9 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateReceiptsFilter(filter, filterReq)
+		if err := server.Send(filterack.ReceiptsReply()); err != nil {
+			return fmt.Errorf("sending receipts filter applied ack: %w", err)
+		}
 	}
 	if recvErr != io.EOF {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
