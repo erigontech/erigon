@@ -159,10 +159,13 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	}
 	switch {
 	case domainExistenceForceWillNeed:
+		log.Warn("[dbg] open", "will_need", accessor.FileName())
 		accessor.ForceExistenceFilterWillNeed()
 	case domainExistenceForceNormal:
+		log.Warn("[dbg] open", "normal", accessor.FileName())
 		accessor.ForceExistenceFilterNormal()
 	case domainExistenceForceInMem:
+		log.Warn("[dbg] open", "in_mem", accessor.FileName())
 		accessor.ForceExistenceFilterInRAM()
 	}
 	return accessor, nil
@@ -175,10 +178,13 @@ func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
 	}
 	switch {
 	case domainExistenceForceWillNeed:
+		log.Warn("[dbg] open", "will_need", filter.FileName)
 		filter.MadvWillNeed()
 	case domainExistenceForceNormal:
+		log.Warn("[dbg] open", "normal", filter.FileName)
 		filter.MadvNormal()
 	case domainExistenceForceInMem:
+		log.Warn("[dbg] open", "in_mem", filter.FileName)
 		filter.ForceInMem()
 	}
 	return filter, nil
