@@ -181,8 +181,8 @@ func TestFindInventoryOrphansPastBlock_IgnoresNonBlockFiles(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
 	inv := snapshot.NewInventory()
-	touchSeg(t, snapDir, "v2.0-stray-state-file.seg") // wrong prefix
-	touchSeg(t, snapDir, "chain.toml")                // wrong extension
+	touchSeg(t, snapDir, "v2.0-stray-state-file.seg")              // wrong prefix
+	touchSeg(t, snapDir, "chain.toml")                             // wrong extension
 	touchSeg(t, snapDir, "v1.1-002900-002910-headers.seg.torrent") // wrong extension
 	p := &Provider{snapDir: snapDir, Inventory: inv}
 	got, err := p.findInventoryOrphansPastBlock(0)

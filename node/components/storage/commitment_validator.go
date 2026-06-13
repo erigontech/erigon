@@ -507,7 +507,7 @@ func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Invent
 		}
 		startTxNum := entry.FromStep * stepSize
 		endTxNum := entry.ToStep * stepSize
-		info, err := integrity.ExtractCommitmentRecord(ctx, tx, startTxNum, endTxNum)
+		info, err := safeExtractCommitmentRecord(ctx, tx, startTxNum, endTxNum)
 		if err != nil {
 			failed++
 			if logger != nil {
@@ -536,6 +536,20 @@ func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Invent
 		logger.Info("[storage] bootstrap commitment anchors extracted",
 			"extracted", extracted, "failed", failed, "totalFiles", len(commitmentFiles))
 	}
+}
+
+// safeExtractCommitmentRecord wraps ExtractCommitmentRecord with a
+// recover so a malformed segment file (e.g. truncated output from an
+// interrupted merge) surfaces as an error rather than killing the
+// process at bootstrap. The recovered panic is converted to the same
+// error path the caller already logs and quarantines.
+func safeExtractCommitmentRecord(ctx context.Context, tx kv.TemporalTx, startTxNum, endTxNum uint64) (info integrity.CommitmentRootInfo, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: panic reading commitment file: %v", integrity.ErrCommitmentRecordInvalid, r)
+		}
+	}()
+	return integrity.ExtractCommitmentRecord(ctx, tx, startTxNum, endTxNum)
 }
 
 // seedLatestCommitmentBinding finds the highest commitment-domain

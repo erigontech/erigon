@@ -560,8 +560,8 @@ func TestStraddleBlockFileForType_FiltersByType(t *testing.T) {
 	t.Parallel()
 	inv := snapshot.NewInventory()
 	for _, e := range []*snapshot.FileEntry{
-		{Name: "v1.1-002910-002920-bodies.seg", Local: true},   // straddles 2,912,999 but wrong type
-		{Name: "v1.1-002910-002920-headers.seg", Local: true},  // straddles + right type
+		{Name: "v1.1-002910-002920-bodies.seg", Local: true},  // straddles 2,912,999 but wrong type
+		{Name: "v1.1-002910-002920-headers.seg", Local: true}, // straddles + right type
 	} {
 		require.NoError(t, inv.AddFile(e))
 	}
