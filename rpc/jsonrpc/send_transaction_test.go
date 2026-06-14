@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -122,7 +122,6 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 
 func TestSendRawTransaction_InvalidParams_OnMalformedRLP(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool())
-	require := require.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
@@ -140,6 +139,7 @@ func TestSendRawTransaction_InvalidParams_OnMalformedRLP(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			require := require.New(t)
 			_, err := api.SendRawTransaction(ctx, hexutil.MustDecode(tc.raw))
 			require.Error(err)
 			var invalid *rpc.InvalidParamsError
