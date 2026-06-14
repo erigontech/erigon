@@ -2152,6 +2152,57 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 // front of the values table, so the big-value deletes are near-sequential).
 func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, prg *prune.Stat, logEvery *time.Ticker) (*prune.Stat, error) {
 	stat := &prune.Stat{MinTxNum: math.MaxUint64, KeyProgress: prune.Done}
+
+	// First pass (read-only): collect the (bareKey, dup) of every in-range entry.
+	// We don't delete while navigating the cursor — emptying a key would leave the
+	// cursor in a state where NextNoDup fails. The deletes happen in the second pass
+	// via position-independent DeleteExact/Delete.
+	collector := etl.NewCollectorWithAllocator(dt.d.FilenameBase+".prune.indirect", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger)
+	defer collector.Close()
+	collector.LogLvl(log.LvlTrace)
+
+	rc, err := rwTx.CursorDupSort(dt.d.KeysTable)
+	if err != nil {
+		return nil, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
+	}
+	var k, dup []byte
+	if prg.ValueProgress == prune.InProgress && prg.LastPrunedKey != nil {
+		k, dup, err = rc.Seek(prg.LastPrunedKey)
+	} else {
+		k, dup, err = rc.First()
+	}
+	var aux []byte
+	for ; k != nil; k, dup, err = rc.Next() {
+		if err != nil {
+			rc.Close()
+			return nil, err
+		}
+		if len(dup) < 16 {
+			continue
+		}
+		txNum := kv.Step(^binary.BigEndian.Uint64(dup[:8])).ToTxNum(dt.stepSize)
+		if txNum < txFrom || txNum >= txTo {
+			continue
+		}
+		aux = append(append(aux[:0], k...), dup...)
+		if err := collector.Collect(aux[:len(k)], aux[len(k):]); err != nil {
+			rc.Close()
+			return nil, err
+		}
+		stat.PruneCountValues++
+		stat.MinTxNum = min(stat.MinTxNum, txNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		limit--
+		if limit == 0 {
+			stat.ValueProgress = prune.InProgress
+			stat.LastPrunedKey = common.Copy(k)
+			break
+		}
+	}
+	rc.Close()
+
+	// Second pass: delete the collected entries. DeleteExact/Delete reposition their
+	// own cursors, so this is safe regardless of the keys/values being removed.
 	keysC, err := rwTx.RwCursorDupSort(dt.d.KeysTable)
 	if err != nil {
 		return nil, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
@@ -2162,63 +2213,21 @@ func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		return nil, fmt.Errorf("create %s values cursor: %w", dt.name.String(), err)
 	}
 	defer valsC.Close()
-
-	var k []byte
-	if prg.ValueProgress == prune.InProgress && prg.LastPrunedKey != nil {
-		k, _, err = keysC.Seek(prg.LastPrunedKey)
-	} else {
-		k, _, err = keysC.First()
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	for k != nil {
-		dup, err := keysC.FirstDup()
-		if err != nil {
-			return nil, err
-		}
-		for dup != nil {
-			txNum := kv.Step(^binary.BigEndian.Uint64(dup[:8])).ToTxNum(dt.stepSize)
-			if txNum >= txFrom && txNum < txTo {
-				if seqID := dup[8:16]; binary.BigEndian.Uint64(seqID) != deletionSeqID {
-					if err := valsC.Delete(seqID); err != nil {
-						return nil, err
-					}
-				}
-				if err := keysC.DeleteCurrent(); err != nil {
-					return nil, err
-				}
-				stat.PruneCountValues++
-				stat.MinTxNum = min(stat.MinTxNum, txNum)
-				stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-				limit--
-				if limit == 0 {
-					stat.ValueProgress = prune.InProgress
-					stat.LastPrunedKey = common.Copy(k)
-					return stat, nil
-				}
-			}
-			_, dup, err = keysC.NextDup()
-			if err != nil {
-				return nil, err
+	if err := collector.Load(nil, "", func(bareKey, dupVal []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if seqID := dupVal[8:16]; binary.BigEndian.Uint64(seqID) != deletionSeqID {
+			if err := valsC.Delete(seqID); err != nil {
+				return err
 			}
 		}
 		select {
-		case <-ctx.Done():
-			stat.ValueProgress = prune.InProgress
-			stat.LastPrunedKey = common.Copy(k)
-			return stat, nil
 		case <-logEvery.C:
 			dt.d.logger.Info("[snapshots] prune domain", "name", dt.d.FilenameBase, "pruned values", stat.PruneCountValues)
 		default:
 		}
-		k, _, err = keysC.NextNoDup()
-		if err != nil {
-			return nil, err
-		}
+		return keysC.DeleteExact(bareKey, dupVal)
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return nil, err
 	}
-	stat.ValueProgress = prune.Done
 	return stat, nil
 }
 
