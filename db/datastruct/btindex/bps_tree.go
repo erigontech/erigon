@@ -369,29 +369,29 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	// small window is handed to the linear scan below either way.
 	if BtInterp && len(klo) > 0 && len(khi) > 0 {
 		probes := uint64(0)
-		var kmBuf, kloBuf, khiBuf []byte
+		var kmBuf []byte
 		for l < r && r-l > DefaultBtreeStartSkip {
 			if probes >= BtInterpBudget {
-				m = (l + r) >> 1
-			} else {
-				m = interpMid(key, klo, khi, l, r)
+				break
 			}
+			m = interpMid(key, klo, khi, l, r)
 			probes++
-			g.Reset(b.offt.Get(m))
+			off := b.offt.Get(m)
+			g.Reset(off)
 			km, _ := g.Next(kmBuf[:0])
 			kmBuf = km
 			cmp = bytes.Compare(key, km)
 			if cmp == 0 {
 				v, _ = g.Next(nil)
-				return v, true, b.offt.Get(m), nil
+				return v, true, off, nil
 			} else if cmp < 0 {
 				r = m
-				khiBuf = append(khiBuf[:0], km...)
-				khi = khiBuf
+				khi = kmBuf
+				kmBuf = nil
 			} else {
 				l = m + 1
-				kloBuf = append(kloBuf[:0], km...)
-				klo = kloBuf
+				klo = kmBuf
+				kmBuf = nil
 			}
 		}
 	}
@@ -458,11 +458,6 @@ func interpMid(key, klo, khi []byte, l, r uint64) uint64 {
 		return (l + r) >> 1
 	}
 	f := float64(x-a) / float64(hi-a)
-	if f < 0 {
-		f = 0
-	} else if f > 1 {
-		f = 1
-	}
 	m := l + uint64(f*float64(r-1-l)+0.5)
 	if m < l {
 		m = l
@@ -486,11 +481,10 @@ func commonPrefixLen(a, b []byte) int {
 }
 
 func u64At(k []byte, p int) uint64 {
-	var buf [8]byte
-	for i := 0; i < 8 && p+i < len(k); i++ {
-		buf[i] = k[p+i]
+	if p > len(k) {
+		return 0
 	}
-	return binary.BigEndian.Uint64(buf[:])
+	return common.BytesToUint64(k[p:])
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
