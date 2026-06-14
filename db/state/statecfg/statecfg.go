@@ -13,7 +13,22 @@ type DomainCfg struct {
 	Compression seg.FileCompression
 	CompressCfg seg.Cfg
 	Accessors   Accessors // list of indexes for given domain
-	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+
+	// LargeValues=false: single DupSort table.
+	//   ValuesTable (DupSort): bareKey -> invStep(8) + value
+	//   Value size capped at ~pagesize/2 (≈2kB on 4kB pages).
+	//
+	// LargeValues=true: two-table indirect layout.
+	//   KeysTable   (DupSort): bareKey   -> invStep(8) + seqID(8)
+	//   ValuesTable (plain)  : seqID(8)  -> value
+	//   DupSort on the keys table is required because variable-length bareKeys
+	//   (e.g. commitment branch nibble paths) can be prefixes of each other —
+	//   a flat `bareKey + invStep` plain table would mis-route Seek(bareKey)
+	//   to a longer-prefixed sibling. The Vals table is plain so Flush is a
+	//   sequential append keyed by an MDBX auto-increment seqID, avoiding a
+	//   per-key SeekBothRange over full-size value bytes.
+	KeysTable   string
+	ValuesTable string
 	LargeValues bool
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
@@ -26,7 +41,11 @@ type DomainCfg struct {
 }
 
 func (d DomainCfg) Tables() []string {
-	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	res := []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	if d.LargeValues && d.KeysTable != "" {
+		res = append(res, d.KeysTable)
+	}
+	return res
 }
 
 func (d DomainCfg) GetVersions() VersionTypes {
