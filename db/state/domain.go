@@ -1475,6 +1475,7 @@ func (dt *DomainRoTx) Close() {
 	dt.mapReaders = nil
 	dt.ht.Close()
 
+	dt.getFromFileCache.LogStats(dt.name)
 	dt.getFromFileCache = nil
 }
 
