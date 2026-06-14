@@ -268,6 +268,14 @@ type ExecModule struct {
 	// from the active beacon config. Zero = disabled (test/harness
 	// paths that don't run Caplin).
 	setHeadMaxDepthBlocks uint64
+
+	// setHeadMaxModeBGapBlocks is the iter-1 stopgap cap on Mode-B
+	// unwind depth past the snapshot tip. The Case C gap-prune path
+	// assumes gap blocks live in snapshot files; that assumption
+	// holds only when targetBlock ≤ frozenBlocks. Beyond it, the
+	// gap-bridging fails silently post-FCU. Zero = disabled. See
+	// docs/plans/20260614-deep-mode-b-gap-bridging.md.
+	setHeadMaxModeBGapBlocks uint64
 }
 
 // eventBus is the publishing surface SetHead needs. Declared as a
@@ -740,6 +748,17 @@ func (e *ExecModule) SetEventBus(bus eventBus) {
 // docs/plans/20260609-mode-b-cl-rewind-gap.md.
 func (e *ExecModule) SetSetHeadMaxDepthBlocks(blocks uint64) {
 	e.setHeadMaxDepthBlocks = blocks
+}
+
+// SetSetHeadMaxModeBGapBlocks installs the iter-1 stopgap cap on
+// Mode-B unwind depth past the snapshot tip. Until the architectural
+// fix from docs/plans/20260614-deep-mode-b-gap-bridging.md lands,
+// targets past frozenBlocks deeper than this many blocks would
+// silently wedge post-FCU; the cap converts that to an actionable
+// refusal. Set by backend.go during component wiring. Zero =
+// disabled (test/harness paths that don't run Caplin).
+func (e *ExecModule) SetSetHeadMaxModeBGapBlocks(blocks uint64) {
+	e.setHeadMaxModeBGapBlocks = blocks
 }
 
 func (e *ExecModule) Ready(ctx context.Context) (bool, error) {

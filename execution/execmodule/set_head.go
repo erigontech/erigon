@@ -118,6 +118,27 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 			targetBlock, currentHead-targetBlock, currentHead, e.setHeadMaxDepthBlocks)
 	}
 
+	// Iteration-1 (experimental) stopgap: refuse mode-B unwinds whose
+	// post-unwind gap to the next forward-pushed block would exceed
+	// Caplin's bridgeable window. After mode-B unwind to target T past
+	// the snapshot tip, Caplin restarts and checkpoint-syncs from
+	// /finalized; its BlockCollector cache anchors at the new
+	// finalised slot's block (well above T). The gap-prune Case C
+	// FCU-nudge path assumes the gap blocks are in snapshot files
+	// (see persistent_block_collector.go:480-487), but for T past the
+	// snapshot tip they aren't — they were wiped by mode-B and aren't
+	// frozen. The walk back from Caplin's cached high block then
+	// runs into missing headers / missing bodies and wedges with
+	// "append with gap". Refuse loudly with the actionable diagnostic
+	// rather than silently wedging post-FCU. See
+	// docs/plans/20260614-deep-mode-b-gap-bridging.md for the full
+	// finding and the Option B medium-term fix that lifts this cap.
+	frozenBlocks := e.blockReader.FrozenBlocks()
+	if e.setHeadMaxModeBGapBlocks > 0 && targetBlock > frozenBlocks && (currentHead-targetBlock) > e.setHeadMaxModeBGapBlocks {
+		return fmt.Errorf("setHead target %d would create a %d-block gap past snapshot tip %d that exceeds Caplin's bridgeable window of %d blocks — shallower targets or fresh-sync required (iter-1 stopgap; see docs/plans/20260614-deep-mode-b-gap-bridging.md)",
+			targetBlock, currentHead-targetBlock, frozenBlocks, e.setHeadMaxModeBGapBlocks)
+	}
+
 	// Check if we can unwind that far back. minUnwindableBlock is the
 	// boundary of the diffset window. Targets inside it ride the
 	// existing incremental path (mode A); targets past it engage the

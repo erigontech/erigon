@@ -1344,3 +1344,112 @@ func TestSetHead_E2E_WSWindowZeroDisablesCheck(t *testing.T) {
 	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(1)),
 		"with cap=0 the check must be disabled regardless of depth")
 }
+
+// TestSetHead_E2E_RejectsBeyondModeBGapWindow pins the iter-1 stopgap
+// for the deep Mode-B gap-bridging finding (2026-06-13). When the
+// target is past the snapshot tip AND the depth exceeds Caplin's
+// bridgeable window, refuse loudly with the actionable diagnostic
+// rather than silently wedging post-FCU. See
+// docs/plans/20260614-deep-mode-b-gap-bridging.md.
+func TestSetHead_E2E_RejectsBeyondModeBGapWindow(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+	)
+	ctx := m.Ctx
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	require.Equal(t, uint64(8), canonicalHead(t, m))
+
+	// In-memory test harness has no frozen snapshots → FrozenBlocks()=0.
+	// Every positive target is "past snapshot tip" for the purposes of
+	// the gap-bridging cap.
+	//
+	// Cap depth past snapshot tip at 3 blocks; WS cap left disabled so
+	// we observe only the gap-bridging refusal.
+	m.ExecModule.SetSetHeadMaxDepthBlocks(0)
+	m.ExecModule.SetSetHeadMaxModeBGapBlocks(3)
+	api := newSetHeadE2EAPI(t, m)
+
+	// Target=2, currentHead=8, depth=6 > cap=3 AND target>frozenBlocks=0 →
+	// reject with the bridgeable-window diagnostic.
+	err = api.SetHead(ctx, hexutil.Uint64(2))
+	require.Error(t, err, "depth 6 must be rejected against a Mode-B gap cap of 3")
+	require.Contains(t, err.Error(), "bridgeable window",
+		"reject error must name the constraint so the operator knows what to do")
+	require.Contains(t, err.Error(), "snapshot tip",
+		"reject error must mention the snapshot tip so the relationship is clear")
+	require.Equal(t, uint64(8), canonicalHead(t, m),
+		"head must NOT move when the cap rejects the request")
+
+	// Target=5, currentHead=8, depth=3 == cap → accepted (strict-greater-than).
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(5)),
+		"depth exactly equal to cap must be accepted")
+	require.Equal(t, uint64(5), canonicalHead(t, m))
+}
+
+// TestSetHead_E2E_ModeBGapWindowZeroDisablesCheck pins the
+// harness/test-path behavior: when the gap cap is unset, the
+// gap-bridging check is bypassed entirely.
+func TestSetHead_E2E_ModeBGapWindowZeroDisablesCheck(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+	)
+	ctx := m.Ctx
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+
+	m.ExecModule.SetSetHeadMaxDepthBlocks(0)
+	m.ExecModule.SetSetHeadMaxModeBGapBlocks(0)
+	api := newSetHeadE2EAPI(t, m)
+
+	// Target=1, depth=7. With gap-cap=0 the check is disabled and
+	// SetHead proceeds.
+	require.NoError(t, api.SetHead(ctx, hexutil.Uint64(1)),
+		"with gap-cap=0 the check must be disabled regardless of depth")
+}

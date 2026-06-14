@@ -1760,6 +1760,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger.Info("[caplin-component] SetHead depth capped at WS window",
 				"blocks", wsBlocks, "epochs", beaconCfg.MinEpochsForBlockRequests())
 		}
+		// Iter-1 stopgap: cap Mode-B depth past the snapshot tip at
+		// the bridgeable window. Live-caught 2026-06-13 (depth=5k
+		// soak iter passed; depth=10k wedged with "append with gap").
+		// Until the Phase-2 architectural fix lands, refuse with an
+		// actionable error rather than silently wedging post-FCU.
+		// See docs/plans/20260614-deep-mode-b-gap-bridging.md.
+		const modeBGapStopgap uint64 = 5000
+		backend.execModule.SetSetHeadMaxModeBGapBlocks(modeBGapStopgap)
+		logger.Info("[caplin-component] SetHead Mode-B gap capped (iter-1 stopgap)",
+			"blocks", modeBGapStopgap)
 		if config.CaplinConfig.EnableEngineAPI {
 			executionEngine, err = executionclient.NewExecutionClientEngineLocal(
 				engineBackendRPC,
