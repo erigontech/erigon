@@ -144,14 +144,18 @@ type Node struct {
 }
 
 func encodeListNodes(nodes []Node, w io.Writer) error {
-	numBuf := make([]byte, 8)
-	binary.BigEndian.PutUint64(numBuf, uint64(len(nodes)))
-	if _, err := w.Write(numBuf); err != nil {
+	var header [10]byte
+	binary.BigEndian.PutUint64(header[:8], uint64(len(nodes)))
+	if _, err := w.Write(header[:8]); err != nil {
 		return err
 	}
-
-	for ni := 0; ni < len(nodes); ni++ {
-		if _, err := w.Write(nodes[ni].Encode()); err != nil {
+	for i := range nodes {
+		binary.BigEndian.PutUint64(header[:8], nodes[i].di)
+		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
+		if _, err := w.Write(header[:]); err != nil {
+			return err
+		}
+		if _, err := w.Write(nodes[i].key); err != nil {
 			return err
 		}
 	}
@@ -170,14 +174,6 @@ func decodeListNodes(data []byte) ([]Node, error) {
 		pos += int(dp)
 	}
 	return nodes, nil
-}
-
-func (n Node) Encode() []byte {
-	buf := make([]byte, 8+2+len(n.key))
-	binary.BigEndian.PutUint64(buf[:8], n.di)
-	binary.BigEndian.PutUint16(buf[8:10], uint16(len(n.key)))
-	copy(buf[10:], n.key)
-	return buf
 }
 
 func (n *Node) Decode(buf []byte) (uint64, error) {

@@ -215,7 +215,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
 
-	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.LargeSortableBuffers, logger)
+	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.SmallSortableBuffers, logger)
 	btw.collector.SortAndFlushInBackground(false)
 	btw.collector.LogLvl(btw.args.Lvl)
 
