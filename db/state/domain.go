@@ -189,7 +189,7 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 }
 
 func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
-	filter, err := existence.OpenFilter(fPath, false)
+	filter, err := existence.OpenFilter(fPath)
 	if err != nil {
 		return nil, err
 	}
@@ -929,7 +929,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			existenceFilter, err = existence.OpenFilter(fPath, false)
+			existenceFilter, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
@@ -1032,7 +1032,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath, false)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
