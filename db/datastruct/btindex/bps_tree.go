@@ -76,8 +76,6 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 			kv.Skip() // skip value
 		}
 		cachedBytes += nsz + uint64(len(nodes[i].key))
-
-		nodes[i].off = offt.Get(nodes[i].di)
 	}
 
 	return bt
@@ -142,7 +140,6 @@ type BpsTreeIterator struct {
 
 type Node struct {
 	key []byte
-	off uint64 // offset in kv file to key
 	di  uint64 // key ordinal number in kv
 }
 
@@ -193,7 +190,6 @@ func (n *Node) Decode(buf []byte) (uint64, error) {
 		return 0, errors.New("short buffer")
 	}
 	n.key = buf[10 : 10+l]
-	//madvise(k, len(k), MADV_WILL_NEED)
 	return uint64(10 + l), nil
 }
 
@@ -223,7 +219,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 		kv.Reset(off)
 		key, _ = kv.Next(key[:0]) // read key only; reuse buffer to avoid allocs
 		kv.Skip()                 // skip value — WarmUp only needs the key
-		b.mx = append(b.mx, Node{off: off, key: common.Copy(key), di: di})
+		b.mx = append(b.mx, Node{key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 
