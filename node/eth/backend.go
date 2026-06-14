@@ -654,7 +654,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionFetcher = execp2p.NewFetcher(logger, backend.sentryProvider.ExecutionP2PMessageListener, backend.sentryProvider.ExecutionP2PMessageSender)
 	executionFetcher = execp2p.NewPenalizingFetcher(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer)
 	executionFetcher = execp2p.NewTrackingFetcher(executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir)
+	balFetcher := execp2p.NewBALFetcher(
+		logger,
+		backend.sentryProvider.ExecutionP2PMessageListener,
+		backend.sentryProvider.ExecutionP2PMessageSender,
+		backend.sentryProvider.ExecutionP2PPeerPenalizer,
+	)
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// the consensus engine which is only available after polygon + engine
@@ -687,19 +693,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
 
-	// Start the eth/71 BAL downloader (EIP-8159) only on chains that activate
-	// EIP-7928. collectMissingBALs already short-circuits on the first pre-
-	// Amsterdam header (BlockAccessListHash==nil), but skipping the whole
-	// goroutine on chains that never reach Amsterdam is cheaper and clearer.
-	if chainConfig.AmsterdamTime != nil {
-		// Always-on once gated, negotiation-driven: if no peer advertises eth/71
-		// this is a silent no-op per scan pass. When eth/71 peers connect, the
-		// downloader backfills missing BALs into rawdb so subsequent stage_exec
-		// runs can skip local BAL regeneration.
-		go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
-	}
-
 	var txnProvider txnprovider.TxnProvider
+	var blobGetter txpool.BlobGetter
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
@@ -726,6 +721,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		txnProvider = backend.txPool
+		blobGetter = backend.txPool
 	}
 
 	execmoduleCache := &execmodule.Cache{}
@@ -1010,6 +1006,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Builder.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
+		blobGetter,
 		config.FcuTimeout,
 		config.MaxReorgDepth,
 	)

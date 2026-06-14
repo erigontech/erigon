@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -9,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
@@ -17,46 +17,64 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 )
+
+type stepRebasePlan struct {
+	renames   []string // flattened from/to pairs
+	deletions []string
+	resetExec bool
+	settings  state.ErigonDBSettings
+}
 
 func stepRebase(cliCtx *cli.Context) error {
 	logger := log.Root()
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
 	dirs := datadir.Open(cliCtx.String("datadir"))
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	if err != nil {
 		return err
 	}
-
-	currentStepSize := settings.StepSize
 	newStepSize := cliCtx.Uint64("new-step-size")
-	logger.Info("Rebasing step size", "current", currentStepSize, "new", newStepSize)
-
+	keepBlocks := cliCtx.Bool("keep-blocks")
+	logger.Info("Rebasing step size", "current", settings.StepSize, "new", newStepSize, "keep-blocks", keepBlocks)
 	if newStepSize == 0 {
 		logger.Crit("Invalid step size", "new-step-size", newStepSize)
 		return fmt.Errorf("new step size must be greater than 0")
 	}
-	if currentStepSize == 0 {
-		logger.Crit("Invalid current step size", "current-step-size", currentStepSize)
+	if settings.StepSize == 0 {
+		logger.Crit("Invalid current step size", "current-step-size", settings.StepSize)
 		return fmt.Errorf("current step size must be greater than 0")
 	}
-
-	if newStepSize == currentStepSize {
+	if newStepSize == settings.StepSize {
 		logger.Info("Step size is already at the desired value; exiting", "new-step-size", newStepSize)
 		return nil
 	}
-	if newStepSize > currentStepSize && newStepSize%currentStepSize != 0 {
-		logger.Crit("Invalid step size", "new-step-size", newStepSize)
-		return fmt.Errorf("new step size must be a multiple of %d", currentStepSize)
-	} else if currentStepSize > newStepSize && currentStepSize%newStepSize != 0 {
-		logger.Crit("Invalid step size", "new-step-size", newStepSize)
-		return fmt.Errorf("new step size must be divisible from %d", currentStepSize)
+	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, keepBlocks, logger)
+	if err != nil {
+		return err
 	}
+	printStepRebasePlan(plan)
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Proceed with these changes? [y/N]: ")
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "y" && answer != "yes" {
+		return fmt.Errorf("aborted by user")
+	}
+	return applyStepRebasePlan(cliCtx.Context, dirs, plan, logger)
+}
 
+func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, logger log.Logger) (stepRebasePlan, error) {
+	currentStepSize := settings.StepSize
+	if newStepSize > currentStepSize && newStepSize%currentStepSize != 0 {
+		return stepRebasePlan{}, fmt.Errorf("new step size must be a multiple of %d", currentStepSize)
+	}
+	if currentStepSize > newStepSize && currentStepSize%newStepSize != 0 {
+		return stepRebasePlan{}, fmt.Errorf("new step size must be divisible from %d", currentStepSize)
+	}
 	factor := newStepSize / currentStepSize
 	decr := newStepSize < currentStepSize
 	if decr {
@@ -65,114 +83,103 @@ func stepRebase(cliCtx *cli.Context) error {
 	} else {
 		logger.Info("Increasing step size", "factor", factor)
 	}
-
-	// Look for files to be renamed
 	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-(.+)\.(\d+)-(\d+)\.([^.]+)$`)
-
+	stateSnapDirs := []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapAccessors, dirs.SnapIdx}
 	rens := make([]string, 0, 100)
-	domains, err := collectRenameList(dirs.SnapDomain, re, decr, factor)
-	if err != nil {
-		return err
+	for _, p := range stateSnapDirs {
+		list, err := collectRenameList(p, re, decr, factor)
+		if err != nil {
+			return stepRebasePlan{}, err
+		}
+		rens = append(rens, list...)
 	}
-	hists, err := collectRenameList(dirs.SnapHistory, re, decr, factor)
-	if err != nil {
-		return err
-	}
-	accessors, err := collectRenameList(dirs.SnapAccessors, re, decr, factor)
-	if err != nil {
-		return err
-	}
-	idxs, err := collectRenameList(dirs.SnapIdx, re, decr, factor)
-	if err != nil {
-		return err
-	}
-	rens = append(rens, domains...)
-	rens = append(rens, hists...)
-	rens = append(rens, accessors...)
-	rens = append(rens, idxs...)
-
-	// List files to be renamed
-	for i := 0; i < len(rens); i += 2 {
-		fmt.Printf("R: %s => %s\n", rens[i], rens[i+1])
-	}
-
-	// Collect and list .torrent files to be deleted
 	dels := make([]string, 0, 100)
-	domainTorrents, err := collectTorrentFiles(dirs.SnapDomain)
-	if err != nil {
-		return err
+	for _, p := range stateSnapDirs {
+		list, err := collectTorrentFiles(p)
+		if err != nil {
+			return stepRebasePlan{}, err
+		}
+		dels = append(dels, list...)
 	}
-	histTorrents, err := collectTorrentFiles(dirs.SnapHistory)
-	if err != nil {
-		return err
+	if !keepBlocks {
+		dels = append(dels, dirs.Chaindata)
 	}
-	accessorTorrents, err := collectTorrentFiles(dirs.SnapAccessors)
-	if err != nil {
-		return err
-	}
-	idxTorrents, err := collectTorrentFiles(dirs.SnapIdx)
-	if err != nil {
-		return err
-	}
-	dels = append(dels, domainTorrents...)
-	dels = append(dels, histTorrents...)
-	dels = append(dels, accessorTorrents...)
-	dels = append(dels, idxTorrents...)
-
-	// include whole chaindata directory for deletion
-	dels = append(dels, dirs.Chaindata) //nolint:gocritic
-
-	// include erigondb.toml.torrent which is invalidated by the rebase
+	// erigondb.toml.torrent is invalidated by the rebase
 	dels = append(dels, filepath.Join(dirs.Snap, "erigondb.toml.torrent"))
+	newFrozenSteps := settings.StepsInFrozenFile / factor
+	if decr {
+		newFrozenSteps = settings.StepsInFrozenFile * factor
+	}
+	newSettings := state.ErigonDBSettings{StepSize: newStepSize, StepsInFrozenFile: newFrozenSteps}
+	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, settings: newSettings}, nil
+}
 
-	for _, f := range dels {
+func printStepRebasePlan(plan stepRebasePlan) {
+	for i := 0; i < len(plan.renames); i += 2 {
+		fmt.Printf("R: %s => %s\n", plan.renames[i], plan.renames[i+1])
+	}
+	for _, f := range plan.deletions {
 		fmt.Printf("D: %s\n", f)
 	}
-
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Proceed with these changes? [y/N]: ")
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	if answer != "y" && answer != "yes" {
-		return fmt.Errorf("aborted by user")
+	if plan.resetExec {
+		fmt.Printf("Reset: execution state tables in chaindata (blocks kept)\n")
 	}
+}
 
-	// Perform renames
-	for i := 0; i < len(rens); i += 2 {
-		from := rens[i]
-		to := rens[i+1]
+func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebasePlan, logger log.Logger) error {
+	unlock, err := dirs.TryFlock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// reset before renaming: a crash mid-apply then leaves old settings with old file
+	// names and cleared exec state, which is a consistent datadir and a re-runnable command
+	if plan.resetExec {
+		if err := resetExecState(ctx, dirs, logger); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < len(plan.renames); i += 2 {
+		from, to := plan.renames[i], plan.renames[i+1]
 		if err := os.Rename(from, to); err != nil {
 			return fmt.Errorf("rename %s -> %s: %w", from, to, err)
 		}
 		fmt.Printf("Renamed: %s => %s\n", from, to)
 	}
-
-	// Perform deletions
-	for _, p := range dels {
+	for _, p := range plan.deletions {
 		if err := dir.RemoveAll(p); err != nil {
 			return fmt.Errorf("delete %s: %w", p, err)
 		}
 		fmt.Printf("Deleted: %s\n", p)
 	}
-
-	// Write rebased settings
-	settings.StepSize = newStepSize
-	newFrozenSteps := settings.StepsInFrozenFile / factor
-	if decr {
-		newFrozenSteps = settings.StepsInFrozenFile * factor
-	}
-	settings.StepsInFrozenFile = newFrozenSteps
-
-	settingsBytes, err := toml.Marshal(settings)
+	settingsBytes, err := toml.Marshal(plan.settings)
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), settingsBytes, 0644)
+	return os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), settingsBytes, 0644)
+}
+
+func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
+	exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat"))
 	if err != nil {
 		return err
 	}
-
-	return nil
+	if !exists {
+		return fmt.Errorf("no chaindata database to keep at %s", dirs.Chaindata)
+	}
+	// exclusive non-Accede open: fail fast if the DB is in use rather than resetting a live node
+	chainDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Accede(false).Exclusive(true).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer chainDB.Close()
+	agg := openAgg(ctx, dirs, chainDB, logger)
+	defer agg.Close()
+	tdb, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	return rawdbreset.ResetExec(ctx, tdb)
 }
 
 // collectRenameList walks the snapshot domain directory and builds a list of

@@ -12,11 +12,18 @@
 # 2x local disk usage vs. extracted-only; CI caches only *.tar.gz to stay
 # under cache budget and re-extracts on each run.
 #
-# Usage: tools/test-fixtures.sh [MANIFEST [CACHE_DIR [KEY...]]]
+# Usage: tools/test-fixtures.sh [--download-only] [MANIFEST [CACHE_DIR [KEY...]]]
+#   --download-only   download & sha256-verify the tarballs, skip extraction
 #   MANIFEST defaults to test-fixtures.json
 #   CACHE_DIR defaults to test-fixtures-cache
 #   KEY...    optional manifest keys; default = all keys
 set -euo pipefail
+
+download_only=false
+if [[ "${1:-}" == "--download-only" ]]; then
+	download_only=true
+	shift
+fi
 
 manifest="${1:-test-fixtures.json}"
 cache="${2:-test-fixtures-cache}"
@@ -68,27 +75,44 @@ tar_path=""
 out_dir=""
 trap 'rm -f "${tar_path}.tmp" 2>/dev/null; rm -rf "${out_dir}.tmp" 2>/dev/null' EXIT
 
+# ensure_tarball NAME URL WANT: download & verify $tar_path unless it already
+# matches WANT.
+ensure_tarball() {
+	if [[ -f "$tar_path" ]] && [[ "$(sha256 "$tar_path")" == "$3" ]]; then
+		echo "$1: tarball cached (sha256 ${3:0:12})"
+		return 0
+	fi
+	echo "$1: downloading from $2"
+	# Ride out transient upstream 5xx (release CDN) with exponential backoff over a 5-min window.
+	curl -fsSL --retry 10 --retry-all-errors --retry-delay 0 \
+		--retry-max-time 300 --connect-timeout 30 \
+		-o "$tar_path.tmp" "$2"
+	local got
+	got=$(sha256 "$tar_path.tmp")
+	if [[ "$got" != "$3" ]]; then
+		rm -f "$tar_path.tmp"
+		echo "test-fixtures: $1: sha256 mismatch — want $3 got $got" >&2
+		exit 1
+	fi
+	mv "$tar_path.tmp" "$tar_path"
+}
+
 while IFS=$'\t' read -r name url want; do
 	tar_path="$cache/${name}.tar.gz"
 	out_dir="$cache/${name}"
 	sentinel="$out_dir/.sha256"
+
+	if [[ "$download_only" == true ]]; then
+		ensure_tarball "$name" "$url" "$want"
+		continue
+	fi
 
 	if [[ -f "$sentinel" ]] && [[ "$(cat "$sentinel")" == "$want" ]]; then
 		echo "$name: cached (sha256 ${want:0:12})"
 		continue
 	fi
 
-	if [[ ! -f "$tar_path" ]] || [[ "$(sha256 "$tar_path")" != "$want" ]]; then
-		echo "$name: downloading from $url"
-		curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -o "$tar_path.tmp" "$url"
-		got=$(sha256 "$tar_path.tmp")
-		if [[ "$got" != "$want" ]]; then
-			rm -f "$tar_path.tmp"
-			echo "test-fixtures: $name: sha256 mismatch — want $want got $got" >&2
-			exit 1
-		fi
-		mv "$tar_path.tmp" "$tar_path"
-	fi
+	ensure_tarball "$name" "$url" "$want"
 
 	echo "$name: extracting"
 	rm -rf "$out_dir.tmp" "$out_dir"
