@@ -692,3 +692,74 @@ func TestInventoryViewLocalBlockTipEqualFromWidestWins(t *testing.T) {
 	require.Equal(t, uint64(10999), v.LocalBlockTip(),
 		"equal-from widest-first tiebreak picks the 10k range's to as the walk's starting tip, then the touching 1k extends it to 10999")
 }
+
+// TestInventoryViewLocalBlockTipCappedAt_ClampsAboveCap pins the
+// "Inventory > aggregator" direction of the inventory-vs-disk
+// mismatch family. Inventory has files going up to block 2,993,999,
+// but the aggregator (passed as maxBlock=2,983,999) can only serve
+// through 2,983,999 — typically because a deep mode-B unwind left
+// stranded .seg files on disk that inventory counts by name but the
+// aggregator can't open. Caplin's DownloadHistoricalBlocks must use
+// the lower value as its stop bound, or it skips downloading the gap
+// and EL's forkchoice walk fails with "invalid" for those blocks.
+//
+// This test is the mirror of TestFindInventoryOrphansPastBlock_*
+// (the orphan precondition catches Inventory < disk; this test
+// pins the Inventory > aggregator clamp). See
+// node/eth/backend.go's localBlockTipFn for the integration site.
+func TestInventoryViewLocalBlockTipCappedAt_ClampsAboveCap(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		// Inventory has files covering blocks 0..2,993,999.
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-002990-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-002990-002994-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(2993999), v.LocalBlockTip(),
+		"inventory-side tip from filename scan")
+	require.Equal(t, uint64(2983999), v.LocalBlockTipCappedAt(2983999),
+		"when aggregator's FrozenBlocks=2983999 is below inventory's 2993999, the cap MUST clamp to 2983999 — otherwise Caplin's DownloadHistoricalBlocks stop bound is too high and the gap-fill download misses blocks the aggregator can't back")
+}
+
+// TestInventoryViewLocalBlockTipCappedAt_PassesThroughWhenCapHigher
+// pins the no-clamp case: when the aggregator's FrozenBlocks
+// already covers more than inventory (shouldn't normally happen but
+// is the defensive case), CappedAt returns LocalBlockTip unchanged.
+func TestInventoryViewLocalBlockTipCappedAt_PassesThroughWhenCapHigher(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-001000-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(999999), v.LocalBlockTip())
+	require.Equal(t, uint64(999999), v.LocalBlockTipCappedAt(5_000_000),
+		"cap higher than tip is a no-op")
+}
+
+// TestInventoryViewLocalBlockTipCappedAt_ZeroCapDisabled pins the
+// disable-cap path: caller has no aggregator reference (test/harness)
+// and passes 0. CappedAt returns LocalBlockTip unchanged.
+func TestInventoryViewLocalBlockTipCappedAt_ZeroCapDisabled(t *testing.T) {
+	inv := NewInventory()
+	for _, kind := range []string{"headers", "bodies", "transactions"} {
+		inv.AddFile(&FileEntry{
+			Name:  "v1.1-000000-001000-" + kind + ".seg",
+			Local: true, Trust: TrustVerified,
+		})
+	}
+	v := inv.View()
+	defer v.Close()
+	require.Equal(t, uint64(999999), v.LocalBlockTipCappedAt(0),
+		"cap=0 disables the clamp; matches the nil-tolerance pattern at the integration site")
+}

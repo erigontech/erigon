@@ -308,6 +308,39 @@ func (v *InventoryView) LocalBlockTip() uint64 {
 	return minTip - 1
 }
 
+// LocalBlockTipCappedAt returns LocalBlockTip() clamped at maxBlock.
+//
+// LocalBlockTip counts block-data files by their on-disk presence
+// (name + Local flag). The aggregator's view of the snapshot tip is
+// stricter — it requires the file to actually open (matching accessor
+// files, valid step alignment, indexing-complete, etc.). When the two
+// disagree — typically after a deep mode-B unwind leaves stranded
+// .seg files on disk that inventory counts but the aggregator cannot
+// load — consumers that route through aggregator-resolved blocks
+// (Caplin's BlockCollector + EL's forkchoice) must use the lower
+// value as their upper bound. Without the cap, Caplin's
+// DownloadHistoricalBlocks stop bound is set above what EL can verify,
+// and the gap between LocalBlockTip and aggregator's FrozenBlocks
+// becomes a no-source range that wedges forkchoice as "invalid".
+//
+// This is the mirror of the orphan precondition in Provider.Unwind:
+//   - Orphan precondition catches Inventory < disk (files on disk not
+//     in inventory; refuses setHead).
+//   - LocalBlockTipCappedAt catches Inventory > aggregator (files in
+//     inventory but not loaded by aggregator; clamps the value handed
+//     to consumers).
+//
+// Pass 0 for maxBlock to disable the cap (returns LocalBlockTip
+// verbatim) — matches the existing nil-tolerance pattern in callers
+// where the aggregator's FrozenBlocks() may not be available yet.
+func (v *InventoryView) LocalBlockTipCappedAt(maxBlock uint64) uint64 {
+	tip := v.LocalBlockTip()
+	if maxBlock > 0 && maxBlock < tip {
+		return maxBlock
+	}
+	return tip
+}
+
 // Get implements HeldView.
 func (v *InventoryView) Get(name string) (*FileEntry, bool) {
 	v.mu.Lock()

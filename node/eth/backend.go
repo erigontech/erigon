@@ -1795,7 +1795,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			localBlockTipFn = func() uint64 {
 				view := inv.View()
 				defer view.Close()
-				return view.LocalBlockTip()
+				// LocalBlockTipCappedAt clamps the inventory's
+				// optimistic tip (files counted by on-disk presence)
+				// to what the aggregator can actually back. See
+				// snapshot.InventoryView.LocalBlockTipCappedAt for the
+				// full rationale. Live-caught 2026-06-14 v8 soak iter
+				// 3 mode_b (depth 30k); pinned by
+				// TestInventoryViewLocalBlockTipCappedAt_ClampsAboveCap.
+				return view.LocalBlockTipCappedAt(blockReader.FrozenBlocks())
 			}
 		}
 		// Construct the CL flow-orchestrator component once. It
