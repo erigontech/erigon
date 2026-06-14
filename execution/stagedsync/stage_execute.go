@@ -60,11 +60,6 @@ const (
 	stateStreamLimit uint64 = 1_000
 )
 
-type headerDownloader interface {
-	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
-	POSSync() bool
-}
-
 type ExecuteBlockCfg struct {
 	db            kv.TemporalRwDB
 	batchSize     datasize.ByteSize
@@ -76,7 +71,6 @@ type ExecuteBlockCfg struct {
 	badBlockHalt  bool
 	stateStream   bool
 	blockReader   services.FullBlockReader
-	hd            headerDownloader
 	author        accounts.Address
 	// last valid number of the stage
 
@@ -102,7 +96,6 @@ func StageExecuteBlocksCfg(
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
-	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
@@ -124,7 +117,6 @@ func StageExecuteBlocksCfg(
 		stateStream:     stateStream,
 		badBlockHalt:    badBlockHalt,
 		blockReader:     blockReader,
-		hd:              hd,
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,

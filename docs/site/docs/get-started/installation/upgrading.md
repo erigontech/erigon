@@ -21,15 +21,19 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 
 1. Backup your datadir.
 2. [Upgrade your Erigon installation](#upgrading-your-erigon-installation) whether from a binary, compiled source code, or Docker.
-3. To initiate the data upgrade, use the following command: `./build/bin/erigon snapshots reset --datadir /your/datadir`.
-4. Run Erigon, it will reuse existing data and sync only newer snapshots.
+3. Upgrade your snapshots using one of the [options below](#snapshots-upgrade-options).
+4. Run Erigon; it downloads any missing snapshots and resumes syncing.
 
 ### Snapshots Upgrade Options
 
-* `erigon update-to-new-ver-format --datadir /your/datadir`: this option updates snapshots to be compatible with latest version, but you will not get the full benefits of the new snapshots.
-* `erigon snapshots reset --datadir /your/datadir`: this command removes all old snapshots that have had performance improvements.
+* `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
+* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and the Heimdall / Polygon-bridge DBs) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
 
-Choose `upgrade` for a quicker process, or `reset` for maximum performance. If you choose `reset`, you'll need to wait for the new snapshots to download once Erigon starts.
+:::warning
+`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and the Heimdall / Polygon-bridge DBs) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+:::
+
+Choose `update-to-new-ver-format` to convert your data in place, or `reset` for a clean reset to the preverified snapshot set.
 
 <details>
 
@@ -58,7 +62,7 @@ If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should foll
 :::
 
 1. Make sure that you're running Erigon on 3.1.x version, use `erigon --version`.
-2. Run `erigon --datadir ../your/datadir reset-to-old-ver-format` to reset your snapshots to old format.
+2. Run `erigon snapshots reset-to-old-ver-format --datadir /your/datadir` to reset your snapshots to old format.
 3. `git checkout v3.0.x` to checkout to preferred `3.0` version. For example now latest: `git checkout v3.0.15`
 4. Run your old version of Erigon.
 
@@ -70,7 +74,7 @@ Follow the below instructions depending on your installation method:
 * [Docker](#docker)
 * [Compiled source code](#compiled-from-source)
 
-### Pre-built Binaries (only Linux and MacOS)
+### Pre-built Binaries (only Linux and macOS)
 
 Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#install-prebuilt) and reinstall it, no other operation needed.
 

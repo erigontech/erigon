@@ -21,7 +21,8 @@ func TestIsBuilderWithdrawalCredential_0x03(t *testing.T) {
 
 	var creds common.Hash
 	creds[0] = 0x03
-	copy(creds[12:], common.HexToAddress("0xdeadbeef").Bytes())
+	addr := common.HexToAddress("0xdeadbeef")
+	copy(creds[12:], addr[:])
 
 	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
 		"0x03 prefix must be recognised as builder withdrawal credential")
@@ -176,7 +177,7 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 
 	// Build withdrawal credentials: 0x03 + 11 zero bytes + 20-byte address.
 	withdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
-	copy(withdrawalCredentials[12:], feeRecipient.Bytes())
+	copy(withdrawalCredentials[12:], feeRecipient[:])
 
 	amount = cfg.MinDepositAmount // 1e9 Gwei
 

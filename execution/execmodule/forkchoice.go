@@ -23,6 +23,7 @@ import (
 	"math"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -119,9 +120,10 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	// it is not cancelled when the caller's context times out. We return as soon
 	// as the result lands on outcomeCh — for a merge-extending fork at tip the
 	// result is sent before flush/commit, so the consensus client is not blocked
-	// on the EL commit. The forkchoice goroutine releases the semaphore only after
-	// all cleanup defers have run, so any follow-up op (AssembleBlock, next FCU)
-	// that acquires the semaphore observes fully-settled state.
+	// on the EL commit. The semaphore is released — by the forkchoice goroutine, or
+	// by the background commit/prune goroutine it hands off to — only after the FCU
+	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
+	// the semaphore observes fully-settled state.
 	go func() {
 		if err := e.updateForkChoice(e.bacgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
@@ -169,12 +171,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
-	defer e.forkValidator.ClearWithUnwind()
-	defer func() {
+	// The next semaphore acquirer must observe settled state, so the bg-commit/
+	// bg-prune paths run this eagerly before handing the semaphore to their goroutine.
+	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
 		if e.currentContext != nil {
 			e.currentContext.ResetPendingUpdates()
 		}
-	}()
+		e.forkValidator.ClearWithUnwind()
+	})
+	defer cleanupBeforeSemaRelease()
 
 	var validationError string
 	type canonicalEntry struct {
@@ -378,28 +383,43 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		unwindTarget := currentParentNumber
-		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if unwindTarget < minUnwindableBlock {
-			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
-			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				LatestValidHash: common.Hash{},
-				Status:          ExecutionStatusReorgTooDeep,
-			}, false)
+
+		// Determine current canonical tip from TxNums. If unwindTarget is at or
+		// above the canonical tip, there's nothing above to roll back — skip the
+		// unwind path entirely and proceed straight to forward-filling new
+		// canonicals. This is the recovery path when chaindata canonical lags
+		// state's commitBlock (e.g. after a snapshot/state misalignment), where
+		// the conservative minUnwindable check would otherwise reject the FCU
+		// as ReorgTooDeep even though no state actually needs unwinding.
+		lastCanonicalBlock, _, errLast := rawdbv3.TxNums.Last(tx)
+		if errLast != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, errLast, false)
 		}
 
-		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		// Run the unwind
-		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if unwindTarget < lastCanonicalBlock {
+			minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if unwindTarget < minUnwindableBlock {
+				e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusReorgTooDeep,
+				}, false)
+			}
+
+			if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			// Run the unwind
+			if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
+				err = fmt.Errorf("updateForkChoice: %w", err)
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
 		}
 
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
@@ -660,6 +680,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			bgSD := currentContext
 			currentContext = nil
 			dispatcher := e.pipelineExecutor.Dispatcher()
+			cleanupBeforeSemaRelease()
 			go func() {
 				defer e.semaphore.Release(1)
 				defer bgSD.Close()
@@ -692,7 +713,22 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// Only runs in foreground when both background flags are off.
 		if !e.fcuBackgroundCommit {
 			if e.fcuBackgroundPrune {
+				// RunPrune shares the pipeline Sync with the next FCU's RunLoop,
+				// so the goroutine holds the semaphore until done. Tear the overlay
+				// down here (prune doesn't use it) to free the SD immediately, and
+				// so the outer defer can't clear it after the next FCU publishes
+				// its own.
+				shouldReleaseSema = false
+				if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+					dispatcher.PublishOverlay(nil)
+				}
+				if currentContext != nil {
+					currentContext.Close()
+					currentContext = nil
+				}
+				cleanupBeforeSemaRelease()
 				go func() {
+					defer e.semaphore.Release(1)
 					pruneTimings, err := e.runForkchoicePrune(initialCycle)
 					if err != nil && !errors.Is(err, context.Canceled) {
 						e.logger.Error("Error running background prune", "err", err)

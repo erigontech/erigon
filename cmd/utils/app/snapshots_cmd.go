@@ -590,6 +590,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "new-step-size", Required: true, DefaultText: strconv.FormatUint(config3.DefaultStepSize, 10)},
+				&cli.BoolFlag{Name: "keep-blocks", Usage: "keep chaindata and reset only execution state in it, so already-downloaded blocks can be re-executed, instead of deleting the whole DB"},
 			}),
 		},
 		{
@@ -684,7 +685,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		}
 		defer idx.Close()
 
-		rd := idx.GetReaderFromPool()
+		rd := idx.Reader()
 		defer rd.Close()
 		if rd.Empty() {
 			log.Warn("[dbg] allow files deletion because accessor broken", "accessor", idx.FileName())
@@ -2091,7 +2092,6 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	}
 
 	to := int64(-1)
-	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
 			checkLastFileTo: to,
@@ -2100,14 +2100,9 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if err != nil {
 			return err
 		}
-		somethingPresent = somethingPresent || !empty
-		somethingEmpty = somethingEmpty || empty
-
-		to = int64(uto)
-	}
-
-	if somethingEmpty && somethingPresent {
-		return fmt.Errorf("some state snapshot files are empty while others are present")
+		if !empty {
+			to = int64(uto)
+		}
 	}
 
 	return nil
@@ -3374,7 +3369,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	blockReader, _ := br.IO()
-	agg.SetFrozenBlocksProvider(blockReader)
 
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)

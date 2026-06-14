@@ -755,7 +755,7 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	// Hash the addresses for trie keys
 	addrHashes := make([]common.Hash, len(addresses))
 	for i, addr := range addresses {
-		addrHashes[i] = crypto.Keccak256Hash(addr.Bytes())
+		addrHashes[i] = crypto.Keccak256Hash(addr[:])
 	}
 
 	// Create accounts
@@ -788,20 +788,24 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 
 	// Insert accounts using UpdateAccount (creates AccountNode entries)
 	for i, addr := range addresses {
-		key := crypto.Keccak256(addr.Bytes())
+		key := crypto.Keccak256(addr[:])
 		stateTrie.UpdateAccount(key, testAccounts[i])
 	}
 
 	// Define storage for contract at index 1
 	contract1AddrHash := addrHashes[1]
+	v1 := common.HexToHash("0x1")
+	v2 := common.HexToHash("0xdeadbeef")
+	v3 := common.HexToHash("0x1234567890abcdef")
+	v4 := common.HexToHash("0xff")
 	storageSlots1 := []struct {
 		slot  common.Hash
 		value []byte
 	}{
-		{common.HexToHash("0x0"), common.HexToHash("0x1").Bytes()},
-		{common.HexToHash("0x1"), common.HexToHash("0xdeadbeef").Bytes()},
-		{common.HexToHash("0x2"), common.HexToHash("0x1234567890abcdef").Bytes()},
-		{common.HexToHash("0x100"), common.HexToHash("0xff").Bytes()},
+		{common.HexToHash("0x0"), v1[:]},
+		{common.HexToHash("0x1"), v2[:]},
+		{common.HexToHash("0x2"), v3[:]},
+		{common.HexToHash("0x100"), v4[:]},
 	}
 
 	// Insert storage using composite keys: addressHash + keccak256(slot)
@@ -809,24 +813,26 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	for _, slot := range storageSlots1 {
 		compositeKey := make([]byte, 64)
 		copy(compositeKey[:32], contract1AddrHash[:])
-		copy(compositeKey[32:], crypto.Keccak256(slot.slot.Bytes()))
+		copy(compositeKey[32:], crypto.Keccak256(slot.slot[:]))
 		stateTrie.Update(compositeKey, slot.value)
 	}
 
 	// Define storage for contract at index 3
 	contract2AddrHash := addrHashes[3]
+	v5 := common.HexToHash("0xabcd")
+	v6 := common.HexToHash("0x9999")
 	storageSlots2 := []struct {
 		slot  common.Hash
 		value []byte
 	}{
-		{common.HexToHash("0x0"), common.HexToHash("0xabcd").Bytes()},
-		{common.HexToHash("0x5"), common.HexToHash("0x9999").Bytes()},
+		{common.HexToHash("0x0"), v5[:]},
+		{common.HexToHash("0x5"), v6[:]},
 	}
 
 	for _, slot := range storageSlots2 {
 		compositeKey := make([]byte, 64)
 		copy(compositeKey[:32], contract2AddrHash[:])
-		copy(compositeKey[32:], crypto.Keccak256(slot.slot.Bytes()))
+		copy(compositeKey[32:], crypto.Keccak256(slot.slot[:]))
 		stateTrie.Update(compositeKey, slot.value)
 	}
 
@@ -861,7 +867,7 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	require.GreaterOrEqual(t, len(encoded), 10, "should have multiple nodes for accounts + storage")
 
 	for i, addr := range addresses {
-		key := crypto.Keccak256(addr.Bytes())
+		key := crypto.Keccak256(addr[:])
 		acc, ok := decodedStateTrie.GetAccount(key)
 		require.True(t, ok)
 		require.EqualValues(t, testAccounts[i], acc)
