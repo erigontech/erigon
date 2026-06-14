@@ -106,7 +106,15 @@ echo "  launched pid=$!"
 #      AND delta in [0, 5] for 2 consecutive polls — i.e., EL has
 #      actually executed past the snapshot tip into Caplin-delivered
 #      territory and the chain is now at live cadence.
-LIVE_TIP_FORWARD="${LIVE_TIP_FORWARD:-100}"
+#
+# LIVE_TIP_FORWARD default = 10000: must exceed the deepest mode_a
+# unwind depth AND give Caplin's BlockCollector cache enough forward
+# window to bridge the recovery. Live-caught 2026-06-14: with
+# LIVE_TIP_FORWARD=100, mode_a depth=50 unwind succeeded but recovery
+# wedged because Caplin's BlockCollector cache started ABOVE the
+# post-unwind head and the gap blocks weren't in snapshots. See
+# memory pin 2026-06-14-gate1-soak-architectural-fixes (bug 6).
+LIVE_TIP_FORWARD="${LIVE_TIP_FORWARD:-10000}"
 stage "Phase 3: wait for live tip (timeout ${SYNC_TIMEOUT_SEC}s; need head > bootstrap_floor + ${LIVE_TIP_FORWARD})"
 sync_end=$(( $(date +%s) + SYNC_TIMEOUT_SEC ))
 prev_head=0
