@@ -157,6 +157,29 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 	return nil
 }
 
+func ResetDecodedState(ctx context.Context, db kv.TemporalRwDB) error {
+	domainTables := db.Debug().DomainTables(kv.DecodedStorageDomain)
+	cleanupList := make([]string, 0, len(domainTables)+3)
+	cleanupList = append(cleanupList, kv.DecodedLatest, kv.DecodedHistory, kv.DecodedMeta)
+	cleanupList = append(cleanupList, domainTables...)
+
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
+			return fmt.Errorf("clearing decoded state tables: %w", err)
+		}
+		for _, table := range cleanupList {
+			if err := tx.Delete(kv.TblPruningProgress, []byte(table)); err != nil {
+				return err
+			}
+			minPrunableKey := append(append([]byte{}, kv.MinimumPrunableStepDomainKey...), []byte(table)...)
+			if err := tx.Delete(kv.TblPruningProgress, minPrunableKey); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func ResetSenders(ctx context.Context, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
 		return fmt.Errorf("clearing senders table: %w", err)

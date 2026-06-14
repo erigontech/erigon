@@ -372,6 +372,10 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 		panic(err)
 	}
 
+	if evm.config.Tracer != nil && evm.config.Tracer.OnKeccak256 != nil {
+		evm.config.Tracer.OnKeccak256(scope.Contract.Address(), data, common.BytesToHash(evm.hasherBuf[:]))
+	}
+
 	size.SetBytes(evm.hasherBuf[:])
 	return pc, nil, nil
 }

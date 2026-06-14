@@ -53,6 +53,13 @@ func InitSchemasGen() {
 	Schema.StorageDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.StorageDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.StorageDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.FileVersion.DataKV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.Hist.FileVersion.DataV = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
+	Schema.DecodedStorageDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{1, 0}, version.Version{1, 0}}
 	Schema.TracesFromIdx.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.TracesFromIdx.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.TracesToIdx.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}

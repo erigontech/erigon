@@ -62,6 +62,15 @@ func InitSchemas() {
 			".vi":  Schema.RCacheDomain.Hist.FileVersion.AccessorVI.MinSupported,
 			".v":   Schema.RCacheDomain.Hist.FileVersion.DataV.MinSupported,
 		},
+		"decodedstorage": {
+			".kv":  Schema.DecodedStorageDomain.FileVersion.DataKV.MinSupported,
+			".bt":  Schema.DecodedStorageDomain.FileVersion.AccessorBT.MinSupported,
+			".kvi": Schema.DecodedStorageDomain.FileVersion.AccessorKVI.MinSupported,
+			".efi": Schema.DecodedStorageDomain.Hist.IiCfg.FileVersion.AccessorEFI.MinSupported,
+			".ef":  Schema.DecodedStorageDomain.Hist.IiCfg.FileVersion.DataEF.MinSupported,
+			".vi":  Schema.DecodedStorageDomain.Hist.FileVersion.AccessorVI.MinSupported,
+			".v":   Schema.DecodedStorageDomain.Hist.FileVersion.DataV.MinSupported,
+		},
 		"logaddrs": {
 			".ef":  Schema.LogAddrIdx.FileVersion.DataEF.MinSupported,
 			".efi": Schema.LogAddrIdx.FileVersion.AccessorEFI.MinSupported,

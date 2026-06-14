@@ -316,6 +316,16 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
 		cfg.ChaosMonkey = true
 	}
+
+	if ctx.IsSet(utils.DecodedStateEnabledFlag.Name) {
+		cfg.DecodedStateEnabled = ctx.Bool(utils.DecodedStateEnabledFlag.Name)
+	}
+	if ctx.IsSet(utils.DecodedStateFullModeFlag.Name) {
+		cfg.DecodedStateFullMode = ctx.Bool(utils.DecodedStateFullModeFlag.Name)
+	}
+	if ctx.IsSet(utils.DecodedStateWhitelistFlag.Name) {
+		cfg.DecodedStateWhitelist = ctx.StringSlice(utils.DecodedStateWhitelistFlag.Name)
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {

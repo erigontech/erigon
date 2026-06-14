@@ -53,6 +53,9 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.RCacheDomain), salt, dirs, logger); err != nil {
 		return err
 	}
+	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.DecodedStorageDomain), salt, dirs, logger); err != nil {
+		return err
+	}
 	if err := a.RegisterII(Schema.GetIICfg(kv.LogAddrIdx), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -92,6 +95,7 @@ type SchemaGen struct {
 	CommitmentDomain      DomainCfg
 	ReceiptDomain         DomainCfg
 	RCacheDomain          DomainCfg
+	DecodedStorageDomain  DomainCfg
 	LogAddrIdx            InvIdxCfg
 	LogTopicIdx           InvIdxCfg
 	TracesFromIdx         InvIdxCfg
@@ -104,7 +108,7 @@ type SchemaGen struct {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String(), kv.DecodedStorageDomain.String():
 		domain, err := kv.String2Domain(name)
 		if err != nil {
 			return nil, err
@@ -140,6 +144,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) DomainCfg {
 		v = s.ReceiptDomain
 	case kv.RCacheDomain:
 		v = s.RCacheDomain
+	case kv.DecodedStorageDomain:
+		v = s.DecodedStorageDomain
 	default:
 		v = DomainCfg{}
 	}
@@ -323,6 +329,29 @@ var Schema = SchemaGen{
 			IiCfg: InvIdxCfg{
 				Disable:      true, // disable everything by default
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
+				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
+			},
+		},
+	},
+
+	DecodedStorageDomain: DomainCfg{
+		Name: kv.DecodedStorageDomain, ValuesTable: kv.TblDecodedStorageVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+
+		Accessors: AccessorBTree | AccessorExistence,
+
+		Hist: HistCfg{
+			ValuesTable:   kv.TblDecodedStorageHistoryVals,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			Accessors: AccessorHashMap,
+
+			HistoryLargeValues: false,
+			HistoryIdx:         kv.DecodedStorageHistoryIdx,
+
+			IiCfg: InvIdxCfg{
+				FilenameBase: kv.DecodedStorageDomain.String(), KeysTable: kv.TblDecodedStorageHistoryKeys, ValuesTable: kv.TblDecodedStorageIdx,
+				Name:          kv.DecodedStorageHistoryIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},

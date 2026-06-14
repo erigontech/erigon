@@ -51,6 +51,14 @@ type ErigonAPI interface {
 
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error)
+
+	// Decoded state methods (see ./erigon_decodedstate.go)
+	EnumerateMappingKeys(ctx context.Context, contract common.Address, mappingSlot common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) ([]any, error)
+	GetDecodedStorage(ctx context.Context, contract common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (map[string]any, error)
+	GetMappingValue(ctx context.Context, contract common.Address, mappingSlot common.Hash, key any, blockNrOrHash *rpc.BlockNumberOrHash) (common.Hash, error)
+	EnumerateMappingKeysAtTx(ctx context.Context, contract common.Address, mappingSlot common.Hash, txNumber uint64) ([]any, error)
+	GetDecodedStorageAtTx(ctx context.Context, contract common.Address, txNumber uint64) (map[string]any, error)
+	GetMappingValueAtTx(ctx context.Context, contract common.Address, mappingSlot common.Hash, key any, txNumber uint64) (common.Hash, error)
 }
 
 // ErigonImpl is implementation of the ErigonAPI interface

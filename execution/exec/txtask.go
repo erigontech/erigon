@@ -225,6 +225,7 @@ type TxTask struct {
 
 	Tracer                *calltracer.CallTracer
 	Hooks                 *tracing.Hooks
+	DecodedCollector      any // decodedstate.Collector, set per-task for parallel execution
 	Config                *chain.Config
 	Engine                rules.Engine
 	Logger                log.Logger
@@ -470,6 +471,13 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
+	// Reset decoded collector for retry incarnations so stale candidates are discarded.
+	if t.DecodedCollector != nil {
+		if resettable, ok := t.DecodedCollector.(interface{ Reset() }); ok {
+			resettable.Reset()
+		}
+	}
+
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
 		var vmCfg vm.Config
 		if callTracer != nil {
@@ -485,6 +493,7 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 		if msg != nil {
 			txContext = protocol.NewEVMTxContext(msg)
 		}
+		ibs.SetHooks(vmCfg.Tracer)
 		evm.ResetBetweenBlocks(t.EvmBlockContext, txContext, ibs, vmCfg, t.Rules())
 	}
 

@@ -53,6 +53,10 @@ var (
 	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                         string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                 string
+	decodedStateEnabledCli        bool
+	decodedStateFullModeCli       bool
+	decodedStateWhitelistCli      []string
+	decodedStateStartBlockCli     uint64
 
 	startTxNum uint64
 
@@ -240,4 +244,11 @@ func withTraceFlags(cmd *cobra.Command) {
 
 func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
+}
+
+func withDecodedStateFlags(cmd *cobra.Command, enabledDefault, fullModeDefault bool) {
+	cmd.Flags().BoolVar(&decodedStateEnabledCli, "decoded.enabled", enabledDefault, "Enable decoded state tracking (mapping keys/values in pre-hashed form)")
+	cmd.Flags().BoolVar(&decodedStateFullModeCli, "decoded.fullmode", fullModeDefault, "Track all contracts (default is whitelist mode)")
+	cmd.Flags().StringSliceVar(&decodedStateWhitelistCli, "decoded.whitelist", nil, "Contract addresses to track in whitelist mode (comma-separated)")
+	cmd.Flags().Uint64Var(&decodedStateStartBlockCli, "decoded.start-block", 0, "Replay decoded state starting from this block instead of genesis/latest decoded marker when greater")
 }

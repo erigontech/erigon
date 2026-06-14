@@ -1680,6 +1680,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
+		case integrity.HistoryEfConsistency:
+			return integrity.E3HistoryEfConsistency(ctx, db, failFast, fromStep)
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}

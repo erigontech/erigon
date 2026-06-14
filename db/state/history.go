@@ -1160,29 +1160,196 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	historyKey := ht.encodeTs(histTxNum, key)
-	offset, ok := reader.Lookup(historyKey)
+	var txNumKey [8]byte
+	binary.BigEndian.PutUint64(txNumKey[:], histTxNum)
+	historyKey := historyKey(histTxNum, key, nil)
+	offset, ok := reader.Lookup2(txNumKey[:], key)
 	if !ok {
-		return nil, false, nil
+		offset, ok = reader.Lookup(historyKey)
+		if !ok {
+			return nil, false, nil
+		}
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
 	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
-	v, _ := g.Next(nil)
+	v, found, err := ht.readHistoryValueAtOffset(historyItem, g, offset, historyKey)
+	if err != nil {
+		return nil, false, err
+	}
 	if traceGetAsOf == ht.h.FilenameBase {
-		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
+		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, found=%t, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, found, v == nil)
+	}
+	if !found {
+		return nil, false, nil
+	}
+	return v, true, nil
+}
+
+func (ht *HistoryRoTx) debugHistorySeekInFiles(key []byte, txNum uint64) (histTxNum uint64, v []byte, ok bool, err error) {
+	ok, histTxNum, err = ht.iit.seekInFiles(key, txNum)
+	if err != nil || !ok {
+		return histTxNum, nil, ok, err
+	}
+	historyItem, ok := ht.getFile(histTxNum)
+	if !ok {
+		return histTxNum, nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.FilenameBase, histTxNum/ht.h.stepSize, histTxNum/ht.h.stepSize)
+	}
+	reader := ht.statelessIdxReader(historyItem.i)
+	if reader.Empty() {
+		return histTxNum, nil, false, nil
+	}
+	var txNumKey [8]byte
+	binary.BigEndian.PutUint64(txNumKey[:], histTxNum)
+	historyKey := historyKey(histTxNum, key, nil)
+	offset, ok := reader.Lookup2(txNumKey[:], key)
+	if !ok {
+		offset, ok = reader.Lookup(historyKey)
+		if !ok {
+			return histTxNum, nil, false, nil
+		}
+	}
+	g := ht.statelessGetter(historyItem.i)
+	g.Reset(offset)
+	v, ok, err = ht.readHistoryValueAtOffset(historyItem, g, offset, historyKey)
+	return histTxNum, v, ok, err
+}
+
+type DebugHistoryFileLookup struct {
+	HistTxNum uint64
+	File      string
+
+	LookupOK     bool
+	LookupOffset uint64
+	LookupValue  []byte
+
+	Lookup2OK     bool
+	Lookup2Offset uint64
+	Lookup2Value  []byte
+
+	PageScanOK    bool
+	PageScanValue []byte
+	PageEntries   []DebugHistoryPageEntry
+}
+
+type DebugHistoryPageEntry struct {
+	Key   []byte
+	Value []byte
+}
+
+func (ht *HistoryRoTx) DebugHistoryFileLookup(key []byte, txNum uint64) (*DebugHistoryFileLookup, error) {
+	ok, histTxNum, err := ht.iit.seekInFiles(key, txNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	historyItem, ok := ht.getFile(histTxNum)
+	if !ok {
+		return nil, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.FilenameBase, histTxNum/ht.h.stepSize, histTxNum/ht.h.stepSize)
+	}
+
+	info := &DebugHistoryFileLookup{
+		HistTxNum: histTxNum,
+		File:      historyItem.Fullpath(),
+	}
+
+	historyKey := ht.encodeTs(histTxNum, key)
+	var txNumKey [8]byte
+	binary.BigEndian.PutUint64(txNumKey[:], histTxNum)
+
+	reader := ht.statelessIdxReader(historyItem.i)
+	if reader.Empty() {
+		return info, nil
+	}
+
+	offset, ok := reader.Lookup(historyKey)
+	if ok {
+		info.LookupOK = true
+		info.LookupOffset = offset
+		g := ht.statelessGetter(historyItem.i)
+		g.Reset(offset)
+		if v, found, readErr := ht.readHistoryValueAtOffset(historyItem, g, offset, historyKey); readErr != nil {
+			return nil, readErr
+		} else if found {
+			info.LookupValue = bytes.Clone(v)
+		}
+	}
+
+	offset2, ok := reader.Lookup2(txNumKey[:], key)
+	if ok {
+		info.Lookup2OK = true
+		info.Lookup2Offset = offset2
+		g := ht.statelessGetter(historyItem.i)
+		g.Reset(offset2)
+		if v, found, readErr := ht.readHistoryValueAtOffset(historyItem, g, offset2, historyKey); readErr != nil {
+			return nil, readErr
+		} else if found {
+			info.Lookup2Value = bytes.Clone(v)
+		}
+	}
+
+	pageOffset := offset
+	if !info.LookupOK && info.Lookup2OK {
+		pageOffset = offset2
+	}
+	if !info.LookupOK && !info.Lookup2OK {
+		return info, nil
 	}
 
 	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
 	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 	}
-
-	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+	if compressedPageValuesCount <= 1 {
+		return info, nil
 	}
-	return v, true, nil
+
+	g := ht.statelessGetter(historyItem.i)
+	g.Reset(0)
+	paged := seg.NewPagedReader(g, compressedPageValuesCount, true)
+	paged.Reset(pageOffset)
+	for paged.HasNext() {
+		k, v, _, currentOffset := paged.Next2(nil)
+		if currentOffset != pageOffset {
+			break
+		}
+		if len(info.PageEntries) < 8 {
+			info.PageEntries = append(info.PageEntries, DebugHistoryPageEntry{
+				Key:   bytes.Clone(k),
+				Value: bytes.Clone(v),
+			})
+		}
+		if bytes.Equal(k, historyKey) {
+			info.PageScanOK = true
+			info.PageScanValue = bytes.Clone(v)
+			break
+		}
+	}
+	return info, nil
+}
+
+func (ht *HistoryRoTx) readHistoryValueAtOffset(historyItem visibleFile, getter *seg.Reader, offset uint64, historyKey []byte) ([]byte, bool, error) {
+	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+	}
+	getter.Reset(offset)
+	if compressedPageValuesCount <= 1 {
+		v, _ := getter.Next(nil)
+		return v, true, nil
+	}
+	paged := seg.NewPagedReader(getter, compressedPageValuesCount, true)
+	paged.Reset(offset)
+	for i := 0; i < compressedPageValuesCount && paged.HasNext(); i++ {
+		k, v, _, _ := paged.Next2(nil)
+		if bytes.Equal(k, historyKey) {
+			return v, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func historyKey(txNum uint64, key []byte, buf []byte) []byte {

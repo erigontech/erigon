@@ -32,6 +32,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -168,6 +169,8 @@ func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModule
 		emt.cfg.Sync,
 		false, /*experimentalBAL*/
 		exec.NewBlockReadAheader(),
+		emt.cfg.DecodedStateEnabled,
+		decodedstate.Config{},
 	)
 
 	// Lock the offline-execution writers like the integration tool does so

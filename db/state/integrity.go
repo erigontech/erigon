@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -248,4 +250,151 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 	}
 
 	return nil
+}
+
+// IntegrityHistoryEfConsistency verifies that history .v files and inverted-index .ef files
+// have their entries in the same order. A mismatch means the .vi accessor maps some
+// historyKeys to wrong pages, causing HistorySeek to silently return wrong data.
+func (at *AggregatorRoTx) IntegrityHistoryEfConsistency(ctx context.Context, failFast bool, fromStep uint64) error {
+	g := &errgroup.Group{}
+	g.SetLimit(estimate.AlmostAllCPUs())
+
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		ht := at.d[domain].ht
+		g.Go(func() error {
+			return ht.IntegrityHistoryEfConsistency(ctx, failFast, fromStep)
+		})
+	}
+	return g.Wait()
+}
+
+func (ht *HistoryRoTx) IntegrityHistoryEfConsistency(ctx context.Context, failFast bool, fromStep uint64) error {
+	fromTxNum := fromStep * ht.stepSize
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for i, histFile := range ht.files {
+		if histFile.endTxNum <= fromTxNum {
+			continue
+		}
+		if histFile.src.decompressor == nil {
+			continue
+		}
+		if i >= len(ht.iit.files) {
+			continue
+		}
+		iiFile := ht.iit.files[i]
+		if iiFile.src.decompressor == nil {
+			continue
+		}
+		// Verify step ranges match
+		if iiFile.startTxNum != histFile.startTxNum || iiFile.endTxNum != histFile.endTxNum {
+			log.Warn(fmt.Sprintf("[integrity] HistoryEfConsistency: step range mismatch at index %d: hist=%d-%d, ef=%d-%d",
+				i, histFile.startTxNum, histFile.endTxNum, iiFile.startTxNum, iiFile.endTxNum))
+			continue
+		}
+
+		mismatches, err := ht.checkHistoryEfFile(ctx, histFile, iiFile, failFast, logEvery)
+		if err != nil {
+			return err
+		}
+		if mismatches > 0 {
+			err := fmt.Errorf("[integrity] HistoryEfConsistency: %d mismatches in %s (steps %d-%d)",
+				mismatches, histFile.src.decompressor.FileName(), histFile.startTxNum/ht.stepSize, histFile.endTxNum/ht.stepSize)
+			if failFast {
+				return err
+			}
+			log.Warn(err.Error())
+		}
+	}
+	return nil
+}
+
+func (ht *HistoryRoTx) checkHistoryEfFile(ctx context.Context, histFile, iiFile visibleFile, failFast bool, logEvery *time.Ticker) (int, error) {
+	histFile.src.decompressor.MadvSequential()
+	defer histFile.src.decompressor.DisableReadAhead()
+	iiFile.src.decompressor.MadvSequential()
+	defer iiFile.src.decompressor.DisableReadAhead()
+
+	pageSize := histFile.src.decompressor.CompressedPageValuesCount()
+	if histFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		pageSize = ht.h.HistoryValuesOnCompressedPage
+	}
+	if pageSize == 0 {
+		pageSize = 1
+	}
+
+	// EF reader
+	efReader := ht.h.InvertedIndex.dataReader(iiFile.src.decompressor)
+	// History reader (paged)
+	histReader := ht.h.dataReader(histFile.src.decompressor)
+	paged := seg.NewPagedReader(histReader, pageSize, true)
+	paged.Reset(0)
+
+	seq := &multiencseq.SequenceReader{}
+	it := &multiencseq.SequenceIterator{}
+	var keyBuf, valBuf, expectedKey []byte
+
+	entryNum := 0
+	mismatches := 0
+	maxReport := 20
+
+	for efReader.HasNext() {
+		keyBuf, _ = efReader.Next(keyBuf[:0])
+		valBuf, _ = efReader.Next(valBuf[:0])
+
+		seq.Reset(iiFile.startTxNum, valBuf)
+		it.Reset(seq, 0)
+
+		for it.HasNext() {
+			txNum, err := it.Next()
+			if err != nil {
+				return mismatches, fmt.Errorf("[integrity] HistoryEfConsistency: sequence decode error at entry %d in %s: %w",
+					entryNum, iiFile.src.decompressor.FileName(), err)
+			}
+
+			if !paged.HasNext() {
+				return mismatches, fmt.Errorf("[integrity] HistoryEfConsistency: .v file exhausted at entry %d in %s (ef expects more)",
+					entryNum, histFile.src.decompressor.FileName())
+			}
+
+			actualKey, _, _, _ := paged.Next2(nil)
+
+			expectedKey = expectedKey[:0]
+			expectedKey = binary.BigEndian.AppendUint64(expectedKey, txNum)
+			expectedKey = append(expectedKey, keyBuf...)
+
+			if !bytes.Equal(expectedKey, actualKey) {
+				mismatches++
+				if mismatches <= maxReport {
+					var vTxNum uint64
+					var vKey []byte
+					if len(actualKey) >= 8 {
+						vTxNum = binary.BigEndian.Uint64(actualKey[:8])
+					}
+					if len(actualKey) > 8 {
+						vKey = actualKey[8:]
+					}
+					log.Warn(fmt.Sprintf("[integrity] HistoryEfConsistency: mismatch entry=%d ef=(txNum=%d, key=%x) vs v=(txNum=%d, key=%x) file=%s",
+						entryNum, txNum, common.Shorten(keyBuf, 8), vTxNum, common.Shorten(vKey, 8), histFile.src.decompressor.FileName()))
+				}
+			}
+
+			entryNum++
+			if entryNum%10_000_000 == 0 {
+				select {
+				case <-ctx.Done():
+					return mismatches, ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[integrity] HistoryEfConsistency: %s %dM entries, %d mismatches",
+						histFile.src.decompressor.FileName(), entryNum/1_000_000, mismatches))
+				default:
+				}
+			}
+		}
+	}
+
+	log.Info(fmt.Sprintf("[integrity] HistoryEfConsistency: %s done, %d entries, %d mismatches",
+		histFile.src.decompressor.FileName(), entryNum, mismatches))
+	return mismatches, nil
 }

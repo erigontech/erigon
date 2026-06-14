@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -108,7 +109,7 @@ func RewindStagesForWitness(sd *execctx.SharedDomains, batch *membatchwithdb.Mem
 	blockReader := cfg.blockReader
 	syncCfg := ethconfig.Defaults.Sync
 	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig,
-		nil /*notifications*/, false /*stateStream*/, true /*badBlockHalt*/, dirs, blockReader, nil /*genesis*/, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
+		nil /*notifications*/, false /*stateStream*/, true /*badBlockHalt*/, dirs, blockReader, nil /*genesis*/, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader(), false /*decodedStateEnabled*/, decodedstate.Config{})
 
 	if err := UnwindExecutionStage(unwindState, stageState, sd, batch, ctx, execCfg, logger); err != nil {
 		return err

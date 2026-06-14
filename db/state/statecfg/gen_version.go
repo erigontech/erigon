@@ -89,6 +89,8 @@ func goStruct(dom string) string {
 		return "ReceiptDomain"
 	case "rcache":
 		return "RCacheDomain"
+	case "decodedstorage":
+		return "DecodedStorageDomain"
 	case "logaddrs":
 		return "LogAddrIdx"
 	case "logtopics":

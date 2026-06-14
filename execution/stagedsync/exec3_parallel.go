@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -590,6 +591,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)
 						lastBlockResult = *applyResult
+					}
+
+					if len(applyResult.decodedEntries) > 0 {
+						if wErr := decodedstate.WriteEntriesToFlatTx(rwTx, applyResult.lastTxNum, applyResult.decodedEntries); wErr != nil {
+							log.Warn(fmt.Sprintf("[%s] decoded state flat write failed", pe.logPrefix), "block", applyResult.BlockNum, "err", wErr)
+						}
+						if wErr := decodedstate.AdvanceLatestBlockTx(rwTx, applyResult.BlockNum); wErr != nil {
+							log.Warn(fmt.Sprintf("[%s] decoded state block marker failed", pe.logPrefix), "block", applyResult.BlockNum, "err", wErr)
+						}
+						if wErr := decodedstate.WriteEntriesToDomains(pe.doms, rwTx, applyResult.lastTxNum, applyResult.decodedEntries); wErr != nil {
+							log.Warn(fmt.Sprintf("[%s] decoded state domain write failed", pe.logPrefix), "block", applyResult.BlockNum, "err", wErr)
+						}
 					}
 
 					blockUpdateCount = 0
@@ -1508,6 +1521,20 @@ type blockResult struct {
 	Header          *types.Header      // for accumulator.StartChange in apply loop
 	Txs             types.Transactions // for accumulator.StartChange in apply loop
 	blockStateCache *state.BlockStateCache
+
+	decodedEntries []decodedstate.DecodedEntry
+}
+
+func collectDecodedEntries(tasks []*execTask) []decodedstate.DecodedEntry {
+	var all []decodedstate.DecodedEntry
+	for _, t := range tasks {
+		if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.DecodedCollector != nil {
+			if c, ok := txTask.DecodedCollector.(decodedstate.Collector); ok {
+				all = append(all, c.Entries()...)
+			}
+		}
+	}
+	return all
 }
 
 type txResult struct {
@@ -2878,6 +2905,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Header:          header,
 			Txs:             txs,
 			blockStateCache: be.blockStateCache,
+			decodedEntries:  collectDecodedEntries(be.tasks),
 		}
 		return be.result, nil
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -43,6 +44,19 @@ type serialExecutor struct {
 	// block-end stateWriter so that AuRa system-call nonce changes are
 	// included in the txpool state-diff batch.
 	accumulator *shards.Accumulator
+}
+
+// collectDecodedEntriesFromTasks gathers decoded state entries from per-task collectors.
+func collectDecodedEntriesFromTasks(tasks []exec.Task) []decodedstate.DecodedEntry {
+	var all []decodedstate.DecodedEntry
+	for _, t := range tasks {
+		if txTask, ok := t.(*exec.TxTask); ok && txTask.DecodedCollector != nil {
+			if c, ok := txTask.DecodedCollector.(decodedstate.Collector); ok {
+				all = append(all, c.Entries()...)
+			}
+		}
+	}
+	return all
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -146,6 +160,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
+			taskHooks := se.hooks
+			var taskDecodedCollector decodedstate.Collector
+			if se.decodedConfig.Enabled {
+				taskDecodedCollector = decodedstate.NewCollector(se.decodedConfig)
+				taskHooks = decodedstate.NewTracingHooks(taskDecodedCollector, se.hooks)
+			}
 			txTask := &exec.TxTask{
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
@@ -157,7 +177,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
 				Trace:            dbg.TraceTx(blockNum, txIndex),
-				Hooks:            se.hooks,
+				Hooks:            taskHooks,
+				DecodedCollector: taskDecodedCollector,
 				Logger:           se.logger,
 			}
 
@@ -173,6 +194,24 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		start := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
+
+		if se.decodedConfig.Enabled {
+			entries := collectDecodedEntriesFromTasks(txTasks)
+			if len(entries) > 0 {
+				lastBlockTxNum := inputTxNum - 1
+				if ttx, ok := se.applyTx.(kv.TemporalRwTx); ok {
+					if wErr := decodedstate.WriteEntriesToFlatTx(ttx, lastBlockTxNum, entries); wErr != nil {
+						log.Warn(fmt.Sprintf("[%s] decoded state flat write failed", se.logPrefix), "block", blockNum, "err", wErr)
+					}
+					if wErr := decodedstate.AdvanceLatestBlockTx(ttx, blockNum); wErr != nil {
+						log.Warn(fmt.Sprintf("[%s] decoded state block marker failed", se.logPrefix), "block", blockNum, "err", wErr)
+					}
+					if wErr := decodedstate.WriteEntriesToDomains(se.doms, ttx, lastBlockTxNum, entries); wErr != nil {
+						log.Warn(fmt.Sprintf("[%s] decoded state domain write failed", se.logPrefix), "block", blockNum, "err", wErr)
+					}
+				}
+			}
+		}
 
 		if took := time.Since(start); took > 50*time.Millisecond { // prevent logs spamming
 			log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, took))

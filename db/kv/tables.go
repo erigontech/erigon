@@ -171,6 +171,11 @@ const (
 	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
 	TblRCacheIdx         = "ReceiptCacheIdx"
 
+	TblDecodedStorageVals        = "DecodedStorageVals"
+	TblDecodedStorageHistoryKeys = "DecodedStorageHistoryKeys"
+	TblDecodedStorageHistoryVals = "DecodedStorageHistoryVals"
+	TblDecodedStorageIdx         = "DecodedStorageIdx"
+
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
 	TblLogTopicsKeys  = "LogTopicsKeys"
@@ -275,6 +280,11 @@ const (
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 
+	// Decoded state tables
+	DecodedLatest  = "DecodedLatest"  // storeKey -> latestRecord (decoded mapping/array state)
+	DecodedHistory = "DecodedHistory" // storeKey+blockNum -> historyEntry (change sets)
+	DecodedMeta    = "DecodedMeta"    // "latestBlock" -> uint64
+
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
@@ -378,6 +388,11 @@ var ChaindataTables = []string{
 	TblRCacheHistoryVals,
 	TblRCacheIdx,
 
+	TblDecodedStorageVals,
+	TblDecodedStorageHistoryKeys,
+	TblDecodedStorageHistoryVals,
+	TblDecodedStorageIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
@@ -437,6 +452,10 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
+	DecodedLatest,
+	DecodedHistory,
+	DecodedMeta,
+
 	// GLOAS (EIP-7732)
 	BuildersDump,
 	Builders,
@@ -558,6 +577,11 @@ var ChaindataTablesCfg = TableCfg{
 
 	TblRCacheHistoryKeys: {Flags: DupSort},
 	TblRCacheIdx:         {Flags: DupSort},
+
+	TblDecodedStorageVals:        {Flags: DupSort},
+	TblDecodedStorageHistoryKeys: {Flags: DupSort},
+	TblDecodedStorageHistoryVals: {Flags: DupSort},
+	TblDecodedStorageIdx:         {Flags: DupSort},
 
 	TblLogAddressKeys: {Flags: DupSort},
 	TblLogAddressIdx:  {Flags: DupSort},
@@ -708,29 +732,31 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain   Domain = 0 // Eth Accounts
-	StorageDomain    Domain = 1 // Eth Account's Storage
-	CodeDomain       Domain = 2 // Eth Smart-Contract Code
-	CommitmentDomain Domain = 3 // Merkle Trie
-	ReceiptDomain    Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
-	RCacheDomain     Domain = 5 // Fat Receipts - with logs. Optional.
-	DomainLen        Domain = 6 // Technical marker of Enum. Not real Domain.
+	AccountsDomain       Domain = 0 // Eth Accounts
+	StorageDomain        Domain = 1 // Eth Account's Storage
+	CodeDomain           Domain = 2 // Eth Smart-Contract Code
+	CommitmentDomain     Domain = 3 // Merkle Trie
+	ReceiptDomain        Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
+	RCacheDomain         Domain = 5 // Fat Receipts - with logs. Optional.
+	DecodedStorageDomain Domain = 6 // Decoded state: mapping keys/values in pre-hashed form.
+	DomainLen            Domain = 7 // Technical marker of Enum. Not real Domain.
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
-	AccountsHistoryIdx   InvertedIdx = 0
-	StorageHistoryIdx    InvertedIdx = 1
-	CodeHistoryIdx       InvertedIdx = 2
-	CommitmentHistoryIdx InvertedIdx = 3
-	ReceiptHistoryIdx    InvertedIdx = 4
-	RCacheHistoryIdx     InvertedIdx = 5
+	AccountsHistoryIdx       InvertedIdx = 0
+	StorageHistoryIdx        InvertedIdx = 1
+	CodeHistoryIdx           InvertedIdx = 2
+	CommitmentHistoryIdx     InvertedIdx = 3
+	ReceiptHistoryIdx        InvertedIdx = 4
+	RCacheHistoryIdx         InvertedIdx = 5
+	DecodedStorageHistoryIdx InvertedIdx = 6
 
-	LogTopicIdx   InvertedIdx = 6
-	LogAddrIdx    InvertedIdx = 7
-	TracesFromIdx InvertedIdx = 8
-	TracesToIdx   InvertedIdx = 9
+	LogTopicIdx   InvertedIdx = 7
+	LogAddrIdx    InvertedIdx = 8
+	TracesFromIdx InvertedIdx = 9
+	TracesToIdx   InvertedIdx = 10
 
 	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
@@ -749,6 +775,8 @@ func (idx InvertedIdx) String() string {
 		return "receipt"
 	case RCacheHistoryIdx:
 		return "rcache"
+	case DecodedStorageHistoryIdx:
+		return "decodedstorage"
 	case LogAddrIdx:
 		return "logaddrs"
 	case LogTopicIdx:
@@ -776,6 +804,8 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 		return ReceiptHistoryIdx, nil
 	case "rcache":
 		return RCacheHistoryIdx, nil
+	case "decodedstorage":
+		return DecodedStorageHistoryIdx, nil
 	case "logaddrs":
 		return LogAddrIdx, nil
 	case "logaddr":
@@ -819,6 +849,8 @@ func (d Domain) String() string {
 		return "receipt"
 	case RCacheDomain:
 		return "rcache"
+	case DecodedStorageDomain:
+		return "decodedstorage"
 	default:
 		return "unknown domain"
 	}
@@ -838,6 +870,8 @@ func String2Domain(in string) (Domain, error) {
 		return ReceiptDomain, nil
 	case "rcache":
 		return RCacheDomain, nil
+	case "decodedstorage":
+		return DecodedStorageDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}

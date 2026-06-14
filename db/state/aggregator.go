@@ -89,8 +89,9 @@ type Aggregator struct {
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
-	buildingFiles atomic.Bool
-	mergingFiles  atomic.Bool
+	buildingFiles                      atomic.Bool
+	mergingFiles                       atomic.Bool
+	startupDecodedGapBackfillTriggered atomic.Bool
 
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
@@ -983,18 +984,30 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
+	var found bool
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		lastBlockInStep, found, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
 			return err
-		}
-		if !ok {
-			lastBlockInStep = 0
 		}
 		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
-	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
+	if err != nil {
+		return
+	}
+	if !found {
+		// Terminal txNum of this step has no canonical block mapping.
+		// Allow only if the step starts within the canonical tx range;
+		// steps that start beyond the canonical frontier are definitely
+		// not ready (their data comes from a domain progress marker, not
+		// from real execution).
+		if firstTxNumOfStep(step, a.stepSize.Load()) > lastTxInDB {
+			return
+		}
+		lastBlockInStep = 0
+	}
+	ok = lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
 	return
 }
 
@@ -2011,6 +2024,19 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
+func (a *Aggregator) decodedGapBackfillRange(step kv.Step) (kv.Step, bool) {
+	d := a.d[kv.DecodedStorageDomain]
+	if d == nil || d.Disable {
+		return 0, false
+	}
+
+	ac := a.BeginFilesRo()
+	decodedFirstMissing := ac.d[kv.DecodedStorageDomain].FirstStepNotInFiles()
+	ac.Close()
+
+	return decodedFirstMissing, decodedFirstMissing < step
+}
+
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
@@ -2030,11 +2056,17 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
+	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
+	startupDecodedGapBackfill := false
 	visMin := a.visible.Load().minimaxTxNum
 	if (txNum + 1) <= visMin+a.stepSize.Load() {
-		a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
-		close(fin)
-		return fin
+		if _, ok := a.decodedGapBackfillRange(step); ok && a.startupDecodedGapBackfillTriggered.CompareAndSwap(false, true) {
+			startupDecodedGapBackfill = true
+		} else {
+			a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
+			close(fin)
+			return fin
+		}
 	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
@@ -2042,8 +2074,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		close(fin)
 		return fin
 	}
-
-	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 
 	a.wg.Add(1)
 	go func() {
@@ -2060,7 +2090,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		lastInDB := func() kv.Step {
+		coreLastInDB := func() kv.Step {
 			a.commitGate.RLock()
 			defer a.commitGate.RUnlock()
 			return max(
@@ -2069,8 +2099,23 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				lastIdInDB(a.db, a.d[kv.StorageDomain]),
 				lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		}()
+		decodedLastInDB := lastIdInDB(a.db, a.d[kv.DecodedStorageDomain])
+
+		// The decoded domain writes a synthetic progress marker one step
+		// ahead so the aggregator sees completed decoded steps.  In
+		// production (core domains have data) cap decoded so it can never
+		// pull lastInDB beyond what core domains justify — otherwise the
+		// decoded marker can cause premature freezing of a step that is
+		// still being executed.  In test-only scenarios where core domains
+		// are empty, decoded drives lastInDB directly.
+		var lastInDB kv.Step
+		if coreLastInDB > 0 {
+			lastInDB = max(coreLastInDB, min(decodedLastInDB, coreLastInDB))
+		} else {
+			lastInDB = max(coreLastInDB, decodedLastInDB)
+		}
 		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx)
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "coreLastInDB", coreLastInDB, "decodedLastInDB", decodedLastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
 			"reorgSafeBlock", reorgSafeBlock, "reorgSafeStep", fmt.Sprintf("%.2f", reorgSafeStep), "reorgSafeOK", reorgSafeOK)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
@@ -2091,6 +2136,28 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				close(fin)
 				return
 			case <-timer.C:
+			}
+		}
+
+		if decodedFirstMissing, ok := a.decodedGapBackfillRange(step); ok {
+			logMsg := "[agg] backfilling decoded storage gap"
+			if startupDecodedGapBackfill {
+				logMsg = "[agg] startup decoded gap backfill"
+			}
+			a.logger.Info(logMsg, "from", decodedFirstMissing, "to", step)
+			for backfillStep := decodedFirstMissing; backfillStep < step; backfillStep++ {
+				if err := a.buildFiles(a.ctx, backfillStep); err != nil {
+					if errors.Is(err, errStepNotReady) {
+						break
+					}
+					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+						close(fin)
+						return
+					}
+					a.logger.Warn("[snapshots] decoded backfill step failed", "step", backfillStep, "err", err)
+					break
+				}
+				a.onFilesChange(nil)
 			}
 		}
 
@@ -2445,6 +2512,32 @@ func (at *AggregatorRoTx) DebugTraceKey(ctx context.Context, domain kv.Domain, k
 		return nil, fmt.Errorf("domain %s has history disabled; can't do TraceKey", domain)
 	}
 	return at.d[domain].TraceKey(ctx, key, fromTxNum, toTxNum, tx)
+}
+
+func (at *AggregatorRoTx) DebugRawHistoryTraceKey(ctx context.Context, domain kv.Domain, key []byte, fromTxNum uint64, toTxNum uint64, tx kv.Tx) (stream.U64V, error) {
+	if at.d[domain].d.HistoryDisabled {
+		return nil, fmt.Errorf("domain %s has history disabled; can't do DebugRawHistoryTraceKey", domain)
+	}
+	return at.d[domain].ht.DebugHistoryTraceKey(ctx, key, fromTxNum, toTxNum, tx)
+}
+
+func (at *AggregatorRoTx) DebugHistorySeekMeta(domain kv.Domain, key []byte, txNum uint64, tx kv.Tx) (histTxNum uint64, v []byte, ok bool, source string, err error) {
+	if at.d[domain].d.HistoryDisabled {
+		return 0, nil, false, "", fmt.Errorf("domain %s has history disabled; can't do DebugHistorySeekMeta", domain)
+	}
+	histTxNum, v, ok, err = at.d[domain].ht.debugHistorySeekInFiles(key, txNum)
+	if err != nil || ok {
+		return histTxNum, v, ok, "files", err
+	}
+	v, ok, err = at.d[domain].ht.historySeekInDB(key, txNum, tx)
+	return txNum, v, ok, "db", err
+}
+
+func (at *AggregatorRoTx) DebugHistoryFileLookup(domain kv.Domain, key []byte, txNum uint64) (*DebugHistoryFileLookup, error) {
+	if at.d[domain].d.HistoryDisabled {
+		return nil, fmt.Errorf("domain %s has history disabled; can't do DebugHistoryFileLookup", domain)
+	}
+	return at.d[domain].ht.DebugHistoryFileLookup(key, txNum)
 }
 
 func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {

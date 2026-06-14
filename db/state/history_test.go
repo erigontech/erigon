@@ -22,9 +22,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -70,6 +74,45 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+	require.NoError(tb, err)
+	tb.Cleanup(h.Close)
+	h.salt.Store(&salt)
+	h.DisableFsync()
+	return db, h
+}
+
+func testDbAndHistoryOfStep(tb testing.TB, largeValues bool, aggStep uint64, logger log.Logger) (kv.RwDB, *History) {
+	tb.Helper()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
+	tb.Cleanup(db.Close)
+
+	salt := uint32(1)
+	cfg := statecfg.Schema.AccountsDomain
+
+	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.HistoryLargeValues = largeValues
+
+	cfg.Hist.IiCfg.Compression = seg.CompressNone
+	cfg.Hist.Compression = seg.CompressNone
+
+	h, err := NewHistory(cfg.Hist, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+	require.NoError(tb, err)
+	tb.Cleanup(h.Close)
+	h.salt.Store(&salt)
+	h.DisableFsync()
+	return db, h
+}
+
+func testDbAndHistoryArchiveLike(tb testing.TB, logger log.Logger) (kv.RwDB, *History) {
+	tb.Helper()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
+	tb.Cleanup(db.Close)
+
+	salt := uint32(1)
+	cfg := statecfg.Schema.AccountsDomain
+	h, err := NewHistory(cfg.Hist, config3.LegacyStepSize, config3.LegacyStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
 	h.salt.Store(&salt)
@@ -2092,6 +2135,614 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
+}
+
+func TestHistorySeekReturnsFrozenArchiveAccountPreState(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	db, h := testDbAndHistoryOfStep(t, false, 600_000, logger)
+	ctx := context.Background()
+	addr := common.HexToAddress("0x49eb9Ab0F00e6Db84B36e8dD9a1Bd44eb6cbd603")
+	addrBytes := addr[:]
+
+	encodeAccount := func(nonce uint64, balance uint64) []byte {
+		a := accounts.NewAccount()
+		a.Nonce = nonce
+		a.Balance.SetUint64(balance)
+		return accounts.SerialiseV3(&a)
+	}
+
+	updates := []upd{
+		{txNum: 426_846, value: nil},
+		{txNum: 447_561, value: encodeAccount(0, 10_000_000_000_000_000)},
+		{txNum: 448_792, value: encodeAccount(0, 20_000_000_000_000_000)},
+		{txNum: 450_297, value: encodeAccount(0, 30_000_000_000_000_000)},
+		{txNum: 460_755, value: encodeAccount(1, 0)},
+		{txNum: 486_794, value: encodeAccount(1, 10_000_000_000_000_000)},
+		{txNum: 487_030, value: encodeAccount(1, 20_000_000_000_000_000)},
+		{txNum: 516_180, value: encodeAccount(2, 28_599_000_000_000_000)},
+		{txNum: 517_122, value: encodeAccount(2, 48_599_000_000_000_000)},
+		{txNum: 517_328, value: encodeAccount(3, 45_224_550_000_000_000)},
+		{txNum: 517_818, value: encodeAccount(4, 40_724_550_000_000_000)},
+		{txNum: 517_881, value: encodeAccount(5, 39_503_700_000_000_000)},
+		{txNum: 535_754, value: encodeAccount(6, 39_503_700_000_000_000)},
+	}
+
+	err := db.Update(ctx, func(tx kv.RwTx) error {
+		hc := h.beginForTests()
+		defer hc.Close()
+
+		writer := hc.NewWriter()
+		defer writer.close()
+		for _, upd := range updates {
+			if err := writer.AddPrevValue(addrBytes, upd.txNum, upd.value); err != nil {
+				return err
+			}
+		}
+		return writer.Flush(ctx, tx)
+	})
+	require.NoError(t, err)
+
+	err = db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		return h.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet())
+	})
+	require.NoError(t, err)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	v, ok, err := hc.HistorySeek(addrBytes, 535_754, roTx)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	var acc accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&acc, v))
+	require.Equal(
+		t,
+		uint64(6),
+		acc.Nonce,
+		"frozen HistorySeek must return the pre-state stored for tx 535754 instead of missing and forcing later readers into latest-state fallback",
+	)
+}
+
+func TestArchiveFixture_HistorySeekMatchesRawTraceKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	ctx, roTx, hc := openArchiveAccountsFixture(t)
+	defer hc.Close()
+
+	addr := common.HexToAddress("0x49eb9Ab0F00e6Db84B36e8dD9a1Bd44eb6cbd603")
+	checkTxNum := uint64(535_754)
+
+	traceIt, err := hc.DebugHistoryTraceKey(ctx, addr[:], 0, checkTxNum+1, roTx)
+	require.NoError(t, err)
+	defer traceIt.Close()
+
+	var (
+		wantTxNum uint64
+		wantValue []byte
+	)
+	for traceIt.HasNext() {
+		txNum, val, nextErr := traceIt.Next()
+		require.NoError(t, nextErr)
+		wantTxNum = txNum
+		wantValue = append(wantValue[:0], val...)
+	}
+	require.Equal(t, checkTxNum, wantTxNum)
+	require.NotEmpty(t, wantValue)
+
+	var wantAcc accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&wantAcc, wantValue))
+	require.Equal(t, uint64(5), wantAcc.Nonce)
+
+	// Diagnostic: check what the accessor returns for this key
+	dbgInfo, dbgErr := hc.DebugHistoryFileLookup(addr[:], checkTxNum)
+	require.NoError(t, dbgErr)
+	if dbgInfo != nil {
+		t.Logf("DebugHistoryFileLookup: histTxNum=%d file=%s", dbgInfo.HistTxNum, dbgInfo.File)
+		t.Logf("  Lookup: ok=%v offset=%d valueLen=%d", dbgInfo.LookupOK, dbgInfo.LookupOffset, len(dbgInfo.LookupValue))
+		t.Logf("  Lookup2: ok=%v offset=%d valueLen=%d", dbgInfo.Lookup2OK, dbgInfo.Lookup2Offset, len(dbgInfo.Lookup2Value))
+		t.Logf("  PageScan: ok=%v valueLen=%d", dbgInfo.PageScanOK, len(dbgInfo.PageScanValue))
+		for i, e := range dbgInfo.PageEntries {
+			t.Logf("  PageEntry[%d]: key=%x valueLen=%d", i, e.Key, len(e.Value))
+		}
+	} else {
+		t.Log("DebugHistoryFileLookup: nil (not found in inverted index)")
+	}
+
+	// Also check the first txNum for this key — DebugHistoryTraceKey starts there
+	firstTxNum := uint64(426_846)
+	dbgFirst, dbgFirstErr := hc.DebugHistoryFileLookup(addr[:], firstTxNum)
+	require.NoError(t, dbgFirstErr)
+	if dbgFirst != nil {
+		t.Logf("DebugHistoryFileLookup(first): histTxNum=%d", dbgFirst.HistTxNum)
+		t.Logf("  Lookup: ok=%v offset=%d valueLen=%d", dbgFirst.LookupOK, dbgFirst.LookupOffset, len(dbgFirst.LookupValue))
+		t.Logf("  PageScan: ok=%v valueLen=%d", dbgFirst.PageScanOK, len(dbgFirst.PageScanValue))
+	}
+
+	// Diagnostic 1: Check if txNum 535754 is in the inverted index (ef file)
+	idxIt, idxErr := hc.IdxRange(addr[:], 0, int(checkTxNum+1), order.Asc, kv.Unlim, roTx)
+	require.NoError(t, idxErr)
+	var allTxNums []uint64
+	for idxIt.HasNext() {
+		txn, nextErr := idxIt.Next()
+		require.NoError(t, nextErr)
+		allTxNums = append(allTxNums, txn)
+	}
+	idxIt.Close()
+	t.Logf("Inverted index has %d txNums for this address (range [0, %d])", len(allTxNums), checkTxNum)
+	foundInEF := false
+	for _, txn := range allTxNums {
+		if txn == checkTxNum {
+			foundInEF = true
+		}
+	}
+	t.Logf("  txNum %d found in inverted index: %v", checkTxNum, foundInEF)
+	if len(allTxNums) > 0 {
+		t.Logf("  first txNum: %d, last txNum: %d", allTxNums[0], allTxNums[len(allTxNums)-1])
+	}
+	// Show last few txNums
+	if len(allTxNums) > 5 {
+		t.Logf("  last 5 txNums: %v", allTxNums[len(allTxNums)-5:])
+	} else {
+		t.Logf("  all txNums: %v", allTxNums)
+	}
+
+	// Diagnostic 2: For each txNum, check if recsplit gives the correct page
+	// Get ALL txNums from ef (not just up to checkTxNum)
+	histItem, histOK := hc.getFile(checkTxNum)
+	if histOK {
+		d := histItem.src.decompressor
+		t.Logf("File props: CompressionFormatVersion=%d CompressedPageValuesCount=%d KeyCount=%d",
+			d.CompressionFormatVersion(), d.CompressedPageValuesCount(), d.Count())
+
+		reader := hc.statelessIdxReader(histItem.i)
+		// Check ALL txNums (will use the ef iterator data from Diagnostic 4 below, but first test the limited set)
+		mismatchCount := 0
+		for _, txn := range allTxNums {
+			hk := historyKey(txn, addr[:], nil)
+			offset, _ := reader.Lookup(hk)
+			// Check if the page at this offset actually contains this historyKey
+			g := hc.statelessGetter(histItem.i)
+			paged := seg.NewPagedReader(g, d.CompressedPageValuesCount(), true)
+			paged.Reset(offset)
+			found := false
+			for j := 0; j < d.CompressedPageValuesCount() && paged.HasNext(); j++ {
+				k, _, _, _ := paged.Next2(nil)
+				if bytes.Equal(k, hk) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				mismatchCount++
+				if mismatchCount <= 10 {
+					t.Logf("  MISMATCH: txNum=%d offset=%d — key NOT on page", txn, offset)
+				}
+			}
+		}
+		t.Logf("  Accessor page-hit check (range [0,%d]): %d/%d correct, %d mismatches", checkTxNum, len(allTxNums)-mismatchCount, len(allTxNums), mismatchCount)
+	}
+
+	// Diagnostic 3: Check how many entries in ef file total (buildVI's count)
+	if histOK {
+		d := histItem.src.decompressor
+		t.Logf("  History .v file: CompressedPageValuesCount=%d, total words=%d",
+			d.CompressedPageValuesCount(), d.Count())
+		// Count entries via the inverted index (same logic as buildVI first pass)
+		iiItem := hc.iit.files[histItem.i]
+		iiD := iiItem.src.decompressor
+		iiReader := hc.h.InvertedIndex.dataReader(iiD)
+		var keyBuf, valBuf []byte
+		efCount := uint64(0)
+		for iiReader.HasNext() {
+			keyBuf, _ = iiReader.Next(keyBuf[:0])
+			valBuf, _ = iiReader.Next(valBuf[:0])
+			efCount += multiencseq.Count(iiItem.startTxNum, valBuf)
+		}
+		t.Logf("  Inverted index total entry count (buildVI cnt): %d", efCount)
+		t.Logf("  Expected pages from entries: %d", (efCount+uint64(d.CompressedPageValuesCount())-1)/uint64(d.CompressedPageValuesCount()))
+
+		// Diagnostic 4: Check Count vs Iterator for this address's ef entry
+		idxReader := hc.iit.statelessIdxReader(histItem.i)
+		efGetter := hc.iit.statelessGetter(histItem.i)
+		offset, efOK := idxReader.TwoLayerLookup(addr[:])
+		if efOK {
+			efGetter.Reset(offset)
+			gkey, _ := efGetter.Next(nil)
+			if bytes.Equal(gkey, addr[:]) {
+				efBuf, _ := efGetter.Next(nil)
+				efCountForAddr := multiencseq.Count(iiItem.startTxNum, efBuf)
+				seq := multiencseq.ReadMultiEncSeq(iiItem.startTxNum, efBuf)
+				itForAddr := seq.Iterator(0)
+				iterCount := 0
+				var iterTxNums []uint64
+				for itForAddr.HasNext() {
+					txn, err := itForAddr.Next()
+					if err != nil {
+						t.Logf("  Iterator error at position %d: %v", iterCount, err)
+						break
+					}
+					iterCount++
+					iterTxNums = append(iterTxNums, txn)
+				}
+				itForAddr.Close()
+				t.Logf("  EF entry for this addr: Count=%d, Iterator produced=%d", efCountForAddr, iterCount)
+				t.Logf("  Iterator txNums: %v", iterTxNums)
+
+				// Also check with SequenceIterator (buildVI uses this path)
+				seq2 := &multiencseq.SequenceReader{}
+				seq2.Reset(iiItem.startTxNum, efBuf)
+				it2 := &multiencseq.SequenceIterator{}
+				it2.Reset(seq2, 0)
+				iter2Count := 0
+				var iter2TxNums []uint64
+				for it2.HasNext() {
+					txn, err := it2.Next()
+					if err != nil {
+						t.Logf("  SequenceIterator error at position %d: %v", iter2Count, err)
+						break
+					}
+					iter2Count++
+					iter2TxNums = append(iter2TxNums, txn)
+				}
+				it2.Close()
+				t.Logf("  SequenceIterator (buildVI path): produced=%d, txNums=%v", iter2Count, iter2TxNums)
+
+				// Diagnostic 5: Check ALL 25 txNums against the accessor
+				idxReader5 := hc.statelessIdxReader(histItem.i)
+				allMismatch := 0
+				for idx, txn := range iterTxNums {
+					hk := historyKey(txn, addr[:], nil)
+					off, _ := idxReader5.Lookup(hk)
+					g2 := hc.statelessGetter(histItem.i)
+					paged2 := seg.NewPagedReader(g2, d.CompressedPageValuesCount(), true)
+					paged2.Reset(off)
+					found2 := false
+					for j := 0; j < d.CompressedPageValuesCount() && paged2.HasNext(); j++ {
+						k, _, _, _ := paged2.Next2(nil)
+						if bytes.Equal(k, hk) {
+							found2 = true
+							break
+						}
+					}
+					status := "OK"
+					if !found2 {
+						status = "MISS"
+						allMismatch++
+					}
+					t.Logf("  ef[%d] txNum=%d offset=%d %s", idx, txn, off, status)
+				}
+				t.Logf("  ALL ef entries check: %d/%d correct, %d mismatches", len(iterTxNums)-allMismatch, len(iterTxNums), allMismatch)
+
+				// Diagnostic 6: Dump ALL entries on the page that belong to this address
+				g3 := hc.statelessGetter(histItem.i)
+				paged3 := seg.NewPagedReader(g3, d.CompressedPageValuesCount(), true)
+				paged3.Reset(dbgInfo.LookupOffset)
+				t.Logf("  Page entries for addr %x at offset %d:", addr, dbgInfo.LookupOffset)
+				addrBytes := addr[:]
+				pageEntryCount := 0
+				for j := 0; j < d.CompressedPageValuesCount() && paged3.HasNext(); j++ {
+					k, v, _, _ := paged3.Next2(nil)
+					pageEntryCount++
+					// historyKey = txNum(8) + addr(20). Check if addr matches.
+					if len(k) >= 28 && bytes.Equal(k[8:28], addrBytes) {
+						txn := binary.BigEndian.Uint64(k[:8])
+						t.Logf("    page[%d]: txNum=%d valueLen=%d", j, txn, len(v))
+					}
+				}
+				t.Logf("  Total entries on page: %d", pageEntryCount)
+
+				// Diagnostic 7: Scan next few pages to find where txNum=535754 actually is
+				targetHistKey := historyKey(checkTxNum, addr[:], nil)
+				// paged3 is now positioned at the start of the next page
+				searchPages := 100
+				for pg := 0; pg < searchPages && paged3.HasNext(); pg++ {
+					for j := 0; j < d.CompressedPageValuesCount() && paged3.HasNext(); j++ {
+						k, v, _, _ := paged3.Next2(nil)
+						if bytes.Equal(k, targetHistKey) {
+							t.Logf("  FOUND txNum=%d on page %d (offset from expected: %d pages), valueLen=%d", checkTxNum, pg+1, pg+1, len(v))
+							// Decode the account
+							if len(v) > 0 {
+								var acc accounts.Account
+								if err := accounts.DeserialiseV3(&acc, v); err == nil {
+									t.Logf("  Account at that position: nonce=%d balance=%s", acc.Nonce, acc.Balance.ToBig().String())
+								}
+							}
+							goto doneSearch
+						}
+					}
+				}
+				t.Logf("  txNum=%d NOT found within %d additional pages", checkTxNum, searchPages)
+			doneSearch:
+			}
+		}
+	}
+
+	got, ok, err := hc.HistorySeek(addr[:], checkTxNum, roTx)
+	require.NoError(t, err)
+	require.Truef(
+		t,
+		ok,
+		"HistorySeek must find the same historical account state that DebugHistoryTraceKey exposes from the real accounts.0-64 fixture at txNum=%d",
+		checkTxNum,
+	)
+	require.Equal(t, wantValue, got)
+}
+
+func TestArchiveFixture_RawTraceKeySequenceIsConsistent(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	ctx, roTx, hc := openArchiveAccountsFixture(t)
+	defer hc.Close()
+
+	addr := common.HexToAddress("0x49eb9Ab0F00e6Db84B36e8dD9a1Bd44eb6cbd603")
+	traceIt, err := hc.DebugHistoryTraceKey(ctx, addr[:], 0, 535_755, roTx)
+	require.NoError(t, err)
+	defer traceIt.Close()
+
+	type traceSample struct {
+		txNum   uint64
+		nonce   uint64
+		balance uint64
+	}
+	var samples []traceSample
+	for traceIt.HasNext() {
+		txNum, val, nextErr := traceIt.Next()
+		require.NoError(t, nextErr)
+		if len(val) == 0 {
+			continue
+		}
+		var acc accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&acc, val))
+		samples = append(samples, traceSample{txNum: txNum, nonce: acc.Nonce, balance: acc.Balance.Uint64()})
+	}
+
+	require.GreaterOrEqual(t, len(samples), 3)
+	for i := 1; i < len(samples); i++ {
+		require.Greater(t, samples[i].txNum, samples[i-1].txNum, "trace txNums must be strictly increasing")
+		require.GreaterOrEqual(t, samples[i].nonce, samples[i-1].nonce, "account nonce must not decrease across trace history")
+	}
+
+	tail := samples[len(samples)-3:]
+	require.Equal(t, []traceSample{
+		{txNum: 517_818, nonce: 4, balance: 40_724_550_000_000_000},
+		{txNum: 517_881, nonce: 5, balance: 39_503_700_000_000_000},
+		{txNum: 535_754, nonce: 5, balance: 39_503_700_000_000_000},
+	}, tail)
+}
+
+func archiveAccountsFixtureRoot(t *testing.T) string {
+	t.Helper()
+	fixtureRoot := os.Getenv("ERIGON_ACCOUNTS_FIXTURE_DIR")
+	if fixtureRoot == "" {
+		fixtureRoot = filepath.Clean(filepath.Join("..", "..", "tmp", "accounts-0-64-fixture"))
+	}
+	absFixtureRoot, err := filepath.Abs(fixtureRoot)
+	require.NoError(t, err)
+	fixtureRoot = absFixtureRoot
+	if ok, err := dir.FileExist(filepath.Join(fixtureRoot, "history", "v1.2-accounts.0-64.v")); err != nil || !ok {
+		t.Skipf("archive fixture missing under %s", fixtureRoot)
+	}
+	if ok, err := dir.FileExist(filepath.Join(fixtureRoot, "salt-state.txt")); err != nil || !ok {
+		t.Skipf("archive fixture missing salt-state.txt under %s", fixtureRoot)
+	}
+	return fixtureRoot
+}
+
+func openArchiveAccountsFixture(t *testing.T) (context.Context, kv.Tx, *HistoryRoTx) {
+	t.Helper()
+	fixtureRoot := archiveAccountsFixtureRoot(t)
+
+	logger := log.New()
+	ctx := context.Background()
+	dirs := datadir.New(t.TempDir())
+	linkFixture := func(rel string) {
+		t.Helper()
+		src := filepath.Join(fixtureRoot, rel)
+		dst := filepath.Join(dirs.Snap, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0o755))
+		require.NoError(t, os.Symlink(src, dst))
+	}
+	linkFixture(filepath.Join("history", "v1.2-accounts.0-64.v"))
+	linkFixture(filepath.Join("idx", "v2.1-accounts.0-64.ef"))
+	linkFixture(filepath.Join("accessor", "v1.2-accounts.0-64.vi"))
+	linkFixture(filepath.Join("accessor", "v2.1-accounts.0-64.efi"))
+	linkFixture("salt-state.txt")
+
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+
+	cfg := statecfg.Schema.AccountsDomain
+	h, err := NewHistory(cfg.Hist, config3.LegacyStepSize, config3.LegacyStepsInFrozenFile, dirs, logger)
+	require.NoError(t, err)
+	t.Cleanup(h.Close)
+
+	require.NoError(t, h.Scan(config3.LegacyStepSize*config3.LegacyStepsInFrozenFile))
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+
+	hc := h.beginForTests()
+	return ctx, roTx, hc
+}
+
+// TestFindArchiveLikeHistorySeekMismatch is an explicit search harness for the
+// mainnet archive failure around block 204336. It is not intended to be part of
+// the regular suite; run it explicitly while narrowing the smallest local
+// counterexample and freeze the resulting seed into a deterministic test.
+func TestFindArchiveLikeHistorySeekMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	if os.Getenv("ERIGON_FIND_HISTORY_MISMATCH") == "" {
+		t.Skip("set ERIGON_FIND_HISTORY_MISMATCH=1 to run the archive-like search harness")
+	}
+
+	readEnvInt := func(name string, def int) int {
+		raw := os.Getenv(name)
+		if raw == "" {
+			return def
+		}
+		n, err := strconv.Atoi(raw)
+		require.NoError(t, err)
+		return n
+	}
+
+	logger := log.New()
+	ctx := context.Background()
+
+	targetAddr := common.HexToAddress("0x49eb9Ab0F00e6Db84B36e8dD9a1Bd44eb6cbd603")
+	targetKey := string(targetAddr[:])
+	checkTxNum := uint64(535_754)
+
+	encodeAccount := func(nonce uint64, balance uint64) []byte {
+		a := accounts.NewAccount()
+		a.Nonce = nonce
+		a.Balance.SetUint64(balance)
+		return accounts.SerialiseV3(&a)
+	}
+	targetUpdates := []upd{
+		{txNum: 426_846, value: nil},
+		{txNum: 447_561, value: encodeAccount(0, 10_000_000_000_000_000)},
+		{txNum: 448_792, value: encodeAccount(0, 20_000_000_000_000_000)},
+		{txNum: 450_297, value: encodeAccount(0, 30_000_000_000_000_000)},
+		{txNum: 460_755, value: encodeAccount(1, 0)},
+		{txNum: 486_794, value: encodeAccount(1, 10_000_000_000_000_000)},
+		{txNum: 487_030, value: encodeAccount(1, 20_000_000_000_000_000)},
+		{txNum: 516_180, value: encodeAccount(2, 28_599_000_000_000_000)},
+		{txNum: 517_122, value: encodeAccount(2, 48_599_000_000_000_000)},
+		{txNum: 517_328, value: encodeAccount(3, 45_224_550_000_000_000)},
+		{txNum: 517_818, value: encodeAccount(4, 40_724_550_000_000_000)},
+		{txNum: 517_881, value: encodeAccount(5, 39_503_700_000_000_000)},
+		{txNum: 535_754, value: encodeAccount(6, 39_503_700_000_000_000)},
+	}
+	want := targetUpdates[len(targetUpdates)-2].value
+
+	makeNoiseKey := func(seed int64, i int) string {
+		var k [20]byte
+		binary.BigEndian.PutUint64(k[:8], uint64(seed))
+		binary.BigEndian.PutUint64(k[8:16], uint64(i+1))
+		k[16] = 0xaa
+		k[17] = byte(i)
+		k[18] = byte(i >> 8)
+		k[19] = 0x55
+		return string(k[:])
+	}
+
+	maxSeed := readEnvInt("ERIGON_FIND_HISTORY_MISMATCH_MAX_SEED", 32)
+	noiseKeys := readEnvInt("ERIGON_FIND_HISTORY_MISMATCH_NOISE_KEYS", 256)
+	minUpdates := readEnvInt("ERIGON_FIND_HISTORY_MISMATCH_MIN_UPDATES", 16)
+	maxExtraUpdates := readEnvInt("ERIGON_FIND_HISTORY_MISMATCH_MAX_EXTRA_UPDATES", 96)
+
+	for seed := int64(1); seed <= int64(maxSeed); seed++ {
+		if seed == 1 || seed%8 == 0 {
+			t.Logf("search seed=%d/%d noiseKeys=%d minUpdates=%d maxExtraUpdates=%d", seed, maxSeed, noiseKeys, minUpdates, maxExtraUpdates)
+		}
+		rng := rand.New(rand.NewSource(seed))
+		values := map[string][]upd{
+			targetKey: append([]upd(nil), targetUpdates...),
+		}
+
+		for i := 0; i < noiseKeys; i++ {
+			key := makeNoiseKey(seed, i)
+			count := minUpdates + rng.Intn(maxExtraUpdates)
+			seen := map[uint64]struct{}{}
+			updates := make([]upd, 0, count)
+			var prev []byte
+			for len(updates) < count {
+				txNum := uint64(1 + rng.Intn(int(checkTxNum)))
+				if _, ok := seen[txNum]; ok {
+					continue
+				}
+				seen[txNum] = struct{}{}
+				val := make([]byte, 16)
+				binary.BigEndian.PutUint64(val[:8], uint64(i+1))
+				binary.BigEndian.PutUint64(val[8:], uint64(len(updates)+1))
+				updates = append(updates, upd{txNum: txNum, value: prev})
+				prev = val
+			}
+			slices.SortFunc(updates, func(a, b upd) int {
+				switch {
+				case a.txNum < b.txNum:
+					return -1
+				case a.txNum > b.txNum:
+					return 1
+				default:
+					return 0
+				}
+			})
+			values[key] = updates
+		}
+
+		db, h := func() (kv.RwDB, *History) {
+			db, h := testDbAndHistoryArchiveLike(t, logger)
+
+			err := db.Update(ctx, func(tx kv.RwTx) error {
+				hc := h.beginForTests()
+				defer hc.Close()
+				writer := hc.NewWriter()
+				defer writer.close()
+				var flusher flusher
+				keyFlushCount := 0
+				for key, upds := range values {
+					upds[0].value = nil
+					values[key] = upds
+					for i := 0; i < len(upds); i++ {
+						if err := writer.AddPrevValue([]byte(key), upds[i].txNum, upds[i].value); err != nil {
+							return err
+						}
+					}
+					keyFlushCount++
+					if keyFlushCount%32 == 0 {
+						if flusher != nil {
+							if err := flusher.Flush(ctx, tx); err != nil {
+								return err
+							}
+							flusher = nil
+						}
+						flusher = writer
+						writer = hc.NewWriter()
+					}
+				}
+				if flusher != nil {
+					if err := flusher.Flush(ctx, tx); err != nil {
+						return err
+					}
+				}
+				return writer.Flush(ctx, tx)
+			})
+			require.NoError(t, err)
+			return db, h
+		}()
+		func() {
+			defer db.Close()
+			collateAndMergeHistory(t, db, h, checkTxNum+1, true)
+
+			roTx, err := db.BeginRo(ctx)
+			require.NoError(t, err)
+			defer roTx.Rollback()
+
+			hc := h.beginForTests()
+			defer hc.Close()
+
+			got, ok, err := hc.HistorySeek(targetAddr[:], checkTxNum, roTx)
+			require.NoError(t, err)
+			if !ok || !bytes.Equal(got, want) {
+				t.Fatalf("found mismatch seed=%d ok=%t got=%x want=%x", seed, ok, got, want)
+			}
+		}()
+	}
+
+	t.Fatalf("no mismatch found in searched seeds")
 }
 
 // TestRangeAsOf_DBIteratorSkipsFileRange verifies that the DB iterator in
