@@ -74,8 +74,10 @@ func newDomainCache(name kv.Domain, files visibleFiles) *DomainGetFromFileCache 
 		limit = 10_000
 	}
 	switch name {
-	case kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain:
+	case kv.ReceiptDomain, kv.RCacheDomain:
 		return nil
+	case kv.CommitmentDomain:
+		limit = limit + limit/2
 	case kv.StorageDomain:
 		limit = limit + limit/2
 	case kv.CodeDomain:
