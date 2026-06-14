@@ -409,6 +409,40 @@ func TestNewBtIndex(t *testing.T) {
 	}
 }
 
+func TestBtIndex_MStoredInFile(t *testing.T) {
+	t.Parallel()
+
+	const wantM = uint64(8)
+	tmp := t.TempDir()
+	logger := log.New()
+	kvPath := generateKV(t, tmp, 20, 10, 1000, logger, seg.CompressNone)
+
+	decomp, err := seg.NewDecompressor(kvPath)
+	require.NoError(t, err)
+	defer decomp.Close()
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
+	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: wantM}, logger)
+	require.NoError(t, err)
+
+	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	r.Reset(0)
+	var pos uint64
+	for r.HasNext() {
+		key, _ := r.Next(nil)
+		require.NoError(t, iw.AddKey(key, pos, false))
+		pos, _ = r.Skip()
+	}
+	iw.DisableFsync()
+	require.NoError(t, iw.Build())
+
+	r2 := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, 1, r2) // pass wrong M — file M should win
+	require.NoError(t, err)
+	defer bt.Close()
+	require.Equal(t, wantM, bt.M())
+}
+
 func BenchmarkBtIndex_Get(b *testing.B) {
 	keyCount := 1_000_000
 	if testing.Short() {

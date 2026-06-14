@@ -56,7 +56,7 @@ const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for 
 const (
 	// old layout: [EF][nodesCount(8)][nodes...]; EF count's MSB is always 0x00 for realistic datasets.
 	btIndexVersion0 = byte(0x00)
-	// new layout: [version][nodesCount(8)][nodes...][EF]; nodes stream during ETL Load, EF written last.
+	// new layout: [version][M(8)][nodesCount(8)][nodes...][EF]; nodes stream during ETL Load, EF written last.
 	btIndexVersion1 = byte(0x01)
 )
 
@@ -290,6 +290,10 @@ func (btw *BtIndexWriter) Build() error {
 		if _, err = indexW.Write([]byte{btIndexVersion1}); err != nil {
 			return fmt.Errorf("[index] write version: %w", err)
 		}
+		binary.BigEndian.PutUint64(btw.numBuf[:], btw.args.M)
+		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
+			return fmt.Errorf("[index] write M: %w", err)
+		}
 		binary.BigEndian.PutUint64(btw.numBuf[:], btw.nodesWritten)
 		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
 			return fmt.Errorf("[index] write nodes count: %w", err)
@@ -379,6 +383,7 @@ type BtIndex struct {
 	size     int64
 	modTime  time.Time
 	filePath string
+	indexM   uint64
 	pool     sync.Pool
 }
 
@@ -484,7 +489,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	return nil
 }
 
-// For now, M is not stored inside index file.
 func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
@@ -529,6 +533,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	switch idx.data[pos] {
 	case btIndexVersion1:
 		pos++
+		if len(idx.data[pos:]) < 8 {
+			return nil, fmt.Errorf("truncated btree index v1 (no M field): %s", indexPath)
+		}
+		M = binary.BigEndian.Uint64(idx.data[pos : pos+8])
+		pos += 8
 		var nodesBytes int
 		nodes, nodesBytes, err = decodeListNodes(idx.data[pos:])
 		if err != nil {
@@ -548,6 +557,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		return nil, fmt.Errorf("unsupported btree index version %d in %s: upgrade Erigon", idx.data[pos], indexPath)
 	}
 
+	idx.indexM = M
 	idx.pool.New = func() any {
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
@@ -610,6 +620,8 @@ func (b *BtIndex) ModTime() time.Time { return b.modTime }
 func (b *BtIndex) FilePath() string { return b.filePath }
 
 func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
+
+func (b *BtIndex) M() uint64 { return b.indexM }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 
