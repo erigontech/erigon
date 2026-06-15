@@ -73,7 +73,7 @@ func Verify(
 	for _, chain := range chains {
 		// Shift left?
 		//
-		err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs, chain)
+		err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs, chain, "")
 		if err != nil {
 			return
 		}

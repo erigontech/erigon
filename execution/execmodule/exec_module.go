@@ -192,7 +192,11 @@ type ExecModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db               kv.TemporalRwDB // main database
+	db kv.TemporalRwDB // main database
+	// semaphore is the module's single mutual-exclusion domain: it guards the
+	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
+	// (retried by the CL) or block, and the background FCU commit/prune
+	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
@@ -217,6 +221,7 @@ type ExecModule struct {
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
+	nextForkActivated       bool
 	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
 	accumGasMgas float64
 	accumTimeSec float64
@@ -293,6 +298,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
 }
 
 // ForkValidator returns the fork validator owned by this module.
@@ -382,6 +400,18 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	}
 	return nil
 }
+
+const nextForkBanner = `
+:'######:::'##::::::::::'###::::'##::::'##::'######::'########:'########:'########::'########:::::'###::::'##::::'##:
+'##... ##:: ##:::::::::'## ##::: ###::'###:'##... ##:... ##..:: ##.....:: ##.... ##: ##.... ##:::'## ##::: ###::'###:
+ ##:::..::: ##::::::::'##:. ##:: ####'####: ##:::..::::: ##:::: ##::::::: ##:::: ##: ##:::: ##::'##:. ##:: ####'####:
+ ##::'####: ##:::::::'##:::. ##: ## ### ##:. ######::::: ##:::: ######::: ########:: ##:::: ##:'##:::. ##: ## ### ##:
+ ##::: ##:: ##::::::: #########: ##. #: ##::..... ##:::: ##:::: ##...:::: ##.. ##::: ##:::: ##: #########: ##. #: ##:
+ ##::: ##:: ##::::::: ##.... ##: ##:.:: ##:'##::: ##:::: ##:::: ##::::::: ##::. ##:: ##:::: ##: ##.... ##: ##:.:: ##:
+. ######::: ########: ##:::: ##: ##:::: ##:. ######::::: ##:::: ########: ##:::. ##: ########:: ##:::: ##: ##:::: ##:
+:......::::........::..:::::..::..:::::..:::......::::::..:::::........::..:::::..::........:::..:::::..::..:::::..::
+=============================================== GLAMSTERDAM ACTIVATED ===============================================
+`
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
@@ -565,6 +595,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, err
 		}
 	}
+	if !e.nextForkActivated && validationStatus == ExecutionStatusSuccess && e.config.IsAmsterdam(header.Time) {
+		e.nextForkActivated = true
+		e.logger.Info(nextForkBanner)
+	}
+
 	result := ValidationResult{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,

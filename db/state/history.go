@@ -959,7 +959,7 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	}
 	r := ht.readers[i]
 	if r == nil {
-		r = ht.files[i].src.index.GetReaderFromPool()
+		r = ht.files[i].src.index.Reader()
 		ht.readers[i] = r
 	}
 	return r

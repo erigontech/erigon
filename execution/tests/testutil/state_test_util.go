@@ -578,6 +578,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	if gasPrice == nil {
 		return nil, errors.New("no gas price provided")
 	}
+	if baseFee == nil {
+		feeCap = big.Int(*gasPrice)
+		tipCap = big.Int(*gasPrice)
+	}
 
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())

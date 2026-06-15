@@ -127,3 +127,22 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 	require.Equal(t, GloasVersion, beaconCfg.GetCurrentStateVersion(1))
 	require.Equal(t, GloasVersion, beaconCfg.GetCurrentStateVersion(100))
 }
+
+func TestMaxBlobsPerBlockUpperBound(t *testing.T) {
+	// The max is taken across the base fields and every BlobSchedule entry, not just the
+	// last (highest-epoch) one — here the peak (48) sits in the middle of the schedule.
+	cfg := &BeaconChainConfig{
+		MaxBlobsPerBlock:        6,
+		MaxBlobsPerBlockElectra: 9,
+		BlobSchedule: []BlobParameters{
+			{Epoch: 100, MaxBlobsPerBlock: 12},
+			{Epoch: 200, MaxBlobsPerBlock: 48},
+			{Epoch: 300, MaxBlobsPerBlock: 24},
+		},
+	}
+	require.EqualValues(t, 48, cfg.MaxBlobsPerBlockUpperBound())
+
+	// With no schedule it falls back to the larger of the base limits.
+	noSchedule := &BeaconChainConfig{MaxBlobsPerBlock: 6, MaxBlobsPerBlockElectra: 9}
+	require.EqualValues(t, 9, noSchedule.MaxBlobsPerBlockUpperBound())
+}
