@@ -260,6 +260,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		}
 	}
 
+	if err = env.SetOption(mdbx.OptPrefaultWriteEnable, 0); err != nil {
+		return nil, err
+	}
+
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
 	if !opts.HasFlag(mdbx.Readonly) {
