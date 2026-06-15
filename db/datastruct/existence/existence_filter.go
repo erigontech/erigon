@@ -230,6 +230,15 @@ func (b *Filter) MadvNormal() {
 	// bloom filter is heap-allocated, no mmap to advise — no-op
 }
 
+func (b *Filter) MadvRandom() {
+	if b == nil || b.empty {
+		return
+	}
+	if b.useFuse {
+		b.fuseReader.MadvRandom()
+	}
+}
+
 func (b *Filter) Close() {
 	if b == nil {
 		return
