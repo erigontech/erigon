@@ -333,4 +333,3 @@ func TestIsHeadWeak_NoCheckpointState(t *testing.T) {
 	f.justifiedCheckpoint.Store(solid.Checkpoint{})
 	require.False(t, f.isHeadWeak(common.Hash{0x01}))
 }
-
