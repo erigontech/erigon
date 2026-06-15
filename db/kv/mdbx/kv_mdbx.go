@@ -190,6 +190,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		opts = opts.DirtySpace(dbg.DirtySpace()) //nolint
 	}
 	if dbg.MergeTr() > 0 {
+		//default: 65536 / 3 = 33%
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}
 
@@ -259,6 +260,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			return nil, err
 		}
 	}
+
+	//if err = env.SetOption(mdbx.OptPrefaultWriteEnable, 0); err != nil {
+	//	return nil, err
+	//}
+	//if err = env.SetOption(mdbx.OptPreferWafInsteadofBalance, 0); err != nil {
+	//	return nil, err
+	//}
 
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
