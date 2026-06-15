@@ -20,6 +20,8 @@ type DomainCfg struct {
 	// for commitment domain only
 	ReplaceKeysInValues bool
 
+	ExistenceFilter ExistenceFilterMode
+
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
 
 	FileVersion DomainVersionTypes
