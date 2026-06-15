@@ -566,22 +566,28 @@ func (be *BranchEncoder) CollectUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	var prev []byte
 	var foundInCache bool
 	var err error
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
+	if !isNew {
+		if be.cache != nil {
+			prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+			if foundInCache && be.metrics != nil {
+				be.metrics.cacheBranch.Add(1)
+			}
+		}
+		if !foundInCache {
+			prev, _, err = ctx.Branch(prefix)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -626,6 +632,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
 	needsFlush := len(be.deferred) >= maxDeferredUpdates
@@ -640,24 +647,28 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// try to get previous data from cache
 	var (
 		prev         []byte
 		foundInCache bool
 		err          error
 	)
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
+	if !isNew {
+		if be.cache != nil {
+			prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+			if foundInCache && be.metrics != nil {
+				be.metrics.cacheBranch.Add(1)
+			}
+		}
+		if !foundInCache {
+			prev, _, err = ctx.Branch(prefix)
+		}
+		if err != nil {
+			return err
 		}
 	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-	}
-	if err != nil {
-		return err
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	// Track this prefix as pending
