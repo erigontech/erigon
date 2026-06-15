@@ -453,6 +453,23 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
+		// Reserve seqIDs in chunks: one IncrementSequence (cursor seek+put) per chunk
+		// instead of per value. Unused tail IDs become harmless gaps — prune scans and
+		// GetLatest dereferences the exact seqID, neither assumes a contiguous space.
+		const seqIDChunk = 128
+		var seqNext, seqEnd uint64
+		nextSeqID := func() (uint64, error) {
+			if seqNext == seqEnd {
+				base, err := tx.IncrementSequence(w.valsTable, seqIDChunk)
+				if err != nil {
+					return 0, err
+				}
+				seqNext, seqEnd = base, base+seqIDChunk
+			}
+			id := seqNext
+			seqNext++
+			return id, nil
+		}
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
@@ -476,7 +493,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					return err
 				}
 			} else if !newIsDeletion {
-				id, err := tx.IncrementSequence(w.valsTable, 1)
+				id, err := nextSeqID()
 				if err != nil {
 					return err
 				}
