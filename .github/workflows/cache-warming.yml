@@ -12,9 +12,11 @@ name: Cache Warming
 # cache keys identical across both paths.
 #
 # Workflows that benefit from Go test result caching (tests, race-tests,
-# caplin) run their full test suites. Workflows where test result caching
-# is not possible or useful (bench, sonar, eest-spec) use
-# cache-warming-only: true to compile only, keeping those runs fast.
+# caplin) run their full test suites; lint likewise runs in full because
+# golangci-lint's analysis cache is only populated by running the linters,
+# not by compiling. Workflows where result caching is not possible or useful
+# (bench, sonar, eest-spec) use cache-warming-only: true to compile only,
+# keeping those runs fast.
 
 on:
   push:
@@ -36,6 +38,10 @@ jobs:
 
   caplin:
     uses: ./.github/workflows/test-integration-caplin.yml
+    secrets: inherit
+
+  lint:
+    uses: ./.github/workflows/lint.yml
     secrets: inherit
 
   bench:
