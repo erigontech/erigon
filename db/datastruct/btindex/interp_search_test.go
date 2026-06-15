@@ -14,7 +14,6 @@ import (
 // key: hits (value+offset) and misses. Checked across budgets, including pure
 // interpolation (large budget) and budget=0 (immediate binary fallback).
 func TestInterpEquivBinary(t *testing.T) {
-	t.Parallel()
 	saveInterp, saveBudget := BtInterp, BtInterpBudget
 	defer func() { BtInterp, BtInterpBudget = saveInterp, saveBudget }()
 
