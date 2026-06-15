@@ -68,7 +68,7 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
-	for i := 0; i < len(nodes); i++ {
+	for i := range len(nodes) {
 		if envAssertBTKeys {
 			if cmp := bt.compareKey(kv, nodes[i].key, nodes[i].di); cmp != 0 {
 				panic(fmt.Errorf("key mismatch at di=%d i=%d cmp=%d", nodes[i].di, i, cmp))
@@ -153,7 +153,7 @@ func encodeListNodes(nodes []Node, w io.Writer) error {
 		return err
 	}
 
-	for ni := 0; ni < len(nodes); ni++ {
+	for ni := range len(nodes) {
 		if _, err := w.Write(nodes[ni].Encode()); err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func decodeListNodes(data []byte) ([]Node, error) {
 	count := binary.BigEndian.Uint64(data[:8])
 	nodes := make([]Node, count)
 	pos := 8
-	for ni := 0; ni < int(count); ni++ {
+	for ni := range int(count) {
 		dp, err := nodes[ni].Decode(data[pos:])
 		if err != nil {
 			return nil, fmt.Errorf("decode node %d: %w", ni, err)
@@ -446,12 +446,12 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	return v, true, b.offt.Get(l), nil
 }
 
-// interpMid estimates the index of key within [l,r) by linear interpolation on
+// interpMid estimates the index of searchKey within [l,r) by linear interpolation on
 // the first 8 key bytes after the common prefix of the bound keys. Falls back to
 // the binary midpoint when the span is degenerate; result is clamped to [l, r-1].
-func interpMid(key, klo, khi []byte, l, r uint64) uint64 {
+func interpMid(searchKey, klo, khi []byte, l, r uint64) uint64 {
 	p := commonPrefixLen(klo, khi)
-	a, hi, x := u64At(klo, p), u64At(khi, p), u64At(key, p)
+	a, hi, x := u64At(klo, p), u64At(khi, p), u64At(searchKey, p)
 	if hi <= a {
 		return (l + r) >> 1
 	}
@@ -467,10 +467,8 @@ func interpMid(key, klo, khi []byte, l, r uint64) uint64 {
 
 func commonPrefixLen(a, b []byte) int {
 	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n = min(n, len(b))
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}
