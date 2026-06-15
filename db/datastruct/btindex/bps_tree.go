@@ -483,11 +483,14 @@ func commonPrefixLen(a, b []byte) int {
 // Left-aligned + zero-padded so the u64 keeps lexicographic key order across
 // differing key lengths, which interpolation relies on (klo <= key <= khi).
 func u64At(k []byte, p int) uint64 {
-	var b [8]byte
-	if p < len(k) {
-		copy(b[:], k[p:])
+	if p+8 <= len(k) {
+		return binary.BigEndian.Uint64(k[p:])
 	}
-	return binary.BigEndian.Uint64(b[:])
+	var x uint64
+	for i := p; i < len(k); i++ {
+		x |= uint64(k[i]) << (56 - 8*uint(i-p))
+	}
+	return x
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
