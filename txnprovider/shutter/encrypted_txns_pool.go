@@ -369,6 +369,10 @@ func (etp *EncryptedTxnsPool) loadSubmissions(ctx context.Context, start, end ui
 		etp.addSubmission(encryptedTxnSubmission)
 	}
 
+	if err := submissionsIter.Error(); err != nil {
+		return fmt.Errorf("failed to iterate submissions from sequencer contract: %w", err)
+	}
+
 	return nil
 }
 
