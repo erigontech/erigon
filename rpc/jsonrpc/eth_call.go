@@ -56,6 +56,16 @@ import (
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
+// orLatest resolves an optional block selector, defaulting to the latest block
+// when the caller omitted the parameter (nil). Used by the state-reading methods
+// whose Block parameter is optional per execution-apis (default 'latest').
+func orLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+	if blockNrOrHash != nil {
+		return *blockNrOrHash
+	}
+	return latestNumOrHash
+}
+
 const (
 	// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
 	// allowed to produce in order to speed up calculations.
@@ -398,7 +408,8 @@ type StorageKeysInfo struct {
 }
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
