@@ -70,6 +70,16 @@ func TestAnswerGetReceiptsQuery_ReturnsBlockReadError(t *testing.T) {
 	require.Nil(t, resp)
 }
 
+// An error resolving a hash to a block number is returned to the caller.
+func TestAnswerGetReceiptsQuery_ReturnsHeaderNumberError(t *testing.T) {
+	f := newReceiptsQueryFixture(t, 3)
+	f.br.numberErrs[f.blocks[1].Hash()] = errors.New("header number read failed")
+	resp, lastBlockIncomplete, err := answerQuery(t, f)
+	require.ErrorContains(t, err, "header number read failed")
+	require.False(t, lastBlockIncomplete)
+	require.Nil(t, resp)
+}
+
 // A hash whose number resolves but whose block cannot be read ends the response
 // there; entries collected before it must not be discarded.
 func TestAnswerGetReceiptsQuery_EndsResponseWhenBlockUnreadable(t *testing.T) {
@@ -104,7 +114,7 @@ type receiptsQueryFixture struct {
 func newReceiptsQueryFixture(t *testing.T, n int) *receiptsQueryFixture {
 	t.Helper()
 	f := &receiptsQueryFixture{
-		br:     &queryTestBlockReader{numbers: map[common.Hash]uint64{}, blocks: map[common.Hash]*types.Block{}, blockErrs: map[common.Hash]error{}},
+		br:     &queryTestBlockReader{numbers: map[common.Hash]uint64{}, numberErrs: map[common.Hash]error{}, blocks: map[common.Hash]*types.Block{}, blockErrs: map[common.Hash]error{}},
 		getter: &queryTestReceiptsGetter{receipts: map[common.Hash]types.Receipts{}, errs: map[common.Hash]error{}},
 	}
 	parent := common.Hash{}
@@ -137,12 +147,16 @@ func (f *receiptsQueryFixture) encoded(t *testing.T, blockIdx int) rlp.RawValue 
 
 type queryTestBlockReader struct {
 	services.HeaderAndBodyReader
-	numbers   map[common.Hash]uint64
-	blocks    map[common.Hash]*types.Block
-	blockErrs map[common.Hash]error
+	numbers    map[common.Hash]uint64
+	numberErrs map[common.Hash]error
+	blocks     map[common.Hash]*types.Block
+	blockErrs  map[common.Hash]error
 }
 
 func (m *queryTestBlockReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	if err := m.numberErrs[hash]; err != nil {
+		return nil, err
+	}
 	n, ok := m.numbers[hash]
 	if !ok {
 		return nil, nil

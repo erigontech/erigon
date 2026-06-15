@@ -18,6 +18,7 @@ package beacon_indicies
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,19 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
+
+type errorCursor struct {
+	err error
+}
+
+func (c errorCursor) First() ([]byte, []byte, error)           { return nil, nil, nil }
+func (c errorCursor) Seek([]byte) ([]byte, []byte, error)      { return nil, nil, nil }
+func (c errorCursor) SeekExact([]byte) ([]byte, []byte, error) { return nil, nil, nil }
+func (c errorCursor) Next() ([]byte, []byte, error)            { return nil, nil, c.err }
+func (c errorCursor) Prev() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c errorCursor) Last() ([]byte, []byte, error)            { return nil, nil, nil }
+func (c errorCursor) Current() ([]byte, []byte, error)         { return nil, nil, nil }
+func (c errorCursor) Close()                                   {}
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
@@ -260,4 +274,81 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 		}
 		require.NotEmpty(t, body)
 	}
+}
+
+func TestPruneBlocksLimitRemovesBoundedNumberOfBlocks(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	type storedBlock struct {
+		slot uint64
+		root common.Hash
+	}
+
+	var blocks []storedBlock
+	for _, slot := range []uint64{1, 2, 3, 4} {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.EncodingSizeSSZ()
+
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+
+		blocks = append(blocks, storedBlock{slot: slot, root: root})
+	}
+
+	deleted, hasMore, err := PruneBlocksLimit(context.Background(), tx, 4, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, deleted)
+	require.True(t, hasMore)
+
+	for _, block := range blocks {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.slot, block.root))
+		require.NoError(t, err)
+		if block.slot < 3 {
+			require.Empty(t, body)
+			continue
+		}
+		require.NotEmpty(t, body)
+	}
+
+	deleted, hasMore, err = PruneBlocksLimit(context.Background(), tx, 4, 2)
+	require.NoError(t, err)
+	require.Equal(t, 1, deleted)
+	require.False(t, hasMore)
+}
+
+func TestPruneBlocksLimitExactLimitHasNoMore(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	for _, slot := range []uint64{1, 2} {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.EncodingSizeSSZ()
+		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+	}
+
+	deleted, hasMore, err := PruneBlocksLimit(context.Background(), tx, 3, 2)
+	require.NoError(t, err)
+	require.Equal(t, 2, deleted)
+	require.False(t, hasMore)
+}
+
+func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
+	wantErr := errors.New("cursor failed")
+
+	hasMore, err := hasMorePrunableBeaconBlocks(errorCursor{err: wantErr}, 10)
+
+	require.False(t, hasMore)
+	require.ErrorIs(t, err, wantErr)
 }

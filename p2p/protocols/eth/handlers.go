@@ -395,11 +395,14 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		}
 		// The response carries one receipt list per requested block in request
 		// order, so a block we cannot serve ends the response at that block.
-		number, _ := br.HeaderNumber(context.Background(), db, hash)
+		number, err := br.HeaderNumber(ctx, db, hash)
+		if err != nil {
+			return nil, false, err
+		}
 		if number == nil {
 			return receipts, false, nil
 		}
-		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		b, _, err := br.BlockWithSenders(ctx, db, hash, *number)
 		if err != nil {
 			return nil, false, err
 		}
