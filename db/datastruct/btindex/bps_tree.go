@@ -369,7 +369,8 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	// small window is handed to the linear scan below either way.
 	if BtInterp && len(klo) > 0 && len(khi) > 0 {
 		probes := uint64(0)
-		var kmBuf []byte
+		var kmArr, kloArr, khiArr [64]byte // stack; spills to heap only for keys > 64B
+		km := kmArr[:0]
 		for l < r && r-l > DefaultBtreeStartSkip {
 			if probes >= BtInterpBudget {
 				break
@@ -378,20 +379,17 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			probes++
 			off := b.offt.Get(m)
 			g.Reset(off)
-			km, _ := g.Next(kmBuf[:0])
-			kmBuf = km
+			km, _ = g.Next(km[:0])
 			cmp = bytes.Compare(key, km)
 			if cmp == 0 {
 				v, _ = g.Next(nil)
 				return v, true, off, nil
 			} else if cmp < 0 {
 				r = m
-				khi = kmBuf
-				kmBuf = nil
+				khi = append(khiArr[:0], km...)
 			} else {
 				l = m + 1
-				klo = kmBuf
-				kmBuf = nil
+				klo = append(kloArr[:0], km...)
 			}
 		}
 	}
