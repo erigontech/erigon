@@ -20,10 +20,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commondir "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -654,4 +659,67 @@ func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 		return 0
 	}
 	return binary.BigEndian.Uint64(v[8:16])
+}
+
+// stateFileStepRe matches state snapshot file names of the form:
+// v<ver>-<name>.<startStep>-<endStep>.<ext>
+var stateFileStepRe = regexp.MustCompile(`^v\d+(?:\.\d+)?-\w+\.(\d+)-(\d+)\.\w+$`)
+
+type removedFilesResult struct {
+	count int
+	names []string
+}
+
+func findHighestStateFileStartStep(dirs datadir.Dirs) (uint64, bool) {
+	var highest uint64
+	found := false
+	for _, d := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			m := stateFileStepRe.FindStringSubmatch(e.Name())
+			if len(m) != 3 {
+				continue
+			}
+			start, err := strconv.ParseUint(m[1], 10, 64)
+			if err != nil {
+				continue
+			}
+			if !found || start > highest {
+				highest = start
+				found = true
+			}
+		}
+	}
+	return highest, found
+}
+
+func removeStateFilesFromStep(dirs datadir.Dirs, startStep uint64, logger log.Logger, logPrefix string) removedFilesResult {
+	var res removedFilesResult
+	for _, d := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			m := stateFileStepRe.FindStringSubmatch(e.Name())
+			if len(m) != 3 {
+				continue
+			}
+			start, err := strconv.ParseUint(m[1], 10, 64)
+			if err != nil || start != startStep {
+				continue
+			}
+			path := filepath.Join(d, e.Name())
+			if err := commondir.RemoveFile(path); err != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to remove state file", logPrefix), "file", e.Name(), "err", err)
+				continue
+			}
+			res.count++
+			res.names = append(res.names, e.Name())
+		}
+	}
+	return res
 }

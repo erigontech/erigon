@@ -182,7 +182,6 @@ func HashSeekingPrune(
 
 type StartPos struct {
 	StartKey []byte
-	StartVal []byte
 }
 
 func TableScanningPrune(
@@ -225,7 +224,7 @@ func TableScanningPrune(
 	var keyCursorPosition = &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
-			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
+			keyCursorPosition.StartKey, _, err = keysCursor.Seek(prevStat.LastPrunedKey)
 		} else if prevStat.KeyProgress == First {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], txFrom)
