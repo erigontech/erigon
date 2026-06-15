@@ -238,9 +238,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	//if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
-	//	return nil, err
-	//}
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
+		return nil, err
+	}
 
 	exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
 	if err != nil {
@@ -260,9 +260,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		}
 	}
 
-	if err = env.SetOption(mdbx.OptPrefaultWriteEnable, 0); err != nil {
-		return nil, err
-	}
+	//if err = env.SetOption(mdbx.OptPrefaultWriteEnable, 0); err != nil {
+	//	return nil, err
+	//}
 
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
