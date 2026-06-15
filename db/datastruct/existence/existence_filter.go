@@ -234,7 +234,11 @@ func (b *Filter) MadvRandom() {
 	if b == nil || b.empty {
 		return
 	}
-	if b.useFuse {
+	if b.fuseReaderSharded != nil {
+		b.fuseReaderSharded.MadvRandom()
+		return
+	}
+	if b.fuseReader != nil {
 		b.fuseReader.MadvRandom()
 	}
 }
@@ -243,6 +247,10 @@ func (b *Filter) Close() {
 	if b == nil {
 		return
 	}
-	b.fuseReader.Close()
-	b.fuseReaderSharded.Close()
+	if b.fuseReaderSharded != nil {
+		b.fuseReaderSharded.Close()
+	}
+	if b.fuseReader != nil {
+		b.fuseReader.Close()
+	}
 }
