@@ -285,11 +285,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
 				return nil, err
 			}
-			dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
+			dpReserveLimit, err := env.GetOption(mdbx.OptDpReserveLimit)
 			if err != nil {
 				return nil, err
 			}
-			if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+			if err = env.SetOption(mdbx.OptDpReserveLimit, dpReserveLimit*2); err != nil {
 				return nil, err
 			}
 		}
