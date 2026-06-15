@@ -481,6 +481,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
+		const seqBatch = 1024
+		var seqBase uint64
+		var seqLeft int
 		t = time.Now()
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
@@ -505,11 +508,17 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					return err
 				}
 			} else if !newIsDeletion {
-				id, err := tx.IncrementSequence(w.valsTable, 1)
-				if err != nil {
-					return err
+				if seqLeft == 0 {
+					id, err := tx.IncrementSequence(w.valsTable, seqBatch)
+					if err != nil {
+						return err
+					}
+					seqBase = id
+					seqLeft = seqBatch
 				}
-				seqID = id
+				seqID = seqBase
+				seqBase++
+				seqLeft--
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
 				if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
 					return err
