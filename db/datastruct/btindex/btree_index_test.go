@@ -480,3 +480,23 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 		})
 	}
 }
+
+func TestListNodes_EncodeDecodeRoundTrip(t *testing.T) {
+	for _, nodes := range [][]Node{
+		nil,
+		{{di: 0, key: nil}},
+		{{di: 0, key: []byte("a")}, {di: 256, key: []byte("bcd")}, {di: 1 << 40, key: bytes.Repeat([]byte{0xff}, 300)}},
+	} {
+		var buf bytes.Buffer
+		require.NoError(t, encodeListNodes(nodes, &buf))
+
+		got, n, err := decodeListNodes(buf.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, buf.Len(), n)
+		require.Len(t, got, len(nodes))
+		for i := range nodes {
+			require.Equal(t, nodes[i].di, got[i].di)
+			require.True(t, bytes.Equal(nodes[i].key, got[i].key))
+		}
+	}
+}

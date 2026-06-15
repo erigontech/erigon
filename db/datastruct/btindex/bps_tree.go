@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 	"unsafe"
 
@@ -143,19 +144,30 @@ type Node struct {
 	di  uint64 // key ordinal number in kv
 }
 
-func encodeListNodes(nodes []Node, w io.Writer) error {
+func (n *Node) Encode(w io.Writer) (int, error) {
+	if len(n.key) > math.MaxUint16 {
+		return 0, fmt.Errorf("node key too long: %d bytes", len(n.key))
+	}
 	var header [10]byte
-	binary.BigEndian.PutUint64(header[:8], uint64(len(nodes)))
-	if _, err := w.Write(header[:8]); err != nil {
+	binary.BigEndian.PutUint64(header[:8], n.di)
+	binary.BigEndian.PutUint16(header[8:], uint16(len(n.key)))
+	if _, err := w.Write(header[:]); err != nil {
+		return 0, err
+	}
+	if _, err := w.Write(n.key); err != nil {
+		return 10, err
+	}
+	return 10 + len(n.key), nil
+}
+
+func encodeListNodes(nodes []Node, w io.Writer) error {
+	var count [8]byte
+	binary.BigEndian.PutUint64(count[:], uint64(len(nodes)))
+	if _, err := w.Write(count[:]); err != nil {
 		return err
 	}
 	for i := range nodes {
-		binary.BigEndian.PutUint64(header[:8], nodes[i].di)
-		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
-		if _, err := w.Write(header[:]); err != nil {
-			return err
-		}
-		if _, err := w.Write(nodes[i].key); err != nil {
+		if _, err := nodes[i].Encode(w); err != nil {
 			return err
 		}
 	}

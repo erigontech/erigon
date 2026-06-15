@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -298,22 +297,14 @@ func (btw *BtIndexWriter) Build() error {
 		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
 			return fmt.Errorf("[index] write nodes count: %w", err)
 		}
-		var nodeBuf [10]byte // di (8) + keyLen (2)
 		var ki uint64
 		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
 
 			if len(k) > 0 {
-				if len(k) > math.MaxUint16 {
-					return fmt.Errorf("[index] node key too long: %d bytes", len(k))
-				}
-				binary.BigEndian.PutUint64(nodeBuf[:8], ki)
-				binary.BigEndian.PutUint16(nodeBuf[8:10], uint16(len(k)))
-				if _, werr := indexW.Write(nodeBuf[:10]); werr != nil {
-					return fmt.Errorf("[index] write node header: %w", werr)
-				}
-				if _, werr := indexW.Write(k); werr != nil {
-					return fmt.Errorf("[index] write node key: %w", werr)
+				node := Node{di: ki, key: k}
+				if _, werr := node.Encode(indexW); werr != nil {
+					return fmt.Errorf("[index] write node: %w", werr)
 				}
 			}
 			ki++
