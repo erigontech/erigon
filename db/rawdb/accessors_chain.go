@@ -1103,21 +1103,22 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
-func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) error {
+func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) (int, error) {
 	t := time.Now()
 	c, err := tx.RwCursor(table)
 	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
+		return 0, fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
+	deleted := 0
 	i := 0
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
-			return err
+			return deleted, err
 		}
 		i++
 		if i > limit {
@@ -1130,12 +1131,13 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 		}
 
 		if err = c.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+			return deleted, fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
+		deleted++
 		if i%1000 == 0 {
 			select {
 			case <-ctx.Done():
-				return common.ErrStopped
+				return deleted, common.ErrStopped
 			case <-logEvery.C:
 				logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
 			default:
@@ -1145,7 +1147,7 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 			}
 		}
 	}
-	return nil
+	return deleted, nil
 }
 
 func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {

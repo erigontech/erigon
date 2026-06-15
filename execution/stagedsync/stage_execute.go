@@ -499,7 +499,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneTimeout = time.Hour
 		}
 		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
+		_, err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
 			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
@@ -508,7 +508,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneTimeout,
 			logger,
 			s.LogPrefix(),
-		); err != nil {
+		)
+		if err != nil {
 			return err
 		}
 		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
@@ -527,7 +528,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneBalLimit = math.MaxInt
 			pruneTimeout = time.Hour
 		}
-		if err := rawdb.PruneTable(
+		_, err := rawdb.PruneTable(
 			tx,
 			kv.BlockAccessList,
 			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
@@ -536,7 +537,8 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneTimeout,
 			logger,
 			s.LogPrefix(),
-		); err != nil {
+		)
+		if err != nil {
 			return err
 		}
 	}
