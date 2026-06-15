@@ -43,7 +43,16 @@ run_case "real failure" 1 \
 run_case "reshuffle cancellation" 0 \
   NEEDS='{"hive":{"result":"cancelled"},"bench":{"result":"cancelled"},"lint":{"result":"success"}}' \
   RUN_CANCELLED=true \
+  GITHUB_EVENT_NAME=merge_group \
   CI_GATE_JOBS_JSON='{"jobs":[{"name":"bench / benchmarks","steps":[{"name":"run","conclusion":"cancelled"}]}]}'
+
+# Same cancellation on a non-merge_group run (PR supersede / manual cancel) is
+# NOT a benign reshuffle -> fail closed even with no failures.
+run_case "cancelled non-merge_group run -> fail closed" 1 \
+  NEEDS='{"hive":{"result":"cancelled"},"lint":{"result":"success"}}' \
+  RUN_CANCELLED=true \
+  GITHUB_EVENT_NAME=pull_request \
+  CI_GATE_JOBS_JSON='{"jobs":[{"name":"hive","steps":[{"name":"run","conclusion":"cancelled"}]}]}'
 
 # Leaf timeout: cancelled need but run NOT cancelled -> fail (real problem).
 run_case "leaf timeout (run not cancelled)" 1 \
@@ -73,6 +82,7 @@ run_case "multi-page, failure on page 2 -> fail" 1 \
 run_case "multi-page reshuffle (no failures)" 0 \
   NEEDS='{"hive":{"result":"cancelled"},"bench":{"result":"cancelled"}}' \
   RUN_CANCELLED=true \
+  GITHUB_EVENT_NAME=merge_group \
   CI_GATE_JOBS_JSON='{"jobs":[{"name":"hive","steps":[{"name":"run","conclusion":"cancelled"}]}]}
 {"jobs":[{"name":"bench","steps":[{"name":"run","conclusion":"cancelled"}]}]}'
 

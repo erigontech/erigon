@@ -5,6 +5,7 @@
 # this run). Exit 1 = real failure; the caller treats it as a failed check.
 #
 # Inputs (env): NEEDS (toJSON(needs)), RUN_CANCELLED ("true" when cancelled()),
+# GITHUB_EVENT_NAME (reshuffle fast-path is merge_group-only),
 # GH_TOKEN/GITHUB_REPOSITORY/GITHUB_RUN_ID to fetch the jobs list.
 # Test seam: CI_GATE_NO_FETCH=1 uses CI_GATE_JOBS_JSON verbatim instead of the
 # API (an empty value simulates a failed fetch).
@@ -38,9 +39,10 @@ fi
 failed_steps=$(jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | .name' <<<"$jobs" 2>/dev/null || true)
 
 # Run cancelled with no failure = GitHub tore down a superseded merge group
-# (reshuffle); failing here would spuriously evict the PR. Require a successful
-# jobs fetch so an empty failed_steps can be trusted.
-if [ -z "$failed" ] && [ -n "$jobs" ] && [ -z "$failed_steps" ] && [ "${RUN_CANCELLED:-}" = "true" ]; then
+# (reshuffle); failing here would spuriously evict the PR. Scope to merge_group
+# (reshuffles only happen in the queue) and require a successful jobs fetch so an
+# empty failed_steps can be trusted.
+if [ -z "$failed" ] && [ -n "$jobs" ] && [ -z "$failed_steps" ] && [ "${RUN_CANCELLED:-}" = "true" ] && [ "${GITHUB_EVENT_NAME:-}" = "merge_group" ]; then
   echo "::notice::Merge-queue reshuffle cancelled this run (no failed jobs or steps); passing the gate so the PR stays queued."
   echo "Cancelled jobs: $(tr '\n' ' ' <<<"$cancelled")"
   exit 0
