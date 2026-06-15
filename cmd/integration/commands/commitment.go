@@ -131,7 +131,7 @@ func init() {
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
 	cmdCommitmentVisualize.Flags().IntVarP(&visualizeConcurrency, "concurrency", "j", 4, "amount of concurrently processed files")
-	cmdCommitmentVisualize.Flags().StringVar(&visualizeTrieVariant, "trie", "hex", "commitment trie variant (values are hex and bin)")
+	cmdCommitmentVisualize.Flags().StringVar(&visualizeTrieVariant, "trie", "hex", "commitment trie variant (values are hex and hex-parallel)")
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeCompression, "compression", "none", "compression type (none, k, v, kv)")
 	cmdCommitmentVisualize.Flags().BoolVar(&visualizePrintState, "state", false, "print state of file")
 	cmdCommitmentVisualize.Flags().IntVar(&visualizeDepth, "depth", 0, "depth of the prefixes to analyze")

@@ -1930,7 +1930,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 
 ### Database and Caching
 
-These flags control database performance and memory usage.
+These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
 
 * `--db.pagesize value`: Sets the fixed page size for the database.
   * Default: `16KB`
@@ -1956,7 +1956,7 @@ These flags control database performance and memory usage.
 
 ### Pruning and Snapshots
 
-Flags for managing how old chain data is handled and stored.
+Flags for managing how old chain data is handled and stored. See [Snapshots Management](/fundamentals/snapshots-management) for snapshot tooling and disk usage.
 
 * `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Pruning Modes](/fundamentals/pruning-modes)
   * Default: `"full"`
@@ -1981,7 +1981,7 @@ Flags for managing how old chain data is handled and stored.
 
 ### Transaction Pool (TxPool)
 
-Options for configuring the transaction pool.
+Options for configuring the [transaction pool](/fundamentals/modules/txpool).
 
 * `--txpool.api.addr value`: The TxPool API network address.
   * Default: Uses the value of `--private.api.addr`
@@ -2013,7 +2013,7 @@ Options for configuring the transaction pool.
 
 ### Network and Peers
 
-These flags manage network connectivity, peer discovery, and traffic control.
+These flags manage network connectivity, peer discovery, and traffic control. See [Default Ports](/fundamentals/default-ports) for the full port map.
 
 * `--port value`: The main network listening port.
   * Default: `30303`
@@ -2040,7 +2040,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
 
 ### RPC & API
 
-Flags for configuring various RPC servers and their behavior.
+Flags for configuring various RPC servers and their behavior. See [Interacting with Erigon](/interacting-with-erigon) for the JSON-RPC API reference.
 
 * `--private.api.addr value`: The internal gRPC API address for Erigon's components.
   * Default: `127.0.0.1:9090`
@@ -2060,7 +2060,7 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `localhost`
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
   * Default: `8551`
-* `--authrpc.jwtsecret value`: The path to the JWT secret file for the consensus layer.
+* `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
 * `--http.compression`: Enables compression over HTTP-RPC.
   * Default: `true`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
@@ -2137,7 +2137,7 @@ Flags for configuring various RPC servers and their behavior.
 
 ### MCP Server
 
-Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP server is **enabled by default** on
+Flags for configuring the Model Context Protocol (MCP) server. The embedded [MCP server](/fundamentals/mcp) is **enabled by default** on
 `127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
 
 * `--mcp.disable`: Disables the embedded MCP server.
@@ -2149,7 +2149,7 @@ Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP 
 
 ### Logging and Profiling
 
-Flags for controlling logging and performance profiling.
+Flags for controlling logging and performance profiling. See [Logs](/fundamentals/logs) for log files, levels, and rotation.
 
 * `--log.json`: Formats console logs with JSON.
   * Default: `false`
@@ -2179,7 +2179,7 @@ Flags for controlling logging and performance profiling.
 * `--trace value`: Writes an execution trace to a file.
 * `--vmtrace value`: Sets the provider tracer.
 * `--vmtrace.jsonconfig value`: Sets the tracer's configuration.
-* `--metrics`: Enables metrics collection and reporting.
+* `--metrics`: Enables metrics collection and reporting. See [Creating a dashboard](/fundamentals/creating-a-dashboard).
   * Default: `false`
 * `--metrics.addr value`: The stand-alone metrics HTTP server listening interface.
   * Default: `127.0.0.1`
@@ -2220,7 +2220,7 @@ Flags related to consensus mechanisms and network forks.
 
 ### Sentry
 
-Flags for configuring the Sentry component.
+Flags for configuring the [Sentry](/fundamentals/modules/sentry) component.
 
 * `--sentry.api.addr value`: A comma-separated list of Sentry addresses.
 * `--sentry.log-peer-info`: Logs detailed peer info when a peer connects or disconnects.
@@ -2234,7 +2234,7 @@ Flags for configuring the Sentry component.
 
 ### Downloader and Synchronization
 
-These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
+These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings. See [Downloader](/fundamentals/modules/downloader) for how snapshot downloading works.
 
 * `--downloader.api.addr value`: The Downloader address.
 * `--downloader.disable.ipv4`: Disables IPv4 for the Downloader.
@@ -2304,7 +2304,7 @@ Flags for configuring the parallel block execution engine.
 
 ### Caplin (Consensus Layer)
 
-Flags for configuring the Caplin consensus layer.
+Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 
 * `--caplin.discovery.addr value`: The address for the Caplin DISCV5 protocol.
   * Default: `0.0.0.0`
@@ -2353,7 +2353,7 @@ Flags for configuring the Caplin consensus layer.
 
 ### Shutter Network Encrypted Transactions
 
-Flags for configuring the Shutter Network encrypted transactions mempool.
+Flags for configuring the [Shutter Network](/staking/shutter-network) encrypted transactions mempool.
 
 * `--shutter`: Enables the Shutter encrypted transactions mempool.
   * Default: `false`
@@ -2448,7 +2448,7 @@ Erigon supports configuration through environment variables, primarily for exper
 
 ### Docker Environment Variables
 
-When running Erigon in Docker, you can configure user permissions and data directories:
+When running Erigon in [Docker](/fundamentals/docker-compose), you can configure user permissions and data directories:
 
 * `DOCKER_UID` - The UID of the Docker user
 * `DOCKER_GID` - The GID of the Docker user
