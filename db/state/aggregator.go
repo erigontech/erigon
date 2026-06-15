@@ -1879,7 +1879,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	at.a.logger.Debug("[snapshots] merge state " + r.String())
 	// Gate on referencing, not the write flag: referenced inputs must be expanded even with the flag off, else stale offsets leak into the merged file.
 	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches ||
-		commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain], at.StepSize())
+		commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain])
 
 	accStorageMerged := new(sync.WaitGroup)
 

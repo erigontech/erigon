@@ -17,45 +17,80 @@
 package integrity
 
 import (
+	"encoding/binary"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type fakeVisibleFile struct {
+	path                 string
 	startTxNum, endTxNum uint64
-	ver                  version.Version
+	referenced           bool
 }
 
-func (f fakeVisibleFile) Fullpath() string         { return "fake.kv" }
-func (f fakeVisibleFile) StartRootNum() uint64     { return f.startTxNum }
-func (f fakeVisibleFile) EndRootNum() uint64       { return f.endTxNum }
-func (f fakeVisibleFile) Version() version.Version { return f.ver }
+func (f fakeVisibleFile) Fullpath() string     { return f.path }
+func (f fakeVisibleFile) StartRootNum() uint64 { return f.startTxNum }
+func (f fakeVisibleFile) EndRootNum() uint64   { return f.endTxNum }
+func (f fakeVisibleFile) Referenced() bool     { return f.referenced }
 
-// TestCommitmentFileReferencing pins the integrity decision boundary: a commitment file
-// carries shortened references only when its own version is below v2.1 AND its range reaches
-// the referencing threshold. A v2.1 (plain) file must never be treated as referencing, even
-// when its range is large.
+// accountBranch builds a single-cell BranchData carrying one account-addr key: touchMap=afterMap=1,
+// fieldBits=fieldAccountAddr(2), then uvarint(len)+addr. A 20-byte addr is plain; a shorter one is a
+// shortened (offset) reference.
+func accountBranch(addr []byte) []byte {
+	b := []byte{0, 1, 0, 1, 0x02}
+	var n [binary.MaxVarintLen64]byte
+	c := binary.PutUvarint(n[:], uint64(len(addr)))
+	b = append(b, n[:c]...)
+	return append(b, addr...)
+}
+
+// writeCommitmentKV writes a tiny commitment .kv (state record + one account branch) with the
+// commitment domain's compression. referencedContent => the branch carries a shortened key.
+func writeCommitmentKV(t *testing.T, referencedContent bool) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "v2.1-commitment.0-2.kv")
+	comp, err := seg.NewCompressor(t.Context(), "test", path, t.TempDir(), seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	w := seg.NewWriter(comp, statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
+
+	_, err = w.Write(commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	_, err = w.Write([]byte("state-blob"))
+	require.NoError(t, err)
+
+	addr := make([]byte, length.Addr) // plain 20-byte account key
+	if referencedContent {
+		addr = []byte{0x81, 0x02} // shortened (varint offset) key
+	}
+	_, err = w.Write([]byte("\x01"))
+	require.NoError(t, err)
+	_, err = w.Write(accountBranch(addr))
+	require.NoError(t, err)
+
+	require.NoError(t, comp.Compress())
+	comp.Close()
+	return path
+}
+
+// TestCommitmentFileReferencing pins that the integrity referencing decision is taken from a FULL
+// content scan of the file, independent of the runtime open-time sampled flag — so it catches a file
+// that runtime sampling misclassified as plain (referenced=false below, yet content is referenced).
 func TestCommitmentFileReferencing(t *testing.T) {
-	const stepSize = uint64(10)
-	cases := []struct {
-		name     string
-		from, to uint64
-		ver      version.Version
-		want     bool
-	}{
-		{"v2.0 at threshold is referencing", 0, 2 * stepSize, version.V2_0, true},
-		{"v1.0 at threshold is referencing", 0, 2 * stepSize, version.V1_0, true},
-		{"v2.1 is always plain", 0, 2 * stepSize, version.V2_1, false},
-		{"v2.0 below threshold is plain", 0, stepSize, version.V2_0, false},
-		{"hypothetical v2.2 is plain", 0, 2 * stepSize, version.Version{Major: 2, Minor: 2}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := fakeVisibleFile{startTxNum: tc.from, endTxNum: tc.to, ver: tc.ver}
-			require.Equal(t, tc.want, commitmentFileReferencing(f, stepSize))
-		})
-	}
+	t.Run("referenced content is referencing even when sampled plain", func(t *testing.T) {
+		f := fakeVisibleFile{path: writeCommitmentKV(t, true), endTxNum: 20, referenced: false}
+		require.True(t, commitmentFileReferencing(f))
+	})
+	t.Run("plain content is not referencing even when sampled referenced", func(t *testing.T) {
+		f := fakeVisibleFile{path: writeCommitmentKV(t, false), endTxNum: 20, referenced: true}
+		require.False(t, commitmentFileReferencing(f))
+	})
 }

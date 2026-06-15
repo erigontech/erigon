@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -537,9 +536,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize, dt.stepsInFrozenFile)
 	valuesIn.frozen = false
-	valuesIn.version, _ = version.ParseVersion(filepath.Base(kvFilePath))
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
+	}
+	if dt.d.Name == kv.CommitmentDomain {
+		valuesIn.referenced = commitmentFileReferenced(dt.d.dataReader(valuesIn.decompressor), uint64(valuesIn.decompressor.Count())/2)
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {

@@ -506,11 +506,43 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
-// commitmentFileReferencing reports whether a commitment file carries shortened key
-// references that must be expanded — a property of the file's own version and range
-// (version < v2.1 AND range >= threshold), independent of the live write flag.
-func commitmentFileReferencing(file state.VisibleFile, stepSize uint64) bool {
-	return state.CommitmentBranchReferenced(file.Version(), stepSize, file.StartRootNum(), file.EndRootNum())
+// commitmentFileReferencing reports whether a commitment file carries shortened key references.
+// The integrity tool full-scans (not the runtime sampled flag) to catch a file sampling missed; any
+// read error returns true rather than under-report as plain.
+func commitmentFileReferencing(file state.VisibleFile) bool {
+	decomp, err := seg.NewDecompressor(file.Fullpath())
+	if err != nil {
+		log.Root().Warn("[integrity] commitmentFileReferencing: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
+		return true
+	}
+	defer decomp.Close()
+
+	g := seg.NewReader(decomp.MakeGetter(), statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
+	var k, v []byte
+	for g.HasNext() {
+		k, _ = g.Next(k[:0])
+		if !g.HasNext() {
+			break
+		}
+		v, _ = g.Next(v[:0])
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		var short bool
+		if _, err := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			full := length.Addr
+			if isStorage {
+				full = length.Addr + length.Hash
+			}
+			if len(key) != full {
+				short = true
+			}
+			return nil, nil
+		}); err != nil || short {
+			return true
+		}
+	}
+	return false
 }
 
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
@@ -518,14 +550,13 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !commitmentFileReferencing(file, stepSize) {
+	if !commitmentFileReferencing(file) {
 		logger.Info(
-			"[integrity] CommitmentKvDeref skipped, file is plain (v2.1) or not above min steps",
+			"[integrity] CommitmentKvDeref skipped, file sampled as plain (no shortened keys)",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
 			"steps", (endTxNum-startTxNum)/stepSize,
-			"version", file.Version().String(),
 		)
 		return derefCounts{}, nil
 	}
@@ -1270,7 +1301,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	expectedAccounts := uint64(accDecomp.Count()) / 2
 	expectedStorages := uint64(stoDecomp.Count()) / 2
 
-	isReferencing := commitmentFileReferencing(file, stepSize)
+	isReferencing := commitmentFileReferencing(file)
 
 	// Track unique keys found in commitment branches via ETL collectors (disk-spilling dedup).
 	accCollector := etl.NewCollector("[integrity] StateVerify acc", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
@@ -1963,7 +1994,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 
-	isReferencing := commitmentFileReferencing(file, stepSize)
+	isReferencing := commitmentFileReferencing(file)
 
 	logger.Info("[integrity] StateVerify hash verification starting",
 		"kv", fileName, "workers", numWorkers, "referencing", isReferencing)

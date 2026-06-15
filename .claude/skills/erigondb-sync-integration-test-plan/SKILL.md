@@ -123,13 +123,13 @@ The `references_in_commitment_branches` field governs whether new commitment mer
 
 ## Producer workflow: publishing plain (unreferenced) snapshots
 
-`references_in_commitment_branches` governs only *new* commitment merges; reads are version-aware and stay correct regardless of the flag (a `v2.0` commitment `.kv` whose range ≥ threshold is referenced/short-key; a `v2.1` file is plain). To publish a snapshot set whose commitment files carry no plain-key references:
+`references_in_commitment_branches` governs only *new* commitment merges; reads stay correct regardless of the flag because each commitment `.kv` is sampled for short-key references when it opens, so deref is driven by the file's own content (not its filename version). To publish a snapshot set whose commitment files carry no plain-key references:
 
 1. In the producer datadir's `snapshots/erigondb.toml`, set `references_in_commitment_branches = false` **before** running merges.
-2. Run the node / merge so commitment merges produce plain `v2.1` `.kv` files. Existing `v2.0` referenced files convert to plain lazily as they are merged — no upfront migration.
+2. Run the node / merge so commitment merges produce plain `.kv` files. Existing referenced files convert to plain lazily as they are merged — no upfront migration.
 3. Ship the datadir's `erigondb.toml` with the snapshot set. Consumers read the file and inherit `false`; a downloaded `erigondb.toml` is never rewritten, so the producer's `false` survives.
 
-This supersedes the build-time const flip (`awskii/36exp`): no binary divergence and no CLI flag. Default nodes (field absent → `true`) keep writing byte-compatible `v2.0` referenced files with no behavior change.
+This supersedes the build-time const flip (`awskii/36exp`): no binary divergence and no CLI flag. Default nodes (field absent → `true`) keep writing byte-compatible referenced files with no behavior change.
 
 ## Cleanup
 

@@ -120,8 +120,9 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// version is the file's parsed on-disk version, used as a per-file regime marker.
-	version version.Version
+	// referenced reports whether a commitment .kv file carries shortened (referenced) keys,
+	// sampled from its content when the decompressor is opened. False for other domains.
+	referenced bool
 
 	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
 	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
@@ -396,7 +397,6 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 
 			fName := filepath.Base(fPath)
 			d.FileVersion.DataKV.MustSupport(fileVer, fName)
-			item.version = fileVer
 
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -407,6 +407,9 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 				invalidFileItems = append(invalidFileItems, item)
 				// don't interrupt on error. other files may be good. but skip indices open.
 				continue
+			}
+			if d.Name == kv.CommitmentDomain {
+				item.referenced = commitmentFileReferenced(d.dataReader(item.decompressor), uint64(item.decompressor.Count())/2)
 			}
 		}
 
@@ -618,8 +621,8 @@ func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
 }
 
-func (i visibleFile) Version() version.Version {
-	return i.src.version
+func (i visibleFile) Referenced() bool {
+	return i.src.referenced
 }
 
 func (i visibleFile) StartRootNum() uint64 {

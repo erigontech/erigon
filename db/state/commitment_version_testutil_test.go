@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -164,12 +163,12 @@ func referencedBranchPrefixes(t *testing.T, path string) [][]byte {
 }
 
 type commitmentKVFile struct {
-	name    string
-	path    string
-	version version.Version
+	name string
+	path string
 }
 
-// commitmentKVFiles lists the commitment .kv files in dir with their parsed on-disk version.
+// commitmentKVFiles lists the commitment .kv files in dir. The on-disk version name no longer
+// carries regime meaning — a file's referenced-ness is decided from its content (short keys).
 func commitmentKVFiles(t *testing.T, dir string) []commitmentKVFile {
 	t.Helper()
 	ents, err := os.ReadDir(dir)
@@ -180,39 +179,27 @@ func commitmentKVFiles(t *testing.T, dir string) []commitmentKVFile {
 		if !strings.Contains(n, "commitment") || !strings.HasSuffix(n, ".kv") {
 			continue
 		}
-		ver, _, ok := strings.Cut(n, "-")
-		require.True(t, ok)
-		fv, err := version.ParseVersion(ver)
-		require.NoError(t, err)
-		out = append(out, commitmentKVFile{name: n, path: filepath.Join(dir, n), version: fv})
+		out = append(out, commitmentKVFile{name: n, path: filepath.Join(dir, n)})
 	}
 	return out
 }
 
-// assertCommitmentVersionConsistency enforces the regime invariant: a v2.1 (plain-regime) commitment
-// file must hold no short reference keys (a v2.1 file with short keys is the stale-offset corruption).
-func assertCommitmentVersionConsistency(t *testing.T, dir string) (referencedFiles int) {
+// fileReferenced reports whether a commitment .kv file is in the referenced regime, decided purely
+// from content: a file carrying any short (referenced) key is referenced, one carrying only plain
+// keys is not.
+func fileReferenced(t *testing.T, path string) bool {
 	t.Helper()
-	for _, f := range commitmentKVFiles(t, dir) {
-		_, short := branchKeyKinds(t, f.path)
-		if !f.version.Less(version.V2_1) {
-			require.Zerof(t, short, "v2.1+ file %s must hold only plain keys, found %d short refs (stale offsets)", f.name, short)
-		} else if short > 0 {
-			referencedFiles++
-		}
-	}
-	return referencedFiles
+	_, short := branchKeyKinds(t, path)
+	return short > 0
 }
 
-// commitmentVersionCounts returns how many commitment .kv files are referenced (version < v2.1 and
-// carry short keys) vs plain (version >= v2.1).
-func commitmentVersionCounts(t *testing.T, dir string) (referenced, plain int) {
+// commitmentRegimeCounts returns how many commitment .kv files are referenced (carry short keys)
+// vs plain (carry only plain keys), classified by content.
+func commitmentRegimeCounts(t *testing.T, dir string) (referenced, plain int) {
 	t.Helper()
 	for _, f := range commitmentKVFiles(t, dir) {
-		if f.version.Less(version.V2_1) {
-			if _, short := branchKeyKinds(t, f.path); short > 0 {
-				referenced++
-			}
+		if fileReferenced(t, f.path) {
+			referenced++
 		} else {
 			plain++
 		}
@@ -221,17 +208,14 @@ func commitmentVersionCounts(t *testing.T, dir string) (referenced, plain int) {
 }
 
 // commitmentRangeReferenced reports whether the on-disk commitment file covering the tx range is in
-// the referenced regime (version < v2.1 and range >= the referencing threshold).
+// the referenced regime, decided from its content (short keys present).
 func commitmentRangeReferenced(t *testing.T, dir string, fileStart, fileEnd, stepSize uint64) bool {
 	t.Helper()
 	fromStep, toStep := fileStart/stepSize, fileEnd/stepSize
-	if toStep-fromStep < 2 {
-		return false
-	}
 	suffix := fmt.Sprintf("commitment.%d-%d.kv", fromStep, toStep)
 	for _, f := range commitmentKVFiles(t, dir) {
 		if strings.HasSuffix(f.name, suffix) {
-			return f.version.Less(version.V2_1)
+			return fileReferenced(t, f.path)
 		}
 	}
 	return false

@@ -35,27 +35,27 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCheckStateVerify_VersionRegimes builds two single-regime datadirs — one referenced (v2.0)
-// and one plain (v2.1), each with a merged commitment file whose range exceeds the referencing
-// threshold — and asserts the version-aware integrity checks pass on both. The plain v2.1 case
-// is the one the version-aware change exists for: a v2.1 file at/above the threshold must be
-// treated as plain (read/verified directly), not as a referenced file with stale offsets.
+// TestCheckStateVerify_VersionRegimes builds two single-regime datadirs — one referenced and one
+// plain, each with a merged commitment file whose range exceeds the referencing threshold — and
+// asserts the regime-aware integrity checks pass on both. The regime is decided by the flag on
+// WRITE and recovered from file content on read: with the flag on, the merged file must carry
+// shortened keys (referenced); with it off it must be plain (read/verified directly, not as a
+// referenced file with stale offsets).
 func TestCheckStateVerify_VersionRegimes(t *testing.T) {
-	t.Run("referenced_v20", func(t *testing.T) {
+	t.Run("referenced", func(t *testing.T) {
 		t.Parallel()
-		runVersionRegimeCheck(t, true, version.V2_0)
+		runVersionRegimeCheck(t, true)
 	})
-	t.Run("plain_v21", func(t *testing.T) {
+	t.Run("plain", func(t *testing.T) {
 		t.Parallel()
-		runVersionRegimeCheck(t, false, version.V2_1)
+		runVersionRegimeCheck(t, false)
 	})
 }
 
-func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool, wantVersion version.Version) {
+func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool) {
 	t.Helper()
 	logger := log.New()
 	ctx := t.Context()
@@ -70,13 +70,13 @@ func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool, wa
 	writeAndBuild(t, ctx, db, agg, txs)
 	require.NoError(t, agg.MergeLoop(ctx))
 
-	// Reopen so commitment file versions are parsed from the on-disk names, exercising the
-	// on-disk parse path independently of the in-memory version stamp set during merge.
+	// Reopen so the commitment file's referenced regime is re-sampled from on-disk content,
+	// exercising the content-sampling path independently of the in-memory flag used during merge.
 	db = reopenAgg(t, db, agg, dirs, stepSize, logger)
 
-	gotVer, gotSpan := largestCommitmentFile(t, ctx, db)
+	gotReferenced, gotSpan := largestCommitmentFile(t, ctx, db)
 	require.GreaterOrEqual(t, gotSpan, 2*stepSize, "expected a merged commitment file spanning >= 2 steps")
-	require.Equal(t, wantVersion.String(), gotVer.String(), "merged commitment file must carry the flag-derived version")
+	require.Equal(t, referencesInCommitmentBranches, gotReferenced, "merged commitment file's sampled regime must match the write flag")
 
 	require.NoError(t, integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger))
 
@@ -132,9 +132,9 @@ func reopenAgg(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs dat
 	return newDB
 }
 
-// largestCommitmentFile returns the version and txNum span of the widest-range commitment .kv
-// file visible after reopen (the merged one).
-func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (version.Version, uint64) {
+// largestCommitmentFile returns the sampled referenced regime and txNum span of the widest-range
+// commitment .kv file visible after reopen (the merged one).
+func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (bool, uint64) {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB
 	aggTx := state.AggTx(tx)
 	defer aggTx.Close()
 
-	var ver version.Version
+	var referenced bool
 	var bestSpan uint64
 	found := false
 	for _, f := range aggTx.Files(kv.CommitmentDomain) {
@@ -150,9 +150,9 @@ func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB
 			continue
 		}
 		if span := f.EndRootNum() - f.StartRootNum(); span >= bestSpan {
-			ver, bestSpan, found = f.Version(), span, true
+			referenced, bestSpan, found = f.Referenced(), span, true
 		}
 	}
 	require.True(t, found, "expected at least one commitment .kv file")
-	return ver, bestSpan
+	return referenced, bestSpan
 }

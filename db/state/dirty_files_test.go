@@ -104,13 +104,15 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	require.Equal(t, f3, fileItems[0])
 }
 
-func TestVisibleFileVersion(t *testing.T) {
+func TestVisibleFileReferenced(t *testing.T) {
 	t.Parallel()
-	vf := visibleFile{src: &FilesItem{version: version.V2_1}}
-	require.Equal(t, version.V2_1, vf.Version())
+	require.True(t, visibleFile{src: &FilesItem{referenced: true}}.Referenced())
+	require.False(t, visibleFile{src: &FilesItem{referenced: false}}.Referenced())
 }
 
-func TestOpenDirtyFilesPopulatesVersion(t *testing.T) {
+// openDirtyFiles must accept a mixed-version file set (v1.0/v2.0/v2.1) without tripping the
+// MustSupport version-acceptance check, opening one dirty item per range from disk.
+func TestOpenDirtyFilesAcceptsMixedVersions(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
@@ -122,11 +124,10 @@ func TestOpenDirtyFilesPopulatesVersion(t *testing.T) {
 	cases := []struct {
 		name string
 		rng  string
-		ver  version.Version
 	}{
-		{"v1.0-accounts.0-1.kv", "0-1", version.V1_0},
-		{"v2.0-accounts.1-2.kv", "1-2", version.V2_0},
-		{"v2.1-accounts.2-3.kv", "2-3", version.V2_1},
+		{"v1.0-accounts.0-1.kv", "0-1"},
+		{"v2.0-accounts.1-2.kv", "1-2"},
+		{"v2.1-accounts.2-3.kv", "2-3"},
 	}
 	fileNames := make([]string, 0, len(cases))
 	for _, c := range cases {
@@ -137,19 +138,16 @@ func TestOpenDirtyFilesPopulatesVersion(t *testing.T) {
 	d.scanDirtyFiles(fileNames)
 	require.NoError(t, d.openDirtyFiles(fileNames))
 
-	gotDirty := make(map[string]version.Version)
-	gotVisible := make(map[string]version.Version)
+	opened := make(map[string]bool)
 	d.dirtyFiles.Scan(func(it *FilesItem) bool {
 		from, to := it.StepRange(d.stepSize)
-		key := fmt.Sprintf("%d-%d", from, to)
-		gotDirty[key] = it.version
-		gotVisible[key] = visibleFile{src: it}.Version()
+		require.NotNil(t, it.decompressor, "dirty file %d-%d must be opened", from, to)
+		opened[fmt.Sprintf("%d-%d", from, to)] = true
 		return true
 	})
 
 	for _, c := range cases {
-		require.Equal(t, c.ver, gotDirty[c.rng], "dirty file version for %s", c.name)
-		require.Equal(t, c.ver, gotVisible[c.rng], "visibleFile.Version() for %s", c.name)
+		require.True(t, opened[c.rng], "range %s must open from %s", c.rng, c.name)
 	}
 }
 
@@ -176,8 +174,7 @@ func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
 			var opened *FilesItem
 			d.dirtyFiles.Scan(func(it *FilesItem) bool { opened = it; return true })
 			require.NotNil(t, opened)
-			require.Equal(t, version.V2_1, opened.version, "newest version wins")
-			require.Equal(t, "v2.1-commitment.0-2.kv", filepath.Base(opened.decompressor.FilePath()))
+			require.Equal(t, "v2.1-commitment.0-2.kv", filepath.Base(opened.decompressor.FilePath()), "newest version wins")
 
 			_, err := os.Stat(filepath.Join(d.dirs.SnapDomain, "v2.0-commitment.0-2.kv"))
 			require.NoError(t, err, "lower-version twin stays on disk, just unopened")
