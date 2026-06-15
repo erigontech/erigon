@@ -338,8 +338,8 @@ github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07 h1:0VpFIthaJ
 github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07/go.mod h1:J9/u5sWfznSObptgfa92Jq8rTswn6ahQWEuiLHOjCUI=
 github.com/erigontech/go-libdeflate v0.1.0 h1:WtKiuNpuAP/Qyq3mbPwFB0DoQikabtOeZFUgo9VGRsY=
 github.com/erigontech/go-libdeflate v0.1.0/go.mod h1:OCQBWlynNqNCYb1ckqNjY69H1LAhg2TyyfYZalO03BM=
-github.com/erigontech/mdbx-go v0.40.1-0.20260615090312-630a4a55034b h1:CU6qK4YKhEVaay5XioFZshbd5YBbAa4Eq37jIo5qZk8=
-github.com/erigontech/mdbx-go v0.40.1-0.20260615090312-630a4a55034b/go.mod h1:QmkpLmcJX5+Fyu9u8eGsyPwoBDrIZJBBLgJHBMFStWE=
+github.com/erigontech/mdbx-go v0.40.1-0.20260615092122-c9bc0fc45930 h1:HI9srEkLyoqu/CFsSQllZ1G39edf9eBrAbsOgUtYPbg=
+github.com/erigontech/mdbx-go v0.40.1-0.20260615092122-c9bc0fc45930/go.mod h1:QmkpLmcJX5+Fyu9u8eGsyPwoBDrIZJBBLgJHBMFStWE=
 github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410 h1:5YD7JJ5PaqOdjKA84lTDtQby9nbI4podqrkUhyIyFDw=
 github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
 github.com/ettle/strcase v0.2.0 h1:fGNiVF21fHXpX1niBgk0aROov1LagYsOwV/xqKDKR/Q=
