@@ -404,7 +404,6 @@ func TestNewBtIndex(t *testing.T) {
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotZero(t, bt.bplus.mx[i].off)
 		require.NotEmpty(t, bt.bplus.mx[i].key)
 	}
 }

@@ -144,9 +144,7 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
-	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
+	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
@@ -158,12 +156,6 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
-	case VariantBinPatriciaTrie:
-		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
-		//fn := func(key []byte) []byte { return hexToBin(key) }
-		//tree := NewUpdateTree(mode, tmpdir, fn)
-		//return trie, tree
-		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -1254,8 +1246,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "bin":
-		trieVariant = VariantBinPatriciaTrie
 	case "hex-parallel":
 		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
@@ -1387,8 +1377,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantBinPatriciaTrie:
-					stat.ExtSize += uint64(c.extLen)
 				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}

@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 	"unsafe"
 
@@ -75,8 +76,6 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 			kv.Skip() // skip value
 		}
 		cachedBytes += nsz + uint64(len(nodes[i].key))
-
-		nodes[i].off = offt.Get(nodes[i].di)
 	}
 
 	return bt
@@ -141,8 +140,26 @@ type BpsTreeIterator struct {
 
 type Node struct {
 	key []byte
-	off uint64 // offset in kv file to key
 	di  uint64 // key ordinal number in kv
+}
+
+func encodeListNodes(nodes []Node, w io.Writer) error {
+	var header [10]byte
+	binary.BigEndian.PutUint64(header[:8], uint64(len(nodes)))
+	if _, err := w.Write(header[:8]); err != nil {
+		return err
+	}
+	for i := range nodes {
+		binary.BigEndian.PutUint64(header[:8], nodes[i].di)
+		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
+		if _, err := w.Write(header[:]); err != nil {
+			return err
+		}
+		if _, err := w.Write(nodes[i].key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func decodeListNodes(data []byte) ([]Node, int, error) {
@@ -165,14 +182,6 @@ func decodeListNodes(data []byte) ([]Node, int, error) {
 	return nodes, pos, nil
 }
 
-func (n Node) Encode() []byte {
-	buf := make([]byte, 8+2+len(n.key))
-	binary.BigEndian.PutUint64(buf[:8], n.di)
-	binary.BigEndian.PutUint16(buf[8:10], uint16(len(n.key)))
-	copy(buf[10:], n.key)
-	return buf
-}
-
 func (n *Node) Decode(buf []byte) (uint64, error) {
 	if len(buf) < 10 {
 		return 0, errors.New("short buffer (less than 10b)")
@@ -183,7 +192,6 @@ func (n *Node) Decode(buf []byte) (uint64, error) {
 		return 0, errors.New("short buffer")
 	}
 	n.key = buf[10 : 10+l]
-	//madvise(k, len(k), MADV_WILL_NEED)
 	return uint64(10 + l), nil
 }
 
@@ -213,7 +221,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 		kv.Reset(off)
 		key, _ = kv.Next(key[:0]) // read key only; reuse buffer to avoid allocs
 		kv.Skip()                 // skip value — WarmUp only needs the key
-		b.mx = append(b.mx, Node{off: off, key: common.Copy(key), di: di})
+		b.mx = append(b.mx, Node{key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 
