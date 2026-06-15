@@ -811,7 +811,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
-			log.Warn("[dbg] flush past domain", "domain", kv.Domain(di).String(), "took", time.Since(t))
+			if took := time.Since(t); took > 10*time.Millisecond {
+				log.Warn("[dbg] flush past domain", "domain", kv.Domain(di).String(), "took", took)
+			}
 			ws[i].Close()
 		}
 	}
@@ -823,7 +825,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] flush domain", "domain", kv.Domain(di).String(), "took", time.Since(t))
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] flush domain", "domain", kv.Domain(di).String(), "took", took)
+		}
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
@@ -832,7 +836,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] flush past ii", "ii", sd.pastIIWriters[i].name.String(), "took", time.Since(t))
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] flush past ii", "ii", sd.pastIIWriters[i].name.String(), "took", took)
+		}
 		sd.pastIIWriters[i].close()
 	}
 	for _, w := range sd.iiWriters {
@@ -843,7 +849,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] flush ii", "ii", w.name.String(), "took", time.Since(t))
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] flush ii", "ii", w.name.String(), "took", took)
+		}
 		w.close()
 	}
 	for id, ws := range sd.pastForkableWriters {
@@ -852,7 +860,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
-			log.Warn("[dbg] flush past forkable", "id", id.Id(), "took", time.Since(t))
+			if took := time.Since(t); took > 10*time.Millisecond {
+				log.Warn("[dbg] flush past forkable", "id", id.Id(), "took", took)
+			}
 			ws[i].Close()
 		}
 	}
@@ -864,7 +874,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] flush forkable", "id", id.Id(), "took", time.Since(t))
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] flush forkable", "id", id.Id(), "took", took)
+		}
 		w.Close()
 	}
 	return nil
