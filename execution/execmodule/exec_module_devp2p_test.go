@@ -18,7 +18,6 @@ package execmodule_test
 
 import (
 	"bytes"
-	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -84,7 +83,6 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	// Freeze the first segment's blocks into a snapshot file and prune them from
 	// the DB, exactly as block retirement does.
 	snCfg, _ := snapcfg.KnownCfg(networkname.Mainnet)
-	snCfg.ExpectBlocks = math.MaxUint64
 	require.NoError(t, freezeblocks.DumpBlocks(m.Ctx, 0, snaptype.Erigon2MinSegmentSize, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB, 1, log.LvlInfo, log.New(), m.BlockReader, snCfg, nil))
 	require.NoError(t, m.BlockSnapshots.OpenFolder())
 	rwTx, err := m.DB.BeginRw(m.Ctx)
