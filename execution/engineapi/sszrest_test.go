@@ -497,6 +497,37 @@ func TestSSZRESTHashListRequestRoundTrip(t *testing.T) {
 	out, err := decodeHashListRequest(enc, sszMaxBodiesRequest)
 	require.NoError(t, err)
 	require.Empty(t, out)
+
+	// decode enforces the limit itself, independent of any caller-side size guard
+	oversized, err := encodeHashListRequest(make([]common.Hash, sszMaxBodiesRequest+1), sszMaxBodiesRequest+1)
+	require.NoError(t, err)
+	_, err = decodeHashListRequest(oversized, sszMaxBodiesRequest)
+	require.Error(t, err)
+}
+
+// A reused PayloadStatus must not leak optional fields from a previous decode.
+func TestSSZRESTPayloadStatusDecodeResetsOptionals(t *testing.T) {
+	latest := common.HexToHash("0xab")
+	full := &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		LatestValidHash: &latest,
+		ValidationError: engine_types.NewStringifiedErrorFromString("bad"),
+	}
+	encFull, err := full.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bare := &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
+	encBare, err := bare.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var reused engine_types.PayloadStatus
+	require.NoError(t, reused.DecodeSSZ(encFull, 0))
+	require.NotNil(t, reused.LatestValidHash)
+	require.NotNil(t, reused.ValidationError)
+
+	require.NoError(t, reused.DecodeSSZ(encBare, 0))
+	require.Equal(t, engine_types.SyncingStatus, reused.Status)
+	require.Nil(t, reused.LatestValidHash)
+	require.Nil(t, reused.ValidationError)
 }
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {

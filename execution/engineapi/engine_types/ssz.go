@@ -269,10 +269,12 @@ func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 		return err
 	}
 	s.Status = engineStatus
+	s.LatestValidHash = nil
 	if latest.Length() > 0 {
 		hash := latest.Get(0)
 		s.LatestValidHash = &hash
 	}
+	s.ValidationError = nil
 	if validationErr.value != nil {
 		s.ValidationError = NewStringifiedErrorFromString(*validationErr.value)
 	}

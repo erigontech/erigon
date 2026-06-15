@@ -136,6 +136,9 @@ func decodeHashListRequest(buf []byte, limit int) ([]common.Hash, error) {
 	if err := ssz2.UnmarshalSSZ(buf, 0, list); err != nil {
 		return nil, err
 	}
+	if list.Length() > limit {
+		return nil, fmt.Errorf("hash list length %d exceeds limit %d", list.Length(), limit)
+	}
 	return hashListValues(list), nil
 }
 
