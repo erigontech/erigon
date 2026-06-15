@@ -120,6 +120,11 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
+	// dataVer is the version parsed from the data file's name. It distinguishes payload formats
+	// that share a file extension: commitment .kv files at v2.0 may carry shortened referenced
+	// keys, v2.1+ are noref-only.
+	dataVer version.Version
+
 	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
 	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
@@ -393,6 +398,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 
 			fName := filepath.Base(fPath)
 			d.FileVersion.DataKV.MustSupport(fileVer, fName)
+			item.dataVer = fileVer
 
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {

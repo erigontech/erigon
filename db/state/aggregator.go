@@ -1875,12 +1875,16 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
-				accStorageMerged.Wait()
+			if kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
+				if commitmentUseReferencedBranches {
+					accStorageMerged.Wait()
+				}
 
-				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
+				// Always install the transform: with produceRefs=false it derefs any source-side
+				// refs (older v2.0 files) back to full keys, producing a noref merged file; v2.1
+				// noref sources pass through. mergedAccount/mergedStorage are unused in that mode.
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
-					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
+					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain], false)
 
 				if err != nil {
 					return fmt.Errorf("failed to create commitment value transformer: %w", err)

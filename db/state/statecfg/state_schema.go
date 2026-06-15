@@ -73,7 +73,10 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	return nil
 }
 
-const AggregatorSqueezeCommitmentValues = true
+// AggregatorSqueezeCommitmentValues being false makes newly produced commitment files noref
+// (full keys). Older referenced (v2.0) files are still read and merged correctly — the read and
+// merge paths key off each file's parsed version, not this flag.
+const AggregatorSqueezeCommitmentValues = false
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
