@@ -481,13 +481,17 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
+		var tKeys, tVals time.Duration
+		var nNew, nUpdate, nDelete int
 		t = time.Now()
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
 			newIsDeletion := len(v) == 0
 
+			t0 := time.Now()
 			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+			tKeys += time.Since(t0)
 			if err != nil {
 				return err
 			}
@@ -495,40 +499,55 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID && !newIsDeletion {
 				copy(seqIDBuf[:], existing[8:])
-				return valsCursorRW.Put(seqIDBuf[:], v)
+				t0 = time.Now()
+				err = valsCursorRW.Put(seqIDBuf[:], v)
+				tVals += time.Since(t0)
+				nUpdate++
+				return err
 			}
 
 			seqID := uint64(deletionSeqID)
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
 				copy(seqIDBuf[:], existing[8:])
+				t0 = time.Now()
 				if err := valsCursorRW.Delete(seqIDBuf[:]); err != nil {
 					return err
 				}
+				tVals += time.Since(t0)
+				nDelete++
 			} else if !newIsDeletion {
+				t0 = time.Now()
 				id, err := tx.IncrementSequence(w.valsTable, 1)
+				tVals += time.Since(t0)
 				if err != nil {
 					return err
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
+				t0 = time.Now()
 				if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
 					return err
 				}
+				tVals += time.Since(t0)
+				nNew++
 			}
 
 			copy(dupBuf[:8], invStep)
 			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
+			t0 = time.Now()
 			if hasDup {
 				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
 			}
-			return keysCursor.Put(bareKey, dupBuf[:])
+			err = keysCursor.Put(bareKey, dupBuf[:])
+			tKeys += time.Since(t0)
+			return err
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
 		if took := time.Since(t); took > 10*time.Millisecond {
-			log.Warn("[dbg] flush domain largeVals", "keys", w.keysTable, "vals", w.valsTable, "took", took)
+			log.Warn("[dbg] flush domain largeVals", "keys", w.keysTable, "vals", w.valsTable, "took", took, "tKeys", tKeys, "tVals", tVals, "new", nNew, "update", nUpdate, "delete", nDelete)
 		}
 		w.Close()
 		return nil
