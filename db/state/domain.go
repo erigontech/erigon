@@ -519,18 +519,11 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					return err
 				}
 			} else if !newIsDeletion {
-				if seqLeft == 0 {
-					id, err := tx.IncrementSequence(w.valsTable, seqBatch)
-					if err != nil {
-						return err
-					}
-
-					seqBase = id
-					seqLeft = seqBatch
+				id, err := nextSeqID()
+				if err != nil {
+					return err
 				}
-				seqID = seqBase
-				seqBase++
-				seqLeft--
+				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
 				if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
 					return err
