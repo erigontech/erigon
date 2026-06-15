@@ -462,6 +462,11 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		defer keysCursor.Close()
+		keysAppCursor, err := tx.RwCursorDupSort(w.keysTable)
+		if err != nil {
+			return err
+		}
+		defer keysAppCursor.Close()
 		// Two cursors on valsTable:
 		//   valsCursorRW  — Put and Delete; can seek anywhere, fine for MDBX_UPSERT/Set.
 		//   valsCursorApp — Append only; never moves backward, so MDBX_APPEND's
@@ -536,8 +541,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				if err := keysCursor.DeleteCurrent(); err != nil {
 					return err
 				}
+				return largeValsPutKeys(keysCursor, bareKey, dupBuf[:])
 			}
-			return largeValsPutKeys(keysCursor, bareKey, dupBuf[:])
+			return largeValsAppendKeys(keysAppCursor, bareKey, dupBuf[:])
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
@@ -576,6 +582,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 //go:noinline
 func largeValsPutKeys(cur kv.RwCursorDupSort, k, v []byte) error { return cur.Put(k, v) }
+
+//go:noinline
+func largeValsAppendKeys(cur kv.RwCursorDupSort, k, v []byte) error { return cur.AppendDup(k, v) }
 
 //go:noinline
 func largeValsPutVals(cur kv.RwCursor, k, v []byte) error { return cur.Put(k, v) }
