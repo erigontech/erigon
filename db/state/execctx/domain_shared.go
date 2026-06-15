@@ -275,7 +275,7 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 	return nil
 }
 
-// ResetPendingUpdates clears all pending commitment updates.
+// ResetPendingUpdates clears all pending commitment updates; safe on a nil receiver.
 func (sd *SharedDomains) ResetPendingUpdates() {
 	if sd != nil && sd.sdCtx != nil {
 		sd.sdCtx.ResetPendingUpdates()
