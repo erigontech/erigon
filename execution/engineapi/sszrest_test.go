@@ -246,8 +246,8 @@ func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
 	})
 }
 
-// Pin the exact wire example from execution-apis#793: a VALID PayloadStatus
-// with latest_valid_hash present and no validation_error is 41 bytes.
+// Pin the exact wire examples from execution-apis#793. Example A: a VALID
+// PayloadStatus with latest_valid_hash present and no validation_error is 41 bytes.
 func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
 	latest := common.HexToHash("0xcd")
 	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}
@@ -258,6 +258,21 @@ func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
 	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(enc[1:5]))
 	require.Equal(t, uint32(41), binary.LittleEndian.Uint32(enc[5:9]))
 	require.Equal(t, latest[:], enc[9:41])
+
+	// Example B: INVALID with validation_error "bad state root" and no
+	// latest_valid_hash is 27 bytes; note the inner 4-byte offset before the text.
+	invalid := &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedErrorFromString("bad state root"),
+	}
+	encB, err := invalid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Len(t, encB, 27)
+	require.Equal(t, byte(1), encB[0])
+	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(encB[1:5]))  // offset[latest_valid_hash]
+	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(encB[5:9]))  // offset[validation_error]
+	require.Equal(t, uint32(4), binary.LittleEndian.Uint32(encB[9:13])) // inner String offset
+	require.Equal(t, []byte("bad state root"), encB[13:27])
 }
 
 func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
@@ -327,15 +342,16 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 
 	for _, tc := range []struct {
 		version      clparams.StateVersion
+		wantSOB      bool
 		wantBundle   bool
 		wantRequests bool
 	}{
-		{clparams.BellatrixVersion, false, false},
-		{clparams.CapellaVersion, false, false},
-		{clparams.DenebVersion, true, false},
-		{clparams.ElectraVersion, true, true},
-		{clparams.FuluVersion, true, true},
-		{clparams.GloasVersion, true, true},
+		{clparams.BellatrixVersion, false, false, false},
+		{clparams.CapellaVersion, true, false, false},
+		{clparams.DenebVersion, true, true, false},
+		{clparams.ElectraVersion, true, true, true},
+		{clparams.FuluVersion, true, true, true},
+		{clparams.GloasVersion, true, true, true},
 	} {
 		t.Run(tc.version.String(), func(t *testing.T) {
 			payload := engine_types.NewExecutionPayloadSSZ(tc.version)
@@ -361,10 +377,10 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, blockValue, out.BlockValue.ToInt())
 			require.Equal(t, payload.BlockHash, out.ExecutionPayload.BlockHash)
+			require.Equal(t, tc.wantSOB, out.ShouldOverrideBuilder)
 			if tc.wantBundle {
 				require.NotNil(t, out.BlobsBundle)
 				require.Equal(t, bundle.Commitments, out.BlobsBundle.Commitments)
-				require.True(t, out.ShouldOverrideBuilder)
 			}
 			if tc.wantRequests {
 				require.Equal(t, requests, out.ExecutionRequests)
@@ -397,6 +413,9 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 		t.Run(tc.version.String(), func(t *testing.T) {
 			enc, err := encodeBodiesResponse([]*engine_types.ExecutionPayloadBodyV2{body, nil}, tc.version)
 			require.NoError(t, err)
+			// BodiesResponse is a single-field container: the body opens with a
+			// 4-byte offset (=4) to the wrapped entries list.
+			require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
 			entries, err := decodeBodiesResponse(enc, tc.version)
 			require.NoError(t, err)
 			require.Len(t, entries, 2)
@@ -432,6 +451,8 @@ func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {
 	t.Run("v1", func(t *testing.T) {
 		enc, err := encodeBlobsV1Response([]*engine_types.BlobAndProofV1{{Blob: blob, Proof: proof}, nil})
 		require.NoError(t, err)
+		// BlobsV1Response is a single-field container wrapping the entries list.
+		require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
 		out, err := decodeBlobsV1Response(enc)
 		require.NoError(t, err)
 		require.Len(t, out, 2)
@@ -444,6 +465,8 @@ func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {
 	t.Run("v2", func(t *testing.T) {
 		enc, err := encodeBlobsV2Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil})
 		require.NoError(t, err)
+		// BlobsV2Response (shared by /v3) is a single-field container.
+		require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
 		out, err := decodeBlobsV2Response(enc)
 		require.NoError(t, err)
 		require.Len(t, out, 2)
@@ -452,6 +475,28 @@ func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {
 		require.Len(t, out[0].CellProofs, sszCellsPerExtBlob)
 		require.Nil(t, out[1])
 	})
+}
+
+func TestSSZRESTHashListRequestRoundTrip(t *testing.T) {
+	hashes := []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")}
+	for _, limit := range []int{sszMaxBodiesRequest, sszMaxGetBlobHashes} {
+		enc, err := encodeHashListRequest(hashes, limit)
+		require.NoError(t, err)
+		// single-field container: a 4-byte offset (=4) precedes the hash list body
+		require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
+		require.Len(t, enc, 4+len(hashes)*32)
+		out, err := decodeHashListRequest(enc, limit)
+		require.NoError(t, err)
+		require.Equal(t, hashes, out)
+	}
+
+	// an empty request is just the 4-byte offset, no hashes
+	enc, err := encodeHashListRequest(nil, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	require.Len(t, enc, 4)
+	out, err := decodeHashListRequest(enc, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	require.Empty(t, out)
 }
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
@@ -474,9 +519,11 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	require.Equal(t, []string{"payloads", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
 	require.Equal(t, []string{"v1", "v2", "v3"}, caps.IndependentlyVersioned["blobs"])
 	require.Equal(t, []string{"capabilities", "identity"}, caps.UnscopedEndpoints)
-	require.Equal(t, uint64(sszMaxBodiesRequest), caps.Limits["bodies.max_count"])
-	require.Equal(t, uint64(sszMaxGetBlobHashes), caps.Limits["blobs.max_versioned_hashes"])
-	require.Equal(t, uint64(sszMaxRequestBody), caps.Limits["payload.max_bytes"])
+	// pin the spec's MAX_* values: MAX_BODIES_REQUEST, MAX_VERSIONED_HASHES_PER_REQUEST,
+	// MAX_REQUEST_BODY_SIZE (2**26 = 64 MiB).
+	require.Equal(t, uint64(32), caps.Limits["bodies.max_count"])
+	require.Equal(t, uint64(128), caps.Limits["blobs.max_versioned_hashes"])
+	require.Equal(t, uint64(67108864), caps.Limits["payload.max_bytes"])
 }
 
 func TestSSZRESTIdentityRoute(t *testing.T) {
@@ -593,9 +640,10 @@ func TestSSZRESTForkchoiceURLForkMustMatchAttributes(t *testing.T) {
 
 func TestSSZRESTBlobsPoolDisabled(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), true)
-	hash := common.HexToHash("0x01")
+	body, err := encodeHashListRequest([]common.Hash{common.HexToHash("0x01")}, sszMaxGetBlobHashes)
+	require.NoError(t, err)
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v2/blobs/v1", hash[:]))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v2/blobs/v1", body))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Empty(t, rec.Body.Bytes())
 }

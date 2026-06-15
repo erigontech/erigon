@@ -27,7 +27,7 @@ const (
 	sszBlobBytes              = 0x20000
 	sszKZGBytes               = 48
 	sszCellsPerExtBlob        = 128
-	sszMaxCellProofs          = 33554432
+	sszMaxCellProofs          = sszMaxBlobHashes * sszCellsPerExtBlob // MAX_BLOBS_PER_PAYLOAD * CELLS_PER_EXT_BLOB
 )
 
 var mainnetBeaconCfg = &clparams.MainnetBeaconConfig

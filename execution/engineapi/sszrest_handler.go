@@ -18,7 +18,6 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -56,7 +55,7 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 
 func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
-	// trailing slashes are forbidden, so an empty last segment is method-not-found
+	// an empty last segment (e.g. a trailing slash) matches no route
 	if len(parts) < 3 || parts[0] != "engine" || parts[1] != "v2" || parts[len(parts)-1] == "" {
 		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 		return
@@ -311,16 +310,15 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if len(body) > sszMaxBodiesRequest*32 {
+	if len(body) > 4+sszMaxBodiesRequest*32 {
 		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, "too many block hashes")
 		return
 	}
-	hashes := solid.NewHashList(sszMaxBodiesRequest)
-	if err := hashes.DecodeSSZ(body, 0); err != nil {
+	blockHashes, err := decodeHashListRequest(body, sszMaxBodiesRequest)
+	if err != nil {
 		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	blockHashes := hashListValues(hashes)
 	bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), blockHashes)
 	if err != nil {
 		writeEngineProblem(w, err)
@@ -370,14 +368,16 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 		writeEngineProblem(w, err)
 		return
 	}
-	// blocks outside the URL fork's time range or past the latest known block
-	// come back as available=false
-	entries := make([]*engine_types.ExecutionPayloadBodyV2, count)
-	for i := uint64(0); i < count; i++ {
-		if i >= uint64(len(bodies)) || bodies[i] == nil {
+	// The response is truncated at the latest known block: GetPayloadBodiesByRange
+	// stops at head and trims trailing nils, so past-head blocks are omitted rather
+	// than padded with available=false. In-range blocks outside the URL fork's time
+	// range still come back as available=false.
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
+	for i := range bodies {
+		if bodies[i] == nil {
 			continue
 		}
-		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
+		header := e.chainRW.GetHeaderByNumber(r.Context(), from+uint64(i))
 		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
 			continue
 		}
@@ -404,16 +404,15 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	if len(body) > sszMaxGetBlobHashes*32 {
+	if len(body) > 4+sszMaxGetBlobHashes*32 {
 		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, "too many blob hashes")
 		return
 	}
-	hashes := solid.NewHashList(sszMaxGetBlobHashes)
-	if err := hashes.DecodeSSZ(body, 0); err != nil {
+	blobHashes, err := decodeHashListRequest(body, sszMaxGetBlobHashes)
+	if err != nil {
 		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	blobHashes := hashListValues(hashes)
 
 	var out []byte
 	switch revision {

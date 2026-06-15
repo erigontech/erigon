@@ -32,7 +32,7 @@ import (
 const (
 	sszMaxGetBlobHashes      = 128
 	sszMaxBodiesRequest      = 32
-	sszMaxRequestBody        = 128 << 20
+	sszMaxRequestBody        = 64 << 20 // MAX_REQUEST_BODY_SIZE = 2**26
 	sszBlobBytes             = 0x20000
 	sszKZGBytes              = 48
 	sszCellsPerExtBlob       = 128
@@ -119,6 +119,24 @@ func hashListValues(l solid.HashListSSZ) []common.Hash {
 		return true
 	})
 	return out
+}
+
+// BodiesByHashRequest {block_hashes} and BlobsVNRequest {versioned_hashes} are
+// single-field containers wrapping a List[Hash32, limit]; they share this codec.
+func encodeHashListRequest(hashes []common.Hash, limit int) ([]byte, error) {
+	list := solid.NewHashList(limit)
+	for _, hash := range hashes {
+		list.Append(hash)
+	}
+	return ssz2.MarshalSSZ(nil, list)
+}
+
+func decodeHashListRequest(buf []byte, limit int) ([]common.Hash, error) {
+	list := solid.NewHashList(limit)
+	if err := ssz2.UnmarshalSSZ(buf, 0, list); err != nil {
+		return nil, err
+	}
+	return hashListValues(list), nil
 }
 
 func transactionsBytes(txs *solid.TransactionsSSZ) []hexutil.Bytes {
@@ -297,7 +315,8 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 
 // BuiltPayload is the response of GET /{fork}/payloads/{payloadId}:
 // {payload, block_value, blobs_bundle, execution_requests, should_override_builder},
-// with blobs_bundle existing since Cancun and execution_requests since Prague.
+// with should_override_builder existing since Shanghai, blobs_bundle since Cancun
+// and execution_requests since Prague.
 func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
 	payload := resp.ExecutionPayload
 	payload.SSZVersion = version
@@ -305,8 +324,10 @@ func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
 	requests := newTransactionsSSZ(resp.ExecutionRequests)
 	switch {
-	case version < clparams.DenebVersion:
+	case version < clparams.CapellaVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:])
+	case version < clparams.DenebVersion:
+		return ssz2.MarshalSSZ(nil, payload, blockValue[:], resp.ShouldOverrideBuilder)
 	case version < clparams.ElectraVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder)
 	default:
@@ -322,8 +343,10 @@ func decodeBuiltPayload(buf []byte, version clparams.StateVersion) (*engine_type
 	shouldOverride := false
 	var err error
 	switch {
-	case version < clparams.DenebVersion:
+	case version < clparams.CapellaVersion:
 		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:])
+	case version < clparams.DenebVersion:
+		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:], &shouldOverride)
 	case version < clparams.ElectraVersion:
 		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:], blobsBundle, &shouldOverride)
 	default:
@@ -471,7 +494,8 @@ func (e *sszBodyEntry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 func (*sszBodyEntry) Clone() clonable.Clonable { return &sszBodyEntry{} }
 
 // The response of POST /{fork}/bodies/hash and GET /{fork}/bodies is
-// List[BodyEntry, MAX_BODIES_REQUEST]; nil bodies become available=false.
+// BodiesResponse {entries: List[BodyEntry, MAX_BODIES_REQUEST]}; nil bodies
+// become available=false.
 func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version clparams.StateVersion) ([]byte, error) {
 	entries := solid.NewDynamicListSSZ[*sszBodyEntry](sszMaxBodiesRequest)
 	for _, body := range bodies {
@@ -484,12 +508,12 @@ func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version
 		}
 		entries.Append(entry)
 	}
-	return entries.EncodeSSZ(nil)
+	return ssz2.MarshalSSZ(nil, entries)
 }
 
 func decodeBodiesResponse(buf []byte, version clparams.StateVersion) ([]*sszBodyEntry, error) {
 	entries := solid.NewDynamicListSSZ[*sszBodyEntry](sszMaxBodiesRequest)
-	if err := entries.DecodeSSZ(buf, int(version)); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, int(version), entries); err != nil {
 		return nil, err
 	}
 	out := make([]*sszBodyEntry, 0, entries.Len())
@@ -566,8 +590,9 @@ func (e *sszBlobV2Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
 func (*sszBlobV2Entry) Clone() clonable.Clonable { return &sszBlobV2Entry{} }
 
-// The response of POST /blobs/vN is List[BlobEntry, MAX_BLOBS_REQUEST];
-// nil contents become available=false with zero-valued contents.
+// The response of POST /blobs/vN is BlobsVNResponse {entries:
+// List[BlobVNEntry, MAX_BLOBS_REQUEST]}; nil contents become available=false
+// with zero-valued contents.
 func encodeBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {
 	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](sszMaxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
 	for _, blob := range blobs {
@@ -579,12 +604,12 @@ func encodeBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error)
 		}
 		entries.Append(entry)
 	}
-	return entries.EncodeSSZ(nil)
+	return ssz2.MarshalSSZ(nil, entries)
 }
 
 func decodeBlobsV1Response(buf []byte) ([]*engine_types.BlobAndProofV1, error) {
 	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](sszMaxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
-	if err := entries.DecodeSSZ(buf, 0); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, 0, entries); err != nil {
 		return nil, err
 	}
 	out := make([]*engine_types.BlobAndProofV1, entries.Len())
@@ -602,12 +627,12 @@ func encodeBlobsV2Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error)
 	for _, blob := range blobs {
 		entries.Append(&sszBlobV2Entry{Available: blob != nil, Contents: blob})
 	}
-	return entries.EncodeSSZ(nil)
+	return ssz2.MarshalSSZ(nil, entries)
 }
 
 func decodeBlobsV2Response(buf []byte) ([]*engine_types.BlobAndProofV2, error) {
 	entries := solid.NewDynamicListSSZ[*sszBlobV2Entry](sszMaxGetBlobHashes)
-	if err := entries.DecodeSSZ(buf, 0); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, 0, entries); err != nil {
 		return nil, err
 	}
 	out := make([]*engine_types.BlobAndProofV2, entries.Len())
