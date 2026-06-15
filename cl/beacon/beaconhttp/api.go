@@ -203,11 +203,21 @@ func responseEncodingForAccept(accept string, sszSupported bool) responseEncodin
 	sszQ, sszOK := acceptQuality(accept, "application/octet-stream")
 	eventQ, eventOK := acceptQuality(accept, "text/event-stream")
 
-	bestJSONQ := max(jsonQ, htmlQ, anyQ)
-	if sszSupported && sszOK && sszQ > 0 && (!jsonOK && !htmlOK && !anyOK || sszQ > bestJSONQ) {
-		return responseEncodingSSZ
+	hasExplicitJSON := (jsonOK && jsonQ > 0) || (htmlOK && htmlQ > 0)
+	explicitJSONQ := max(jsonQ, htmlQ)
+
+	if sszSupported && sszOK && sszQ > 0 {
+		switch {
+		case !jsonOK && !htmlOK && !anyOK:
+			return responseEncodingSSZ
+		case hasExplicitJSON && sszQ > explicitJSONQ:
+			return responseEncodingSSZ
+		case !hasExplicitJSON && anyOK && sszQ >= anyQ:
+			// Exact type beats wildcard at equal quality (RFC 9110 §12.5.1).
+			return responseEncodingSSZ
+		}
 	}
-	hasJSONAlternative := jsonOK && jsonQ > 0 || htmlOK && htmlQ > 0 || anyOK && anyQ > 0
+	hasJSONAlternative := hasExplicitJSON || (anyOK && anyQ > 0)
 	hasEventStreamAlternative := eventOK && eventQ > 0
 	if !sszSupported && sszOK && sszQ > 0 && !hasJSONAlternative && !hasEventStreamAlternative {
 		return responseEncodingSSZ
@@ -244,7 +254,7 @@ func acceptQuality(accept, target string) (float64, bool) {
 			if err != nil {
 				parsed = 0
 			}
-			q = parsed
+			q = max(0, min(1, parsed))
 		}
 		if !found || q > best {
 			best = q
