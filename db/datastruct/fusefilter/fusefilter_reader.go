@@ -185,6 +185,14 @@ func (r *Reader) MadvNormal() {
 		panic(err)
 	}
 }
+func (r *Reader) MadvRandom() {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseRandom(r.m); err != nil {
+		panic(err)
+	}
+}
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
 func (r *Reader) Close() {
@@ -334,6 +342,14 @@ func (r *ReaderSharded) MadvNormal() {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
+		panic(err)
+	}
+}
+func (r *ReaderSharded) MadvRandom() {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }
