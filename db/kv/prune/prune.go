@@ -182,13 +182,12 @@ func HashSeekingPrune(
 
 type StartPos struct {
 	StartKey []byte
-	StartVal []byte
 }
 
 func TableScanningPrune(
 	ctx context.Context,
 	name, filenameBase string,
-	txFrom, txTo, stepSize uint64,
+	txFrom, txTo, limit, stepSize uint64,
 	logEvery *time.Ticker,
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
@@ -199,13 +198,16 @@ func TableScanningPrune(
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
 	defer func() {
-		logger.Trace("scan prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "keys",
+		logger.Trace("scan prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
 			stat.PruneCountTx, "vals", stat.PruneCountValues, "dups", stat.DupsDeleted,
 			"spent ms", time.Since(start).Milliseconds(),
 			"key prune status", stat.KeyProgress.String(),
 			"val prune status", stat.ValueProgress.String())
 	}()
 
+	if limit == 0 {
+		limit = math.MaxUint64
+	}
 	var throttling *time.Duration
 	if v := ctx.Value("throttle"); v != nil {
 		throttling = v.(*time.Duration)
@@ -222,7 +224,7 @@ func TableScanningPrune(
 	var keyCursorPosition = &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
-			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
+			keyCursorPosition.StartKey, _, err = keysCursor.Seek(prevStat.LastPrunedKey)
 		} else if prevStat.KeyProgress == First {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], txFrom)
