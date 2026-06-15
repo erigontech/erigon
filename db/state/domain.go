@@ -2165,6 +2165,7 @@ func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	if err != nil {
 		return nil, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
 	}
+	defer rc.Close()
 	var k, dup []byte
 	if prg.ValueProgress == prune.InProgress && prg.LastPrunedKey != nil {
 		k, dup, err = rc.Seek(prg.LastPrunedKey)
@@ -2174,7 +2175,6 @@ func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	var aux []byte
 	for ; k != nil; k, dup, err = rc.Next() {
 		if err != nil {
-			rc.Close()
 			return nil, err
 		}
 		if len(dup) < 16 {
@@ -2186,7 +2186,6 @@ func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		aux = append(append(aux[:0], k...), dup...)
 		if err := collector.Collect(aux[:len(k)], aux[len(k):]); err != nil {
-			rc.Close()
 			return nil, err
 		}
 		stat.PruneCountValues++
@@ -2199,7 +2198,6 @@ func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, t
 			break
 		}
 	}
-	rc.Close()
 
 	// Second pass: delete the collected entries. DeleteExact/Delete reposition their
 	// own cursors, so this is safe regardless of the keys/values being removed.
