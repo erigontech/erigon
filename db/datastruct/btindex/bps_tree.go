@@ -154,7 +154,7 @@ func encodeListNodes(nodes []Node, w io.Writer) error {
 	}
 	for ni := range len(nodes) {
 		binary.BigEndian.PutUint64(header[:8], nodes[ni].di)
-		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
+		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[ni].key)))
 		if _, err := w.Write(header[:]); err != nil {
 			return err
 		}
