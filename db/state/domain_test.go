@@ -3620,6 +3620,94 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 	}
 }
 
+// assertNoIndirectOrphans checks the seqID-indexed invariant: every value row
+// (seqID -> value) is referenced by exactly one keys dup, and no keys dup points
+// at a missing value row.
+func assertNoIndirectOrphans(t *testing.T, tx kv.Tx, d *Domain) {
+	t.Helper()
+	require.NotEmpty(t, d.KeysTable)
+	referenced := map[uint64]bool{}
+	kc, err := tx.CursorDupSort(d.KeysTable)
+	require.NoError(t, err)
+	defer kc.Close()
+	for k, dup, err := kc.First(); k != nil; k, dup, err = kc.Next() {
+		require.NoError(t, err)
+		require.Len(t, dup, 16)
+		seq := binary.BigEndian.Uint64(dup[8:16])
+		if seq == deletionSeqID {
+			continue
+		}
+		require.False(t, referenced[seq], "seqID %d referenced by more than one keys dup", seq)
+		referenced[seq] = true
+	}
+	vc, err := tx.Cursor(d.ValuesTable)
+	require.NoError(t, err)
+	defer vc.Close()
+	for sk, _, err := vc.First(); sk != nil; sk, _, err = vc.Next() {
+		require.NoError(t, err)
+		seq := binary.BigEndian.Uint64(sk)
+		require.True(t, referenced[seq], "orphan value row seqID=%d not referenced by any keys dup", seq)
+		delete(referenced, seq)
+	}
+	require.Empty(t, referenced, "keys dups reference value rows that don't exist: %v", referenced)
+}
+
+// TestDomain_IndirectPruneNoOrphans verifies that pruning the older step of a
+// seqID-indexed domain removes both the keys dup and its value row even when the
+// same key has a newer (un-pruned) dup — i.e. it does not leave orphaned value
+// rows (the failure mode a NextNoDup-based prune would hit).
+func TestDomain_IndirectPruneNoOrphans(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CodeDomain, 16, logger)
+	require.NotEmpty(t, d.KeysTable, "test requires a seqID-indexed domain")
+	ctx := t.Context()
+	require := require.New(t)
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dt := d.beginForTests()
+	w := dt.NewWriter()
+
+	keyA := []byte("keyAAAAA") // updated at step 0 and step 1
+	keyB := []byte("keyBBBBB") // written only at step 0 (fully pruned)
+	a0, a1, b0 := []byte("A-step0"), []byte("A-step1"), []byte("B-step0")
+
+	require.NoError(w.PutWithPrev(keyA, a0, 2, nil))
+	require.NoError(w.PutWithPrev(keyB, b0, 3, nil))
+	require.NoError(w.Flush(ctx, tx))
+	require.NoError(w.PutWithPrev(keyA, a1, 18, a0))
+	require.NoError(w.Flush(ctx, tx))
+	w.Close()
+	dt.Close()
+
+	// Build files for step 0 so [0, 16) becomes prunable; step 1 stays in DB.
+	require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	logEvery := time.NewTicker(time.Second)
+	defer logEvery.Stop()
+	dt = d.beginForTests()
+	stat, err := dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
+	require.NoError(err)
+	dt.Close()
+	require.GreaterOrEqual(stat.Values, uint64(2), "both step-0 entries pruned")
+
+	assertNoIndirectOrphans(t, tx, d)
+
+	dt = d.beginForTests()
+	defer dt.Close()
+	v, _, found, err := dt.GetLatest(keyA, tx)
+	require.NoError(err)
+	require.True(found, "keyA's step-1 value must survive pruning of step 0")
+	require.Equal(a1, v)
+}
+
 // TestDomain_UnwindRestoresDeletionMarker is a regression test for the bug
 // where unwind() fails to restore empty tombstones. When a slot is deleted
 // then re-written within the same step, unwinding the re-write must restore
