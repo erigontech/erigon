@@ -250,29 +250,21 @@ func resetDomainGauges(ctx context.Context) {
 	}
 }
 
-func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *changeset.DomainMetrics, interval time.Duration,
-	executing bool) *changeset.DomainMetrics {
-	metrics.RLock()
-	defer metrics.RUnlock()
-
-	if prevMetrics == nil {
-		prevMetrics = &changeset.DomainMetrics{
-			Domains: map[kv.Domain]*changeset.DomainIOMetrics{},
-		}
-	}
-
+func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prev changeset.DomainMetricsSnapshot, interval time.Duration,
+	executing bool) changeset.DomainMetricsSnapshot {
+	cur := metrics.Snapshot()
 	seconds := interval.Seconds()
 
-	cacheReads := metrics.CacheReadCount - prevMetrics.CacheReadCount
-	cacheDuration := metrics.CacheReadDuration - prevMetrics.CacheReadDuration
-	dbReads := metrics.DbReadCount - prevMetrics.DbReadCount
-	dbDuration := metrics.DbReadDuration - prevMetrics.DbReadDuration
-	fileReads := metrics.FileReadCount - prevMetrics.FileReadCount
-	fileDuration := metrics.FileReadDuration - prevMetrics.FileReadDuration
-	cachePutCount := metrics.CachePutCount - prevMetrics.CachePutCount
-	cachePutSize := metrics.CachePutSize - prevMetrics.CachePutSize
-	cachePutKeySize := metrics.CachePutKeySize - prevMetrics.CachePutKeySize
-	cachePutValueSize := metrics.CachePutValueSize - prevMetrics.CachePutValueSize
+	cacheReads := cur.CacheReadCount - prev.CacheReadCount
+	cacheDuration := cur.CacheReadDuration - prev.CacheReadDuration
+	dbReads := cur.DbReadCount - prev.DbReadCount
+	dbDuration := cur.DbReadDuration - prev.DbReadDuration
+	fileReads := cur.FileReadCount - prev.FileReadCount
+	fileDuration := cur.FileReadDuration - prev.FileReadDuration
+	cachePutCount := cur.CachePutCount - prev.CachePutCount
+	cachePutSize := cur.CachePutSize - prev.CachePutSize
+	cachePutKeySize := cur.CachePutKeySize - prev.CachePutKeySize
+	cachePutValueSize := cur.CachePutValueSize - prev.CachePutValueSize
 
 	mxExecDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 	mxExecDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
@@ -287,153 +279,103 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	mxExecDomainFileReads.Set(float64(fileReads) / seconds)
 	mxExecDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
 
-	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
-
-	if accountMetrics, ok := metrics.Domains[kv.AccountsDomain]; ok {
-		var prevAccountMetrics changeset.DomainIOMetrics
-
-		if prev, ok := prevMetrics.Domains[kv.AccountsDomain]; ok {
-			prevAccountMetrics = *prev
-		}
-
-		cacheReads := accountMetrics.CacheReadCount - prevAccountMetrics.CacheReadCount
-		cacheDuration := accountMetrics.CacheReadDuration - prevAccountMetrics.CacheReadDuration
-		dbReads := accountMetrics.DbReadCount - prevAccountMetrics.DbReadCount
-		dbDuration := accountMetrics.DbReadDuration - prevAccountMetrics.DbReadDuration
-		fileReads := accountMetrics.FileReadCount - prevAccountMetrics.FileReadCount
-		fileDuration := accountMetrics.FileReadDuration - prevAccountMetrics.FileReadDuration
-		cachePutCount := accountMetrics.CachePutCount - prevAccountMetrics.CachePutCount
-		cachePutSize := accountMetrics.CachePutSize - prevAccountMetrics.CachePutSize
-		cachePutKeySize := accountMetrics.CachePutKeySize - prevAccountMetrics.CachePutKeySize
-		cachePutValueSize := accountMetrics.CachePutValueSize - prevAccountMetrics.CachePutValueSize
+	{
+		a, pa := cur.Domains[kv.AccountsDomain], prev.Domains[kv.AccountsDomain]
+		cacheReads := a.CacheReadCount - pa.CacheReadCount
+		cacheDuration := a.CacheReadDuration - pa.CacheReadDuration
+		dbReads := a.DbReadCount - pa.DbReadCount
+		dbDuration := a.DbReadDuration - pa.DbReadDuration
+		fileReads := a.FileReadCount - pa.FileReadCount
+		fileDuration := a.FileReadDuration - pa.FileReadDuration
 
 		mxExecAccountDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecAccountDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExecAccountDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecAccountDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		if executing {
-			mxExecAccountDomainPutRate.Set(float64(cachePutCount))
-			mxExecAccountDomainPutSize.Set(float64(cachePutSize))
-			mxExecAccountDomainPutKeySize.Set(float64(cachePutKeySize))
-			mxExecAccountDomainPutValueSize.Set(float64(cachePutValueSize))
+			mxExecAccountDomainPutRate.Set(float64(a.CachePutCount - pa.CachePutCount))
+			mxExecAccountDomainPutSize.Set(float64(a.CachePutSize - pa.CachePutSize))
+			mxExecAccountDomainPutKeySize.Set(float64(a.CachePutKeySize - pa.CachePutKeySize))
+			mxExecAccountDomainPutValueSize.Set(float64(a.CachePutValueSize - pa.CachePutValueSize))
 		}
 		mxExecAccountDomainDbReads.Set(float64(dbReads) / seconds)
 		mxExecAccountDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecAccountDomainFileReads.Set(float64(fileReads) / seconds)
 		mxExecAccountDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
-
-		prevAccountMetrics = *accountMetrics
-		prevMetrics.Domains[kv.AccountsDomain] = &prevAccountMetrics
 	}
 
-	if storageMetrics, ok := metrics.Domains[kv.StorageDomain]; ok {
-		var prevStorageMetrics changeset.DomainIOMetrics
-
-		if prev, ok := prevMetrics.Domains[kv.StorageDomain]; ok {
-			prevStorageMetrics = *prev
-		}
-
-		cacheReads := storageMetrics.CacheReadCount - prevStorageMetrics.CacheReadCount
-		cacheDuration := storageMetrics.CacheReadDuration - prevStorageMetrics.CacheReadDuration
-		dbReads := storageMetrics.DbReadCount - prevStorageMetrics.DbReadCount
-		dbDuration := storageMetrics.DbReadDuration - prevStorageMetrics.DbReadDuration
-		fileReads := storageMetrics.FileReadCount - prevStorageMetrics.FileReadCount
-		fileDuration := storageMetrics.FileReadDuration - prevStorageMetrics.FileReadDuration
-		cachePutCount := storageMetrics.CachePutCount - prevStorageMetrics.CachePutCount
-		cachePutSize := storageMetrics.CachePutSize - prevStorageMetrics.CachePutSize
-		cachePutKeySize := storageMetrics.CachePutKeySize - prevStorageMetrics.CachePutKeySize
-		cachePutValueSize := storageMetrics.CachePutValueSize - prevStorageMetrics.CachePutValueSize
+	{
+		s, ps := cur.Domains[kv.StorageDomain], prev.Domains[kv.StorageDomain]
+		cacheReads := s.CacheReadCount - ps.CacheReadCount
+		cacheDuration := s.CacheReadDuration - ps.CacheReadDuration
+		dbReads := s.DbReadCount - ps.DbReadCount
+		dbDuration := s.DbReadDuration - ps.DbReadDuration
+		fileReads := s.FileReadCount - ps.FileReadCount
+		fileDuration := s.FileReadDuration - ps.FileReadDuration
 
 		mxExecStorageDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecStorageDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExexStorageDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecStorageDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
 		if executing {
-			mxExecStorageDomainPutRate.Set(float64(cachePutCount))
-			mxExecStorageDomainPutSize.Set(float64(cachePutSize))
-			mxExecStorageDomainPutKeySize.Set(float64(cachePutKeySize))
-			mxExecStorageDomainPutValueSize.Set(float64(cachePutValueSize))
+			mxExecStorageDomainPutRate.Set(float64(s.CachePutCount - ps.CachePutCount))
+			mxExecStorageDomainPutSize.Set(float64(s.CachePutSize - ps.CachePutSize))
+			mxExecStorageDomainPutKeySize.Set(float64(s.CachePutKeySize - ps.CachePutKeySize))
+			mxExecStorageDomainPutValueSize.Set(float64(s.CachePutValueSize - ps.CachePutValueSize))
 		}
 		mxExecStorageDomainDbReads.Set(float64(dbReads) / seconds)
 		mxExecStorageDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecStorageDomainFileReads.Set(float64(fileReads) / seconds)
 		mxExecStorageDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
-
-		prevStorageMetrics = *storageMetrics
-		prevMetrics.Domains[kv.StorageDomain] = &prevStorageMetrics
 	}
 
-	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok && executing {
-		var prevCodeMetrics changeset.DomainIOMetrics
-
-		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
-			prevCodeMetrics = *prev
-		}
-
-		cacheReads := codeMetrics.CacheReadCount - prevCodeMetrics.CacheReadCount
-		cacheDuration := codeMetrics.CacheReadDuration - prevCodeMetrics.CacheReadDuration
-		dbReads := codeMetrics.DbReadCount - prevCodeMetrics.DbReadCount
-		dbDuration := codeMetrics.DbReadDuration - prevCodeMetrics.DbReadDuration
-		fileReads := codeMetrics.FileReadCount - prevCodeMetrics.FileReadCount
-		fileDuration := codeMetrics.FileReadDuration - prevCodeMetrics.FileReadDuration
-		cachePutCount := codeMetrics.CachePutCount - prevCodeMetrics.CachePutCount
-		cachePutSize := codeMetrics.CachePutSize - prevCodeMetrics.CachePutSize
-		cachePutKeySize := codeMetrics.CachePutKeySize - prevCodeMetrics.CachePutKeySize
-		cachePutValueSize := codeMetrics.CachePutValueSize - prevCodeMetrics.CachePutValueSize
+	if executing {
+		c, pc := cur.Domains[kv.CodeDomain], prev.Domains[kv.CodeDomain]
+		cacheReads := c.CacheReadCount - pc.CacheReadCount
+		cacheDuration := c.CacheReadDuration - pc.CacheReadDuration
+		dbReads := c.DbReadCount - pc.DbReadCount
+		dbDuration := c.DbReadDuration - pc.DbReadDuration
+		fileReads := c.FileReadCount - pc.FileReadCount
+		fileDuration := c.FileReadDuration - pc.FileReadDuration
 
 		mxExecCodeDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxExecCodeDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxExexCodeDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxExecCodeDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxExecCodeDomainPutRate.Set(float64(cachePutCount))
-		mxExecCodeDomainPutSize.Set(float64(cachePutSize))
-		mxExecCodeDomainPutKeySize.Set(float64(cachePutKeySize))
-		mxExecCodeDomainPutValueSize.Set(float64(cachePutValueSize))
+		mxExecCodeDomainPutRate.Set(float64(c.CachePutCount - pc.CachePutCount))
+		mxExecCodeDomainPutSize.Set(float64(c.CachePutSize - pc.CachePutSize))
+		mxExecCodeDomainPutKeySize.Set(float64(c.CachePutKeySize - pc.CachePutKeySize))
+		mxExecCodeDomainPutValueSize.Set(float64(c.CachePutValueSize - pc.CachePutValueSize))
 		mxExecCodeDomainDbReads.Set(float64(dbReads) / seconds)
 		mxExecCodeDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxExecCodeDomainFileReads.Set(float64(fileReads) / seconds)
 		mxExecCodeDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
-
-		prevCodeMetrics = *codeMetrics
-		prevMetrics.Domains[kv.CodeDomain] = &prevCodeMetrics
 	}
 
-	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; !executing && ok {
-		var prevCommitmentMetrics changeset.DomainIOMetrics
-
-		if prev, ok := prevMetrics.Domains[kv.CommitmentDomain]; ok {
-			prevCommitmentMetrics = *prev
-		}
-
-		cacheReads := commitmentMetrics.CacheReadCount - prevCommitmentMetrics.CacheReadCount
-		cacheDuration := commitmentMetrics.CacheReadDuration - prevCommitmentMetrics.CacheReadDuration
-		dbReads := commitmentMetrics.DbReadCount - prevCommitmentMetrics.DbReadCount
-		dbDuration := commitmentMetrics.DbReadDuration - prevCommitmentMetrics.DbReadDuration
-		fileReads := commitmentMetrics.FileReadCount - prevCommitmentMetrics.FileReadCount
-		fileDuration := commitmentMetrics.FileReadDuration - prevCommitmentMetrics.FileReadDuration
-		cachePutCount := commitmentMetrics.CachePutCount - prevCommitmentMetrics.CachePutCount
-		cachePutSize := commitmentMetrics.CachePutSize - prevCommitmentMetrics.CachePutSize
-		cachePutKeySize := commitmentMetrics.CachePutKeySize - prevCommitmentMetrics.CachePutKeySize
-		cachePutValueSize := commitmentMetrics.CachePutValueSize - prevCommitmentMetrics.CachePutValueSize
+	if !executing {
+		c, pc := cur.Domains[kv.CommitmentDomain], prev.Domains[kv.CommitmentDomain]
+		cacheReads := c.CacheReadCount - pc.CacheReadCount
+		cacheDuration := c.CacheReadDuration - pc.CacheReadDuration
+		dbReads := c.DbReadCount - pc.DbReadCount
+		dbDuration := c.DbReadDuration - pc.DbReadDuration
+		fileReads := c.FileReadCount - pc.FileReadCount
+		fileDuration := c.FileReadDuration - pc.FileReadDuration
 
 		mxCommitmentDomainReads.Set(float64(cacheReads+dbReads+fileReads) / seconds)
 		mxCommitmentDomainReadDuration.Set(float64(cacheDuration+dbDuration+fileDuration) / float64(cacheReads+dbReads+fileReads))
 		mxCommitmentDomainCacheReads.Set(float64(cacheReads) / seconds)
 		mxCommitmentDomainCacheReadDuration.Set(float64(cacheDuration) / float64(cacheReads))
-		mxCommitmentDomainPutRate.Set(float64(cachePutCount))
-		mxCommitmentDomainPutSize.Set(float64(cachePutSize))
-		mxCommitmentDomainPutKeySize.Set(float64(cachePutKeySize))
-		mxCommitmentDomainPutValueSize.Set(float64(cachePutValueSize))
+		mxCommitmentDomainPutRate.Set(float64(c.CachePutCount - pc.CachePutCount))
+		mxCommitmentDomainPutSize.Set(float64(c.CachePutSize - pc.CachePutSize))
+		mxCommitmentDomainPutKeySize.Set(float64(c.CachePutKeySize - pc.CachePutKeySize))
+		mxCommitmentDomainPutValueSize.Set(float64(c.CachePutValueSize - pc.CachePutValueSize))
 		mxCommitmentDomainDbReads.Set(float64(dbReads) / seconds)
 		mxCommitmentDomainDbReadDuration.Set(float64(dbDuration) / float64(dbReads))
 		mxCommitmentDomainFileReads.Set(float64(fileReads) / seconds)
 		mxCommitmentDomainFileReadDuration.Set(float64(fileDuration) / float64(fileReads))
-
-		prevCommitmentMetrics = *commitmentMetrics
-		prevMetrics.Domains[kv.CommitmentDomain] = &prevCommitmentMetrics
 	}
 
-	return prevMetrics
+	return cur
 }
 
 func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
@@ -491,7 +433,7 @@ type Progress struct {
 	prevBranchReadCount            uint64
 	prevBranchWriteCount           uint64
 	commitThreshold                uint64
-	prevDomainMetrics              *changeset.DomainMetrics
+	prevDomainMetrics              changeset.DomainMetricsSnapshot
 	logPrefix                      string
 	logger                         log.Logger
 }
@@ -800,14 +742,13 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
 	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
 
-	rs.Domains().Metrics().RLock()
+	dmSnap := rs.Domains().Metrics().Snapshot()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
-		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
+		"buf", common.ByteCount(uint64(dmSnap.CachePutSize + dmSnap.CacheGetSize)),
 		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
-	rs.Domains().Metrics().RUnlock()
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
 		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, gasSec, 0, stepsInDb, commitVals)

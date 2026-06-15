@@ -151,24 +151,12 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	defer sd.latestStateLock.Unlock()
 
 	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
-		sd.metrics.Lock()
-		defer sd.metrics.Unlock()
-		sd.metrics.CachePutCount++
-		sd.metrics.CachePutSize += putKeySize + putValueSize
-		sd.metrics.CachePutKeySize += putKeySize
-		sd.metrics.CachePutValueSize += putValueSize
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.CachePutCount++
-			dm.CachePutSize += putKeySize + putValueSize
-			dm.CachePutKeySize += putKeySize
-			dm.CachePutValueSize += putValueSize
-		} else {
-			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
-				CachePutCount:     1,
-				CachePutSize:      putKeySize + putValueSize,
-				CachePutKeySize:   putKeySize,
-				CachePutValueSize: putValueSize,
-			}
+		putSize := int64(putKeySize + putValueSize)
+		for _, m := range []*changeset.DomainIOMetrics{&sd.metrics.DomainIOMetrics, &sd.metrics.Domains[domain]} {
+			m.CachePutCount.Add(1)
+			m.CachePutSize.Add(putSize)
+			m.CachePutKeySize.Add(int64(putKeySize))
+			m.CachePutValueSize.Add(int64(putValueSize))
 		}
 	}
 
@@ -327,7 +315,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-	return uint64(sd.metrics.CachePutSize)
+	return uint64(sd.metrics.CachePutSize.Load())
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
@@ -342,18 +330,17 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.unwindChangeset = nil
 	sd.unwindChangesetRaw = nil
 
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
-	sd.metrics.CachePutCount = 0
-	sd.metrics.CachePutSize = 0
-	sd.metrics.CachePutKeySize = 0
-	sd.metrics.CachePutValueSize = 0
-	for _, dm := range sd.metrics.Domains {
-		dm.CachePutCount = 0
-		dm.CachePutSize = 0
-		dm.CachePutKeySize = 0
-		dm.CachePutValueSize = 0
+	for i := range sd.metrics.Domains {
+		m := &sd.metrics.Domains[i]
+		m.CachePutCount.Store(0)
+		m.CachePutSize.Store(0)
+		m.CachePutKeySize.Store(0)
+		m.CachePutValueSize.Store(0)
 	}
+	sd.metrics.CachePutCount.Store(0)
+	sd.metrics.CachePutSize.Store(0)
+	sd.metrics.CachePutKeySize.Store(0)
+	sd.metrics.CachePutValueSize.Store(0)
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {

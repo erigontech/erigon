@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -537,16 +536,9 @@ type DomainRoTx struct {
 	getFromFileCache *DomainGetFromFileCache
 }
 
-func domainReadMetric(name kv.Domain, level int) metrics.Summary {
-	if level > 4 {
-		level = 5
-	}
-	return mxsKVGet[name][level]
-}
-
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVReadLevelledMetrics {
-		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
+		defer recordKVGet(dt.name, i, time.Now())
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
