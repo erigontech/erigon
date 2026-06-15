@@ -25,10 +25,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -803,11 +805,13 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
-	for _, ws := range sd.pastDomainWriters {
+	for di, ws := range sd.pastDomainWriters {
 		for i := len(ws) - 1; i >= 0; i-- {
+			t := time.Now()
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
+			log.Warn("[dbg] flush past domain", "domain", kv.Domain(di).String(), "took", time.Since(t))
 			ws[i].Close()
 		}
 	}
@@ -815,42 +819,52 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if w == nil {
 			continue
 		}
+		t := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		log.Warn("[dbg] flush domain", "domain", kv.Domain(di).String(), "took", time.Since(t))
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
 	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
+		t := time.Now()
 		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
 			return err
 		}
+		log.Warn("[dbg] flush past ii", "ii", sd.pastIIWriters[i].name.String(), "took", time.Since(t))
 		sd.pastIIWriters[i].close()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
 			continue
 		}
+		t := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		log.Warn("[dbg] flush ii", "ii", w.name.String(), "took", time.Since(t))
 		w.close()
 	}
-	for _, ws := range sd.pastForkableWriters {
+	for id, ws := range sd.pastForkableWriters {
 		for i := len(ws) - 1; i >= 0; i-- {
+			t := time.Now()
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
+			log.Warn("[dbg] flush past forkable", "id", id.Id(), "took", time.Since(t))
 			ws[i].Close()
 		}
 	}
-	for _, w := range sd.forkableWriters {
+	for id, w := range sd.forkableWriters {
 		if w == nil {
 			continue
 		}
+		t := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		log.Warn("[dbg] flush forkable", "id", id.Id(), "took", time.Since(t))
 		w.Close()
 	}
 	return nil
