@@ -328,6 +328,19 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+func (idx *Index) ForceExistenceFilterRandom() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvRandom()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvRandom()
+	}
+}
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {

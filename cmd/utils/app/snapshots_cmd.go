@@ -714,7 +714,8 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		return true, false, "", nil
 	}
 	if !ok {
-		return false, false, "", fmt.Errorf("can't find accessor for %s", filePath)
+		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
+		return true, false, "", nil
 	}
 	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {

@@ -68,7 +68,7 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
-	for i := 0; i < len(nodes); i++ {
+	for i := range len(nodes) {
 		if envAssertBTKeys {
 			if cmp := bt.compareKey(kv, nodes[i].key, nodes[i].di); cmp != 0 {
 				panic(fmt.Errorf("key mismatch at di=%d i=%d cmp=%d", nodes[i].di, i, cmp))
@@ -144,14 +144,18 @@ type Node struct {
 }
 
 func encodeListNodes(nodes []Node, w io.Writer) error {
-	numBuf := make([]byte, 8)
-	binary.BigEndian.PutUint64(numBuf, uint64(len(nodes)))
-	if _, err := w.Write(numBuf); err != nil {
+	var header [10]byte
+	binary.BigEndian.PutUint64(header[:8], uint64(len(nodes)))
+	if _, err := w.Write(header[:8]); err != nil {
 		return err
 	}
-
-	for ni := 0; ni < len(nodes); ni++ {
-		if _, err := w.Write(nodes[ni].Encode()); err != nil {
+	for i := range nodes {
+		binary.BigEndian.PutUint64(header[:8], nodes[i].di)
+		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
+		if _, err := w.Write(header[:]); err != nil {
+			return err
+		}
+		if _, err := w.Write(nodes[i].key); err != nil {
 			return err
 		}
 	}
@@ -162,7 +166,7 @@ func decodeListNodes(data []byte) ([]Node, error) {
 	count := binary.BigEndian.Uint64(data[:8])
 	nodes := make([]Node, count)
 	pos := 8
-	for ni := 0; ni < int(count); ni++ {
+	for ni := range int(count) {
 		dp, err := nodes[ni].Decode(data[pos:])
 		if err != nil {
 			return nil, fmt.Errorf("decode node %d: %w", ni, err)
@@ -170,14 +174,6 @@ func decodeListNodes(data []byte) ([]Node, error) {
 		pos += int(dp)
 	}
 	return nodes, nil
-}
-
-func (n Node) Encode() []byte {
-	buf := make([]byte, 8+2+len(n.key))
-	binary.BigEndian.PutUint64(buf[:8], n.di)
-	binary.BigEndian.PutUint16(buf[8:10], uint16(len(n.key)))
-	copy(buf[10:], n.key)
-	return buf
 }
 
 func (n *Node) Decode(buf []byte) (uint64, error) {
@@ -230,8 +226,9 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 	return nil
 }
 
-// bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
-func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
+// bs binary-searches the warmed-up pivot list for the [dl,dr) data-index window
+// of key, plus klo/khi: the pivot keys bounding it, used by interpolation search.
+func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64, klo, khi []byte) {
 	dr = b.offt.Count()
 	m, l, r := 0, 0, len(b.mx) //nolint
 
@@ -244,19 +241,21 @@ func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 		}
 		switch bytes.Compare(n.key, x) {
 		case 0:
-			return n, n.di, n.di
+			return n, n.di, n.di, n.key, n.key
 		case 1:
 			r = m
 			dr = n.di
+			khi = n.key
 		case -1:
 			l = m + 1
 			dl = n.di
 			if dl < dr {
 				dl++
 			}
+			klo = n.key
 		}
 	}
-	return n, dl, dr
+	return n, dl, dr, klo, khi
 }
 
 // Seek returns cursor pointing at first key which is >= seekKey.
@@ -275,7 +274,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	}
 
 	// check cached nodes and narrow roi
-	n, l, r := b.bs(seekKey) // l===r when key is found
+	n, l, r, _, _ := b.bs(seekKey) // l===r when key is found
 	if l == r {
 		cur.Reset(n.di, g)
 		return cur, nil
@@ -349,7 +348,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		return v0, true, 0, nil
 	}
 
-	n, l, r := b.bs(key) // l===r when key is found
+	n, l, r, klo, khi := b.bs(key) // l===r when key is found
 	if b.trace {
 		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
@@ -357,6 +356,35 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 
 	var cmp int
 	var m uint64
+	// Interpolation search narrows the window with position estimates from the
+	// bound keys; after BtInterpBudget probes fall back to binary. The final
+	// small window is handed to the linear scan below either way.
+	if BtInterp && len(klo) > 0 && len(khi) > 0 {
+		probes := uint64(0)
+		var kmArr, kloArr, khiArr [64]byte // stack; spills to heap only for keys > 64B
+		km := kmArr[:0]
+		for l < r && r-l > DefaultBtreeStartSkip {
+			if probes >= BtInterpBudget {
+				break
+			}
+			m = interpMid(key, klo, khi, l, r)
+			probes++
+			off := b.offt.Get(m)
+			g.Reset(off)
+			km, _ = g.Next(km[:0])
+			cmp = bytes.Compare(key, km)
+			if cmp == 0 {
+				v, _ = g.Next(nil)
+				return v, true, off, nil
+			} else if cmp < 0 {
+				r = m
+				khi = append(khiArr[:0], km...)
+			} else {
+				l = m + 1
+				klo = append(kloArr[:0], km...)
+			}
+		}
+	}
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip {
@@ -408,6 +436,49 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 	v, _ = g.Next(nil)
 	return v, true, b.offt.Get(l), nil
+}
+
+// interpMid estimates the index of searchKey within [l,r) by linear interpolation on
+// the first 8 key bytes after the common prefix of the bound keys. Falls back to
+// the binary midpoint when the span is degenerate; result is clamped to [l, r-1].
+func interpMid(searchKey, klo, khi []byte, l, r uint64) uint64 {
+	p := commonPrefixLen(klo, khi)
+	a, hi, x := u64At(klo, p), u64At(khi, p), u64At(searchKey, p)
+	if hi <= a {
+		return (l + r) >> 1
+	}
+	f := float64(x-a) / float64(hi-a)
+	m := l + uint64(f*float64(r-1-l)+0.5)
+	if m < l {
+		m = l
+	} else if m >= r {
+		m = r - 1
+	}
+	return m
+}
+
+func commonPrefixLen(a, b []byte) int {
+	n := len(a)
+	n = min(n, len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+// Left-aligned + zero-padded so the u64 keeps lexicographic key order across
+// differing key lengths, which interpolation relies on (klo <= key <= khi).
+func u64At(k []byte, p int) uint64 {
+	if p+8 <= len(k) {
+		return binary.BigEndian.Uint64(k[p:])
+	}
+	var x uint64
+	for i := p; i < len(k); i++ {
+		x |= uint64(k[i]) << (56 - 8*uint(i-p))
+	}
+	return x
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
