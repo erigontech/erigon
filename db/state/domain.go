@@ -445,8 +445,12 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	t := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
+	}
+	if took := time.Since(t); took > 10*time.Millisecond {
+		log.Warn("[dbg] flush domain history", "table", w.valsTable, "took", took)
 	}
 
 	if w.largeVals {
@@ -477,6 +481,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
+		t = time.Now()
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
@@ -522,6 +527,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] flush domain largeVals", "keys", w.keysTable, "vals", w.valsTable, "took", took)
+		}
 		w.Close()
 		return nil
 	}
@@ -531,6 +539,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	t = time.Now()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
@@ -542,6 +551,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
+	}
+	if took := time.Since(t); took > 10*time.Millisecond {
+		log.Warn("[dbg] flush domain vals", "table", w.valsTable, "took", took)
 	}
 	w.Close()
 
