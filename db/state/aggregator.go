@@ -92,6 +92,9 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	maxCollationTxNum          atomic.Uint64
+	lastFlushedCommitmentTxNum atomic.Uint64
+
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -2200,7 +2203,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				lastInDB = safeStep
 			}
 		}
-
 
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
