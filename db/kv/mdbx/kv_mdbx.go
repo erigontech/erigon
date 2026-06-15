@@ -260,7 +260,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		}
 	}
 
-	if err = env.SetOption(mdbx.OptPrefaultWriteEnable, 0); err != nil {
+	//if err = env.SetOption(mdbx.OptPrefaultWriteEnable, 0); err != nil {
+	//	return nil, err
+	//}
+	if err = env.SetOption(mdbx.OptPreferWafInsteadofBalance, 0); err != nil {
 		return nil, err
 	}
 
