@@ -304,7 +304,7 @@ func (btw *BtIndexWriter) Build() error {
 
 			if len(k) > 0 {
 				node := Node{di: ki, key: k}
-				if _, werr := node.Encode(indexW, headerBuf[:]); werr != nil {
+				if werr := node.Encode(indexW, headerBuf[:]); werr != nil {
 					return fmt.Errorf("[index] write node: %w", werr)
 				}
 			}

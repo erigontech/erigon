@@ -506,7 +506,7 @@ func TestNodeEncode_NoAlloc(t *testing.T) {
 	node := Node{di: 42, key: []byte("some-key")}
 	var headerBuf [10]byte
 	allocs := testing.AllocsPerRun(1000, func() {
-		if _, err := node.Encode(io.Discard, headerBuf[:]); err != nil {
+		if err := node.Encode(io.Discard, headerBuf[:]); err != nil {
 			t.Fatal(err)
 		}
 	})
