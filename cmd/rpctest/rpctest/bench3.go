@@ -67,7 +67,7 @@ func Bench3(erigon_url, geth_url string) error {
 			break
 		} else {
 			page = sr.Result.Next
-			maps.Copy(accRangeTG, sr.Result.Accounts)
+			maps.Copy(accRangeGeth, sr.Result.Accounts)
 		}
 	}
 
