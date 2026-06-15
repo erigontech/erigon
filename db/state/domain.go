@@ -2151,7 +2151,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 // keys dup and its value row (the oldest steps occupy the lowest seqIDs, i.e. the
 // front of the values table, so the big-value deletes are near-sequential).
 func (dt *DomainRoTx) pruneIndirect(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, prg *prune.Stat, logEvery *time.Ticker) (*prune.Stat, error) {
-	stat := &prune.Stat{MinTxNum: math.MaxUint64, KeyProgress: prune.Done}
+	stat := &prune.Stat{MinTxNum: math.MaxUint64, KeyProgress: prune.Done, ValueProgress: prune.Done}
 
 	// First pass (read-only): collect the (bareKey, dup) of every in-range entry.
 	// We don't delete while navigating the cursor — emptying a key would leave the
