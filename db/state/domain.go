@@ -533,9 +533,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			copy(dupBuf[:8], invStep)
 			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
 			if hasDup {
-				if err := keysCursor.DeleteCurrent(); err != nil {
-					return err
-				}
+				return largeValsPutCurrentKeys(keysCursor, bareKey, dupBuf[:])
 			}
 			return largeValsPutKeys(keysCursor, bareKey, dupBuf[:])
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
@@ -576,6 +574,11 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 //go:noinline
 func largeValsPutKeys(cur kv.RwCursorDupSort, k, v []byte) error { return cur.Put(k, v) }
+
+//go:noinline
+func largeValsPutCurrentKeys(cur kv.RwCursorDupSort, k, v []byte) error {
+	return cur.PutCurrent(k, v)
+}
 
 //go:noinline
 func largeValsPutVals(cur kv.RwCursor, k, v []byte) error { return cur.Put(k, v) }
