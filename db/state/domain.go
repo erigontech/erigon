@@ -481,7 +481,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
-		const seqBatch = 1024
+		const seqBatch = 128
 		var seqBase uint64
 		var seqLeft int
 		t = time.Now()
