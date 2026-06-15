@@ -495,7 +495,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID && !newIsDeletion {
 				copy(seqIDBuf[:], existing[8:])
-				return valsCursorRW.Put(seqIDBuf[:], v)
+				return largeValsPutVals(valsCursorRW, seqIDBuf[:], v)
 			}
 
 			seqID := uint64(deletionSeqID)
@@ -523,7 +523,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					return err
 				}
 			}
-			return keysCursor.Put(bareKey, dupBuf[:])
+			return largeValsPutKeys(keysCursor, bareKey, dupBuf[:])
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
@@ -559,6 +559,12 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 	return nil
 }
+
+//go:noinline
+func largeValsPutKeys(cur kv.RwCursorDupSort, k, v []byte) error { return cur.Put(k, v) }
+
+//go:noinline
+func largeValsPutVals(cur kv.RwCursor, k, v []byte) error { return cur.Put(k, v) }
 
 func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 	if w.discard {
