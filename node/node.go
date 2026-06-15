@@ -339,7 +339,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if config.MdbxDBSizeLimit > 0 {
 				opts = opts.MapSize(config.MdbxDBSizeLimit)
 			}
-			opts = opts.GrowthStep(1024 * datasize.MB)
+			opts = opts.GrowthStep(512 * datasize.MB)
 			//if config.MdbxGrowthStep > 0 {
 			//	//opts = opts.GrowthStep(config.MdbxGrowthStep)
 			//	opts = opts.GrowthStep(1024 * datasize.MB)
