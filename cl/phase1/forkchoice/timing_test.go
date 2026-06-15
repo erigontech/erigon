@@ -8,7 +8,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -335,36 +334,3 @@ func TestIsHeadWeak_NoCheckpointState(t *testing.T) {
 	require.False(t, f.isHeadWeak(common.Hash{0x01}))
 }
 
-func TestGetProposerHeadDoesNotReorgGloasPayloadDecision(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.GloasForkEpoch = 0
-
-	parentRoot := common.Hash{0x10}
-	headRoot := common.Hash{0x11}
-	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
-	require.NoError(t, err)
-	verifiedExecutionPayload.Add(headRoot, struct{}{})
-	f := &ForkChoiceStore{
-		genesisTime:              0,
-		beaconCfg:                &cfg,
-		verifiedExecutionPayload: verifiedExecutionPayload,
-		forkGraph: ptcVoteForkGraph{
-			envelopes: map[common.Hash]bool{headRoot: true},
-			blocks: map[common.Hash]*cltypes.SignedBeaconBlock{
-				parentRoot: {Block: &cltypes.BeaconBlock{Slot: 0}},
-				headRoot: {
-					Block: &cltypes.BeaconBlock{
-						Slot:       1,
-						ParentRoot: parentRoot,
-					},
-				},
-			},
-		},
-	}
-	f.time.Store(2 * cfg.SecondsPerSlot)
-	f.headHash = headRoot
-	f.headPayloadStatus = cltypes.PayloadStatusFull
-	f.payloadTimelinessVote.Store(headRoot, ptcVotes(0, ptcVoteThreshold()+1))
-
-	require.Equal(t, headRoot, f.GetProposerHead(headRoot, 2))
-}

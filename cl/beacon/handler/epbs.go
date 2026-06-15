@@ -563,7 +563,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 		} else {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
 		}
 	}

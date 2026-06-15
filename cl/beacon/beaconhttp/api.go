@@ -129,7 +129,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		if slices.Contains(w.Header().Values("Content-Type"), "text/event-stream") {
 			return
 		}
-		if beaconResponse, ok := any(ans).(*BeaconResponse); ok {
+		if beaconResponse, ok := any(ans).(*BeaconResponse); ok && beaconResponse != nil {
 			for key, value := range beaconResponse.Headers() {
 				w.Header().Set(key, value)
 			}
@@ -233,6 +233,9 @@ func responseEncodingForAccept(accept string, sszSupported bool) responseEncodin
 
 func supportsSSZ(ans any) bool {
 	if beaconResponse, ok := ans.(*BeaconResponse); ok {
+		if beaconResponse == nil {
+			return false
+		}
 		_, ok = beaconResponse.Data.(ssz.Marshaler)
 		return ok
 	}

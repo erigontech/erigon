@@ -46,7 +46,6 @@ type ForkChoiceStorageReader interface {
 	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
-	GetProposerHead(headRoot common.Hash, slot uint64) common.Hash
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64

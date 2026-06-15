@@ -399,11 +399,6 @@ func (f *ForkChoiceStore) isShufflingStable(slot uint64) bool {
 	return slot%f.beaconCfg.SlotsPerEpoch != 0
 }
 
-// GetProposerHead returns the current head until proposer reorg implements all spec guards.
-func (f *ForkChoiceStore) GetProposerHead(headRoot common.Hash, _ uint64) common.Hash {
-	return headRoot
-}
-
 // getBlockTimeliness returns the timeliness vector for a block root.
 // Returns (timeliness, true) if found, or (zero value, false) if not tracked.
 func (f *ForkChoiceStore) getBlockTimeliness(root common.Hash) ([clparams.NumBlockTimelinessDeadlines]bool, bool) {

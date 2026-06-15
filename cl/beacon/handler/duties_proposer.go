@@ -190,6 +190,8 @@ func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.
 		With("dependent_root", dependentRoot), nil
 }
 
+// copyHeadStateForDuties copies the head state using the handler's config rather than the
+// state's own config, so the copy picks up fork schedule changes from the handler.
 func (a *ApiHandler) copyHeadStateForDuties(s *state.CachingBeaconState) (*state.CachingBeaconState, error) {
 	copied := state.New(a.beaconChainCfg)
 	if err := s.CopyInto(copied); err != nil {
