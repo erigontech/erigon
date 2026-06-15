@@ -481,9 +481,20 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
-		const seqBatch = 128
-		var seqBase uint64
-		var seqLeft int
+		const seqIDChunk = 128
+		var seqNext, seqEnd uint64
+		nextSeqID := func() (uint64, error) {
+			if seqNext == seqEnd {
+				base, err := tx.IncrementSequence(w.valsTable, seqIDChunk)
+				if err != nil {
+					return 0, err
+				}
+				seqNext, seqEnd = base, base+seqIDChunk
+			}
+			id := seqNext
+			seqNext++
+			return id, nil
+		}
 		t = time.Now()
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
