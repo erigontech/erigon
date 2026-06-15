@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.6.0]
+
+### Breaking Changes
+
+#### `eth_simulateV1`: base fee too low error code corrected to `-38012`
+
+Aligns Erigon with the `eth_simulateV1` error code specification
+([NethermindEth/nethermind#11412](https://github.com/NethermindEth/nethermind/issues/11412)).
+
+**What changed:**
+
+| Aspect                       | Before                              | After                                               |
+|------------------------------|-------------------------------------|-----------------------------------------------------|
+| `ErrFeeCapTooLow` error code | `-32602` (generic "Invalid params") | `-38012` (spec-mandated "baseFeePerGas is too low") |
+
+**Migration:**
+
+- If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses,
+  update it to match `-38012` instead.
+
+---
+
 ## [3.5.0] "Tidal Tails" – TBD
 
 Erigon 3.5.0 is a major release headlined by **parallel block execution becoming the default** and **initial support for Ethereum's upcoming Glamsterdam hardfork**. It is a drop-in upgrade for 3.4.x users — no re-sync required; existing datadirs upgrade their prune configuration automatically (see Breaking Changes).

@@ -59,6 +59,10 @@ const (
 	btIndexVersion1 = byte(0x01)
 )
 
+// BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
+var BtInterp = dbg.EnvBool("BT_INTERP", true)
+var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
+
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 type Cursor struct {
