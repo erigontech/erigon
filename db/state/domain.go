@@ -513,6 +513,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					if err != nil {
 						return err
 					}
+
 					seqBase = id
 					seqLeft = seqBatch
 				}
