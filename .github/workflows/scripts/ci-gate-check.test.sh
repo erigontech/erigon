@@ -62,6 +62,27 @@ run_case "reshuffle w/ failed jobs fetch (fail closed)" 1 \
   RUN_CANCELLED=true \
   CI_GATE_JOBS_JSON=''
 
+# --paginate emits one object per page; a failure on a later page must be seen.
+run_case "multi-page, failure on page 2 -> fail" 1 \
+  NEEDS='{"hive":{"result":"cancelled"},"bench":{"result":"cancelled"}}' \
+  RUN_CANCELLED=true \
+  CI_GATE_JOBS_JSON='{"jobs":[{"name":"hive","steps":[{"name":"run","conclusion":"cancelled"}]}]}
+{"jobs":[{"name":"bench","steps":[{"name":"unit","conclusion":"failure"}]}]}'
+
+# Multi-page with no failure on any page -> still a benign reshuffle.
+run_case "multi-page reshuffle (no failures)" 0 \
+  NEEDS='{"hive":{"result":"cancelled"},"bench":{"result":"cancelled"}}' \
+  RUN_CANCELLED=true \
+  CI_GATE_JOBS_JSON='{"jobs":[{"name":"hive","steps":[{"name":"run","conclusion":"cancelled"}]}]}
+{"jobs":[{"name":"bench","steps":[{"name":"run","conclusion":"cancelled"}]}]}'
+
+# An error page (no .jobs) among the pages must fail closed, not silently pass.
+run_case "error page mid-pagination -> fail closed" 1 \
+  NEEDS='{"hive":{"result":"cancelled"}}' \
+  RUN_CANCELLED=true \
+  CI_GATE_JOBS_JSON='{"jobs":[{"name":"hive","steps":[{"name":"run","conclusion":"cancelled"}]}]}
+{"message":"Server Error"}'
+
 echo "----"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -21,9 +21,16 @@ if [ -z "$failed" ] && [ -z "$cancelled" ]; then
 fi
 
 if [ -n "${CI_GATE_NO_FETCH:-}" ]; then
-  jobs="${CI_GATE_JOBS_JSON:-}"
+  raw="${CI_GATE_JOBS_JSON:-}"
 else
-  jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" --paginate) || jobs=""
+  raw=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" --paginate) || raw=""
+fi
+
+# --paginate emits one JSON object per page; merge into a single {jobs:[...]}
+# so a failure on any page is seen, and fail closed on an empty/invalid fetch.
+jobs=""
+if [ -n "$raw" ]; then
+  jobs=$(jq -s '{jobs: [.[].jobs[]]}' <<<"$raw" 2>/dev/null) || jobs=""
 fi
 
 # A leaf that fast-cancels the run on its own failure rolls up to "cancelled",
