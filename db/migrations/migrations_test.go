@@ -17,6 +17,7 @@
 package migrations
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,8 +40,8 @@ func TestApplyWithInit(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -54,8 +55,8 @@ func TestApplyWithInit(t *testing.T) {
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -73,7 +74,7 @@ func TestApplyWithInit(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	var applied map[string][]byte
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
@@ -89,7 +90,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -105,15 +106,15 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -135,7 +136,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -153,7 +154,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
@@ -171,8 +172,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -186,8 +187,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
@@ -201,7 +202,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -219,7 +220,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -268,7 +269,7 @@ func TestValidation(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.ErrorIs(err, ErrMigrationNonUniqueName)
 
 	var applied map[string][]byte
@@ -279,6 +280,68 @@ func TestValidation(t *testing.T) {
 		return nil
 	})
 	require.NoError(err)
+}
+
+func writeDBMajorVersion(t *testing.T, db kv.RwDB, major uint32) {
+	t.Helper()
+	var v [12]byte
+	binary.BigEndian.PutUint32(v[:], major)
+	err := db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, v[:])
+	})
+	require.NoError(t, err)
+}
+
+func TestWipeDataIfMajorBelow(t *testing.T) {
+	logger := log.New()
+
+	t.Run("no_wipe_when_version_absent", func(t *testing.T) {
+		// Fresh DB has no version record: ok=false → no wipe.
+		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		migrationsDB := newTestMigrationsDB(t)
+		wipeCalled := false
+		migrator := NewMigrator(dbcfg.ChainDB)
+		migrator.Migrations = []Migration{{Name: "wipe_absent", WipeDataIfMajorBelow: 5}}
+		migrator.ReopenDB = func() (kv.RwDB, error) {
+			wipeCalled = true
+			return db, nil
+		}
+		_, err := migrator.Apply(db, migrationsDB, "", "", logger)
+		require.NoError(t, err)
+		require.False(t, wipeCalled)
+		err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+			applied, err := AppliedMigrations(tx, false)
+			require.NoError(t, err)
+			require.Contains(t, applied, "wipe_absent")
+			return nil
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("no_wipe_when_version_at_threshold", func(t *testing.T) {
+		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		writeDBMajorVersion(t, db, 5)
+		migrationsDB := newTestMigrationsDB(t)
+		wipeCalled := false
+		migrator := NewMigrator(dbcfg.ChainDB)
+		migrator.Migrations = []Migration{{Name: "wipe_at", WipeDataIfMajorBelow: 5}}
+		migrator.ReopenDB = func() (kv.RwDB, error) { wipeCalled = true; return db, nil }
+		_, err := migrator.Apply(db, migrationsDB, "", "", logger)
+		require.NoError(t, err)
+		require.False(t, wipeCalled)
+	})
+
+	t.Run("error_when_reopen_nil", func(t *testing.T) {
+		// Version below threshold but ReopenDB not set → error.
+		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		writeDBMajorVersion(t, db, 3)
+		migrationsDB := newTestMigrationsDB(t)
+		migrator := NewMigrator(dbcfg.ChainDB)
+		migrator.Migrations = []Migration{{Name: "wipe_nil_reopen", WipeDataIfMajorBelow: 5}}
+		_, err := migrator.Apply(db, migrationsDB, "", "", logger)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "ReopenDB")
+	})
 }
 
 func TestCommitCallRequired(t *testing.T) {
@@ -296,7 +359,7 @@ func TestCommitCallRequired(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.ErrorIs(err, ErrMigrationCommitNotCalled)
 
 	var applied map[string][]byte

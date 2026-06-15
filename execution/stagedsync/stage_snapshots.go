@@ -258,6 +258,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := agg.OpenFolder(); err != nil {
 			return err
 		}
+		if err := alignStateToBlockSnapshots(ctx, agg, cfg, s.LogPrefix(), logger); err != nil {
+			return err
+		}
 
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
 			return err
@@ -557,10 +560,89 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 	return filesDeleted, nil
 }
 
+// alignStateToBlockSnapshots detects when state domain files imply a
+// commitment block past the current frozen block snapshots and removes the
+// highest state files until the state view no longer extends beyond the block
+// snapshots. Without this, SeekCommitment can return a block number past what
+// TxNums covers, causing "behind commitment" errors.
+func alignStateToBlockSnapshots(ctx context.Context, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	if frozenBlocks == 0 {
+		return nil
+	}
+
+	// Only align on fresh start. If MDBX already has commitment data
+	// (written by execution, not by OtterSync indexing), the node
+	// previously executed past any snapshot misalignment.
+	// Re-running alignment on restart would remove snapshot files that
+	// the downloader re-downloaded, cascading until all state is gone.
+	if roTx, err := cfg.db.BeginRo(ctx); err == nil {
+		// Check if the commitment domain keys table has any entries.
+		// TblCommitmentKeys (DupSort) is written by every execution flush including
+		// deletions; TblCommitmentVals would miss pure-deletion runs.
+		if cursor, cErr := roTx.Cursor(kv.TblCommitmentKeys); cErr == nil {
+			k, _, _ := cursor.First()
+			cursor.Close()
+			roTx.Rollback()
+			if k != nil {
+				return nil // execution has run — skip alignment
+			}
+		} else {
+			roTx.Rollback()
+		}
+	}
+
+	dirs := cfg.dirs
+	totalRemoved := 0
+
+	for {
+		commitBlock := readCommitmentBlockFromDB(ctx, cfg.db)
+		logger.Debug(fmt.Sprintf("[%s] alignment check", logPrefix),
+			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "totalRemoved", totalRemoved)
+
+		if commitBlock == 0 || commitBlock <= frozenBlocks {
+			if totalRemoved > 0 {
+				logger.Info(fmt.Sprintf("[%s] state/block snapshot alignment complete", logPrefix),
+					"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "filesRemoved", totalRemoved)
+			}
+			return nil
+		}
+
+		// Commitment past block boundary. Remove the highest state files.
+		highestStart, found := findHighestStateFileStartStep(dirs)
+		if !found {
+			logger.Warn(fmt.Sprintf("[%s] state files misaligned but no removable files found", logPrefix),
+				"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
+			return nil
+		}
+
+		logger.Info(fmt.Sprintf("[%s] state/block misalignment detected, removing step %d", logPrefix, highestStart),
+			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
+
+		removedFiles := removeStateFilesFromStep(dirs, highestStart, logger, logPrefix)
+		totalRemoved += removedFiles.count
+		if removedFiles.count == 0 {
+			return nil
+		}
+
+		// Tell the downloader to de-register deleted files so the torrent
+		// client doesn't panic trying to serve them to peers.
+		if len(removedFiles.names) > 0 {
+			seeder := cfg.getSeederClient()
+			if err := seeder.Delete(ctx, removedFiles.names); err != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to de-register deleted files from downloader", logPrefix), "err", err)
+			}
+		}
+
+		// Reopen aggregator files with the reduced set.
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
+	}
+}
+
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
-// temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
-// need a separate temporal RO tx to read domain data from snapshot files.
-// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
+// temporary RO tx to determine the last committed block.
 func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
