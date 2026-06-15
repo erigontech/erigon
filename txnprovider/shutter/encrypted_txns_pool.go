@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
@@ -376,15 +377,12 @@ func (etp *EncryptedTxnsPool) loadSubmissions(ctx context.Context, start, end ui
 	return nil
 }
 
-// errBlockRangeIntoFuture mirrors the rpc/jsonrpc eth_getLogs error for a
-// toBlock past the executed head; the block-event stream can momentarily run
-// ahead of the head a fresh RO tx in the RPC path sees.
-const errBlockRangeIntoFuture = "block range extends beyond current head block"
-
 const chainHeadCatchUpRetryWait = 50 * time.Millisecond
 
+// isChainHeadBehindErr reports the transient eth_getLogs rejection from the
+// block-event stream momentarily running ahead of the RPC path's RO view.
 func isChainHeadBehindErr(err error) bool {
-	return err != nil && strings.Contains(err.Error(), errBlockRangeIntoFuture)
+	return err != nil && strings.Contains(err.Error(), jsonrpc.ErrBlockRangeIntoFuture)
 }
 
 // filterSubmissionsWaitingForHead retries the log filter while the chain head is

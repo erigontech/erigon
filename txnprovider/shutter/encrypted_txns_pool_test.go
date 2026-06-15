@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/contracts"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
@@ -65,13 +66,13 @@ func newTestEncryptedTxnsPool(t *testing.T, backend *contracts.MockBackend) *Enc
 
 // The block-event stream can report a new head before the eth_getLogs path
 // (a fresh RO tx) sees it, so the initial submissions load races ahead of the
-// chain head and the RPC rejects it with errBlockRangeIntoFuture. The pool must
+// chain head and the RPC rejects it with jsonrpc.ErrBlockRangeIntoFuture. The pool must
 // wait for the head to catch up and retry rather than treating it as fatal.
 func TestEncryptedTxnsPoolLoadSubmissionsRetriesWhenChainHeadIsBehind(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
 	backend := contracts.NewMockBackend(ctrl)
-	headBehindErr := errors.New("rpc error: block range extends beyond current head block")
+	headBehindErr := errors.New("rpc error: " + jsonrpc.ErrBlockRangeIntoFuture)
 	gomock.InOrder(
 		backend.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return(nil, headBehindErr),
 		backend.EXPECT().FilterLogs(gomock.Any(), gomock.Any()).Return([]types.Log{}, nil),
