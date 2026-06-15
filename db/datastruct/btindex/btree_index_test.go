@@ -19,6 +19,7 @@ package btindex
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -499,4 +500,15 @@ func TestListNodes_EncodeDecodeRoundTrip(t *testing.T) {
 			require.True(t, bytes.Equal(nodes[i].key, got[i].key))
 		}
 	}
+}
+
+func TestNodeEncode_NoAlloc(t *testing.T) {
+	node := Node{di: 42, key: []byte("some-key")}
+	var headerBuf [10]byte
+	allocs := testing.AllocsPerRun(1000, func() {
+		if _, err := node.Encode(io.Discard, headerBuf[:]); err != nil {
+			t.Fatal(err)
+		}
+	})
+	require.Zero(t, allocs)
 }

@@ -297,13 +297,14 @@ func (btw *BtIndexWriter) Build() error {
 		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
 			return fmt.Errorf("[index] write nodes count: %w", err)
 		}
+		var headerBuf [10]byte
 		var ki uint64
 		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
 
 			if len(k) > 0 {
 				node := Node{di: ki, key: k}
-				if _, werr := node.Encode(indexW); werr != nil {
+				if _, werr := node.Encode(indexW, headerBuf[:]); werr != nil {
 					return fmt.Errorf("[index] write node: %w", werr)
 				}
 			}

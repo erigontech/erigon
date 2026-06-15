@@ -144,14 +144,15 @@ type Node struct {
 	di  uint64 // key ordinal number in kv
 }
 
-func (n *Node) Encode(w io.Writer) (int, error) {
+// Encode writes the node, reusing headerBuf (len >= 10) so callers in a loop
+// avoid a heap allocation per node.
+func (n Node) Encode(w io.Writer, headerBuf []byte) (int, error) {
 	if len(n.key) > math.MaxUint16 {
 		return 0, fmt.Errorf("node key too long: %d bytes", len(n.key))
 	}
-	var header [10]byte
-	binary.BigEndian.PutUint64(header[:8], n.di)
-	binary.BigEndian.PutUint16(header[8:], uint16(len(n.key)))
-	if _, err := w.Write(header[:]); err != nil {
+	binary.BigEndian.PutUint64(headerBuf[:8], n.di)
+	binary.BigEndian.PutUint16(headerBuf[8:10], uint16(len(n.key)))
+	if _, err := w.Write(headerBuf[:10]); err != nil {
 		return 0, err
 	}
 	if _, err := w.Write(n.key); err != nil {
@@ -161,13 +162,13 @@ func (n *Node) Encode(w io.Writer) (int, error) {
 }
 
 func encodeListNodes(nodes []Node, w io.Writer) error {
-	var count [8]byte
-	binary.BigEndian.PutUint64(count[:], uint64(len(nodes)))
-	if _, err := w.Write(count[:]); err != nil {
+	var headerBuf [10]byte
+	binary.BigEndian.PutUint64(headerBuf[:8], uint64(len(nodes)))
+	if _, err := w.Write(headerBuf[:8]); err != nil {
 		return err
 	}
 	for i := range nodes {
-		if _, err := nodes[i].Encode(w); err != nil {
+		if _, err := nodes[i].Encode(w, headerBuf[:]); err != nil {
 			return err
 		}
 	}
