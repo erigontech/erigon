@@ -45,10 +45,10 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 )
 
-// DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
-// amount of network announcements, but can't go over 2Mb. TODO: This is definitely not true.
-// see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-const DefaultPieceSize = 2 * 1024 * 1024
+// DefaultPieceSize - Erigon serves many big files, bigger pieces reduce the
+// amount of network announcements and bound the torrent info bytes held in RAM
+// for large snapshot sets.
+const DefaultPieceSize = 64 << 20
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // BitTorrent client default: 16Kb
