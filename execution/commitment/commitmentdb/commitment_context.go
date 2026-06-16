@@ -755,8 +755,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		hext = phext.RootTrie()
 	}
-	if tv == commitment.VariantBinPatriciaTrie || hext == nil {
-		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+	if hext == nil {
+		return 0, 0, errors.New("commitment trie not available")
 	}
 
 	if err := hext.SetState(cs.trieState); err != nil {

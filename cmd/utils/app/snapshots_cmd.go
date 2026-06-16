@@ -590,6 +590,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "new-step-size", Required: true, DefaultText: strconv.FormatUint(config3.DefaultStepSize, 10)},
+				&cli.BoolFlag{Name: "keep-blocks", Usage: "keep chaindata and reset only execution state in it, so already-downloaded blocks can be re-executed, instead of deleting the whole DB"},
 			}),
 		},
 		{
@@ -713,7 +714,8 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		return true, false, "", nil
 	}
 	if !ok {
-		return false, false, "", fmt.Errorf("can't find accessor for %s", filePath)
+		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
+		return true, false, "", nil
 	}
 	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {

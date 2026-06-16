@@ -1,10 +1,11 @@
 name: Cache Warming — Kurtosis GLOAS images
 
-# Populates the base-branch docker-cl-* image cache that test-kurtosis-gloas.yml
-# restores. That workflow only saves the cache on non-PR events and has no push /
-# schedule trigger of its own, so without this its PR runs cold-pull every
-# third-party image from Docker Hub. GitHub cache scoping makes default-branch
-# caches readable from every PR, so warming on main/release is enough.
+# Populates the base-branch docker-cl-* and docker-buildkit-* image caches that
+# test-kurtosis-gloas.yml restores. That workflow only saves the caches on non-PR
+# events and has no push / schedule trigger of its own, so without this its PR
+# runs cold-pull every third-party image from Docker Hub. GitHub cache scoping
+# makes default-branch caches readable from every PR, so warming on main/release
+# is enough.
 #
 # Triggers:
 #   - push to a protected branch touching test-kurtosis-gloas.yml -> warm on a version bump
