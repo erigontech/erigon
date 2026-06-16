@@ -150,6 +150,16 @@ type BlockRetire struct {
 	working            atomic.Bool
 	lastRetireGapStart atomic.Uint64
 
+	// retireCancel holds the cancel func for the currently-running
+	// retire goroutine (set on launch in RetireBlocksInBackground,
+	// cleared on goroutine exit). CancelInFlight uses it to abort
+	// retire when an admin SetHead Mode-B unwind targets a block
+	// below retire's range — retire would otherwise produce snapshot
+	// /.idx files for blocks the unwind is about to remove (wasted
+	// work + recovery wedge: 1803s timeout in iter 3 of the 5-iter
+	// soak 2026-06-14). Reads/writes via Load/Store on the atomic.
+	retireCancel atomic.Pointer[context.CancelFunc]
+
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
 
@@ -247,6 +257,60 @@ func NewBlockRetire(
 
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
+
+// Working reports whether a retire goroutine is currently running.
+// Mirror accessor for the unexported atomic; ExecModule needs it via
+// the narrow retireCanceller interface to decide whether to call
+// CancelInFlight before a Mode-B unwind.
+func (br *BlockRetire) Working() bool { return br.working.Load() }
+
+// MaxScheduledBlock returns the upper bound of the in-flight retire's
+// requested range. SetHead uses it to skip CancelInFlight when retire's
+// range is entirely below toBlock — that work survives the unwind.
+func (br *BlockRetire) MaxScheduledBlock() uint64 { return br.maxScheduledBlock.Load() }
+
+// setRetireCancel installs the cancel func for the just-launched retire
+// goroutine. Internal helper to make the launch/clear sites and tests
+// easier to read; the underlying storage is an atomic.Pointer so this
+// is safe to call from any goroutine.
+func (br *BlockRetire) setRetireCancel(cancel context.CancelFunc) {
+	if cancel == nil {
+		br.retireCancel.Store(nil)
+		return
+	}
+	br.retireCancel.Store(&cancel)
+}
+
+// CancelInFlight aborts an in-flight retire goroutine and waits up to
+// timeout for it to drain (working drops to false). Returns nil if the
+// retire was idle or drained in time, or an error if the goroutine
+// ignored cancellation past the deadline.
+//
+// The caller is SetHead's Mode-B path: when an unwind target is below
+// retire's range, every snapshot/.idx file retire is building is
+// destined for blocks the unwind will remove. Letting retire finish is
+// pure waste plus a tail of "Building recsplit. Collision happened."
+// retries because the unwind wipes EthTx underneath retire's indexer.
+func (br *BlockRetire) CancelInFlight(timeout time.Duration) error {
+	if !br.working.Load() {
+		return nil
+	}
+	if cancelPtr := br.retireCancel.Load(); cancelPtr != nil && *cancelPtr != nil {
+		(*cancelPtr)()
+	}
+	// Poll for the goroutine to clear working. Use a short fixed
+	// poll interval so the wait terminates promptly when retire's
+	// next ctx.Done check fires.
+	const pollInterval = 20 * time.Millisecond
+	deadline := time.Now().Add(timeout)
+	for br.working.Load() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("BlockRetire.CancelInFlight: in-flight retire did not drain within %s after cancel", timeout)
+		}
+		time.Sleep(pollInterval)
+	}
+	return nil
+}
 
 // SetCommitGate wraps the retirement's chain DB reads with the given gate so
 // each db.View acquires RLock, serializing against a writer (Aggregator
@@ -511,20 +575,30 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
+	// Wrap the caller's ctx so SetHead's CancelInFlight can abort the
+	// retire goroutine independently of stagedsync's ctx — without
+	// this lever, an admin Mode-B unwind targeting a block below
+	// retire's range would race the indexer (recsplit retry loop on
+	// half-wiped EthTx, inv_extras = orphan files past target).
+	retireCtx, retireCancel := context.WithCancel(ctx)
+	br.setRetireCancel(retireCancel)
+
 	go func() {
 		defer onDone()
 		defer br.working.Store(false)
+		defer br.setRetireCancel(nil)
+		defer retireCancel()
 
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
-			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
+			if err := br.snBuildAllowed.Acquire(retireCtx, 1); err != nil {
 				br.logger.Warn("[snapshots] retire blocks", "err", err)
 				return
 			}
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
+		err := br.RetireBlocks(retireCtx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
 			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)

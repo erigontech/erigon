@@ -37,6 +37,12 @@ const modeBQuiescenceTimeout = 120 * time.Second
 // as the in-flight SharedDomains is released.
 const modeBQuiescencePoll = 50 * time.Millisecond
 
+// modeBRetireCancelTimeout bounds how long SetHead waits for a
+// cancelled retire goroutine to drain. Retire's per-file work checks
+// ctx.Done on a coarse cadence (between segment rebuilds), so the
+// timeout is comfortably above one segment's typical build window.
+const modeBRetireCancelTimeout = 60 * time.Second
+
 // setHeadModeB runs the past-diffset admin unwind path. Entered when
 // targetBlock < minUnwindableBlock AND the chain is aligned-mode AND
 // an Unwinder is wired. Delegates the storage-layer + DB-reset
@@ -53,6 +59,17 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	// (after tx.Commit) and every error before it.
 	e.adminUnwindInProgress.Store(true)
 	defer e.adminUnwindInProgress.Store(false)
+
+	// Cancel any in-flight BlockRetire whose range crosses
+	// targetBlock — that work is, by definition, producing
+	// snapshot/.idx files for blocks the unwind is about to
+	// remove. Skipping this leaves the indexer racing the unwind's
+	// EthTx wipe (the recsplit-collision retry loop seen in iter 3
+	// of the 5-iter soak 2026-06-14).
+	if err := e.quiesceRetireIfPastTarget(targetBlock); err != nil {
+		e.unwinder.AbortUnwind()
+		return fmt.Errorf("SetHead mode B: %w", err)
+	}
 
 	if err := e.waitForQuiescence(ctx); err != nil {
 		// Quiescence failure: Unwind never ran, nothing was staged,
@@ -102,6 +119,35 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	// IsFirstCycle — see stage_snapshots.go).
 	e.pipelineExecutor.SignalSnapshotReconcileNeeded()
 	e.publishUnwindCompleted(targetBlock, currentHead)
+	return nil
+}
+
+// quiesceRetireIfPastTarget cancels an in-flight BlockRetire whose
+// scheduled range crosses targetBlock. The unwind is about to remove
+// every block above targetBlock, so retire's outputs above the cap
+// are wasted work — letting them finish also lets the indexer race
+// the unwind's EthTx wipe (recsplit-collision retry loop, inv_extras
+// orphans). If retire is idle, its range is entirely below the
+// target, or no handle is wired, this is a clean no-op.
+func (e *ExecModule) quiesceRetireIfPastTarget(targetBlock uint64) error {
+	if e.blockRetire == nil {
+		return nil
+	}
+	if !e.blockRetire.Working() {
+		return nil
+	}
+	if e.blockRetire.MaxScheduledBlock() <= targetBlock {
+		return nil
+	}
+	if e.logger != nil {
+		e.logger.Info("[setHead] cancelling in-flight BlockRetire (range past unwind target)",
+			"targetBlock", targetBlock,
+			"retireMaxScheduledBlock", e.blockRetire.MaxScheduledBlock(),
+			"timeout", modeBRetireCancelTimeout)
+	}
+	if err := e.blockRetire.CancelInFlight(modeBRetireCancelTimeout); err != nil {
+		return fmt.Errorf("cancel in-flight BlockRetire: %w", err)
+	}
 	return nil
 }
 

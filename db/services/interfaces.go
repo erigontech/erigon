@@ -127,6 +127,14 @@ type BlockRetire interface {
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int
+	// Working / MaxScheduledBlock / CancelInFlight expose the admin
+	// SetHead Mode-B cancellation lever. SetHead cancels an in-flight
+	// retire whose range crosses the unwind target — letting it
+	// finish would race the unwind's EthTx wipe (recsplit-collision
+	// retry loop) and leave inventory entries past target.
+	Working() bool
+	MaxScheduledBlock() uint64
+	CancelInFlight(timeout time.Duration) error
 }
 
 type DBEventNotifier interface {

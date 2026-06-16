@@ -1715,6 +1715,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		newProviderUnwinderAdapter(backend.components.Storage),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
+	// Install the BlockRetire cancellation lever so SetHead's Mode-B
+	// path can abort an in-flight retire whose range crosses the
+	// unwind target. Without this, retire keeps producing snapshot
+	// /.idx files for blocks the unwind is about to remove (the
+	// inv_extras=3 + recsplit-collision wedge from iter 3 of the
+	// 5-iter soak 2026-06-14). blockRetire is captured upthread at
+	// line 1547 and is guaranteed non-nil on the production path.
+	backend.execModule.SetBlockRetire(blockRetire)
 
 	var executionEngine executionclient.ExecutionEngine
 

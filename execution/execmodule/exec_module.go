@@ -276,6 +276,16 @@ type ExecModule struct {
 	// gap-bridging fails silently post-FCU. Zero = disabled. See
 	// docs/plans/20260614-deep-mode-b-gap-bridging.md.
 	setHeadMaxModeBGapBlocks uint64
+
+	// blockRetire is the cancellation lever SetHead uses to abort
+	// an in-flight BlockRetire whose range crosses the unwind target.
+	// Without this coordination retire keeps producing snapshot/.idx
+	// files for blocks the unwind is about to remove (wasted work +
+	// recovery wedge — iter 3 of the 5-iter mode-B soak 2026-06-14
+	// reported inv_extras=3 + 1803s recovery timeout from exactly this
+	// race). Wired by backend.go via SetBlockRetire; nil in harness /
+	// standalone-exec paths.
+	blockRetire retireCanceller
 }
 
 // eventBus is the publishing surface SetHead needs. Declared as a
@@ -285,6 +295,18 @@ type ExecModule struct {
 // real bus satisfies it without an adapter.
 type eventBus interface {
 	Publish(payload ...interface{}) int
+}
+
+// retireCanceller is the narrow surface SetHead needs from BlockRetire.
+// Declared here (not imported from db/snapshotsync/freezeblocks) so the
+// execmodule package keeps its dependency graph; *BlockRetire satisfies
+// it directly via its Working / MaxScheduledBlock / CancelInFlight
+// methods. Nil-safe by design — harness / standalone-exec paths leave
+// the field unset and SetHead skips the coordination.
+type retireCanceller interface {
+	Working() bool
+	MaxScheduledBlock() uint64
+	CancelInFlight(timeout time.Duration) error
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
@@ -759,6 +781,16 @@ func (e *ExecModule) SetSetHeadMaxDepthBlocks(blocks uint64) {
 // disabled (test/harness paths that don't run Caplin).
 func (e *ExecModule) SetSetHeadMaxModeBGapBlocks(blocks uint64) {
 	e.setHeadMaxModeBGapBlocks = blocks
+}
+
+// SetBlockRetire installs the cancellation lever SetHead uses to
+// abort an in-flight BlockRetire whose range crosses the unwind
+// target. Called from backend.go during component wiring with the
+// production *BlockRetire; harness paths leave it nil and SetHead
+// skips the coordination. Passing nil clears any previously-set
+// handle (used by tests that swap the harness in and out).
+func (e *ExecModule) SetBlockRetire(retire retireCanceller) {
+	e.blockRetire = retire
 }
 
 func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
