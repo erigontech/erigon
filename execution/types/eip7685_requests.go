@@ -25,11 +25,13 @@ import (
 const DepositRequestType byte = 0x00
 const WithdrawalRequestType byte = 0x01
 const ConsolidationRequestType byte = 0x02
+const BuilderDepositRequestType byte = 0x03
+const BuilderExitRequestType byte = 0x04
 const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
 const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
 const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
 
-var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType}
+var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType, BuilderDepositRequestType, BuilderExitRequestType}
 
 // FlatRequest carries serialized (flat) request data from any known Request type
 // The RequestData slice can contain collated data for more than one request of the same type
