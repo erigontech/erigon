@@ -32,8 +32,7 @@ import (
 
 // whaleOpts describes a deterministic account/storage corpus: smallBefore small
 // accounts, an optional bigSlots whale, extraWhales, smallAfter small accounts,
-// then tailAccounts single-slot accounts. fixedBalance != 0 uses a constant
-// balance (no RNG draw); otherwise each balance is rnd.Uint64()+1.
+// then tailAccounts single-slot accounts. Each balance is rnd.Uint64()+1.
 type whaleOpts struct {
 	seed             int64
 	smallBefore      int
@@ -43,7 +42,6 @@ type whaleOpts struct {
 	smallAfter       int
 	smallAfterSlots  int
 	tailAccounts     int
-	fixedBalance     uint64
 }
 
 // buildWhaleCorpus generates the account/storage corpus described by opts. The
@@ -56,11 +54,7 @@ func buildWhaleCorpus(opts whaleOpts) (pk [][]byte, upds []Update) {
 		addr := make([]byte, length.Addr)
 		rnd.Read(addr)
 		a := hex.EncodeToString(addr)
-		if opts.fixedBalance != 0 {
-			ub.Balance(a, opts.fixedBalance)
-		} else {
-			ub.Balance(a, rnd.Uint64()+1)
-		}
+		ub.Balance(a, rnd.Uint64()+1)
 		for range slots {
 			loc := make([]byte, length.Hash)
 			rnd.Read(loc)
@@ -109,7 +103,6 @@ const (
 	modeParallel
 	modeStreaming
 	modeStreamingScheduled
-	modeStreamingUpdates
 	modeStreamingPublic
 )
 
@@ -178,19 +171,6 @@ func processBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [
 		defer sc.Release()
 		for _, k := range keys {
 			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
-		r, err := sc.Process(ctx)
-		require.NoError(t, err)
-		return common.Copy(r)
-	case modeStreamingUpdates:
-		sc := newStreamCommitter(t, ms, workers, false)
-		defer sc.Release()
-		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-		defer ut.Close()
-		ut.SetStreamingCommitter(sc)
-		require.True(t, ut.Streaming())
-		for i, key := range keys {
-			ut.TouchPlainKeyDirect(string(key), &upds[i])
 		}
 		r, err := sc.Process(ctx)
 		require.NoError(t, err)

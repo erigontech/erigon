@@ -257,8 +257,6 @@ func assertEquivalentRootWorkers(
 	return requireRootParity(t, plainKeys, updates, numWorkers)
 }
 
-// TestParallelProcessSkeleton_EmptyUpdates: zero touched keys. Both modes
-// must return the empty-trie root.
 // TestParallelProcessSkeleton_DenseSingleNibbleBucket: many accounts under one
 // root nibble, so a single mount worker carries the whole batch.
 func TestParallelProcessSkeleton_DenseSingleNibbleBucket(t *testing.T) {
@@ -882,9 +880,6 @@ func TestParallelSingleTouchedKey(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelMixedAccountStorage: random mix of accounts and storage slots
-// across many accounts. Exercises both the account-leaf and storage-leaf
-// hashing paths through a single Process call.
 // TestParallelOnlyOneAccountTouchedManyTimes: the same account hit with
 // several distinct field updates (Balance, Nonce, CodeHash). UpdateBuilder
 // merges field updates per key before hashing, so the resulting batch has
