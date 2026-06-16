@@ -80,9 +80,8 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	return misc.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
-func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
-	currSlot := ethClock.GetCurrentSlot()
-	if slot != currSlot {
+func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, currentSlotOnEntry uint64) {
+	if slot != currentSlotOnEntry {
 		return
 	}
 	initialSlotTime := ethClock.GetSlotTime(slot)
@@ -127,6 +126,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
 		return ErrNotFinalizedDescendant
 	}
+	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
@@ -258,9 +258,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Block.Slot > f.highestSeen.Load() {
 		f.highestSeen.Store(block.Block.Slot)
 		f.highestSeenRoot.Store(common.Hash(blockRoot))
-		// Recorded on the fork-agnostic tip advance so block_importing_latency
-		// also populates on Fulu+ (the prior call site sat in the Deneb-only blob path).
-		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot, currentSlotOnEntry)
 	}
 	startStateProcess := time.Now()
 
