@@ -100,10 +100,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// SetBranchCache attaches the shared cache used by trie + branchEncoder.
-	// ConcurrentPatriciaHashed propagates the same instance to all mounts —
-	// see branch_cache.go for the concurrency contract.
-	SetBranchCache(*BranchCache)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -150,9 +146,7 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg. The
-// aggregator-scope BranchCache is attached separately via Trie.SetBranchCache
-// by the caller (wired from SharedDomains via the BranchCacheProvider lookup).
+// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
@@ -347,7 +341,6 @@ type BranchEncoder struct {
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	branchCache        *BranchCache                        // set via HexPatriciaHashed.SetBranchCache (cross-block, aggregator-scope)
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -594,9 +587,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	// No cache Put here: ctx.PutBranch writes to sd.mem which masks this
-	// prefix for the rest of the block; BranchCache is invalidated and
-	// repopulated at SD.Flush.
+	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}

@@ -99,12 +99,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// branchCache is the BranchCache instance attached via SetBranchCache.
-	// Production wires the aggregator-scope instance through
-	// InitializeTrieAndUpdates; tests/benchmarks may pass a per-init
-	// fallback. See branch_cache.go's concurrency contract.
-	branchCache *BranchCache
-
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
 	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
 	// applies deferred updates inline.
@@ -2825,20 +2819,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
-
-// SetBranchCache attaches a BranchCache for branch read-through and
-// write-through. Also propagates to the trie's BranchEncoder so encoder
-// writes update the cache via mark-dirty-then-Put (see CollectUpdate).
-//
-// nil disables — both this trie's branchFromCacheOrDB Level-2 and the
-// encoder's cache write-back become no-ops.
-func (hph *HexPatriciaHashed) SetBranchCache(c *BranchCache) {
-	hph.branchCache = c
-	hph.branchEncoder.branchCache = c
-}
-
-// BranchCache returns the attached BranchCache, or nil if none is set.
-func (hph *HexPatriciaHashed) BranchCache() *BranchCache { return hph.branchCache }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
