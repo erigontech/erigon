@@ -125,7 +125,7 @@ func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 	return common.Copy(root)
 }
 
-func processBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update) []byte {
+func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update) []byte {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
@@ -183,7 +183,7 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 	if mode != modeSeq {
 		ms.SetConcurrentCommitment(true)
 	}
-	return processBatch(t, ms, mode, workers, keys, upds), ms
+	return processModeBatch(t, ms, mode, workers, keys, upds), ms
 }
 
 // Folds two batches into one MockState so batch-1 branches become on-disk state for batch-2.
@@ -193,8 +193,8 @@ func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []
 	if mode != modeSeq {
 		ms.SetConcurrentCommitment(true)
 	}
-	processBatch(t, ms, mode, workers, k1, u1)
-	return processBatch(t, ms, mode, workers, k2, u2), ms
+	processModeBatch(t, ms, mode, workers, k1, u1)
+	return processModeBatch(t, ms, mode, workers, k2, u2), ms
 }
 
 func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int) []byte {

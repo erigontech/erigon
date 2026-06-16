@@ -78,7 +78,6 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		defer ms.mu.RUnlock()
 	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
-		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
 		return exBytes, 0, nil
 	}
 	return nil, 0, nil
@@ -93,7 +92,6 @@ func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 		ms.mu.RUnlock()
 	}
 	if !ok {
-		//ms.t.Logf("%p GetAccount not found key [%x]", ms, plainKey)
 		u := new(Update)
 		u.Flags = DeleteUpdate
 		return u, nil
@@ -161,7 +159,7 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 
 func (ms *MockState) TxNum() uint64 { return 0 }
 
-// / called sequentially outside of the trie so no need to protect
+// applyPlainUpdates is called sequentially outside of the trie, so it needs no locking.
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
 		update := updates[i]
@@ -187,11 +185,10 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 	return nil
 }
 
-// / called sequentially outside of the trie so no need to protect
+// applyBranchNodeUpdates is called sequentially outside of the trie, so it needs no locking.
 func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
 	for key, update := range updates {
 		if pre, ok := ms.cm[key]; ok {
-			// Merge
 			merged, err := pre.MergeHexBranches(update, nil)
 			if err != nil {
 				panic(err)
@@ -348,10 +345,7 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 	return ub
 }
 
-// Build returns three slices (in the order sorted by the hashed keys)
-// 1. Plain keys
-// 2. Corresponding hashed keys
-// 3. Corresponding updates
+// Build returns plain keys and the corresponding updates, ordered by increasing hashed key.
 func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
@@ -443,6 +437,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	return
 }
 
+// WrapKeyUpdatesParallel is WrapKeyUpdates with concurrent commitment enabled on the result.
 func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
 	tb.Helper()
 
@@ -473,7 +468,7 @@ func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, u
 	return upd
 }
 
-// it's caller problem to keep track of upd contents. If given Updates is not empty, it will NOT be cleared before adding new keys
+// WrapKeyUpdatesInto adds keys to an existing Updates without clearing its prior contents.
 func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Update) {
 	tb.Helper()
 	for i, key := range keys {
@@ -481,11 +476,4 @@ func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Up
 			c.update = &updates[i]
 		})
 	}
-}
-
-type ParallelMockState struct {
-	MockState
-	accMu  sync.Mutex
-	stoMu  sync.Mutex
-	commMu sync.RWMutex
 }
