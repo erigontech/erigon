@@ -104,8 +104,21 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
+// fastJSONResult lets an RPC result implement fast JSON marshalling where needed — e.g. large payloads that benefit from skipping the reflection-based path.
+type fastJSONResult interface {
+	MarshalFastJSON() ([]byte, error)
+}
+
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	enc, err := json.Marshal(result)
+	var (
+		enc []byte
+		err error
+	)
+	if fm, ok := result.(fastJSONResult); ok {
+		enc, err = fm.MarshalFastJSON()
+	} else {
+		enc, err = json.Marshal(result)
+	}
 	if err != nil {
 		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)
@@ -207,13 +220,28 @@ func NewFuncCodec(conn deadlineCloser, encode, decode func(v any) error) ServerC
 	return codec
 }
 
+// rawResponse is a pre-assembled, already-valid JSON response the codec writes verbatim,
+// skipping json.Encoder's redundant appendCompact re-scan; a distinct type keeps that path opt-in.
+type rawResponse []byte
+
+// MarshalJSON emits the bytes verbatim so json.Marshal-based transports don't base64-encode the []byte.
+func (r rawResponse) MarshalJSON() ([]byte, error) { return r, nil }
+
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
 func NewCodec(conn Conn) ServerCodec {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return NewFuncCodec(conn, enc.Encode, dec.Decode)
+	encode := func(v any) error {
+		raw, ok := v.(rawResponse)
+		if !ok {
+			return enc.Encode(v)
+		}
+		_, err := conn.Write(append(raw, '\n'))
+		return err
+	}
+	return NewFuncCodec(conn, encode, dec.Decode)
 }
 
 func (c *jsonCodec) remoteAddr() string {

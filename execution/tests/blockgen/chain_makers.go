@@ -24,7 +24,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -660,6 +659,6 @@ func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header      
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
 func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }

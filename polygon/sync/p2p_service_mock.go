@@ -11,12 +11,12 @@ package sync
 
 import (
 	context "context"
-	big "math/big"
 	reflect "reflect"
 
 	common "github.com/erigontech/erigon/common"
 	p2p "github.com/erigontech/erigon/execution/p2p"
 	types "github.com/erigontech/erigon/execution/types"
+	uint256 "github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -291,7 +291,7 @@ func (c *Mockp2pServicePenalizeCall) DoAndReturn(f func(context.Context, *p2p.Pe
 }
 
 // PublishNewBlock mocks base method.
-func (m *Mockp2pService) PublishNewBlock(block *types.Block, td *big.Int) {
+func (m *Mockp2pService) PublishNewBlock(block *types.Block, td uint256.Int) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "PublishNewBlock", block, td)
 }
@@ -315,13 +315,13 @@ func (c *Mockp2pServicePublishNewBlockCall) Return() *Mockp2pServicePublishNewBl
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *Mockp2pServicePublishNewBlockCall) Do(f func(*types.Block, *big.Int)) *Mockp2pServicePublishNewBlockCall {
+func (c *Mockp2pServicePublishNewBlockCall) Do(f func(*types.Block, uint256.Int)) *Mockp2pServicePublishNewBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *Mockp2pServicePublishNewBlockCall) DoAndReturn(f func(*types.Block, *big.Int)) *Mockp2pServicePublishNewBlockCall {
+func (c *Mockp2pServicePublishNewBlockCall) DoAndReturn(f func(*types.Block, uint256.Int)) *Mockp2pServicePublishNewBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

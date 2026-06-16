@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
@@ -57,9 +57,9 @@ const MaxLeafSize = 24
 // ExistenceFilterVersion selects the existence-filter format written for new index files.
 //
 //	0 = byte-array of first-bytes (legacy, no FuseFilter)
-//	1 = BinaryFuse[uint8] — monolithic FuseFilter (current default)
-//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
-const ExistenceFilterVersion version.DataStructureVersion = 1
+//	1 = BinaryFuse[uint8] — monolithic FuseFilter
+//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×; current default)
+const ExistenceFilterVersion version.DataStructureVersion = 2
 
 func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
 	if v == 2 {

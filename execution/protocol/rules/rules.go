@@ -21,8 +21,6 @@
 package rules
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -61,7 +59,7 @@ type ChainHeaderReader interface {
 	GetHeaderByHash(hash common.Hash) *types.Header
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
-	GetTd(hash common.Hash, number uint64) *big.Int
+	GetTd(hash common.Hash, number uint64) *uint256.Int
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64

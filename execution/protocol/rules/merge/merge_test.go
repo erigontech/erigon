@@ -17,9 +17,9 @@
 package merge
 
 import (
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
@@ -64,7 +64,7 @@ func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
+func (r readerMock) GetTd(common.Hash, uint64) *uint256.Int {
 	return nil
 }
 

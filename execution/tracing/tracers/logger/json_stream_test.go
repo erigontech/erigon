@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -63,7 +62,7 @@ func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, 
 	return uint256.Int{}, nil
 }
 func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *mockIBS) GetRefund() mdgas.MdGas               { return mdgas.MdGas{} }
+func (m *mockIBS) GetRefund() uint64                    { return 0 }
 
 // captureOnOpcode runs a single OnOpcode call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
@@ -224,6 +223,13 @@ func TestJsonStreamLogger_EnableMemory(t *testing.T) {
 		obj := captureOnOpcode(t, &LogConfig{EnableMemory: false}, mem, nil, nil)
 		if _, ok := obj["memory"]; ok {
 			t.Error("expected 'memory' field to be absent, but it was present")
+		}
+	})
+
+	t.Run("enableMemory=true with empty memory excludes memory field", func(t *testing.T) {
+		obj := captureOnOpcode(t, &LogConfig{EnableMemory: true}, nil, nil, nil)
+		if _, ok := obj["memory"]; ok {
+			t.Error("expected 'memory' field to be absent when memory is empty, but it was present")
 		}
 	})
 }

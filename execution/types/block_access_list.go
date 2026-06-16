@@ -523,6 +523,8 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 	var size uint64
 	if size, err = s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
+			// EOL at List() time means the BAL value is missing/pruned,
+			// not that an empty list (0xc0) was decoded. Return nil.
 			*out = nil
 			return nil
 		}
@@ -558,7 +560,9 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		return err
 	}
 	if len(changes) == 0 {
-		*out = nil
+		// EIP-7928: a genuine empty list (0xc0) was successfully decoded.
+		// Return an initialized empty slice, not nil.
+		*out = make(BlockAccessList, 0)
 		return nil
 	}
 	*out = changes
@@ -577,9 +581,6 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 
 // EncodeBlockAccessListBytes encodes a block access list into RLP bytes.
 func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
-	if len(bal) == 0 {
-		return []byte{0xc0}, nil
-	}
 	if err := bal.Validate(); err != nil {
 		return nil, err
 	}
@@ -918,8 +919,9 @@ func (sc *SlotChanges) validate() error {
 }
 
 func validateStorageChangeEntries(changes []*StorageChange) error {
+	// Each SlotChanges entry MUST contain at least one StorageChange.
 	if len(changes) == 0 {
-		return nil
+		return errors.New("empty slot changes")
 	}
 	if len(changes) > maxStorageChangesPerSlot {
 		return fmt.Errorf("too many storage change entries (%d > %d)", len(changes), maxStorageChangesPerSlot)
@@ -1004,7 +1006,12 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 		if slot == nil {
 			return fmt.Errorf("entry %d is nil", i)
 		}
+		if err := validateStorageChangeEntries(slot.Changes); err != nil {
+			return fmt.Errorf("entry %d: %w", i, err)
+		}
 	}
+
+	// Each storage key MUST appear at most once in storage_changes per account.
 	for i := 1; i < len(slots); i++ {
 		if slots[i-1].Slot.Cmp(slots[i].Slot) >= 0 {
 			return fmt.Errorf("slots must be strictly increasing (index %d)", i)

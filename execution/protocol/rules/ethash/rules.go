@@ -354,6 +354,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 	}
 	// Recompute the digest and PoW values
 	number := header.Number.Uint64()
+	sealHash := ethash.SealHash(header)
 
 	var (
 		digest []byte
@@ -363,7 +364,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 	if fulldag {
 		dataset := ethash.dataset(number, true)
 		if dataset.generated() {
-			digest, result = hashimotoFull(dataset.dataset, ethash.SealHash(header).Bytes(), header.Nonce.Uint64())
+			digest, result = hashimotoFull(dataset.dataset, sealHash[:], header.Nonce.Uint64())
 
 			// Datasets are unmapped in a finalizer. Ensure that the dataset stays alive
 			// until after the call to hashimotoFull so it's not unmapped while being used.
@@ -381,7 +382,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 		if ethash.config.PowMode == ethashcfg.ModeTest {
 			size = 32 * 1024
 		}
-		digest, result = hashimotoLight(size, cache.cache, ethash.SealHash(header).Bytes(), header.Nonce.Uint64())
+		digest, result = hashimotoLight(size, cache.cache, sealHash[:], header.Nonce.Uint64())
 
 		// Caches are unmapped in a finalizer. Ensure that the cache stays alive
 		// until after the call to hashimotoLight so it's not unmapped while being used.

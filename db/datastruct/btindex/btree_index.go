@@ -24,20 +24,18 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
-	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
@@ -52,6 +50,10 @@ const BtreeLogPrefix = "btree"
 var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
+// BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
+var BtInterp = dbg.EnvBool("BT_INTERP", true)
+var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
@@ -171,7 +173,6 @@ func (c *Cursor) readKV() error {
 type BtIndexWriter struct {
 	maxOffset  uint64
 	prevOffset uint64
-	minDelta   uint64
 	indexF     *os.File
 	ef         *eliasfano32.EliasFano
 	collector  *etl.Collector
@@ -190,12 +191,11 @@ type BtIndexWriter struct {
 }
 
 type BtIndexWriterArgs struct {
-	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir      string
-	M           uint64
-	KeyCount    int
-	EtlBufLimit datasize.ByteSize
-	Lvl         log.Lvl
+	IndexFile string // File name where the index and the minimal perfect hash function will be written to
+	TmpDir    string
+	M         uint64
+	KeyCount  int
+	Lvl       log.Lvl
 }
 
 // NewBtIndexWriter creates a new BtIndexWriter instance with given number of keys
@@ -203,9 +203,6 @@ type BtIndexWriterArgs struct {
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
 func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
-	if args.EtlBufLimit == 0 {
-		args.EtlBufLimit = etl.BufferOptimalSize / 2
-	}
 	if args.Lvl == 0 {
 		args.Lvl = log.LvlTrace
 	}
@@ -215,7 +212,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
 
-	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.LargeSortableBuffers, logger)
+	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.SmallSortableBuffers, logger)
 	btw.collector.SortAndFlushInBackground(false)
 	btw.collector.LogLvl(btw.args.Lvl)
 
@@ -234,10 +231,6 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 
 	keepKey := keep
 	if btw.keysWritten > 0 {
-		delta := offset - btw.prevOffset
-		if btw.keysWritten == 1 || delta < btw.minDelta {
-			btw.minDelta = delta
-		}
 		keepKey = btw.keysWritten%btw.args.M == 0
 	}
 
@@ -271,7 +264,12 @@ func (btw *BtIndexWriter) Build() error {
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
 	if btw.keysWritten > 0 {
-		btw.ef = eliasfano32.NewEliasFano(btw.keysWritten, btw.maxOffset)
+		efBuilder, err := eliasfano32.NewEliasFanoOffHeap(btw.keysWritten, btw.maxOffset, btw.args.TmpDir)
+		if err != nil {
+			return fmt.Errorf("[index] create offheap ef: %w", err)
+		}
+		defer efBuilder.Close()
+		btw.ef = efBuilder.EliasFano
 
 		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
 		var ki uint64
@@ -355,8 +353,8 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
+func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
@@ -365,33 +363,35 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed seg.FileCompression, trace bool) (*seg.Decompressor, *BtIndex, error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
 	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if err != nil {
+			d.Close()
+		}
+	}()
 	kv := seg.NewReader(d.MakeGetter(), compressed)
 	bt, err := OpenBtreeIndexWithDecompressor(indexPath, M, kv)
 	if err != nil {
-		d.Close()
 		return nil, nil, err
 	}
 	return d, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
 	defer kv.MadvNormal().DisableReadAhead()
-	existenceFilterPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
 		var err error
-		useFuse := false
-		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath, useFuse)
+		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath)
 		if err != nil {
 			return err
 		}

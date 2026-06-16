@@ -213,15 +213,22 @@ const (
 	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 
 	// EIP-8037: State Creation Gas Cost Increase
-	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
-	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
-	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
-	CreateGasEIP8037                = CallValueTransferGas
-	Create2GasEIP8037               = CallValueTransferGas
-	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
-	PerAuthBaseCostEIP8037          = 7_500
-	StateBytesNewAccount            = 112 // bytes per new account creation
-	StateBytesAuthBase              = 23  // bytes per authorization base cost
+	CreateGasEIP8037        = CallValueTransferGas // spec: "9000, assuming same as GAS_CALL_VALUE"
+	Create2GasEIP8037       = CallValueTransferGas
+	SstoreSetGasEIP8037     = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
+	PerAuthBaseCostEIP8037  = 7_500
+	StateBytesNewAccount    = 120 // bytes per new account creation
+	StateBytesPerStorageSet = 64  // bytes per new storage slot
+	StateBytesAuthBase      = 23  // bytes per authorization base cost
+	SystemMaxSstoresPerCall = 16  // upper bound on new SSTOREs per system call (matches MAX_WITHDRAWAL_REQUESTS_PER_BLOCK)
+	CostPerStateByte        = 1530
+
+	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
+	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
+	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
+	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 )
 
 // EIP-7702: Set EOA account code

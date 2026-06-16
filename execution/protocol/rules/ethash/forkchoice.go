@@ -18,7 +18,8 @@ package ethash
 
 import (
 	"bytes"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -31,12 +32,12 @@ import (
 // total difficulty AND equal height, the lexicographically larger block hash
 // wins. This matches geth's tie-break — see
 // https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L81.
-func ShouldReorg(localTd *big.Int, localHeight uint64, localHash common.Hash, newTd *big.Int, newHeight uint64, newHash common.Hash) bool {
+func ShouldReorg(localTd *uint256.Int, localHeight uint64, localHash common.Hash, newTd *uint256.Int, newHeight uint64, newHash common.Hash) bool {
 	if cmp := newTd.Cmp(localTd); cmp != 0 {
 		return cmp > 0
 	}
 	if newHeight != localHeight {
 		return newHeight < localHeight
 	}
-	return bytes.Compare(localHash.Bytes(), newHash.Bytes()) < 0
+	return bytes.Compare(localHash[:], newHash[:]) < 0
 }

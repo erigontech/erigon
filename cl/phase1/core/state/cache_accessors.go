@@ -152,6 +152,15 @@ func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, e
 func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
 	epoch := slot / b.BeaconConfig().SlotsPerEpoch
 
+	if b.Version() >= clparams.FuluVersion {
+		stateEpoch := b.Slot() / b.BeaconConfig().SlotsPerEpoch
+		if epoch >= stateEpoch && epoch <= stateEpoch+b.BeaconConfig().MinSeedLookahead {
+			p := b.GetProposerLookahead()
+			index := int((epoch-stateEpoch)*b.BeaconConfig().SlotsPerEpoch + slot%b.BeaconConfig().SlotsPerEpoch)
+			return p.Get(index), nil
+		}
+	}
+
 	hash := sha256.New()
 	beaconConfig := b.BeaconConfig()
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
@@ -173,6 +182,9 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
+	if b.Version() >= clparams.GloasVersion {
+		return shuffling.ComputeUnslashedBalanceWeightedProposerIndex(b.BeaconState, indices, seedArray)
+	}
 	return shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 }
 
@@ -517,7 +529,7 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 // ptcWindow's 3-epoch range (e.g. state advanced far past the parent).
 func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
 	if b.Version() >= clparams.GloasVersion {
-		ptc, err := b.getPTCFromWindow(slot)
+		ptc, err := b.GetPTCFromWindow(slot)
 		if err == nil {
 			return ptc, nil
 		}
@@ -526,14 +538,14 @@ func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
 	return b.ComputePTC(slot)
 }
 
-// getPTCFromWindow reads the PTC for a given slot from the ptc_window state field.
+// GetPTCFromWindow reads the PTC for a given slot from the ptc_window state field.
 // Index calculation follows the spec's get_ptc:
 //   - previous epoch: index = slot % SLOTS_PER_EPOCH
 //   - current/lookahead: index = (epoch - state_epoch + 1) * SLOTS_PER_EPOCH + slot % SLOTS_PER_EPOCH
 //
 // The ptc_window only covers [stateEpoch-1, stateEpoch, stateEpoch+1]. Slots
 // outside this range return an error.
-func (b *CachingBeaconState) getPTCFromWindow(slot uint64) ([]uint64, error) {
+func (b *CachingBeaconState) GetPTCFromWindow(slot uint64) ([]uint64, error) {
 	cfg := b.BeaconConfig()
 	epoch := GetEpochAtSlot(cfg, slot)
 	stateEpoch := b.Slot() / cfg.SlotsPerEpoch
@@ -557,8 +569,11 @@ func (b *CachingBeaconState) getPTCFromWindow(slot uint64) ([]uint64, error) {
 	}
 
 	ptcWindow := b.GetPtcWindow()
+	if ptcWindow == nil {
+		return nil, errors.New("GetPTCFromWindow: ptcWindow is nil")
+	}
 	if index >= uint64(ptcWindow.Length()) {
-		return nil, fmt.Errorf("getPTCFromWindow: index %d out of range (window size %d)", index, ptcWindow.Length())
+		return nil, fmt.Errorf("GetPTCFromWindow: index %d out of range (window size %d)", index, ptcWindow.Length())
 	}
 
 	vec := ptcWindow.Get(int(index))

@@ -302,7 +302,7 @@ type BlockHeadersPacket66 struct {
 // NewBlockPacket is the network packet for the block propagation message.
 type NewBlockPacket struct {
 	Block *types.Block
-	TD    *big.Int
+	TD    uint256.Int
 }
 
 func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
@@ -311,7 +311,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	blockLen := nbp.Block.EncodingSize()
 	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
-	encodingSize += rlp.BigIntLen(nbp.TD)
+	encodingSize += rlp.Uint256Len(nbp.TD)
 	// prefix
 	var b [32]byte
 	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
@@ -322,7 +322,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TD
-	if err := rlp.EncodeBigInt(nbp.TD, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(nbp.TD, w, b[:]); err != nil {
 		return err
 	}
 	return nil
@@ -339,11 +339,9 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode TD
-	var td uint256.Int
-	if err = s.ReadUint256(&td); err != nil {
+	if err = s.ReadUint256(&nbp.TD); err != nil {
 		return fmt.Errorf("read TD: %w", err)
 	}
-	nbp.TD = td.ToBig()
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
@@ -410,12 +408,16 @@ type GetBlockAccessListsPacket66 struct {
 // of a types.BlockAccessList per EIP-7928, passed through as RawValue since
 // rawdb stores it in that exact form.
 //
-// An empty RLP list (0xc0) in slot i has two possible meanings and MUST be
-// disambiguated by the caller via the corresponding header's
-// BlockAccessListHash:
-//   - "peer does not have this BAL" — hash will not match the header
-//   - "block has a genuinely empty BAL" — hash will equal the empty-list hash
-//     (see common/empty.BlockAccessListHash)
+// EIP-8159 (post ethereum/EIPs#11553) defines three wire-distinguishable
+// entry shapes:
+//   - 0x80 (RLP empty string) — "peer does not have this BAL". The caller
+//     should treat the slot as missing and may retry from another peer.
+//   - 0xc0 (RLP empty list) — "block has a genuinely empty BAL". Valid only
+//     when the corresponding header's BlockAccessListHash equals the
+//     empty-BAL hash (see common/empty.BlockAccessListHash); otherwise the
+//     peer is misbehaving.
+//   - any other payload — actual BAL bytes whose keccak256 MUST match the
+//     header's BlockAccessListHash.
 type BlockAccessListsPacket []rlp.RawValue
 
 // BlockAccessListsPacket66 wraps BlockAccessListsPacket in the eth/66

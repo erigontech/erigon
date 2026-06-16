@@ -398,6 +398,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		NetworkConfig:      networkConfig,
 		BeaconConfig:       beaconConfig,
 		TmpDir:             dirs.Tmp,
+		DataDir:            dirs.DataDir,
 		SubscribeAllTopics: config.SubscribeAllTopics,
 		//EnableBlocks:                 true,
 		//ActiveIndicies: uint64(len(activeIndicies)),
@@ -408,7 +409,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
-	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,
 			Port:               int(config.CaplinDiscoveryPort),
@@ -419,6 +420,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			NetworkConfig:      networkConfig,
 			BeaconConfig:       beaconConfig,
 			TmpDir:             dirs.Tmp,
+			DataDir:            dirs.DataDir,
 			MaxPeerCount:       config.MaxPeerCount,
 			SubscribeAllTopics: config.SubscribeAllTopics,
 		},
@@ -592,7 +594,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			syncedDataManager,
 			statesReader,
 			sentinel,
-			version.GitTag,
+			version.NodeVersion(),
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,

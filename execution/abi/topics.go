@@ -118,18 +118,42 @@ func genIntType(rule int64, size uint) []byte {
 
 // ParseTopics converts the indexed topic fields into actual log field values.
 func ParseTopics(out any, fields Arguments, topics []common.Hash) error {
+	outValue := reflect.ValueOf(out)
+	if outValue.Kind() != reflect.Pointer || outValue.IsNil() {
+		return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
+	}
+	outValue = outValue.Elem()
+	if outValue.Kind() != reflect.Struct {
+		return fmt.Errorf("abi: cannot unmarshal indexed event fields into %T", out)
+	}
+
 	return parseTopicWithSetter(fields, topics,
-		func(arg Argument, reconstr any) {
-			field := reflect.ValueOf(out).Elem().FieldByName(ToCamelCase(arg.Name))
-			field.Set(reflect.ValueOf(reconstr))
+		func(arg Argument, reconstr any) error {
+			field := outValue.FieldByName(ToCamelCase(arg.Name))
+			if !field.IsValid() {
+				return fmt.Errorf("abi: field %s can't be found in the given value", arg.Name)
+			}
+			if !field.CanSet() {
+				return fmt.Errorf("abi: field %s cannot be set", arg.Name)
+			}
+			value := reflect.ValueOf(reconstr)
+			if !value.IsValid() || !value.Type().AssignableTo(field.Type()) {
+				return fmt.Errorf("abi: cannot unmarshal %T in to %v", reconstr, field.Type())
+			}
+			field.Set(value)
+			return nil
 		})
 }
 
 // ParseTopicsIntoMap converts the indexed topic field-value pairs into map key-value pairs.
 func ParseTopicsIntoMap(out map[string]any, fields Arguments, topics []common.Hash) error {
+	if out == nil {
+		return errors.New("abi: cannot unpack into a nil map")
+	}
 	return parseTopicWithSetter(fields, topics,
-		func(arg Argument, reconstr any) {
+		func(arg Argument, reconstr any) error {
 			out[arg.Name] = reconstr
+			return nil
 		})
 }
 
@@ -138,7 +162,7 @@ func ParseTopicsIntoMap(out map[string]any, fields Arguments, topics []common.Ha
 //
 // Note, dynamic types cannot be reconstructed since they get mapped to Keccak256
 // hashes as the topic value!
-func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Argument, any)) error {
+func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Argument, any) error) error {
 	// Sanity check that the fields and topics match up
 	if len(fields) != len(topics) {
 		return errors.New("topic/field count mismatch")
@@ -158,20 +182,22 @@ func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Ar
 			reconstr = topics[i]
 		case FunctionTy:
 			if garbage := binary.BigEndian.Uint64(topics[i][0:8]); garbage != 0 {
-				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i].Bytes())
+				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i][:])
 			}
 			var tmp [24]byte
 			copy(tmp[:], topics[i][8:32])
 			reconstr = tmp
 		default:
 			var err error
-			reconstr, err = toGoType(0, arg.Type, topics[i].Bytes())
+			reconstr, err = toGoType(0, arg.Type, topics[i][:])
 			if err != nil {
 				return err
 			}
 		}
 		// Use the setter function to store the value
-		setter(arg, reconstr)
+		if err := setter(arg, reconstr); err != nil {
+			return err
+		}
 	}
 
 	return nil

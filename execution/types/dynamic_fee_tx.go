@@ -22,7 +22,6 @@ package types
 import (
 	"errors"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -334,7 +333,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 }
 
 type dynamicFeeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -345,7 +344,7 @@ type dynamicFeeTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *DynamicFeeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{

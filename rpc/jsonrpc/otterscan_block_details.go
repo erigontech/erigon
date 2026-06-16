@@ -81,7 +81,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, err
 	}
 	if blockNumber == nil {
-		return nil, fmt.Errorf("couldn't find block number for hash %v", hash.Bytes())
+		return nil, fmt.Errorf("couldn't find block number for hash %v", hash[:])
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)

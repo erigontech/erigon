@@ -21,7 +21,8 @@ func TestIsBuilderWithdrawalCredential_0x03(t *testing.T) {
 
 	var creds common.Hash
 	creds[0] = 0x03
-	copy(creds[12:], common.HexToAddress("0xdeadbeef").Bytes())
+	addr := common.HexToAddress("0xdeadbeef")
+	copy(creds[12:], addr[:])
 
 	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
 		"0x03 prefix must be recognised as builder withdrawal credential")
@@ -38,6 +39,35 @@ func TestIsBuilderWithdrawalCredential_NotBuilder(t *testing.T) {
 		require.False(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
 			"prefix 0x%02x must NOT be classified as builder credential", prefix)
 	}
+}
+
+func TestGetProposerDependentRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.SlotsPerHistoricalRoot = 8192
+	cfg.MinSeedLookahead = 1
+	s := state2.New(&cfg)
+	s.SetSlot(100)
+	want := common.Hash{0x42}
+	s.SetBlockRootAt(63, want)
+
+	got, err := state2.GetProposerDependentRoot(s, 3)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.MinSeedLookahead = 1
+	s := state2.New(&cfg)
+	s.SetSlot(100)
+
+	_, err := state2.GetProposerDependentRoot(s, 0)
+	require.Error(t, err)
+
+	_, err = state2.GetProposerDependentRoot(s, 1)
+	require.Error(t, err)
 }
 
 // TestApplyDepositForBuilder_NewBuilder_WithValidSignature verifies that a
@@ -147,7 +177,7 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 
 	// Build withdrawal credentials: 0x03 + 11 zero bytes + 20-byte address.
 	withdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
-	copy(withdrawalCredentials[12:], feeRecipient.Bytes())
+	copy(withdrawalCredentials[12:], feeRecipient[:])
 
 	amount = cfg.MinDepositAmount // 1e9 Gwei
 

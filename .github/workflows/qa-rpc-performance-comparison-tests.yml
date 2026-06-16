@@ -10,6 +10,12 @@ on:
         default: false
   schedule:
     - cron: '0 2 * * *'  # Run daily at 02:00 UTC
+  # Auto-fire on PRs that touch this workflow's own YAML so the exec-mode
+  # matrix change can be validated in-PR without a manual dispatch.
+  # Regular PRs that don't touch this file are unaffected.
+  pull_request:
+    paths:
+      - '.github/workflows/qa-rpc-performance-comparison-tests.yml'
 
 concurrency:
   group: rpc-performance-latest-${{ github.ref }}
@@ -81,16 +87,24 @@ jobs:
           python3 coordinated_start.py --client "geth" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
 
   test:
-    name: Benchmark Latest ${{ matrix.client }}
+    name: Benchmark Latest ${{ matrix.client }}${{ matrix.client == 'erigon' && format(' ({0})', matrix.exec_mode) || '' }}
     needs: [setup]
     strategy:
       fail-fast: false
+      # erigon runs twice (serial + parallel exec) so the perf comparison
+      # surfaces both data points; geth has only one entry — exec_mode there
+      # is set to a placeholder and ignored by the geth binary.
       matrix:
         include:
           - client: erigon
             runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
+            exec_mode: serial
+          - client: erigon
+            runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
+            exec_mode: parallel
           - client: geth
             runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
+            exec_mode: parallel  # placeholder — geth ignores this
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 480
     permissions:
@@ -102,6 +116,11 @@ jobs:
       TOTAL_TIME_SECONDS: 1200 # 20 minutes
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
+      # Toggle dbg.Exec3Parallel when running erigon. envLookup in
+      # common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to the
+      # EXEC3_PARALLEL flag declared in common/dbg/experiments.go. geth
+      # ignores it.
+      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
       - name: Set reference data dir based on branch
@@ -354,7 +373,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest-$method \
+              --test_name rpc-performance-test-latest${{ matrix.client == 'erigon' && matrix.exec_mode == 'parallel' && '-parallel' || '' }}-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
@@ -427,7 +446,7 @@ jobs:
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}-${{ matrix.exec_mode }}
           path: ${{ env.past_test_dir }}
 
       - name: Stop Erigon
@@ -447,7 +466,7 @@ jobs:
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: erigon-logs-${{ env.CHAIN }}
+          name: erigon-logs-${{ env.CHAIN }}-${{ matrix.exec_mode }}
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Delete Erigon Testbed Data Directory

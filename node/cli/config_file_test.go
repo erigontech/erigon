@@ -25,6 +25,77 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+func TestSetFlagsFromConfigFile_YAML(t *testing.T) {
+	staticPeersFlag := cli.StringFlag{Name: "staticpeers", Value: ""}
+	sentinelStaticPeersFlag := cli.StringSliceFlag{Name: "sentinel.staticpeers"}
+	datadirFlag := cli.StringFlag{Name: "datadir", Value: ""}
+
+	tests := []struct {
+		name                    string
+		ext                     string // ".yaml" or ".yml"
+		yaml                    string
+		wantStaticPeers         string
+		wantSentinelStaticPeers []string
+		wantDatadir             string
+	}{
+		{
+			name:        "flat scalar value, .yaml extension",
+			ext:         ".yaml",
+			yaml:        "datadir: /tmp/erigon\n",
+			wantDatadir: "/tmp/erigon",
+		},
+		{
+			name:        "flat scalar value, .yml extension",
+			ext:         ".yml",
+			yaml:        "datadir: /tmp/erigon\n",
+			wantDatadir: "/tmp/erigon",
+		},
+		{
+			name:            "YAML sequence for staticpeers",
+			ext:             ".yaml",
+			yaml:            "staticpeers:\n  - enode://abc@1.2.3.4:30303\n  - enode://def@5.6.7.8:30303\n",
+			wantStaticPeers: "enode://abc@1.2.3.4:30303,enode://def@5.6.7.8:30303",
+		},
+		{
+			// Nested YAML map: yaml.v3 decodes these as map[string]any directly,
+			// whereas yaml.v2 produced map[interface{}]interface{} and required
+			// the now-deleted convertYAMLMap workaround.
+			name:                    "nested YAML map for sentinel.staticpeers",
+			ext:                     ".yaml",
+			yaml:                    "sentinel:\n  staticpeers:\n    - enode://abc@1.2.3.4:9000\n    - enode://def@5.6.7.8:9000\n",
+			wantSentinelStaticPeers: []string{"enode://abc@1.2.3.4:9000", "enode://def@5.6.7.8:9000"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgFile := filepath.Join(t.TempDir(), "erigon"+tt.ext)
+			require.NoError(t, os.WriteFile(cfgFile, []byte(tt.yaml), 0o600))
+
+			app := cli.NewApp()
+			app.Flags = []cli.Flag{&staticPeersFlag, &sentinelStaticPeersFlag, &datadirFlag}
+			app.Action = func(ctx *cli.Context) error {
+				err := SetFlagsFromConfigFile(ctx, cfgFile)
+				require.NoError(t, err)
+
+				if tt.wantDatadir != "" {
+					require.Equal(t, tt.wantDatadir, ctx.String("datadir"))
+				}
+				if tt.wantStaticPeers != "" {
+					require.True(t, ctx.IsSet("staticpeers"))
+					require.Equal(t, tt.wantStaticPeers, ctx.String("staticpeers"))
+				}
+				if tt.wantSentinelStaticPeers != nil {
+					require.True(t, ctx.IsSet("sentinel.staticpeers"))
+					require.Equal(t, tt.wantSentinelStaticPeers, ctx.StringSlice("sentinel.staticpeers"))
+				}
+				return nil
+			}
+			require.NoError(t, app.Run([]string{"erigon"}))
+		})
+	}
+}
+
 func TestSetFlagsFromConfigFile_StaticPeers(t *testing.T) {
 	staticPeersFlag := cli.StringFlag{
 		Name:  "staticpeers",

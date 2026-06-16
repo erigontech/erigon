@@ -127,6 +127,31 @@ func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, account
 	return sb.String()
 }
 
+// getLogsForTopics builds a positional topic filter; nil at a position means "match any".
+func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topics [][]common.Hash) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "topics": [`, prevBn, bn)
+	for i, posTopics := range topics {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		if posTopics == nil {
+			sb.WriteString("null")
+		} else {
+			sb.WriteByte('[')
+			for j, t := range posTopics {
+				if j > 0 {
+					sb.WriteByte(',')
+				}
+				fmt.Fprintf(&sb, `"0x%x"`, t)
+			}
+			sb.WriteByte(']')
+		}
+	}
+	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
+
 func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account common.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))

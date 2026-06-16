@@ -545,9 +545,14 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	}
 
 	v, r, s := txn.RawSignatureValues()
-	result.V = (*hexutil.Big)(v.ToBig())
-	result.R = (*hexutil.Big)(r.ToBig())
-	result.S = (*hexutil.Big)(s.ToBig())
+	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);
+	// match geth which returns null for these. For typed transactions (EIP-1559, EIP-2930…),
+	// v=0 is valid yParity=0 and must serialise as "0x0" — do not suppress it.
+	if txn.Type() != types.LegacyTxType || !v.IsZero() || !r.IsZero() || !s.IsZero() {
+		result.V = (*hexutil.Big)(v.ToBig())
+		result.R = (*hexutil.Big)(r.ToBig())
+		result.S = (*hexutil.Big)(s.ToBig())
+	}
 
 	if txn.Type() == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
@@ -587,7 +592,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	from, err := txn.Sender(*signer)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
@@ -615,7 +620,7 @@ func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int)
 
 // NewRPCBorTransaction returns a Bor transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *big.Int) *RPCTransaction {
+func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *uint256.Int) *RPCTransaction {
 	txn := opaqueTxn.(*types.LegacyTx)
 	result := &RPCTransaction{
 		Type:     hexutil.Uint64(txn.Type()),
@@ -633,7 +638,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 		S:        (*hexutil.Big)(big.NewInt(0)),
 	}
 	if blockHash != (common.Hash{}) {
-		result.ChainID = (*hexutil.Big)(chainId)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)

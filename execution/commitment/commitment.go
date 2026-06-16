@@ -144,31 +144,23 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
-	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
+	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
-	switch tv {
+func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
+	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil)
+		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		trie := NewConcurrentPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
-	case VariantBinPatriciaTrie:
-		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
-		//fn := func(key []byte) []byte { return hexToBin(key) }
-		//tree := NewUpdateTree(mode, tmpdir, fn)
-		//return trie, tree
-		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil)
+		trie := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -346,10 +338,11 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates    bool
-	deferred        []*DeferredBranchUpdate
-	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache           *WarmupCache
+	deferUpdates       bool
+	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
+	deferred           []*DeferredBranchUpdate
+	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	cache              *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -359,9 +352,9 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-// SetDeferUpdates enables or disables deferred update collection.
+// setDeferUpdates enables or disables deferred update collection.
 // When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
-func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
+func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
 	if defer_ {
 		if be.deferred == nil {
@@ -565,22 +558,28 @@ func (be *BranchEncoder) CollectUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	var prev []byte
 	var foundInCache bool
 	var err error
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
+	if !isNew {
+		if be.cache != nil {
+			prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+			if foundInCache && be.metrics != nil {
+				be.metrics.cacheBranch.Add(1)
+			}
+		}
+		if !foundInCache {
+			prev, _, err = ctx.Branch(prefix)
+			if err != nil {
+				return err
+			}
 		}
 	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -613,8 +612,6 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-const maxDeferredUpdates = 50_000
-
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
 // and defers encoding for parallel execution later.
@@ -625,9 +622,14 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
-	needsFlush := len(be.deferred) >= maxDeferredUpdates
+	limit := be.maxDeferredUpdates
+	if limit == 0 {
+		limit = DefaultMaxDeferredUpdates
+	}
+	needsFlush := len(be.deferred) >= limit
 	if !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}
@@ -639,24 +641,28 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// try to get previous data from cache
 	var (
 		prev         []byte
 		foundInCache bool
 		err          error
 	)
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
+	if !isNew {
+		if be.cache != nil {
+			prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+			if foundInCache && be.metrics != nil {
+				be.metrics.cacheBranch.Add(1)
+			}
+		}
+		if !foundInCache {
+			prev, _, err = ctx.Branch(prefix)
+		}
+		if err != nil {
+			return err
 		}
 	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-	}
-	if err != nil {
-		return err
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	// Track this prefix as pending
@@ -748,6 +754,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 }
 
 type BranchData []byte
+
+// ChildCount returns the number of children present in the branch.
+func (branchData BranchData) ChildCount() int {
+	if len(branchData) < 4 {
+		return 0
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+}
 
 func (branchData BranchData) String() string {
 	if len(branchData) == 0 {
@@ -1243,8 +1257,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "bin":
-		trieVariant = VariantBinPatriciaTrie
 	case "hex-parallel":
 		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
@@ -1376,8 +1388,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantBinPatriciaTrie:
-					stat.ExtSize += uint64(c.extLen)
 				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}
@@ -1446,8 +1456,15 @@ type Updates struct {
 	nibbles       [16]*etl.Collector
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
-	byteArena []byte      // grow-only byte arena for HashSort key copies
+
+	// Ring of byte arenas for HashSort key copies; a slot is reused only after its prior generation's warm items drain.
+	arenas   [arenaRingSize][]byte
+	curArena int
+	gen      uint64
 }
+
+// arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
+const arenaRingSize = 2
 
 // arenaAlloc appends b to the byte arena and returns the sub-slice.
 // The returned slice is valid until the arena is reset.
@@ -1456,9 +1473,10 @@ type Updates struct {
 // to an independent heap allocation to keep previously returned
 // sub-slices valid.
 func (t *Updates) arenaAlloc(b []byte) []byte {
-	off := len(t.byteArena)
+	arena := t.arenas[t.curArena]
+	off := len(arena)
 	needed := off + len(b)
-	if needed > cap(t.byteArena) {
+	if needed > cap(arena) {
 		// Arena capacity exceeded — fall back to an independent allocation.
 		// This keeps previously returned sub-slices valid while avoiding a
 		// panic that would crash a production node.
@@ -1466,16 +1484,18 @@ func (t *Updates) arenaAlloc(b []byte) []byte {
 		copy(result, b)
 		return result
 	}
-	t.byteArena = t.byteArena[:needed]
-	copy(t.byteArena[off:], b)
-	return t.byteArena[off:needed]
+	arena = arena[:needed]
+	copy(arena[off:], b)
+	t.arenas[t.curArena] = arena
+	return arena[off:needed]
 }
 
-// arenaEnsureCap ensures the byte arena has at least cap bytes of capacity.
-// Must be called before each batch to prevent mid-batch reallocation.
+// arenaEnsureCap reserves at least c bytes in every ring buffer; call before a batch so a mid-batch grow can't reallocate and invalidate returned sub-slices.
 func (t *Updates) arenaEnsureCap(c int) {
-	if cap(t.byteArena) < c {
-		t.byteArena = make([]byte, 0, c)
+	for i := range t.arenas {
+		if cap(t.arenas[i]) < c {
+			t.arenas[i] = make([]byte, 0, c)
+		}
 	}
 }
 
@@ -1800,12 +1820,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		clear(t.keys)
 
 		t.batchSlab = t.batchSlab[:0]
-		// Pre-allocate arena to avoid mid-batch reallocation that would
-		// invalidate previously returned sub-slices (hk/pk in batchSlab).
-		// Worst case: storage keys produce 128-byte nibblized hashed keys +
-		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
+		if warmuper != nil {
+			if err := warmuper.WaitBufferFree(t.curArena); err != nil {
+				return err
+			}
+		}
+		// Pre-size the arena so a mid-batch grow can't reallocate and invalidate live sub-slices (≤180 B/key, 192 with headroom).
 		t.arenaEnsureCap(hashSortBatchSize * 192)
-		t.byteArena = t.byteArena[:0]
+		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -1827,7 +1849,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						startDepth++
 					}
 				}
-				warmuper.WarmKey(hk, startDepth)
+				warmuper.WarmKey(hk, startDepth, t.gen)
 				prevKey = append(prevKey[:0], hk...)
 			}
 
@@ -1843,11 +1865,17 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return err
 					}
 				}
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
 				t.batchSlab = t.batchSlab[:0]
-				t.byteArena = t.byteArena[:0]
+				nextGen := t.gen + 1
+				slot := int(nextGen % arenaRingSize)
+				if warmuper != nil {
+					if err := warmuper.WaitBufferFree(slot); err != nil {
+						return err
+					}
+				}
+				t.gen = nextGen
+				t.arenas[slot] = t.arenas[slot][:0]
+				t.curArena = slot
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1871,8 +1899,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
+		if warmuper != nil {
+			if err := warmuper.WaitBufferFree(t.curArena); err != nil {
+				return err
+			}
+		}
 		t.arenaEnsureCap(hashSortBatchSize * 144)
-		t.byteArena = t.byteArena[:0]
+		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 		var processErr error
 
@@ -1895,7 +1928,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						startDepth++
 					}
 				}
-				warmuper.WarmKey(hk, startDepth)
+				warmuper.WarmKey(hk, startDepth, t.gen)
 				prevKey = append(prevKey[:0], hk...)
 			}
 
@@ -1912,11 +1945,18 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					}
 				}
-				if warmuper != nil {
-					warmuper.DrainPending()
-				}
 				t.batchSlab = t.batchSlab[:0]
-				t.byteArena = t.byteArena[:0]
+				nextGen := t.gen + 1
+				slot := int(nextGen % arenaRingSize)
+				if warmuper != nil {
+					if err := warmuper.WaitBufferFree(slot); err != nil {
+						processErr = err
+						return false
+					}
+				}
+				t.gen = nextGen
+				t.arenas[slot] = t.arenas[slot][:0]
+				t.curArena = slot
 			}
 			return true
 		})
@@ -1960,7 +2000,11 @@ func (t *Updates) Reset() {
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
-	t.byteArena = t.byteArena[:0]
+	for i := range t.arenas {
+		t.arenas[i] = t.arenas[i][:0]
+	}
+	t.curArena = 0
+	t.gen = 0
 }
 
 type KeyUpdate struct {

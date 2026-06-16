@@ -33,7 +33,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
@@ -52,7 +51,7 @@ import (
 func TestSimulatedBackend(t *testing.T) {
 	var gasLimit uint64 = 8000029
 	key, _ := crypto.GenerateKey() // nolint: gosec
-	auth, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
+	auth, _ := bind.NewKeyedTransactorWithChainID(key, uint256.NewInt(1337))
 	genAlloc := make(types.GenesisAlloc)
 	genAlloc[auth.From] = types.GenesisAccount{Balance: big.NewInt(9223372036854775807)}
 
@@ -65,8 +64,8 @@ func TestSimulatedBackend(t *testing.T) {
 	if isPending {
 		t.Fatal("transaction should not be pending")
 	}
-	if err != ethereum.NotFound {
-		t.Fatalf("err should be `ethereum.NotFound` but received %v", err)
+	if err != bind.ErrNotFound {
+		t.Fatalf("err should be `bind.ErrNotFound` but received %v", err)
 	}
 
 	// generate a transaction and confirm you can retrieve it
@@ -436,7 +435,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	opts, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
+	opts, _ := bind.NewKeyedTransactorWithChainID(key, uint256.NewInt(1337))
 
 	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether)}}, 10000000)
 
@@ -446,12 +445,12 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 
 	var cases = []struct {
 		name        string
-		message     ethereum.CallMsg
+		message     bind.CallMsg
 		expect      uint64
 		expectError error
 		expectData  any
 	}{
-		{"plain transfer(valid)", ethereum.CallMsg{
+		{"plain transfer(valid)", bind.CallMsg{
 			From:     addr,
 			To:       &addr,
 			Gas:      0,
@@ -460,7 +459,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Data:     nil,
 		}, params.TxGas, nil, nil},
 
-		{"plain transfer(invalid)", ethereum.CallMsg{
+		{"plain transfer(invalid)", bind.CallMsg{
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
@@ -469,7 +468,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Data:     nil,
 		}, 0, errors.New("execution reverted"), nil},
 
-		{"Revert", ethereum.CallMsg{
+		{"Revert", bind.CallMsg{
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
@@ -478,7 +477,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Data:     common.Hex2Bytes("d8b98391"),
 		}, 0, errors.New("execution reverted: revert reason"), "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d72657665727420726561736f6e00000000000000000000000000000000000000"},
 
-		{"PureRevert", ethereum.CallMsg{
+		{"PureRevert", bind.CallMsg{
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
@@ -487,7 +486,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Data:     common.Hex2Bytes("aa8b1d30"),
 		}, 0, errors.New("execution reverted"), nil},
 
-		{"OOG", ethereum.CallMsg{
+		{"OOG", bind.CallMsg{
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
@@ -496,7 +495,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Data:     common.Hex2Bytes("50f6fe34"),
 		}, 0, errors.New("gas required exceeds allowance (100000)"), nil},
 
-		{"Assert", ethereum.CallMsg{
+		{"Assert", bind.CallMsg{
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
@@ -505,7 +504,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			Data:     common.Hex2Bytes("b9b046f9"),
 		}, 0, errors.New("invalid opcode: INVALID"), nil},
 
-		{"Valid", ethereum.CallMsg{
+		{"Valid", bind.CallMsg{
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
@@ -547,11 +546,11 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	recipient := common.HexToAddress("deadbeef")
 	var cases = []struct {
 		name        string
-		message     ethereum.CallMsg
+		message     bind.CallMsg
 		expect      uint64
 		expectError error
 	}{
-		{"EstimateWithoutPrice", ethereum.CallMsg{
+		{"EstimateWithoutPrice", bind.CallMsg{
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
@@ -560,7 +559,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			Data:     nil,
 		}, 21000, nil},
 
-		{"EstimateWithPrice", ethereum.CallMsg{
+		{"EstimateWithPrice", bind.CallMsg{
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
@@ -569,7 +568,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			Data:     nil,
 		}, 21000, nil},
 
-		{"EstimateWithVeryHighPrice", ethereum.CallMsg{
+		{"EstimateWithVeryHighPrice", bind.CallMsg{
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
@@ -578,7 +577,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			Data:     nil,
 		}, 21000, nil},
 
-		{"EstimateWithSuperhighPrice", ethereum.CallMsg{
+		{"EstimateWithSuperhighPrice", bind.CallMsg{
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
@@ -906,7 +905,7 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
@@ -941,7 +940,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
@@ -973,7 +972,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
@@ -985,7 +984,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	}
 
 	// make sure you can call the contract in pending state
-	res, err := sim.PendingCallContract(bgCtx, ethereum.CallMsg{
+	res, err := sim.PendingCallContract(bgCtx, bind.CallMsg{
 		From: testAddr,
 		To:   &addr,
 		Data: input,
@@ -1005,7 +1004,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	sim.Commit()
 
 	// make sure you can call the contract
-	res, err = sim.CallContract(bgCtx, ethereum.CallMsg{
+	res, err = sim.CallContract(bgCtx, bind.CallMsg{
 		From: testAddr,
 		To:   &addr,
 		Data: input,
@@ -1035,7 +1034,7 @@ func TestSimulatedBackend_PendingAndCallContractOsakaDefaultGas(t *testing.T) {
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
 	require.NoError(t, err)
 
-	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	require.NoError(t, err)
 	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
 	contractAuth.GasLimit = params.MaxTxnGasLimit
@@ -1046,7 +1045,7 @@ func TestSimulatedBackend_PendingAndCallContractOsakaDefaultGas(t *testing.T) {
 	input, err := parsed.Pack("receive", []byte("X"))
 	require.NoError(t, err)
 
-	call := ethereum.CallMsg{
+	call := bind.CallMsg{
 		From: testAddr,
 		To:   &addr,
 		Data: input,
@@ -1083,7 +1082,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 
 	constructor := program.New().ReturnViaCodeCopy(runtime.Bytes()).Bytes()
 
-	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	require.NoError(t, err)
 	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
 	contractAuth.GasLimit = 5_000_000
@@ -1091,7 +1090,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 	addr, _, _, err := bind.DeployContract(contractAuth, abi.ABI{}, constructor, sim)
 	require.NoError(t, err)
 
-	call := ethereum.CallMsg{
+	call := bind.CallMsg{
 		From: testAddr,
 		To:   &addr,
 	}
@@ -1152,7 +1151,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(reverterBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
@@ -1165,14 +1164,14 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 
 	call := make([]func([]byte) ([]byte, error), 2)
 	call[0] = func(input []byte) ([]byte, error) {
-		return sim.PendingCallContract(bgCtx, ethereum.CallMsg{
+		return sim.PendingCallContract(bgCtx, bind.CallMsg{
 			From: testAddr,
 			To:   &addr,
 			Data: input,
 		})
 	}
 	call[1] = func(input []byte) ([]byte, error) {
-		return sim.CallContract(bgCtx, ethereum.CallMsg{
+		return sim.CallContract(bgCtx, bind.CallMsg{
 			From: testAddr,
 			To:   &addr,
 			Data: input,

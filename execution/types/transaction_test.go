@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -81,7 +80,7 @@ var (
 	}
 
 	signedEip2718Tx, _ = emptyEip2718Tx.WithSignature(
-		*LatestSignerForChainID(big.NewInt(1)),
+		*LatestSignerForChainID(uint256.NewInt(1)),
 		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
 	)
 
@@ -99,7 +98,7 @@ var (
 	}
 
 	signedDynFeeTx, _ = dynFeeTx.WithSignature(
-		*LatestSignerForChainID(big.NewInt(1)),
+		*LatestSignerForChainID(uint256.NewInt(1)),
 		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
 	)
 )
@@ -212,11 +211,11 @@ func TestTransactionEncode(t *testing.T) {
 
 func TestEIP2718TransactionSigHash(t *testing.T) {
 	t.Parallel()
-	if emptyEip2718Tx.SigningHash(big.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
-		t.Errorf("empty EIP-2718 transaction hash mismatch, got %x", emptyEip2718Tx.SigningHash(big.NewInt(1)))
+	if emptyEip2718Tx.SigningHash(uint256.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
+		t.Errorf("empty EIP-2718 transaction hash mismatch, got %x", emptyEip2718Tx.SigningHash(uint256.NewInt(1)))
 	}
-	if signedEip2718Tx.SigningHash(big.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
-		t.Errorf("signed EIP-2718 transaction hash mismatch, got %x", signedEip2718Tx.SigningHash(big.NewInt(1)))
+	if signedEip2718Tx.SigningHash(uint256.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
+		t.Errorf("signed EIP-2718 transaction hash mismatch, got %x", signedEip2718Tx.SigningHash(uint256.NewInt(1)))
 	}
 }
 
@@ -226,8 +225,8 @@ func TestEIP2930Signer(t *testing.T) {
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		keyAddr = crypto.PubkeyToAddress(key.PublicKey)
-		signer1 = LatestSignerForChainID(big.NewInt(1))
-		signer2 = LatestSignerForChainID(big.NewInt(2))
+		signer1 = LatestSignerForChainID(uint256.NewInt(1))
+		signer2 = LatestSignerForChainID(uint256.NewInt(2))
 		tx0     = &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
 		tx1     = &AccessListTx{ChainID: u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
 		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
@@ -235,7 +234,7 @@ func TestEIP2930Signer(t *testing.T) {
 
 	tests := []struct {
 		tx             Transaction
-		chainID        *big.Int
+		chainID        *uint256.Int
 		signer         *Signer
 		wantSignerHash common.Hash
 		wantSenderErr  error
@@ -245,7 +244,7 @@ func TestEIP2930Signer(t *testing.T) {
 		{
 			tx:             tx0,
 			signer:         signer1,
-			chainID:        big.NewInt(1),
+			chainID:        uint256.NewInt(1),
 			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantSenderErr:  ErrInvalidChainId,
 			wantHash:       common.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
@@ -253,7 +252,7 @@ func TestEIP2930Signer(t *testing.T) {
 		{
 			tx:             tx1,
 			signer:         signer1,
-			chainID:        big.NewInt(1),
+			chainID:        uint256.NewInt(1),
 			wantSenderErr:  ErrInvalidSig,
 			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantHash:       common.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
@@ -262,7 +261,7 @@ func TestEIP2930Signer(t *testing.T) {
 			// This checks what happens when trying to sign an unsigned txn for the wrong chain.
 			tx:             tx1,
 			signer:         signer2,
-			chainID:        big.NewInt(2),
+			chainID:        uint256.NewInt(2),
 			wantSenderErr:  ErrInvalidChainId,
 			wantSignerHash: common.HexToHash("367967247499343401261d718ed5aa4c9486583e4d89251afce47f4a33c33362"),
 			wantSignErr:    ErrInvalidChainId,
@@ -271,7 +270,7 @@ func TestEIP2930Signer(t *testing.T) {
 			// This checks what happens when trying to re-sign a signed txn for the wrong chain.
 			tx:             tx2,
 			signer:         signer1,
-			chainID:        big.NewInt(1),
+			chainID:        uint256.NewInt(1),
 			wantSenderErr:  ErrInvalidChainId,
 			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantSignErr:    ErrInvalidChainId,
@@ -434,7 +433,7 @@ func TestTransactionCoding(t *testing.T) {
 		t.Fatalf("could not generate key: %v", err)
 	}
 	var (
-		signer    = LatestSignerForChainID(common.Big1)
+		signer    = LatestSignerForChainID(uint256.NewInt(1))
 		addr      = common.HexToAddress("0x0000000000000000000000000000000000000001")
 		recipient = common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 		accesses  = AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}

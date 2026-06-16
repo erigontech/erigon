@@ -19,7 +19,6 @@ package p2p
 import (
 	"context"
 	"maps"
-	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -82,7 +81,7 @@ func TestPublisher(t *testing.T) {
 		// we hear about block1 from peers 1,2,3,4
 		header1 := &types.Header{Number: *uint256.NewInt(1)}
 		block1 := types.NewBlockWithHeader(header1)
-		td1 := big.NewInt(5)
+		td1 := uint256.NewInt(5)
 		waitPeersMayMissHash := func(peersCount int) func() bool {
 			return func() bool { return len(pt.peerTracker.ListPeersMayMissBlockHash(header1.Hash())) == peersCount }
 		}
@@ -91,7 +90,7 @@ func TestPublisher(t *testing.T) {
 			PeerId: PeerIdFromUint64(1),
 			Decoded: &eth.NewBlockPacket{
 				Block: block1,
-				TD:    td1,
+				TD:    *td1,
 			},
 		})
 		require.Eventually(t, waitPeersMayMissHash(7), time.Second, 5*time.Millisecond)
@@ -99,7 +98,7 @@ func TestPublisher(t *testing.T) {
 			PeerId: PeerIdFromUint64(2),
 			Decoded: &eth.NewBlockPacket{
 				Block: block1,
-				TD:    td1,
+				TD:    *td1,
 			},
 		})
 		require.Eventually(t, waitPeersMayMissHash(6), time.Second, 5*time.Millisecond)
@@ -125,7 +124,7 @@ func TestPublisher(t *testing.T) {
 		require.Eventually(t, waitPeersMayMissHash(4), time.Second, 5*time.Millisecond)
 
 		p := pt.publisher
-		p.PublishNewBlock(block1, big.NewInt(55))
+		p.PublishNewBlock(block1, *uint256.NewInt(55))
 		waitSends := func(sendsCount int) func() bool {
 			return func() bool { return len(pt.capturedSends()) == sendsCount }
 		}

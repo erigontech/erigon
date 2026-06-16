@@ -465,7 +465,7 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 
 	vBigNum := new(big.Int)
 	for k, v := range eventTxnToBlockNum {
-		err := tx.Put(kv.BorTxLookup, k.Bytes(), vBigNum.SetUint64(v).Bytes())
+		err := tx.Put(kv.BorTxLookup, k[:], vBigNum.SetUint64(v).Bytes())
 		if err != nil {
 			return err
 		}
@@ -477,7 +477,7 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 func (s txStore) EventTxnToBlockNum(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	var blockNum uint64
 
-	v, err := s.tx.GetOne(kv.BorTxLookup, borTxHash.Bytes())
+	v, err := s.tx.GetOne(kv.BorTxLookup, borTxHash[:])
 	if err != nil {
 		return blockNum, false, err
 	}

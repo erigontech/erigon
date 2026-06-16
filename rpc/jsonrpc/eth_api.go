@@ -97,11 +97,11 @@ type EthAPI interface {
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
-	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
-	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
-	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
@@ -109,7 +109,10 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
+	BaseFee(ctx context.Context) (*hexutil.Big, error)
+	BlobBaseFee(ctx context.Context) (*hexutil.Big, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
+	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
@@ -122,7 +125,7 @@ type EthAPI interface {
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
@@ -139,10 +142,11 @@ type BaseAPI struct {
 	stateCache kvcache.Cache
 	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
-	filters      *rpchelper.Filters
-	_chainConfig atomic.Pointer[chain.Config]
-	_genesis     atomic.Pointer[types.Block]
-	_pruneMode   atomic.Pointer[prune.Mode]
+	filters                   *rpchelper.Filters
+	_chainConfig              atomic.Pointer[chain.Config]
+	_genesis                  atomic.Pointer[types.Block]
+	_pruneMode                atomic.Pointer[prune.Mode]
+	_commitmentHistoryEnabled atomic.Pointer[bool]
 
 	_blockReader services.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -370,28 +374,34 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
+}
+
+// checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
+// that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
+func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+}
+
+func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
 	}
 	if p == nil {
-		// no prune info found
 		return nil
 	}
-	if p.History.Enabled() {
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api._blockReader, api.filters)
-		if err != nil {
-			return err
-		}
-		if latest <= 1 {
-			return nil
-		}
-		prunedTo := p.History.PruneTo(latest)
-		if block < prunedTo {
-			return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, block, prunedTo)
-		}
+	amount := field(p)
+	if !amount.Enabled() {
+		return nil
 	}
-
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return err
+	}
+	if block < amount.PruneTo(latest) {
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, amount.PruneTo(latest))
+	}
 	return nil
 }
 
@@ -422,6 +432,26 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	api._pruneMode.Store(&mode)
 
 	return &mode, nil
+}
+
+// commitmentHistoryEnabled returns whether --prune.include-commitment-history was set at node
+// startup. The flag is written once by checkAndSetCommitmentHistoryFlag and never changed, so
+// the result is cached after the first successful read.
+// Unlike pruneMode, false is not cached when the DB key is absent: during the brief boot window
+// before checkAndSetCommitmentHistoryFlag runs the key may not exist yet, and caching false
+// would shadow a subsequent true write. Each request during that window pays one DB lookup.
+func (api *BaseAPI) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
+	if p := api._commitmentHistoryEnabled.Load(); p != nil {
+		return *p, nil
+	}
+	enabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		api._commitmentHistoryEnabled.Store(&enabled)
+	}
+	return enabled, nil
 }
 
 type bridgeReader interface {
@@ -520,8 +550,7 @@ type GasPriceCache struct {
 
 func NewGasPriceCache() *GasPriceCache {
 	return &GasPriceCache{
-		latestPrice: uint256.NewInt(0),
-		latestHash:  common.Hash{},
+		latestPrice: uint256.NewInt(common.GWei / 1000),
 	}
 }
 
