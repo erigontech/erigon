@@ -127,6 +127,15 @@ func commitmentMergeInputsReferenced(inputs []*FilesItem) bool {
 	return false
 }
 
+// commitmentMergeNeedsTransform reports whether a commitment merge needs a value transformer — and
+// thus must wait for the account/storage merges. True when an input must be expanded (any input
+// referenced) or the output must be re-shortened (refsEnabled and output range >= threshold). Plain
+// inputs merged without re-shortening need neither, so they run in parallel with account/storage.
+func commitmentMergeNeedsTransform(inputs []*FilesItem, refsEnabled bool, stepSize, from, to uint64) bool {
+	reshorten := refsEnabled && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
+	return reshorten || commitmentMergeInputsReferenced(inputs)
+}
+
 // commitmentFileReferencedByRange reports whether the commitment file covering from..to is
 // referenced (missing => referenced, the safe default) and its metric bucket index.
 func (at *AggregatorRoTx) commitmentFileReferencedByRange(from, to uint64) (bool, int) {

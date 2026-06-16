@@ -1877,9 +1877,12 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	t := time.Now()
 
 	at.a.logger.Debug("[snapshots] merge state " + r.String())
-	// Gate on referencing, not the write flag: referenced inputs must be expanded even with the flag off, else stale offsets leak into the merged file.
-	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches ||
-		commitmentMergeInputsReferenced(files.d[kv.CommitmentDomain])
+	// Block account/storage before commitment only when the commitment merge needs the merged files:
+	// to expand referenced inputs, or to re-shorten the output. Plain inputs merged without
+	// re-shortening (flag off, or flag on below threshold) need neither and run in parallel.
+	comVals := r.domain[kv.CommitmentDomain].values
+	needCommitmentTransform := comVals.needMerge &&
+		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches, at.StepSize(), comVals.from, comVals.to)
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1893,13 +1896,13 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 
 		id := id
 		kid := kv.Domain(id)
-		if commitmentMergeReferencing && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
+		if needCommitmentTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 			accStorageMerged.Add(1)
 		}
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if commitmentMergeReferencing && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
+			if needCommitmentTransform && kid == kv.CommitmentDomain {
 				accStorageMerged.Wait()
 
 				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
@@ -1912,7 +1915,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, at.a.ps)
-			if commitmentMergeReferencing {
+			if needCommitmentTransform {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
 				}

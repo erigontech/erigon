@@ -661,6 +661,39 @@ func TestCommitmentMergeInputsReferenced(t *testing.T) {
 	}
 }
 
+// TestCommitmentMergeNeedsTransform covers the barrier gate: the commitment merge blocks on the
+// account/storage merges only when it needs the merged files — to expand referenced inputs or to
+// re-shorten the output. Plain inputs merged without re-shortening (flag off, or flag on below
+// threshold) need neither and must not block.
+func TestCommitmentMergeNeedsTransform(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	in := func(referenced bool) []*FilesItem {
+		return []*FilesItem{{startTxNum: 0, endTxNum: 2 * stepSize, referenced: referenced}}
+	}
+	const fromAbove, toAbove = uint64(0), uint64(20) // 2 steps -> threshold reached
+	const fromBelow, toBelow = uint64(0), uint64(10) // 1 step  -> below threshold
+	cases := []struct {
+		name        string
+		inputs      []*FilesItem
+		refsEnabled bool
+		from, to    uint64
+		want        bool
+	}{
+		{"plain inputs, flag off -> no transform, no block", in(false), false, fromAbove, toAbove, false},
+		{"plain inputs, flag on, below threshold -> no transform, no block", in(false), true, fromBelow, toBelow, false},
+		{"plain inputs, flag on, at threshold -> reshorten, block", in(false), true, fromAbove, toAbove, true},
+		{"referenced input, flag off -> expand, block", in(true), false, fromAbove, toAbove, true},
+		{"referenced input, flag on -> block", in(true), true, fromAbove, toAbove, true},
+		{"no inputs -> no transform", nil, true, fromBelow, toBelow, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, commitmentMergeNeedsTransform(tc.inputs, tc.refsEnabled, stepSize, tc.from, tc.to))
+		})
+	}
+}
+
 // TestCommitmentVisibleFilesReferenced covers the planning-time over-approximation that gates the
 // range-alignment hold. It reads each file's sampled referenced flag through the visible-files
 // layer and must report referencing independently of the live write flag (set off here on purpose).
