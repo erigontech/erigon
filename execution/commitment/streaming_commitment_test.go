@@ -311,97 +311,98 @@ func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_RetouchAfterFold folds a first wave of touches to completion,
-// then re-touches keys landing in already-folded splits, forcing those splits to
-// re-fold before Process. The final root + branches must match sequential — the
-// re-fold picks up the later touch rather than serving the stale cached cell.
-func TestStreaming_RetouchAfterFold(t *testing.T) {
-	t.Parallel()
-	keys, upds := buildMixedCorpus(33, 2500)
-	seqRoot, seqMs := sequentialRoot(t, keys, upds)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(4)
-	sc.SetEagerFold(1) // small corpus: fold below the production floor so the gate path is exercised
-	require.NoError(t, sc.StartScheduler(context.Background()))
-
-	const hold = 8
-	for i := 0; i < len(keys)-hold; i++ {
-		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
-	}
-	waitSchedulerIdle(t, sc)
-
-	for i := len(keys) - hold; i < len(keys); i++ {
-		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
-	}
-	waitSchedulerIdle(t, sc)
-
-	root, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, root, "streaming re-touch root != sequential")
-	requireBranchParity(t, seqMs, ms)
-}
-
-// TestStreaming_StorageMidAccountFold injects a withheld storage-slot touch into
-// the owning account's split via foldGate, exactly while that split is folding.
-// The in-flight fold's snapshot misses the slot, so its gen check fails, the
-// result is discarded (RefoldCount bumps) and the split re-folds with the new
-// slot — proving the storageRoot cross-dependency is honored. Final root +
-// branches match sequential.
+// TestStreaming_StorageMidAccountFold covers the two re-fold-before-Process
+// regimes. The retouch subtest folds a first wave to completion, then re-touches
+// keys landing in already-folded splits, forcing them to re-fold and pick up the
+// later touch rather than serve a stale cached cell. The mid_account subtest
+// injects a withheld storage-slot touch into the owning account's split via
+// foldGate exactly while it folds: the in-flight snapshot misses the slot, its
+// gen check fails, the result is discarded (RefoldCount bumps) and the split
+// re-folds with the new slot — proving the storageRoot cross-dependency is
+// honored. Both must match the sequential root + branches.
 func TestStreaming_StorageMidAccountFold(t *testing.T) {
 	t.Parallel()
-	keys, upds := genRandomAccountsStorage(300)
 
-	withheld := -1
-	for i, k := range keys {
-		if len(k) > length.Addr {
-			withheld = i
-			break
+	t.Run("retouch_after_fold", func(t *testing.T) {
+		keys, upds := buildMixedCorpus(33, 2500)
+		seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(4)
+		sc.SetEagerFold(1) // small corpus: fold below the production floor so the gate path is exercised
+		require.NoError(t, sc.StartScheduler(context.Background()))
+
+		const hold = 8
+		for i := 0; i < len(keys)-hold; i++ {
+			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 		}
-	}
-	require.GreaterOrEqual(t, withheld, 0, "corpus must contain a storage key")
-	targetNib := KeyToHexNibbleHash(keys[withheld])[0]
+		waitSchedulerIdle(t, sc)
 
-	seqRoot, seqMs := sequentialRoot(t, keys, upds)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(4)
-	sc.SetEagerFold(1) // small corpus: fold below the production floor so the target split folds (foldGate fires)
-
-	var once sync.Once
-	sc.SetFoldGate(func(nib byte) {
-		if nib != targetNib {
-			return
+		for i := len(keys) - hold; i < len(keys); i++ {
+			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 		}
-		once.Do(func() {
-			sc.TouchKey(KeyToHexNibbleHash(keys[withheld]), keys[withheld], nil)
-		})
+		waitSchedulerIdle(t, sc)
+
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, root, "streaming re-touch root != sequential")
+		requireBranchParity(t, seqMs, ms)
 	})
 
-	require.NoError(t, sc.StartScheduler(context.Background()))
-	for i, k := range keys {
-		if i == withheld {
-			continue
-		}
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-	waitSchedulerIdle(t, sc)
+	t.Run("mid_account_fold", func(t *testing.T) {
+		keys, upds := genRandomAccountsStorage(300)
 
-	root, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, root, "streaming storage-mid-fold root != sequential")
-	requireBranchParity(t, seqMs, ms)
-	require.Positive(t, sc.RefoldCount(), "expected a mid-fold re-fold to be triggered")
+		withheld := -1
+		for i, k := range keys {
+			if len(k) > length.Addr {
+				withheld = i
+				break
+			}
+		}
+		require.GreaterOrEqual(t, withheld, 0, "corpus must contain a storage key")
+		targetNib := KeyToHexNibbleHash(keys[withheld])[0]
+
+		seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(4)
+		sc.SetEagerFold(1) // small corpus: fold below the production floor so the target split folds (foldGate fires)
+
+		var once sync.Once
+		sc.SetFoldGate(func(nib byte) {
+			if nib != targetNib {
+				return
+			}
+			once.Do(func() {
+				sc.TouchKey(KeyToHexNibbleHash(keys[withheld]), keys[withheld], nil)
+			})
+		})
+
+		require.NoError(t, sc.StartScheduler(context.Background()))
+		for i, k := range keys {
+			if i == withheld {
+				continue
+			}
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		waitSchedulerIdle(t, sc)
+
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, root, "streaming storage-mid-fold root != sequential")
+		requireBranchParity(t, seqMs, ms)
+		require.Positive(t, sc.RefoldCount(), "expected a mid-fold re-fold to be triggered")
+	})
 }
 
 // TestStreaming_SchedulerCollapseParity runs the background scheduler over a
@@ -853,89 +854,89 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 	}
 }
 
-// TestStreaming_MultiBlockResetWithScheduler reuses one committer across two
-// blocks with Reset between, the scheduler running each block. Block 1 commits a
-// from-scratch corpus; Reset must wipe all per-block state; block 2 (a
-// delete/collapse batch over block 1's DB branches) must match the sequential
-// incremental root and branches — proving Reset leaves no stale split state.
-func TestStreaming_MultiBlockResetWithScheduler(t *testing.T) {
+// TestStreaming_MultiBlockReuse reuses one committer across two blocks (block 1 a
+// from-scratch corpus, block 2 a delete/collapse batch over block 1's DB
+// branches) in both rotation regimes. The reset subtest runs the scheduler each
+// block with sc.Reset() between, proving Reset wipes all per-block split state.
+// The no_reset subtest mirrors production — the calculator rotates only the
+// Updates buffer and never calls Reset — so Process must drain its own prefix
+// trie + split state at the block boundary (asserted directly on the trie) or
+// block 2 re-folds block 1's keys. Both must match the sequential incremental
+// root + branches.
+func TestStreaming_MultiBlockReuse(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	k1, u1 := genRandomAccountsStorage(400)
-	k2, u2 := sparseBatch2(k1, 3, true)
 
-	seqRoot1, _ := sequentialRoot(t, k1, u1)
-	seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+	t.Run("reset", func(t *testing.T) {
+		ctx := context.Background()
+		k1, u1 := genRandomAccountsStorage(400)
+		k2, u2 := sparseBatch2(k1, 3, true)
 
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(4)
+		seqRoot1, _ := sequentialRoot(t, k1, u1)
+		seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
-	require.NoError(t, ms.applyPlainUpdates(k1, u1))
-	require.NoError(t, sc.StartScheduler(ctx))
-	for _, k := range k1 {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-	root1, err := sc.Process(ctx)
-	require.NoError(t, err)
-	require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(4)
 
-	sc.Reset()
-	requireResetClean(t, sc)
+		require.NoError(t, ms.applyPlainUpdates(k1, u1))
+		require.NoError(t, sc.StartScheduler(ctx))
+		for _, k := range k1 {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root1, err := sc.Process(ctx)
+		require.NoError(t, err)
+		require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
 
-	require.NoError(t, ms.applyPlainUpdates(k2, u2))
-	require.NoError(t, sc.StartScheduler(ctx))
-	for _, k := range k2 {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-	root2, err := sc.Process(ctx)
-	require.NoError(t, err)
-	require.Equal(t, seqRoot2, root2, "block-2 streaming root after reset != sequential")
-	requireBranchParity(t, seqMs, ms)
-}
+		sc.Reset()
+		requireResetClean(t, sc)
 
-// TestStreaming_MultiBlockNoResetAccumulation reuses one committer across two
-// blocks the way production does: the commitment calculator rotates only the
-// Updates buffer (NewEmpty) and never calls sc.Reset() between blocks. Process
-// must drain its own prefix trie + split state at the block boundary, otherwise
-// block 2 re-folds block 1's keys (unbounded growth within a batch). Roots stay
-// correct either way, so the accumulation is asserted directly on the trie.
-func TestStreaming_MultiBlockNoResetAccumulation(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	k1, u1 := genRandomAccountsStorage(400)
-	k2, u2 := sparseBatch2(k1, 3, true)
+		require.NoError(t, ms.applyPlainUpdates(k2, u2))
+		require.NoError(t, sc.StartScheduler(ctx))
+		for _, k := range k2 {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root2, err := sc.Process(ctx)
+		require.NoError(t, err)
+		require.Equal(t, seqRoot2, root2, "block-2 streaming root after reset != sequential")
+		requireBranchParity(t, seqMs, ms)
+	})
 
-	seqRoot1, _ := sequentialRoot(t, k1, u1)
-	seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+	t.Run("no_reset", func(t *testing.T) {
+		ctx := context.Background()
+		k1, u1 := genRandomAccountsStorage(400)
+		k2, u2 := sparseBatch2(k1, 3, true)
 
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(4)
+		seqRoot1, _ := sequentialRoot(t, k1, u1)
+		seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
-	require.NoError(t, ms.applyPlainUpdates(k1, u1))
-	for _, k := range k1 {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-	root1, err := sc.Process(ctx)
-	require.NoError(t, err)
-	require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(4)
 
-	require.Zero(t, sc.trie.root.subtreeCount, "Process left block-1 keys in the prefix trie")
-	require.Empty(t, sc.splits, "Process left stale split state")
+		require.NoError(t, ms.applyPlainUpdates(k1, u1))
+		for _, k := range k1 {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root1, err := sc.Process(ctx)
+		require.NoError(t, err)
+		require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
 
-	require.NoError(t, ms.applyPlainUpdates(k2, u2))
-	for _, k := range k2 {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-	root2, err := sc.Process(ctx)
-	require.NoError(t, err)
-	require.Equal(t, seqRoot2, root2, "block-2 streaming root without reset != sequential")
-	requireBranchParity(t, seqMs, ms)
+		require.Zero(t, sc.trie.root.subtreeCount, "Process left block-1 keys in the prefix trie")
+		require.Empty(t, sc.splits, "Process left stale split state")
+
+		require.NoError(t, ms.applyPlainUpdates(k2, u2))
+		for _, k := range k2 {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root2, err := sc.Process(ctx)
+		require.NoError(t, err)
+		require.Equal(t, seqRoot2, root2, "block-2 streaming root without reset != sequential")
+		requireBranchParity(t, seqMs, ms)
+	})
 }
 
 // TestStreamingCommitterStateRoundTrip drives the streaming variant through the
@@ -1105,19 +1106,39 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 
 // TestStreaming_MultiDepthCollapseParity is the deep-collapse parity gate: a
 // whale account whose deep storage collapses (block 2 deletes 1/3 + updates 1/3)
-// while embedded among thousands of other accounts must fold via the streaming
-// concurrent engine to the SAME root and stored-branch set as sequential
-// ModeDirect AND ModeParallel, at every worker count. This surfaces the
-// streaming-mode deep-collapse divergence fixed by
+// while EMBEDDED among thousands of other accounts must fold via the streaming
+// concurrent engine to the SAME root and byte-identical stored-branch set as
+// sequential ModeDirect AND ModeParallel, at every worker count. Embedding is
+// load-bearing: a single-account storage trie yields a degenerate
+// incremental-collapse root no embedding-insensitive concurrent fold can match.
+// Both embedding seeds are swept so a collapse self-flush that dropped a deletion
+// (phantom child) or clobbered an untouched on-disk sibling breaks branch parity.
+// Surfaces the streaming-mode deep-collapse divergence fixed by
 // docs/plans/20260609-streaming-collapse-fold-fix.md.
 func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
 	t.Parallel()
 	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
-	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
-	k1 := append(append([][]byte{}, mk...), wk1...)
-	u1 := append(append([]Update{}, mu...), wu1...)
-	for _, w := range []int{1, 4, 8} {
-		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
+	for _, tc := range []struct {
+		name    string
+		mixSeed int64
+		mixKeys int
+	}{
+		{"embed_c0ffee_4000", 0xC0FFEE, 4000},
+		{"embed_5eed_3000", 0x5EED, 3000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mk, mu := buildMixedCorpus(tc.mixSeed, tc.mixKeys)
+			k1 := append(append([][]byte{}, mk...), wk1...)
+			u1 := append(append([]Update{}, mu...), wu1...)
+
+			seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, wk2, wu2)
+			for _, w := range []int{1, 4, 8} {
+				requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
+				strRoot, strMs := runIncremental(t, modeStreaming, w, k1, u1, wk2, wu2)
+				require.Equalf(t, seqRoot, strRoot, "whale storage collapse(workers=%d) root != sequential", w)
+				requireBranchParity(t, seqMs, strMs)
+			}
+		})
 	}
 }
 
@@ -1226,28 +1247,3 @@ func whaleFullCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Up
 	return pk, upds, k2, u2
 }
 
-// TestStreaming_StorageCollapseAcrossSplit drives a delete batch that collapses
-// storage branches below the account/storage boundary while the whale is EMBEDDED
-// among thousands of other accounts. Embedding is load-bearing: a single-account
-// storage trie produces a degenerate incremental-collapse root that no
-// embedding-insensitive concurrent per-first-nibble fold can match (Task 3 of
-// docs/plans/20260609-streaming-collapse-fold-fix.md). Embedded, the collapse root
-// is canonical and the streaming fold must reproduce it — root + every stored
-// branch byte-identical to sequential at every worker count. A collapse self-flush
-// that dropped a deletion (phantom child) or clobbered an untouched on-disk sibling
-// would break branch parity.
-func TestStreaming_StorageCollapseAcrossSplit(t *testing.T) {
-	t.Parallel()
-	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
-	mk, mu := buildMixedCorpus(0x5EED, 3000)
-	k1 := append(append([][]byte{}, mk...), wk1...)
-	u1 := append(append([]Update{}, mu...), wu1...)
-
-	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, wk2, wu2)
-
-	for _, w := range []int{1, 4, 8} {
-		strRoot, strMs := runIncremental(t, modeStreaming, w, k1, u1, wk2, wu2)
-		require.Equalf(t, seqRoot, strRoot, "whale storage collapse(workers=%d) root != sequential", w)
-		requireBranchParity(t, seqMs, strMs)
-	}
-}

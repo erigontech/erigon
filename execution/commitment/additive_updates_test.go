@@ -60,58 +60,57 @@ func additiveCorpus() (keys [][]byte, partials [][2]*Update, merged []Update) {
 	return keys, partials, merged
 }
 
-// TestUpdatesModeParallel_AdditiveTouchDirect: two partial TouchPlainKeyDirect
-// calls per key must merge like ModeUpdate, producing the same root as the
-// sequential trie folding the merged state.
-func TestUpdatesModeParallel_AdditiveTouchDirect(t *testing.T) {
+// TestAdditiveTouch asserts both concurrent engines merge two partial touches of
+// the same key like ModeUpdate, producing the sequential merged-state root. The
+// parallel subtest drives TouchPlainKeyDirect; the streaming subtest drives the
+// committer's carried TouchKey.
+func TestAdditiveTouch(t *testing.T) {
 	t.Parallel()
 
-	keys, partials, merged := additiveCorpus()
-	seqRoot, _ := sequentialRoot(t, keys, merged)
+	t.Run("parallel", func(t *testing.T) {
+		keys, partials, merged := additiveCorpus()
+		seqRoot, _ := sequentialRoot(t, keys, merged)
 
-	parMs := NewMockState(t)
-	parMs.SetConcurrentCommitment(true)
-	require.NoError(t, parMs.applyPlainUpdates(keys, merged))
+		parMs := NewMockState(t)
+		parMs.SetConcurrentCommitment(true)
+		require.NoError(t, parMs.applyPlainUpdates(keys, merged))
 
-	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
-	defer parTrie.Release()
-	parTrie.SetNumWorkers(2)
-	parTrie.ResetContext(parMs)
+		parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
+		defer parTrie.Release()
+		parTrie.SetNumWorkers(2)
+		parTrie.ResetContext(parMs)
 
-	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer ut.Close()
-	for i, k := range keys {
-		ut.TouchPlainKeyDirect(string(k), partials[i][0])
-		ut.TouchPlainKeyDirect(string(k), partials[i][1])
-	}
-	require.Equal(t, uint64(len(keys)), ut.Size(), "re-touches must not add keys")
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for i, k := range keys {
+			ut.TouchPlainKeyDirect(string(k), partials[i][0])
+			ut.TouchPlainKeyDirect(string(k), partials[i][1])
+		}
+		require.Equal(t, uint64(len(keys)), ut.Size(), "re-touches must not add keys")
 
-	parRoot, err := parTrie.Process(context.Background(), ut, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, parRoot, "additive partial touches must fold to the merged root")
-}
+		parRoot, err := parTrie.Process(context.Background(), ut, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, parRoot, "additive partial touches must fold to the merged root")
+	})
 
-// TestStreaming_AdditiveTouchKey: the streaming committer must merge repeated
-// carried touches of one key the same way.
-func TestStreaming_AdditiveTouchKey(t *testing.T) {
-	t.Parallel()
+	t.Run("streaming", func(t *testing.T) {
+		keys, partials, merged := additiveCorpus()
+		seqRoot, _ := sequentialRoot(t, keys, merged)
 
-	keys, partials, merged := additiveCorpus()
-	seqRoot, _ := sequentialRoot(t, keys, merged)
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, merged))
 
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, merged))
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(2)
+		for i, k := range keys {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, partials[i][0])
+			sc.TouchKey(KeyToHexNibbleHash(k), k, partials[i][1])
+		}
 
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(2)
-	for i, k := range keys {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, partials[i][0])
-		sc.TouchKey(KeyToHexNibbleHash(k), k, partials[i][1])
-	}
-
-	root, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, root, "streaming additive touches must fold to the merged root")
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, seqRoot, root, "streaming additive touches must fold to the merged root")
+	})
 }

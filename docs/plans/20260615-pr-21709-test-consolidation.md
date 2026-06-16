@@ -389,9 +389,9 @@ Apply merges 9–13. For #11: FIRST wire `requireBranchParity` into
 `StorageCollapseAcrossSplit` standalone and skip the corresponding prune in
 Task 6. For #12: add the `{1,4,8}` worker loop into `…BranchParity`.
 
-- [ ] `go test ./execution/commitment/... -run 'Streaming|MultiDepth|Collapse|Additive|DeepIntegration' -count=1` green.
-- [ ] `-race` green on `TestStreaming_SchedulerConcurrentParity`, `TestStreaming_StorageMidAccountFold`, `TestStreaming_MultiBlockReuse`.
-- [ ] Byte-level `requireBranchParity` runs in the collapse owner (or the downgrade was taken and recorded).
+- [x] `go test ./execution/commitment/... -run 'Streaming|MultiDepth|Collapse|Additive|DeepIntegration' -count=1` green.
+- [x] `-race` green on `TestStreaming_SchedulerConcurrentParity`, `TestStreaming_StorageMidAccountFold`, `TestStreaming_MultiBlockReuse`.
+- [x] Byte-level `requireBranchParity` runs in the collapse owner (merge taken, not downgrade — wired into `TestStreaming_MultiDepthCollapseParity`).
 
 ### Task 6: Prunes + dead-helper + file deletions
 
