@@ -409,9 +409,9 @@ runners survive in `parallel_streaming_bench_test.go` before deleting
 
 ### Task 7: Final verification
 
-- [ ] Path-coverage checklist diff: every non-negotiable path present pre- is present post-.
-- [ ] `go test ./execution/commitment/... -race -count=1` green (full, not `-short`).
-- [ ] `make lint` green (repeat until stable — non-deterministic per repo CLAUDE.md).
-- [ ] `make test-short` green.
-- [ ] `make erigon integration` builds (repo pre-commit convention; expected trivially green since no non-test code changed).
-- [ ] Replace the plan's estimates with ACTUAL before/after file + test + line counts in the commit body.
+- [x] Path-coverage checklist diff: every non-negotiable path present pre- is present post-.
+- [x] `go test ./execution/commitment/... -race -count=1` green (full, not `-short`).
+- [x] `make lint` green (repeat until stable — non-deterministic per repo CLAUDE.md).
+- [x] `make test-short` green.
+- [x] `make erigon integration` builds (repo pre-commit convention; expected trivially green since no non-test code changed).
+- [x] Replace the plan's estimates with ACTUAL before/after file + test + line counts in the commit body.

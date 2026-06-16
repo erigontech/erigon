@@ -1201,4 +1201,3 @@ func whaleFullCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Up
 	}
 	return pk, upds, k2, u2
 }
-
