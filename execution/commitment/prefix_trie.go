@@ -20,23 +20,18 @@ import "math/bits"
 
 const prefixSlabSize = 16384
 
-// prefixNode is a path-compressed prefix-trie node keyed on nibbles.
-// ext is the compressed nibble path from the parent (each byte is one nibble 0x00..0x0F).
-// bitmap marks which children are present; children is dense (len == popcount(bitmap)).
-// subtreeCount is incremented on every insert that traverses the node — it counts
-// path traversals, not distinct keys.
+// prefixNode is a path-compressed prefix-trie node keyed on nibbles (each ext byte is one nibble 0x00..0x0F).
+// children is dense: len == popcount(bitmap). subtreeCount counts traversing inserts, not distinct keys.
 type prefixNode struct {
 	ext          []byte
 	children     []*prefixNode
-	plainKey     []byte  // un-hashed key; set only where a key terminates
-	update       *Update // carried per-key value (nil = re-read from ctx); set only where a key terminates
+	plainKey     []byte  // set only where a key terminates
+	update       *Update // carried value (nil = re-read from ctx); set only where a key terminates
 	subtreeCount uint32
 	bitmap       uint16
 }
 
-// prefixSlab is a fixed-size backing array for prefixNodes. Pointers into the slab
-// remain stable as long as the slab itself is not freed, so the arena never resizes
-// individual slabs — it appends new ones.
+// prefixSlab is a fixed-size backing array for prefixNodes; pointers into it stay stable until freed.
 type prefixSlab struct {
 	nodes [prefixSlabSize]prefixNode
 }
@@ -66,8 +61,7 @@ func (a *prefixArena) allocNode() *prefixNode {
 	return n
 }
 
-// resetArena clears every node touched so far so the slabs can be re-used without
-// re-allocating fresh memory. Keeps the first slab; trailing slabs are released.
+// resetArena clears touched nodes for reuse, keeping the first slab and releasing the rest.
 func (a *prefixArena) resetArena() {
 	for i := 0; i <= a.slabIdx && i < len(a.slabs); i++ {
 		limit := prefixSlabSize
@@ -76,35 +70,28 @@ func (a *prefixArena) resetArena() {
 		}
 		clear(a.slabs[i].nodes[:limit])
 	}
-	// Drop pointers to trailing slabs so the GC can reclaim them; the slice
-	// reslice below would otherwise keep them alive via the backing array
-	// until subsequent appends overwrote each slot.
+	// Nil out trailing slabs so the GC reclaims them; the reslice below keeps them alive via the backing array otherwise.
 	clear(a.slabs[1:])
 	a.slabs = a.slabs[:1]
 	a.slabIdx = 0
 	a.nextIdx = 0
 }
 
-// nodeCount reports how many nodes the arena has handed out since the last reset.
 func (a *prefixArena) nodeCount() int {
 	return a.slabIdx*prefixSlabSize + a.nextIdx
 }
 
-// popcount returns the number of children present on the node.
 func popcount(n *prefixNode) int {
 	return bits.OnesCount16(n.bitmap)
 }
 
-// childIndex returns the dense index of a child nibble in node.children and whether
-// the child is present.
 func childIndex(n *prefixNode, nib byte) (int, bool) {
 	mask := uint16(1) << nib
 	idx := bits.OnesCount16(n.bitmap & (mask - 1))
 	return idx, n.bitmap&mask != 0
 }
 
-// prefixTrie is a path-compressed nibble trie. Insert is sequential — concurrent
-// callers must serialize themselves.
+// prefixTrie is a path-compressed nibble trie; Insert is not safe for concurrent use.
 type prefixTrie struct {
 	root    *prefixNode
 	arena   *prefixArena
@@ -135,12 +122,8 @@ func commonPrefixLen(a, b []byte) int {
 	return n
 }
 
-// Insert adds hashedKey (in nibble form) to the trie and records plainKey on the
-// node where the key terminates, along with an optional carried value (update;
-// nil means the fold re-reads it from ctx). Re-inserting an existing key merges
-// the carried updates per-field copy-on-write (a snapshot holding the old update
-// stays intact) and leaves subtree counts unchanged; isNew reports whether the
-// key was new. plainKey backing must stay stable for the trie's lifetime.
+// Insert adds hashedKey (nibble form), recording plainKey and optional update (nil = re-read from ctx) at its terminating node.
+// Re-inserting merges updates copy-on-write so a snapshot of the old update stays intact; plainKey backing must outlive the trie.
 func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew bool) {
 	node := t.root
 	keyOffset := 0
@@ -157,7 +140,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		m := commonPrefixLen(remain, node.ext)
 
 		if m < len(node.ext) {
-			// Partial match — split the current node at position m.
+			// Partial match: split the node at position m.
 			oldExt := node.ext
 			oldBitmap := node.bitmap
 			oldChildren := node.children
@@ -168,7 +151,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 			oldChild.bitmap = oldBitmap
 			oldChild.children = oldChildren
 			oldChild.subtreeCount = oldSubtreeCount
-			// terminator on node was a key reaching past m; it moves to oldChild
+			// A terminator on the split node belonged to a longer key; move it to oldChild.
 			oldChild.plainKey = node.plainKey
 			oldChild.update = node.update
 			node.plainKey = nil
@@ -177,7 +160,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 			node.ext = oldExt[:m]
 
 			if m == len(remain) {
-				// Key terminates inside the old extension — no new sibling, just one child.
+				// Key ends inside the old extension: one child, no new sibling.
 				node.bitmap = uint16(1) << oldExt[m]
 				node.children = []*prefixNode{oldChild}
 				node.plainKey = plainKey
@@ -204,10 +187,8 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 			return true
 		}
 
-		// Full match on node.ext.
 		keyOffset += m
 		if keyOffset == len(hashedKey) {
-			// Key terminates exactly at this node.
 			if node.plainKey != nil {
 				if update != nil {
 					merged := &Update{}

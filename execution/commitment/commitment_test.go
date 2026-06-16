@@ -1006,7 +1006,6 @@ func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
 
-	// Distinct plain keys → distinct hashed keys → trie should accumulate them.
 	keys := [][]byte{
 		common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"),
 		common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"),
@@ -1022,7 +1021,6 @@ func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
 		"every touched key must show up in the prefix trie")
 
-	// Duplicate insert must dedup.
 	ut.TouchPlainKey(string(keys[0]), []byte("v2"), ut.TouchStorage)
 	require.Equal(t, uint64(len(keys)), ut.Size())
 	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
@@ -1040,7 +1038,7 @@ func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {
 
 	ut.TouchHashedKey(hk1)
 	ut.TouchHashedKey(hk2)
-	ut.TouchHashedKey(hk1) // dedup
+	ut.TouchHashedKey(hk1)
 
 	require.Equal(t, uint64(2), ut.Size())
 	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
@@ -1074,7 +1072,6 @@ func TestUpdatesModeParallel_Reset(t *testing.T) {
 		require.Nilf(t, ut.nibbles[i], "nibbles[%d] must stay unallocated after Reset", i)
 	}
 
-	// Round-trip: touches after Reset must work.
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 	}
@@ -1100,14 +1097,12 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 	defer ut.Close()
 	require.Nil(t, ut.parallel)
 
-	// Transition into ModeParallel allocates the parallel state.
 	ut.SetMode(ModeParallel)
 	require.Equal(t, ModeParallel, ut.mode)
 	require.NotNil(t, ut.parallel)
 	require.False(t, ut.sortPerNibble)
 	require.Equal(t, uint64(0), ut.Size())
 
-	// A subsequent SetMode(ModeParallel) must not re-allocate or wipe pre-existing state.
 	prev := ut.parallel
 	ut.SetMode(ModeParallel)
 	require.Same(t, prev, ut.parallel)
@@ -1124,9 +1119,7 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 
 	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
 	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
-	// InitializeTrieAndUpdates must force ModeParallel for the parallel variant,
-	// regardless of the mode argument — the Updates buffer must allocate the
-	// prefix-trie state Prepare reads.
+	// Parallel variant forces ModeParallel regardless of the mode argument.
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
 	require.True(t, upd.IsConcurrentCommitment())

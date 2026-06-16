@@ -37,11 +37,6 @@ func (r *recordingStreamSink) TouchKey(hashedKey, plainKey []byte, update *Updat
 	r.touches++
 }
 
-// TestUpdates_NewEmpty_PreservesStreaming guards the calculator funnel: the
-// commitment calculator rotates its buffer via NewEmpty (committer.go), and the
-// rotated buffer must keep forwarding touches to the StreamingCommitter,
-// otherwise the committer receives no touches and silently computes the
-// unchanged base root.
 func TestUpdates_NewEmpty_PreservesStreaming(t *testing.T) {
 	u := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	sink := &recordingStreamSink{}
@@ -56,8 +51,7 @@ func TestUpdates_NewEmpty_PreservesStreaming(t *testing.T) {
 	require.NotZero(t, sink.touches, "rotated buffer did not forward touch to the streamer")
 }
 
-// streamingRoot drives a StreamingCommitter over keys/upds touched in the order
-// given by idxOrder, returning its root and MockState (with committed branches).
+// streamingRoot drives a StreamingCommitter over keys/upds in idxOrder, returning root + state.
 func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxOrder []int) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -80,10 +74,6 @@ func sequentialRoot(t *testing.T, keys [][]byte, upds []Update) ([]byte, *MockSt
 	return engineRoot(t, modeSeq, 0, keys, upds)
 }
 
-// TestStreaming_RandomOrderParity feeds the mixed corpus through TouchKey in
-// randomized (execution) order — order-independence is the premise; the in-order
-// prefix-trie walk re-sorts at fold — and asserts root + every stored branch
-// match the sequential run.
 func TestStreaming_RandomOrderParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(99, 6000)
@@ -103,11 +93,6 @@ func TestStreaming_RandomOrderParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_DeepBranchParity drives the deep-fan-out corpus (an account whose
-// touched storage exceeds deepStorageThreshold, alongside many small accounts)
-// through TouchKey in randomized order and asserts root + every stored branch
-// match sequential. This exercises foldSplit's big-storage path
-// (foldStorageRoot) and the account-leaf storageRoot/CodeHash assembly.
 func TestStreaming_DeepBranchParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
@@ -127,13 +112,8 @@ func TestStreaming_DeepBranchParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_NonEmptyPrevRefold is the novel-correctness claim: re-folding a
-// split repeatedly over a NON-EMPTY on-disk pre-image stays parity-clean because
-// the committer flushes nothing mid-block, so every re-fold reads the same prev.
-// After each re-fold the store must still equal the post-batch-1 snapshot. A
-// from-scratch run cannot falsify this, hence the batch-1 commit first. The
-// corpus is collapse-free (sparseBatch2 without deletes) — the regime where the
-// invariant holds; see foldDirtySplits for the collapse caveat.
+// TestStreaming_NonEmptyPrevRefold asserts repeated re-folds over a non-empty
+// pre-image stay parity-clean; the corpus must be collapse-free for this to hold.
 func TestStreaming_NonEmptyPrevRefold(t *testing.T) {
 	t.Parallel()
 	const workers = 4
@@ -175,10 +155,8 @@ func TestStreaming_NonEmptyPrevRefold(t *testing.T) {
 	requireBranchParity(t, seqMs, ms)
 }
 
-// makeBranch builds a hash-only-cell deferred branch update at prefix: afterMap
-// declares the full child set, touched lists the nibbles this update supplies
-// cells for (seeded so each nibble's hash is distinguishable by source), and prev
-// is the on-disk pre-image the update merges onto.
+// makeBranch builds a deferred branch update at prefix: afterMap is the full child set,
+// touched the nibbles this update supplies (seed makes each hash source-distinguishable), prev the pre-image it merges onto.
 func makeBranch(prefix []byte, afterMap uint16, touched []int, seed byte, prev []byte) *DeferredBranchUpdate {
 	var cells [16]cellEncodeData
 	var tm uint16
@@ -192,11 +170,8 @@ func makeBranch(prefix []byte, afterMap uint16, touched []int, seed byte, prev [
 	return getDeferredUpdate(prefix, tm, tm, afterMap, &cells, prev)
 }
 
-// waitSchedulerIdle blocks until the background scheduler has drained its queue
-// (no split queued and dirtyCh empty, stable for a short window). Under the
-// re-fold coalescing gate a split can remain dirty between doublings, so "all
-// clean" is no longer the settle condition — the scheduler folds what the gate
-// allows and idles; Process folds the rest. Fails the test if it never idles.
+// waitSchedulerIdle blocks until the scheduler drains its queue; the coalescing
+// gate may leave a split dirty, so idle (not all-clean) is the settle condition.
 func waitSchedulerIdle(t *testing.T, sc *StreamingCommitter) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
@@ -226,11 +201,6 @@ func waitSchedulerIdle(t *testing.T, sc *StreamingCommitter) {
 	}
 }
 
-// TestStreaming_SchedulerConcurrentParity runs the background scheduler while
-// many goroutines touch keys concurrently, then asserts the drained Process root
-// and every stored branch match sequential. The corpus is from-scratch
-// (collapse-free), so background folds cache authoritative cells and Process only
-// merges. Run under -race.
 func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(77, 4000)
@@ -266,15 +236,6 @@ func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_StorageMidAccountFold covers the two re-fold-before-Process
-// regimes. The retouch subtest folds a first wave to completion, then re-touches
-// keys landing in already-folded splits, forcing them to re-fold and pick up the
-// later touch rather than serve a stale cached cell. The mid_account subtest
-// injects a withheld storage-slot touch into the owning account's split via
-// foldGate exactly while it folds: the in-flight snapshot misses the slot, its
-// gen check fails, the result is discarded (RefoldCount bumps) and the split
-// re-folds with the new slot — proving the storageRoot cross-dependency is
-// honored. Both must match the sequential root + branches.
 func TestStreaming_StorageMidAccountFold(t *testing.T) {
 	t.Parallel()
 
@@ -289,7 +250,7 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		defer sc.Release()
 		sc.SetNumWorkers(4)
-		sc.SetEagerFold(1) // small corpus: fold below the production floor so the gate path is exercised
+		sc.SetEagerFold(1) // fold below the production floor to exercise the gate path
 		require.NoError(t, sc.StartScheduler(context.Background()))
 
 		const hold = 8
@@ -331,7 +292,7 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		defer sc.Release()
 		sc.SetNumWorkers(4)
-		sc.SetEagerFold(1) // small corpus: fold below the production floor so the target split folds (foldGate fires)
+		sc.SetEagerFold(1) // fold below the production floor so the target split folds (foldGate fires)
 
 		var once sync.Once
 		sc.SetFoldGate(func(nib byte) {
@@ -360,14 +321,6 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 	})
 }
 
-// TestStreaming_SchedulerCollapseParity runs the background scheduler over a
-// delete batch that collapses branches on a non-empty pre-image — the regime the
-// Task-3 caveat flagged as unsafe for naive re-folds. After draining in-flight
-// folds (Stop), the store must be byte-for-byte the post-block-1 snapshot: the
-// overlay isolates every self-flush so no branch is written mid-block. Process
-// then folds the still-dirty collapsed splits against the real ctx, and the final
-// root + branches match sequential — proving the isolation prevents the
-// double-apply corruption.
 func TestStreaming_SchedulerCollapseParity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -408,14 +361,6 @@ func TestStreaming_SchedulerCollapseParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_SplitMergeCollisionDedup models a prefix emitted by two slices
-// (a split set and the merge set) over a non-empty pre-image: each supplies a
-// different half of the same full child set. The duplicate-prefix flush guard
-// re-reads prev so the second update merges onto the first's write — both halves
-// survive. Bare ApplyDeferredBranchUpdates does not dedup: the second update
-// still carries the block-start prev and its merge clobbers the first half. The
-// branch merger treats branch2's afterMap as authoritative, so the clobber is
-// silent — exactly the data loss the guard prevents.
 func TestStreaming_SplitMergeCollisionDedup(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0x0a, 0x03}
@@ -454,11 +399,8 @@ func TestStreaming_SplitMergeCollisionDedup(t *testing.T) {
 	require.Equal(t, byte(0x80+4), brow[4].hash[0], "bare apply kept the merge set's high half")
 }
 
-// drainContext models the production concurrent apply context: PutBranch writes
-// into a drain-later collector (last-write-wins on a key) that Branch cannot read
-// until drained. This reproduces the read-your-writes gap MockState hides — the
-// flush-then-reread guard saw the stale pre-image here and clobbered the first
-// colliding update.
+// drainContext models the production write-only apply context: PutBranch buffers
+// into a drain-later collector that Branch cannot read until drained.
 type drainContext struct {
 	*MockState
 	pending map[string][]byte
@@ -482,11 +424,6 @@ func (d *drainContext) drain() error {
 	return nil
 }
 
-// TestStreaming_SplitMergeCollisionDedup_WriteOnlyCtx asserts the dedup guard
-// survives a write-only apply context (the production collector), where a flushed
-// branch is not visible to a subsequent Branch read. Both colliding halves must
-// survive; with the prior reread-based guard the second half merged against the
-// stale pre-image and clobbered the first.
 func TestStreaming_SplitMergeCollisionDedup_WriteOnlyCtx(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0x0a, 0x03}
@@ -513,8 +450,7 @@ func TestStreaming_SplitMergeCollisionDedup_WriteOnlyCtx(t *testing.T) {
 	require.Equal(t, byte(0x10+8), row[8].hash[0], "prev's untouched cell survived")
 }
 
-// foldedSplitCount reports how many splits hold an authoritative background-folded
-// cell (eager policy reached them before Process).
+// foldedSplitCount reports how many splits were background-folded before Process.
 func foldedSplitCount(sc *StreamingCommitter) int {
 	n := 0
 	sc.trieMu.RLock()
@@ -536,13 +472,6 @@ func splitCount(sc *StreamingCommitter) int {
 	return n
 }
 
-// TestStreaming_FoldEagerPolicy exercises the single shipped fold trigger
-// (foldEager, fold-on-dirty) across both regimes it governs: the eager path,
-// where every touched split is background-folded before Process (drained), and
-// the fall-through path, where splits the scheduler never reached fold at Process
-// — both the lazy committer (scheduler never started) and a scheduler stopped
-// immediately after touching. Every regime must match the sequential root and
-// branches; the drained eager run must actually fold splits in the background.
 func TestStreaming_FoldEagerPolicy(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(123, 5000)
@@ -554,7 +483,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
 		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		sc.SetNumWorkers(4)
-		sc.SetEagerFold(1) // exercise the eager path below the production floor
+		sc.SetEagerFold(1) // fold below the production floor to exercise the eager path
 		return sc, ms
 	}
 
@@ -600,11 +529,8 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 	})
 }
 
-// streamingViaUpdatesRoot drives a StreamingCommitter through the production
-// funnel: an Updates buffer in ModeParallel with SetStreamingCommitter, fed via
-// the same TouchPlainKey/TouchPlainKeyDirect entry points sdctx.TouchKey and the
-// commitment calculator use. carried=true exercises the carried-*Update path
-// (TouchPlainKeyDirect); carried=false the nil/ctx-read path (TouchPlainKey).
+// streamingViaUpdatesRoot drives the committer through the public Updates funnel;
+// carried=true uses TouchPlainKeyDirect (carried *Update), carried=false TouchPlainKey (nil/ctx-read).
 func streamingViaUpdatesRoot(t *testing.T, workers int, keys [][]byte, upds []Update, carried bool) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -631,10 +557,6 @@ func streamingViaUpdatesRoot(t *testing.T, workers int, keys [][]byte, upds []Up
 	return root, ms
 }
 
-// TestStreaming_UpdatesFunnelParity drives the committer through the public
-// Updates.TouchPlainKey* funnel (ModeParallel + SetStreamingCommitter) and
-// asserts both the carried-*Update path and the nil/ctx-read path produce
-// root + every stored branch == sequential.
 func TestStreaming_UpdatesFunnelParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(7, 6000)
@@ -649,10 +571,6 @@ func TestStreaming_UpdatesFunnelParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_UpdatesLifetimeRegression proves the ModeParallel streaming
-// branch copies both the key bytes and the *Update into the stable arena: every
-// caller-owned key buffer and Update is clobbered immediately after Touch
-// returns, yet the root matches a run that never mutated its inputs.
 func TestStreaming_UpdatesLifetimeRegression(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(31, 4000)
@@ -675,15 +593,13 @@ func TestStreaming_UpdatesLifetimeRegression(t *testing.T) {
 		kb := append([]byte(nil), key...)
 		ub := upds[i]
 		ut.TouchPlainKeyDirect(common.ToStringZeroCopy(kb), &ub)
-		// Corrupt the caller's key backing right after Touch returns; a
-		// non-copying intern would carry the corruption into the fold.
+		// Corrupt the caller's key backing after Touch; a non-copying intern would fold the corruption.
 		for j := range kb {
 			kb[j] ^= 0xFF
 		}
 		held = append(held, &ub)
 	}
-	// Clobber every caller-owned Update before folding; a non-copying branch
-	// would fold these DeleteUpdates instead of the real state.
+	// Clobber every caller-owned Update before folding; a non-copying branch would fold these deletes.
 	for _, u := range held {
 		*u = Update{Flags: DeleteUpdate}
 	}
@@ -694,9 +610,6 @@ func TestStreaming_UpdatesLifetimeRegression(t *testing.T) {
 	requireBranchParity(t, seqMs, ms)
 }
 
-// TestInitializeTrieAndUpdates_StreamingVariant asserts the streaming variant
-// builds a *ParallelPatriciaHashed shell with a streaming committer attached and
-// a ModeParallel Updates buffer wired to forward touches to that same committer.
 func TestInitializeTrieAndUpdates_StreamingVariant(t *testing.T) {
 	t.Parallel()
 
@@ -710,26 +623,18 @@ func TestInitializeTrieAndUpdates_StreamingVariant(t *testing.T) {
 	require.Equal(t, VariantStreamingHexPatricia, trie.Variant())
 	pt := trie.(*ParallelPatriciaHashed)
 	require.NotNil(t, pt.streaming, "streaming variant must attach a StreamingCommitter")
-	// The streaming committer reuses ModeParallel's intern/prefix-trie machinery.
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
 	require.True(t, upd.Streaming(), "Updates must forward touches to the committer")
 }
 
-// streamingViaPublicProcessRoot drives the streaming committer through the
-// public Trie.Process path: InitializeTrieAndUpdates builds the shell + wires the
-// committer to the Updates buffer, touches flow through TouchPlainKey, and
-// trie.Process delegates to processStreaming. This is the production entry point
-// (the Trie interface), unlike streamingViaUpdatesRoot which calls sc.Process.
+// streamingViaPublicProcessRoot drives the committer through the public Trie.Process path,
+// unlike streamingViaUpdatesRoot which calls sc.Process directly.
 func streamingViaPublicProcessRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
 	return engineRoot(t, modeStreamingPublic, workers, keys, upds)
 }
 
-// TestStreaming_PublicProcessParity is the Task-7 integration check: the
-// streaming variant, selected by InitializeTrieAndUpdates and driven through the
-// public Trie.Process path, yields root + every stored branch == sequential on
-// the big-storage corpus across worker counts.
 func TestStreaming_PublicProcessParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
@@ -742,8 +647,7 @@ func TestStreaming_PublicProcessParity(t *testing.T) {
 	}
 }
 
-// requireResetClean asserts Reset wiped every per-block field so the committer
-// can be reused with no carry-over.
+// requireResetClean asserts Reset wiped every per-block field for reuse.
 func requireResetClean(t *testing.T, sc *StreamingCommitter) {
 	t.Helper()
 	require.Empty(t, sc.splits, "Reset left stale split state")
@@ -754,14 +658,6 @@ func requireResetClean(t *testing.T, sc *StreamingCommitter) {
 	require.Zero(t, sc.trie.root.subtreeCount, "Reset left prefix-trie entries")
 }
 
-// TestStreaming_NewSplitMidBlock is the scheduler-specific new-split case: with
-// the background pool running, all keys in the lower top-nibble half are touched
-// and their folds scheduled first, then keys in the upper half create brand-new
-// top-nibble splits that did not exist when the earlier ones were scheduled. Each
-// new split is its own per-nibble state, independent of any in-flight fold, so the
-// drained Process root + branches match sequential. Background folding is
-// best-effort (the coalescing gate may defer a settled split to Process), so the
-// scenario is asserted via deterministic split creation, not fold timing.
 func TestStreaming_NewSplitMidBlock(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMixedCorpus(91, 4000)
@@ -785,7 +681,7 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 
 		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		sc.SetNumWorkers(w)
-		sc.SetEagerFold(1) // small per-nibble corpus: fold below the production floor
+		sc.SetEagerFold(1) // fold below the production floor
 		require.NoError(t, sc.StartScheduler(context.Background()))
 
 		for _, i := range early {
@@ -809,15 +705,6 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 	}
 }
 
-// TestStreaming_MultiBlockReuse reuses one committer across two blocks (block 1 a
-// from-scratch corpus, block 2 a delete/collapse batch over block 1's DB
-// branches) in both rotation regimes. The reset subtest runs the scheduler each
-// block with sc.Reset() between, proving Reset wipes all per-block split state.
-// The no_reset subtest mirrors production — the calculator rotates only the
-// Updates buffer and never calls Reset — so Process must drain its own prefix
-// trie + split state at the block boundary (asserted directly on the trie) or
-// block 2 re-folds block 1's keys. Both must match the sequential incremental
-// root + branches.
 func TestStreaming_MultiBlockReuse(t *testing.T) {
 	t.Parallel()
 
@@ -928,13 +815,6 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 	})
 }
 
-// TestStreamingCommitterStateRoundTrip drives the streaming variant through the
-// public Trie.Process path, encodes the resulting trie state via the persistence
-// template, restores it into a fresh streaming instance, and asserts the
-// restored RootHash matches the originally published value. This is the
-// commitmentdb persistence path (encodeCommitmentState -> restorePatriciaState)
-// taken on a process restart; without promoting the committer's folded root into
-// the template, EncodeCurrentState would serialize a stale/empty root.
 func TestStreamingCommitterStateRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -966,8 +846,6 @@ func TestStreamingCommitterStateRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, published)
 
-	// The template's root flags must mirror the committer's terminal state; they
-	// are serialized below and any drift surfaces as a restore-then-continue bug.
 	tmpl := pt.RootTrie()
 	require.True(t, tmpl.rootChecked, "streaming template.rootChecked must be promoted from the committer")
 	require.True(t, tmpl.rootTouched, "streaming template.rootTouched must be promoted from the committer")
@@ -977,7 +855,6 @@ func TestStreamingCommitterStateRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, encoded, "EncodeCurrentState must capture template state mirrored from the committer")
 
-	// Restore into a fresh streaming instance, simulating a process restart.
 	trie2, ut2 := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
 	defer ut2.Close()
 	defer trie2.Release()
@@ -992,10 +869,6 @@ func TestStreamingCommitterStateRoundTrip(t *testing.T) {
 		"RootHash after SetState must reproduce the published streaming root")
 }
 
-// TestKeyArena_PointerStability verifies the chunked keyArena returns stable,
-// independent slices: prior keys survive a new-chunk allocation, each returned
-// slice is full-cap so a caller append cannot clobber the next key, and an
-// oversize key still copies its full contents.
 func TestKeyArena_PointerStability(t *testing.T) {
 	var arena keyArena
 
@@ -1003,7 +876,7 @@ func TestKeyArena_PointerStability(t *testing.T) {
 	got := make([][]byte, 0, 4096)
 	// Push enough small keys to roll over at least two 64KB chunks.
 	for i := range 4096 {
-		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32) // 64 bytes/key
+		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32)
 		inputs = append(inputs, in)
 		got = append(got, arena.copy(in))
 	}
@@ -1019,8 +892,7 @@ func TestKeyArena_PointerStability(t *testing.T) {
 			"key %d not full-cap: a caller append could overwrite the next key", i)
 	}
 
-	// Stamp a unique byte into every returned slice, then confirm none was
-	// overwritten by a neighbour sharing the same backing chunk.
+	// Stamp each slice and confirm no neighbour sharing a chunk overwrote it.
 	for i := range got {
 		for j := range got[i] {
 			got[i][j] = byte(i)
@@ -1034,11 +906,8 @@ func TestKeyArena_PointerStability(t *testing.T) {
 	}
 }
 
-// buildMultiDepthCorpus mixes account-trie forks (thousands of independent
-// accounts → split-points at several shallow account-trie depths) with a whale
-// storage subtree whose deep forks split below the account/storage boundary
-// (depth > 64). Together they exercise concurrent folding at many depths in one
-// batch, which a single-whale or accounts-only corpus cannot.
+// buildMultiDepthCorpus mixes shallow account-trie forks with a whale storage
+// subtree forking below depth 64, exercising concurrent folding at many depths.
 func buildMultiDepthCorpus() (keys [][]byte, upds []Update) {
 	mk, mu := buildMixedCorpus(0xD15C0DE, 6000)
 	_, _, _, _, pk, pu, _ := whaleByNibble(20_000)
@@ -1049,19 +918,12 @@ func buildMultiDepthCorpus() (keys [][]byte, upds []Update) {
 	return keys, upds
 }
 
-// parallelRoot drives ModeParallel over a single batch, returning the root and
-// the MockState (with committed branches) for parity comparison.
+// parallelRoot drives ModeParallel over a single batch, returning root + state.
 func parallelRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
 	return engineRoot(t, modeParallel, workers, keys, upds)
 }
 
-// TestStreaming_MultiDepthSplitParity is the headline Task-5 parity gate: a
-// corpus with split-points at SEVERAL depths must fold via the streaming
-// concurrent engine to the SAME root and stored-branch set as sequential
-// ModeDirect AND ModeParallel, at every worker count. DeepLocalFolds asserts the
-// whale's account@64 boundary still routes through foldStorageRoot (the flat
-// per-first-nibble fan-out).
 func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 	t.Parallel()
 	keys, upds := buildMultiDepthCorpus()
@@ -1093,17 +955,9 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_MultiDepthCollapseParity is the deep-collapse parity gate: a
-// whale account whose deep storage collapses (block 2 deletes 1/3 + updates 1/3)
-// while EMBEDDED among thousands of other accounts must fold via the streaming
-// concurrent engine to the SAME root and byte-identical stored-branch set as
-// sequential ModeDirect AND ModeParallel, at every worker count. Embedding is
-// load-bearing: a single-account storage trie yields a degenerate
-// incremental-collapse root no embedding-insensitive concurrent fold can match.
-// Both embedding seeds are swept so a collapse self-flush that dropped a deletion
-// (phantom child) or clobbered an untouched on-disk sibling breaks branch parity.
-// Surfaces the streaming-mode deep-collapse divergence fixed by
-// docs/plans/20260609-streaming-collapse-fold-fix.md.
+// TestStreaming_MultiDepthCollapseParity embeds a collapsing whale among many
+// accounts; embedding is load-bearing — a single-account trie yields a degenerate
+// collapse root no embedding-insensitive concurrent fold can match.
 func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
 	t.Parallel()
 	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
@@ -1131,10 +985,8 @@ func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_FullCollapseParity is the full-deletion variant: block 2 deletes
-// EVERY whale storage slot (embedded among other accounts), so the whale becomes
-// storage-less. Streaming must yield the empty-trie storageRoot for the account
-// (not a zero hash) and match ModeDirect == ModeParallel at every worker count.
+// TestStreaming_FullCollapseParity deletes every whale storage slot; the now
+// storage-less account must yield the empty-trie storageRoot, not a zero hash.
 func TestStreaming_FullCollapseParity(t *testing.T) {
 	t.Parallel()
 	wk1, wu1, wk2, wu2 := whaleFullCollapseCorpus()
@@ -1146,12 +998,6 @@ func TestStreaming_FullCollapseParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_StorageInteriorSplits is the headline Task-3 check: a whale
-// account whose storage spans many slots must fold via the flat per-first-nibble
-// fan-out (foldStorageRoot, ~16-way below the account/storage boundary) while
-// still matching the sequential root and stored branch set. The account folds
-// through foldStorageRoot (DeepLocalFolds), never as a split-point (its depth-64
-// node carries the account terminator).
 func TestStreaming_StorageInteriorSplits(t *testing.T) {
 	t.Parallel()
 	_, _, _, _, pk, upds, _ := whaleByNibble(20_000)
@@ -1178,15 +1024,9 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 	}
 }
 
-// whaleCollapseCorpus builds a two-block whale-storage delete corpus that drives
-// the concurrent deep-fold path. Block 1 (pk/upds) is a whale whose storage spans
-// many slots. Block 2 (k2/u2) touches the account and rewrites a SUBSET of the
-// slots — a third deleted, a third updated, a third left untouched on disk — so
-// the block-2 fold still crosses deepStorageThreshold (routing through
-// foldStorageRoot's split fan-out) while the deletes collapse interior storage
-// branches AND untouched on-disk siblings must be preserved across the fold. That
-// untouched-sibling read is what makes the engine self-flush mid-fold; the fold
-// must write only deferred (applied once at end of block) and stay parity-clean.
+// whaleCollapseCorpus builds a two-block whale corpus whose block 2 deletes a
+// third of the slots, updates a third, and leaves a third untouched on disk — the
+// untouched-sibling read forces a mid-fold self-flush that must stay parity-clean.
 func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
 	var addr []byte
 	addr, _, _, _, pk, upds, _ = whaleByNibble(30_000)
@@ -1197,7 +1037,7 @@ func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update
 	u2[0].Nonce = 7
 	for i := range pk {
 		if len(pk[i]) == length.Addr || i%3 == 2 {
-			continue // leave every third slot untouched on disk
+			continue
 		}
 		var u Update
 		if i%3 == 0 {
@@ -1213,11 +1053,8 @@ func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update
 	return pk, upds, k2, u2
 }
 
-// whaleFullCollapseCorpus is whaleCollapseCorpus's full-deletion variant: block 2
-// touches the account and DELETES every storage slot, so the whale becomes
-// storage-less (storageRoot == emptyRoot). Every first-storage-nibble subtree
-// collapses to empty, exercising the all-children-collapsed path that must yield
-// the empty-trie root rather than a zero hash.
+// whaleFullCollapseCorpus deletes every whale storage slot, exercising the
+// all-children-collapsed path that must yield the empty-trie root, not a zero hash.
 func whaleFullCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
 	var addr []byte
 	addr, _, _, _, pk, upds, _ = whaleByNibble(30_000)

@@ -30,12 +30,10 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// foldChildSubtree folds one subtree's collected keys in a standalone worker
-// mounted from the trie root and returns its cell at the deepest shared depth,
-// stripped of the leading extension nibble the parent column carries. col is that
-// cell's column (the prefix's last nibble). The destination grid cell is reset
-// first so no stale pooled-grid field (hashedExtension or account fields a
-// single-child foldPropagate leaves untouched) survives into the folded cell.
+// foldChildSubtree folds one subtree's collected keys in a standalone worker and
+// returns its cell at column col, stripped of the leading extension nibble the
+// parent column carries. The destination grid cell is reset first so no stale
+// pooled-grid field survives into the folded cell.
 func foldChildSubtree(w *HexPatriciaHashed, col int, group []touchedKey) (cell, error) {
 	w.grid[0][col].reset()
 	for i := range group {
@@ -53,14 +51,10 @@ func foldChildSubtree(w *HexPatriciaHashed, col int, group []touchedKey) (cell, 
 	return c, nil
 }
 
-// aggregateSubtreeRoot stitches the present child cells into the branch at depth
-// len(prefix)+1 and folds it once to the subtree's root cell at depth len(prefix).
-// The destination grid cell is reset first so no stale pooled-grid field survives
-// into the folded cell. A child that folded to an empty cell (its whole sub-subtree
-// collapsed under deletes) stays in touchMap — so the branch update records the
-// deletion against the on-disk pre-image — but is dropped from afterMap. If every
-// child collapsed the whole subtree is empty and an empty cell is returned so the
-// caller drops this branch bit in turn. The returned cell's hash is the subtree root.
+// aggregateSubtreeRoot stitches the present child cells into the branch and folds
+// it once to the subtree's root cell. A child that folded to an empty cell stays in
+// touchMap (so the branch update records the deletion) but is dropped from afterMap;
+// if every child collapsed an empty cell is returned.
 func aggregateSubtreeRoot(w *HexPatriciaHashed, prefix []byte, children *[16]cell, present uint16) (cell, error) {
 	d := int16(len(prefix))
 	col := int(prefix[d-1])
@@ -96,22 +90,15 @@ func aggregateSubtreeRoot(w *HexPatriciaHashed, prefix []byte, children *[16]cel
 	return w.grid[0][col], nil
 }
 
-// aggregateStorageRoot stitches the present storage child cells into the storage
-// branch and folds it once to the account's storageRoot cell (depth 64) —
-// aggregateSubtreeRoot mounted at the 64-nibble account hash. The returned cell's
-// hash is the storageRoot setAccountStorageRoot injects into the account leaf.
+// aggregateStorageRoot folds the storage branch to the account's storageRoot cell.
 func aggregateStorageRoot(w *HexPatriciaHashed, accHash []byte, children *[16]cell, present uint16) (cell, error) {
 	return aggregateSubtreeRoot(w, accHash[:64], children, present)
 }
 
-// foldStorageLeaf folds one first-storage-nibble subtree confined to its own
-// depth-65 prefix. The worker is mounted at childPrefix (= accHash + nibble +
-// child.ext) and, when an on-disk branch exists there, unfolds it so an incremental
-// collapse preserves this subtree's untouched on-disk interior siblings — without
-// reading the storage-root branch (which would pull in the sibling first-nibbles
-// other workers own) or the account trie above it. The returned cell is the
-// childPrefix branch with no extension; the caller lifts child.ext, mirroring the
-// recursive split aggregate's convention.
+// foldStorageLeaf folds one first-storage-nibble subtree confined to childPrefix,
+// unfolding the on-disk branch there (if any) so an incremental collapse preserves
+// untouched on-disk interior siblings without reading the storage-root branch above.
+// The returned cell carries no extension; the caller lifts child.ext.
 func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKey) (cell, error) {
 	pd := int16(len(childPrefix))
 	col := int(childPrefix[pd-1])
@@ -120,9 +107,8 @@ func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKe
 	w.depths[0] = pd
 	w.activeRows = 1
 	w.grid[0][col].reset()
-	// Trigger the on-disk unfold at childPrefix when a branch exists there. The
-	// seeded hashLen is only a needUnfolding signal; unfoldBranchNode replaces the
-	// cell with the real on-disk children.
+	// The seeded hashLen below is only a needUnfolding signal; unfoldBranchNode
+	// replaces the cell with the real on-disk children.
 	branch, err := w.branchFromCacheOrDB(nibbles.HexToCompact(childPrefix))
 	if err != nil {
 		return cell{}, err
@@ -143,16 +129,15 @@ func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKe
 	return w.grid[0][col], nil
 }
 
-// isDeepStorageAccount reports whether node is an account leaf at depth 64 whose
-// touched storage is large and forked enough to fold concurrently.
+// isDeepStorageAccount reports whether node is an account leaf whose touched storage
+// is large and forked enough to fold concurrently.
 func isDeepStorageAccount(node *prefixNode, depth int) bool {
 	return depth == 64 && node.plainKey != nil &&
 		bits.OnesCount16(node.bitmap) >= 2 && node.subtreeCount > deepStorageThreshold
 }
 
-// dfsSubtreeDeep walks node's subtree like dfsSubtree, applying each key to w,
-// but at a big-storage account it injects storageRoot's result into the account
-// leaf instead of streaming the slots.
+// dfsSubtreeDeep walks node's subtree applying each key to w, but at a big-storage
+// account it injects storageRoot's result instead of streaming the slots.
 func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte) (common.Hash, error)) error {
 	if node == nil {
 		return nil
@@ -191,9 +176,8 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 	return nil
 }
 
-// foldStorageRoot folds each first-storage-nibble subtree of one account in its
-// own worker (foldStorageLeaf), aggregates the storage branch, and returns the
-// account's storageRoot; an all-collapsed aggregate yields the empty-trie root.
+// foldStorageRoot folds each first-storage-nibble subtree of one account in its own
+// worker, aggregates the storage branch, and returns the account's storageRoot.
 func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
 	accPrefix := append([]byte(nil), path...)
 	var children [16]cell
@@ -251,16 +235,15 @@ func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*Hex
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
 	}
-	// All touched first-nibble subtrees collapsed: the account is storage-less,
-	// so its storageRoot is the empty-trie root, not a zero hash.
+	// A fully collapsed aggregate means a storage-less account: empty-trie root, not zero.
 	if sr.IsEmpty() {
 		return empty.RootHash, nil
 	}
 	return sr.hash, nil
 }
 
-// newDeferredStorageWorker yields a pooled trie worker set up for a deferring
-// storage fold and a release that drains it back to the pool and frees its context.
+// newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold
+// and a release that returns it to the pool and frees its context.
 func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, trace bool) (*HexPatriciaHashed, func()) {
 	w := pool.Get().(*HexPatriciaHashed)
 	wctx, cleanup := factory()
@@ -277,8 +260,8 @@ func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, trace
 	}
 }
 
-// collectSubtreeKeys walks a subtree in sorted order, copying each key's hashed
-// nibbles off the reused walk path; plainKey/update stay referenced.
+// collectSubtreeKeys walks a subtree in sorted order; it copies each key's hashed
+// nibbles off the reused walk path but leaves plainKey/update aliased.
 func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
 	var arena keyArena

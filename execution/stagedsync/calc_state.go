@@ -67,9 +67,7 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	return val, true, nil
 }
 
-// storageEnumerator lists every storage slot the persisted trie holds under
-// an address, so a self-destruct deletes the whole subtree — matching
-// serial's DomainDelPrefix — not just the slots the EVM touched this block.
+// storageEnumerator lists every persisted storage slot under an address.
 type storageEnumerator interface {
 	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
 }
@@ -90,7 +88,7 @@ type calcState struct {
 	domainReader *calcDomainReader
 
 	// storageEnum enumerates an account's persisted storage subtree for
-	// self-destruct. Nil in tests that don't exercise the subtree wipe.
+	// self-destruct; nil disables the on-disk subtree wipe.
 	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
@@ -313,12 +311,8 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 }
 
 // deleteStorageSubtree zeroes and dirties every storage slot under a
-// self-destructed account so FlushToUpdates emits DeleteUpdate per slot,
-// matching serial's DomainDelPrefix(StorageDomain, addr). It covers both the
-// slots already tracked this block and the untouched on-disk slots the EVM
-// never read (which therefore never entered the writes stream); the latter
-// are pulled from the persisted subtree via storageEnum. A later same-block
-// write to a recreated slot overwrites the zero via last-write-wins.
+// self-destructed account, including untouched on-disk slots pulled via
+// storageEnum, so FlushToUpdates emits a DeleteUpdate for each.
 func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	slots := cs.storageState[addr]
 	if slots == nil {

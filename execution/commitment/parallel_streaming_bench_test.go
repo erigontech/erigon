@@ -36,8 +36,6 @@ import (
 func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 	ctx := context.Background()
 	b.ReportAllocs()
-	// b.Loop requires the timer to be running on entry, so each iteration ends
-	// with StartTimer to bracket the (untimed) teardown before the next check.
 	for b.Loop() {
 		b.StopTimer()
 		ms := NewMockState(b)
@@ -58,10 +56,7 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	ctx := context.Background()
 	b.ReportAllocs()
-	// pph lives across iterations: production usage is a long-lived instance
-	// servicing many blocks, so the worker pool gets to actually reuse hph
-	// instances. Re-creating pph per iteration (with .Release() dropping the
-	// pool) would amortize zero work.
+	// pph is reused across iterations so the long-lived worker pool actually amortizes; recreating it per iteration would not.
 	var pph *ParallelPatriciaHashed
 	defer func() {
 		if pph != nil {
@@ -77,13 +72,10 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
-			// Re-wire MockState dependencies without dropping the worker pool.
-			// pph.Reset()/Release() would call resetPool() and defeat the experiment.
+			// Rewire MockState without Reset()/Release(), which would drop the worker pool.
 			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
 			pph.ResetContext(ms)
 		}
-		// Each iteration rebuilds the trie from a fresh MockState, so the
-		// long-lived template must not carry the previous iteration's root.
 		pph.RootTrie().Reset()
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
 		b.StartTimer()
@@ -157,10 +149,7 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 	})
 }
 
-// buildClusteredStorageCorpus pins numAccounts to distinct top nibbles (so only
-// numAccounts of the 16 top-nibble buckets are populated) and gives each many
-// storage slots. The old per-nibble dispatch serializes each bucket on one
-// goroutine; the DFS dispatch fans each account's storage across workers.
+// buildClusteredStorageCorpus pins numAccounts to distinct top nibbles, each with many storage slots.
 func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int) ([][]byte, []Update) {
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))
@@ -199,18 +188,13 @@ func Benchmark_Commitment_Clustered(b *testing.B) {
 	}
 }
 
-// storageGroup is one whale account plus a disjoint subset of its storage
-// slots — the shape a single concurrent storage-fold worker would own.
+// storageGroup is one whale account plus a disjoint subset of its storage slots.
 type storageGroup struct {
 	pk      [][]byte
 	updates []Update
 }
 
-// buildWhaleStorageGroups splits one whale account's `slots` storage entries
-// into `groups` disjoint sub-tries (account + subset). Each group is a valid,
-// independent account+storage trie whose per-key processing cost matches a real
-// storage-nibble subtree at depth 64; the only difference from the production
-// mount is the (negligible) repeated single-account prefix.
+// buildWhaleStorageGroups splits one whale account's slots into groups disjoint, independent account+storage sub-tries.
 func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 	rnd := rand.New(rand.NewSource(919273))
 	addr := make([]byte, length.Addr)
@@ -243,9 +227,7 @@ type groupRun struct {
 	upds *Updates
 }
 
-// setupGroup builds the (untimed) per-iteration state for one group. Must run on
-// the test goroutine (uses require). Each group gets its own MockState/trie so
-// concurrent process() calls share no mutable state.
+// setupGroup must run on the test goroutine (uses require); each group gets its own MockState/trie so concurrent process() shares no mutable state.
 func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	ms := NewMockState(tb)
 	require.NoError(tb, ms.applyPlainUpdates(g.pk, g.updates))
@@ -274,16 +256,7 @@ func closeGroups(rs []groupRun) {
 	}
 }
 
-// Benchmark_StorageConcurrency measures whether processing one whale account's
-// storage concurrently (split into N disjoint sub-tries) beats the single
-// serial pass — the headline question for concurrent storage-subtree folding.
-//
-//	Single            one trie, all slots (the current whale-worker cost)
-//	GroupsN-Serial    N sub-tries one after another (isolates split overhead)
-//	GroupsN-Parallel  N sub-tries concurrently (the win)
-//
-// All timed regions cover only Process; MockState/Updates construction is under
-// StopTimer, matching runDirectBench.
+// Benchmark_StorageConcurrency compares one whale account's storage processed serially vs split into N disjoint sub-tries run concurrently.
 func Benchmark_StorageConcurrency(b *testing.B) {
 	for _, slots := range []int{750_000} {
 		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
@@ -336,12 +309,10 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 	}
 }
 
-// benchCPUSink keeps burnCPU's result observable so the compiler cannot elide
-// the synthetic work.
+// benchCPUSink keeps burnCPU's result observable so the compiler cannot elide the synthetic work.
 var benchCPUSink atomic.Uint64
 
-// burnCPU spins a tunable arithmetic loop standing in for the per-touch block
-// execution cost the streaming committer overlaps its background folds with.
+// burnCPU spins a tunable arithmetic loop standing in for per-touch block execution cost.
 func burnCPU(iters int) {
 	var x uint64 = 1469598103934665603
 	for i := range iters {
@@ -350,10 +321,7 @@ func burnCPU(iters int) {
 	benchCPUSink.Add(x)
 }
 
-// streamingBenchCorpora is the (whale, mixed) pair Task 9 measures. The whale is
-// a bench-scale big-storage account (deep fan-out) plus accounts spread across
-// the top nibbles so the background scheduler has multiple splits to fold in
-// parallel under execution.
+// streamingBenchCorpora returns a deep-storage whale corpus and a corpus spread across top nibbles for multiple parallel splits.
 func streamingBenchCorpora() []struct {
 	name string
 	pk   [][]byte
@@ -371,11 +339,7 @@ func streamingBenchCorpora() []struct {
 	}
 }
 
-// runStreamingOverlapBench drives one full touch→Process cycle per b.Loop
-// iteration: a synthetic CPU cost is burned before every touch, then Process
-// merges. With scheduler=true the background pool folds splits during the burn
-// (overlap); with scheduler=false everything folds at Process (batch baseline).
-// It reports Process-only time and per-op re-fold count alongside wall-clock.
+// runStreamingOverlapBench burns synthetic CPU before each touch, then Processes; scheduler=true overlaps folds with the burn, false folds all at Process.
 func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters int, scheduler bool) {
 	ctx := context.Background()
 	b.ReportAllocs()
@@ -418,12 +382,7 @@ func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters
 	}
 }
 
-// Benchmark_StreamingOverlap is a MECHANISM SANITY-CHECK, not a performance
-// claim. It interleaves a tunable synthetic CPU cost per touch (standing in for
-// block execution) with background folds and compares overlap (scheduler) vs
-// batch (touch-all-then-Process) total wall-clock plus Process-only time and
-// re-fold count. The synthetic number must NOT be cited as a headline win — the
-// real measurement is the live-node run (Post-Completion).
+// Benchmark_StreamingOverlap is a mechanism sanity-check with a synthetic CPU cost; its numbers must not be cited as a performance claim.
 func Benchmark_StreamingOverlap(b *testing.B) {
 	for _, c := range streamingBenchCorpora() {
 		for _, cpu := range []int{0, 500, 5000} {

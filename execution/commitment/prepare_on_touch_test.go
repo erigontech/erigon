@@ -12,9 +12,6 @@ import (
 )
 
 // preparedSplits holds one mounted HexPatriciaHashed per top-nibble split point.
-// Keys are fed via touch() (the "during block execution" phase, hidden under
-// exec in production); Process() then ONLY folds each split and stitches — the
-// prepare-on-touch model.
 type preparedSplits struct {
 	base     *HexPatriciaHashed
 	splits   [16]*HexPatriciaHashed
@@ -109,9 +106,7 @@ func (ps *preparedSplits) release() {
 	}
 }
 
-// sortedTriples returns (hashedKey, plainKey, *update) sorted by hashed key — the
-// order followAndUpdate requires. In production the eager-unfold/deferred-apply
-// drain produces this; here we sort directly.
+// sortedTriples returns triples sorted by hashed key, the order followAndUpdate requires.
 type triple struct {
 	hk, pk []byte
 	upd    *Update
@@ -157,9 +152,6 @@ func TestPrepareOnTouch_Parity(t *testing.T) {
 	require.Equal(t, seqRoot, root, "prepare-on-touch root != sequential")
 }
 
-// Benchmark_PrepareOnTouch reports prepare (touch/followAndUpdate, hidden under
-// execution in production) vs process (fold+stitch, the commitment-time cost) on
-// the whale corpus, with top-nibble split points.
 func Benchmark_PrepareOnTouch(b *testing.B) {
 	pk, upds := buildWhaleCorpus(whale1M())
 	for b.Loop() {

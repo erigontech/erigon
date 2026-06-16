@@ -27,16 +27,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// collectWalk returns the set of (prefix, subtreeCount) pairs in DFS order.
 type walkEntry struct {
 	prefix       []byte
 	subtreeCount uint32
 	bitmap       uint16
 }
 
-// collectWalk visits every node in DFS pre-order and records its accumulated
-// prefix, subtreeCount, and bitmap. Production has no trie walker (Prepare uses
-// its own DFS), so this helper recurses directly for the structure assertions.
+// collectWalk records each node's accumulated prefix, subtreeCount, and bitmap in DFS pre-order.
 func collectWalk(t *prefixTrie) []walkEntry {
 	var out []walkEntry
 	var dfs func(n *prefixNode, accPrefix []byte)
@@ -78,7 +75,6 @@ func TestPrefixTrieSingleInsert(t *testing.T) {
 	key := nibs(0x01, 0x02, 0x03, 0x04)
 	tr.Insert(key, nil, nil)
 
-	// root + one leaf
 	assert.Equal(t, 2, tr.arena.nodeCount())
 	assert.Equal(t, uint32(1), tr.root.subtreeCount)
 	assert.Equal(t, uint16(1)<<0x01, tr.root.bitmap)
@@ -101,7 +97,6 @@ func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 		assert.Equal(t, uint16(1)<<0x01|uint16(1)<<0x05, tr.root.bitmap)
 		require.Len(t, tr.root.children, 2)
 
-		// Children are in nibble order: 0x01 first, then 0x05.
 		assert.Equal(t, nibs(0x02, 0x03), tr.root.children[0].ext)
 		assert.Equal(t, uint32(1), tr.root.children[0].subtreeCount)
 		assert.Equal(t, nibs(0x06, 0x07), tr.root.children[1].ext)
@@ -110,7 +105,6 @@ func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 
 	t.Run("asymmetricCounts", func(t *testing.T) {
 		tr := newPrefixTrie()
-		// 4 inserts in left subtree (nibble 0x01), 3 inserts in right subtree (nibble 0x05).
 		for _, suf := range [][]byte{
 			{0x02, 0x00}, {0x02, 0x01}, {0x02, 0x02}, {0x02, 0x03},
 		} {
@@ -132,11 +126,9 @@ func TestPrefixTrieTwoInsertsDivergeAtRoot(t *testing.T) {
 func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 	t.Run("inside", func(t *testing.T) {
 		tr := newPrefixTrie()
-		// Both keys descend on 0x01, then share extension [0x02, 0x03], then diverge.
 		tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil, nil)
 		tr.Insert(nibs(0x01, 0x02, 0x03, 0x06, 0x07), nil, nil)
 
-		// root -> child (ext=[0x02,0x03], bitmap has 2 children) -> two grandchildren
 		assert.Equal(t, 4, tr.arena.nodeCount())
 
 		require.Len(t, tr.root.children, 1)
@@ -154,12 +146,10 @@ func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 
 	t.Run("atEndOfExtension", func(t *testing.T) {
 		tr := newPrefixTrie()
-		// Second key shares the leaf's full extension then descends with a new
-		// nibble — the descend-into-existing-child path after splitting.
+		// Second key shares the leaf's full extension then descends with a new nibble: exercises descend-into-existing-child after splitting.
 		tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil, nil)
 		tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07), nil, nil)
 
-		// root -> child (ext=[0x02,0x03,0x04,0x05], one child at nibble 0x06) -> grandchild (ext=[0x07])
 		assert.Equal(t, 3, tr.arena.nodeCount())
 
 		require.Len(t, tr.root.children, 1)
@@ -181,7 +171,6 @@ func TestPrefixTrieDuplicateInsert(t *testing.T) {
 	tr.Insert(key, nil, nil)
 	nodesAfterFirst := tr.arena.nodeCount()
 
-	// Insert same key twice more — no growth.
 	tr.Insert(key, nil, nil)
 	tr.Insert(key, nil, nil)
 
@@ -199,7 +188,6 @@ func TestPrefixTrieDeepInsert(t *testing.T) {
 	}
 	tr.Insert(deep, nil, nil)
 
-	// root + one leaf
 	assert.Equal(t, 2, tr.arena.nodeCount())
 	assert.Equal(t, uint32(1), tr.root.subtreeCount)
 	require.Len(t, tr.root.children, 1)
@@ -211,13 +199,11 @@ func TestPrefixTrieSubtreeCountAccumulation(t *testing.T) {
 	tr := newPrefixTrie()
 	const N = 50
 	for i := 0; i < N; i++ {
-		// keep first three nibbles shared, vary the rest deterministically
 		k := []byte{0x01, 0x02, 0x03, byte(i & 0x0F), byte((i >> 4) & 0x0F), byte(i & 0x0F)}
 		tr.Insert(k, nil, nil)
 	}
 	assert.Equal(t, uint32(N), tr.root.subtreeCount)
 
-	// First-level child rooted at nibble 0x01 should also have N entries.
 	require.Len(t, tr.root.children, 1)
 	assert.Equal(t, uint32(N), tr.root.children[0].subtreeCount)
 }
@@ -235,7 +221,6 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 	assert.Equal(t, uint16(0), tr.root.bitmap)
 	assert.Empty(t, tr.root.children)
 
-	// Re-insert the same set — should produce same node count.
 	tr.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
 	tr.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
 	tr.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
@@ -244,11 +229,7 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
-	// Force allocation past one slab by inserting distinct keys diverging at nibble 0.
-	// Each insert under a unique top nibble creates one new leaf, but we only have 16
-	// possible top nibbles, so vary the second nibble too. We need > prefixSlabSize allocs
-	// to be sure, but that's 16K — too slow for a unit test. Instead validate the slab
-	// boundary by stuffing the arena directly.
+	// Stuff the arena directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
 	for i := 0; i < prefixSlabSize+5; i++ {
 		tr.arena.allocNode()
 	}
@@ -268,12 +249,6 @@ func TestPrefixTrieWalkDFSOrder(t *testing.T) {
 
 	entries := collectWalk(tr)
 
-	// Walk visits root, then full DFS:
-	//   root (prefix=[])
-	//   inner at 0x01 (prefix=[0x01])
-	//     leaf at 0x02 (prefix=[0x01,0x02,0x03])
-	//     leaf at 0x05 (prefix=[0x01,0x05,0x06])
-	//   leaf at 0x07 (prefix=[0x07,0x08,0x09])
 	require.Len(t, entries, 5)
 	assert.Empty(t, entries[0].prefix, "root walk entry has empty prefix")
 	assert.Equal(t, nibs(0x01), entries[1].prefix)
@@ -285,7 +260,6 @@ func TestPrefixTrieWalkDFSOrder(t *testing.T) {
 func TestPrefixTrieChildIndex(t *testing.T) {
 	t.Run("childIndex", func(t *testing.T) {
 		n := &prefixNode{bitmap: 0}
-		// no bits set
 		idx, ok := childIndex(n, 0x05)
 		assert.False(t, ok)
 		assert.Equal(t, 0, idx)
@@ -349,7 +323,6 @@ func TestParallelUpdateInsertDelegates(t *testing.T) {
 	pu.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
 	pu.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
 
-	// Verify the trie observed the inserts by comparing against a freshly built trie.
 	expected := newPrefixTrie()
 	expected.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
 	expected.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
@@ -377,7 +350,6 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	assert.Equal(t, 1, pu.trie.arena.nodeCount(), "arena must be reset to a single root node")
 	assert.Empty(t, pu.deferredCombined, "deferredCombined must be cleared")
 
-	// Verify reusable: insert again works as on fresh instance.
 	pu.Insert(nibs(0x0A, 0x0B), nil, nil)
 	assert.Equal(t, uint32(1), pu.trie.root.subtreeCount)
 }
@@ -385,7 +357,6 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
 	pu := newParallelUpdate()
 
-	// Empty inputs must not grow deferredCombined.
 	pu.appendDeferred(nil)
 	pu.appendDeferred([]*DeferredBranchUpdate{})
 	assert.Empty(t, pu.deferredCombined, "empty inputs must not grow deferredCombined")
@@ -403,8 +374,7 @@ func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
 	assert.Same(t, c, pu.deferredCombined[2])
 }
 
-// TestParallelUpdateAppendDeferredConcurrent exercises the appendDeferred mutex
-// under contention. Run with `go test -race` to verify there are no data races.
+// Run with -race to catch data races in appendDeferred under contention.
 func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 	pu := newParallelUpdate()
 
@@ -431,15 +401,11 @@ func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 	assert.Len(t, pu.deferredCombined, expectedSize,
 		"appendDeferred must atomically merge every worker's batch")
 
-	// All pointers must be non-nil — verifies no torn writes from concurrent appends.
 	for i, upd := range pu.deferredCombined {
 		assert.NotNil(t, upd, "deferredCombined[%d] must not be nil", i)
 	}
 }
 
-// TestPrefixTrieInsertDuplicateMerges: a second Insert of the same key must
-// merge the carried update per-field (copy-on-write, so a snapshot holding the
-// old pointer is unaffected) and must not inflate subtree counts.
 func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
 	t.Parallel()
 
@@ -466,7 +432,6 @@ func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
 	assert.Equal(t, uint64(100), got.Balance.Uint64())
 	assert.Equal(t, uint64(5), got.Nonce)
 
-	// Copy-on-write: the first update object must not have been mutated (a
-	// concurrent fold snapshot may still hold it).
+	// Merge is copy-on-write: a concurrent fold snapshot may still hold the prior update pointer.
 	assert.Equal(t, BalanceUpdate, first.Flags, "merge must not mutate the previously stored update")
 }

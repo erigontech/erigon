@@ -15,15 +15,10 @@ import (
 
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
-// deepStorageThreshold is the touched-slot count above which an account's
-// storage subtree folds concurrently (split below depth 64) instead of
-// streaming through the owning worker.
+// deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
 
-// processMounted unfolds the base to the root branch, mounts a worker per
-// touched child nibble, folds each child's subtree into a cell at its true
-// depth, stitches the cells back into the base row (untouched siblings stay),
-// and folds the base up — the mount/fold model of ConcurrentPatriciaHashed.
+// processMounted folds each touched root-child subtree concurrently, stitches the resulting cells back into the base row, and folds the base up to the root.
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel
 	base := p.template
@@ -154,8 +149,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
-	// Only a multi-child root fold sets rootPresent; set it here so the
-	// EncodeCurrentState/SetState round-trip restores a usable root.
+	// fold() only sets rootPresent on a multi-child root fold, so set it here for the EncodeCurrentState/SetState round-trip.
 	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
@@ -204,9 +198,7 @@ func (p *ParallelPatriciaHashed) newStorageWorker() (*HexPatriciaHashed, func())
 	return newDeferredStorageWorker(&p.workerPool, p.trieCtxFactory, p.template != nil && p.template.trace)
 }
 
-// setAccountStorageRoot sets the just-placed account leaf's storage root to sr,
-// so computeCellHash hashes the account with that storageRoot (computeCellHash
-// uses cell.hash as the storageRoot when no storage cell was processed).
+// setAccountStorageRoot sets the account leaf's storage root to sr; computeCellHash uses cell.hash as the storageRoot when no storage cell was processed.
 func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr common.Hash) {
 	var c *cell
 	if w.activeRows == 0 {

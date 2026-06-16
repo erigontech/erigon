@@ -16,9 +16,7 @@
 
 package commitment
 
-// stripLeadingChildExt removes the single leading extension nibble a folded
-// subtree cell carries — the branch column it lands in already implies that
-// nibble. Generalizes the row-0 split stitch to any depth.
+// stripLeadingChildExt drops the leading extension nibble already implied by the branch column the cell lands in.
 func stripLeadingChildExt(c *cell) {
 	if c.hashedExtLen > 0 {
 		c.hashedExtLen--

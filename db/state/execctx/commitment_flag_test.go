@@ -31,10 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// withCommitmentFlag pins the three experimental commitment flags to select the
-// requested trie variant for the duration of the test, restoring the originals
-// on cleanup. The non-selected flags are forced false so PickTrieVariant's
-// streaming-over-parallel-over-concurrent precedence is exercised in isolation.
+// withCommitmentFlag pins the experimental commitment flags to select the requested trie variant, restoring originals on cleanup.
 func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	t.Helper()
 	origStream := statecfg.ExperimentalStreamingCommitment
@@ -50,17 +47,7 @@ func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	statecfg.ExperimentalConcurrentCommitment = false
 }
 
-// runWriteCommitBatch writes a small fixed set of account updates to the
-// SharedDomains and returns the resulting commitment root. The update set is
-// identical across calls so two roots from two SharedDomains can be compared.
-//
-// The workload is intentionally narrow (one account) so Prepare emits a single
-// leafTask with zero split-points — ParallelPatriciaHashed.Process rejects
-// multi-bucket workloads without a top-level split-point (see the "Task 10
-// root barrier" rejection in parallel_patricia_hashed.go), which is a follow-up
-// optimisation tracked outside this task. The single-leafTask path exercises
-// the full wiring (flag → variant → mode → Process) and is sufficient for
-// asserting root-hash equivalence with the sequential trie.
+// runWriteCommitBatch writes a fixed single-account update and returns the resulting commitment root; the update set is identical across calls so roots can be compared.
 func runWriteCommitBatch(t *testing.T, sd *execctx.SharedDomains, rwTx kv.TemporalRwTx) []byte {
 	t.Helper()
 
@@ -84,16 +71,11 @@ func runWriteCommitBatch(t *testing.T, sd *execctx.SharedDomains, rwTx kv.Tempor
 	return rh
 }
 
-// TestSharedDomains_ParallelFlag_RootEquivalence is the cardinal correctness
-// check from the parallel-hph plan: the same update set must produce the same
-// root hash whether the trie is sequential (flag off) or parallel (flag on).
-// Both runs use isolated in-memory DBs so each pass starts from a clean state.
 func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Do not call t.Parallel() — withCommitmentFlag mutates a process-global
-	// flag; concurrent flag flips race against each other.
+	// No t.Parallel(): withCommitmentFlag mutates process-global flags.
 
 	stepSize := uint64(16)
 
@@ -116,13 +98,8 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		require.NoError(t, err)
 		defer sd.Close()
 
-		// ParallelPatriciaHashed needs a TrieContextFactory built from a
-		// separate RO DB so each worker holds its own transaction. Production
-		// wires this in stagedsync/exec3 and squeeze; for the test we use the
-		// same DB as the underlying RwDB.
 		sd.EnableParaTrieDB(db)
 
-		// Sanity check that the flag-to-trie wiring matches the requested mode.
 		got := sd.GetCommitmentCtx().Trie().Variant()
 		require.Equalf(t, variant, got, "trie variant for parallel=%v", parallel)
 
@@ -137,14 +114,11 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		seqRoot, parRoot)
 }
 
-// TestPickTrieVariant_StreamingFlag asserts the flag-to-variant mapping and its
-// precedence: streaming wins over parallel and concurrent when set.
 func TestPickTrieVariant_StreamingFlag(t *testing.T) {
-	// Do not call t.Parallel() — mutates process-global statecfg flags.
+	// No t.Parallel(): mutates process-global statecfg flags.
 	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
 	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
 
-	// Streaming precedence over the other concurrent paths.
 	statecfg.ExperimentalParallelCommitment = true
 	statecfg.ExperimentalConcurrentCommitment = true
 	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
@@ -153,14 +127,11 @@ func TestPickTrieVariant_StreamingFlag(t *testing.T) {
 	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
 }
 
-// TestSharedDomains_StreamingFlag_RootEquivalence asserts the streaming trie
-// produces the same commitment root as the sequential trie over the same update
-// set. Both runs use isolated in-memory DBs so each starts from a clean state.
 func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Do not call t.Parallel() — mutates process-global statecfg flags.
+	// No t.Parallel(): mutates process-global statecfg flags.
 
 	stepSize := uint64(16)
 

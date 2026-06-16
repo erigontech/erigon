@@ -161,18 +161,11 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
 	case VariantParallelHexPatricia:
-		// ParallelPatriciaHashed requires ModeParallel — the Updates buffer
-		// must allocate the prefix-trie / parallelUpdate state that Prepare
-		// reads. Force ModeParallel here so callers cannot accidentally pair
-		// the parallel trie with ModeDirect/ModeUpdate.
+		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	case VariantStreamingHexPatricia:
-		// Streaming reuses ModeParallel's intern/copy/prefix-trie machinery; the
-		// touches are forwarded to the StreamingCommitter, which folds the owning
-		// split (overlapping with execution) and merges at Process. The trie is a
-		// ParallelPatriciaHashed shell that delegates Process to the committer.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		sc := NewStreamingCommitter(nil, length.Addr, cfg)
 		trie.SetStreamingCommitter(sc)
@@ -1448,10 +1441,8 @@ const (
 	ModeParallel Mode = 3
 )
 
-// streamingSink receives touched keys when an Updates buffer runs in streaming
-// mode, driving a StreamingCommitter's (re-)fold of the owning split. The
-// hashedKey backing need not be stable; plainKey/update must stay valid until
-// the committer's Process (the ModeParallel intern/copy guarantees this).
+// streamingSink receives touched keys for a StreamingCommitter's fold; plainKey
+// and update must stay valid until the committer's Process call.
 type streamingSink interface {
 	TouchKey(hashedKey, plainKey []byte, update *Update)
 }
@@ -1490,15 +1481,10 @@ type Updates struct {
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
 
-	// parallel is allocated in ModeParallel; tracks the path-compressed prefix
-	// trie of touched hashed keys and serves as the freeze-time source for
-	// split-point emission. Nil in any other mode.
+	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
 	parallel *parallelUpdate
 
-	// streaming, when true (ModeParallel only), forwards every touched key to
-	// streamer so a StreamingCommitter can (re-)fold the owning split under
-	// execution. The ModeParallel intern/copy machinery is reused verbatim, so
-	// the forwarded plainKey/update reference the stable per-batch arena.
+	// streaming (ModeParallel only) forwards every touched key to streamer.
 	streaming bool
 	streamer  streamingSink
 
@@ -1552,9 +1538,7 @@ func (t *Updates) SetConcurrentCommitment(b bool) {
 	t.initCollector()
 }
 
-// IsConcurrentCommitment reports whether the current configuration allows
-// concurrent commitment processing. ModeParallel implies concurrent; legacy
-// ModeDirect callers opt in by setting sortPerNibble via SetConcurrentCommitment.
+// IsConcurrentCommitment reports whether the configuration allows concurrent commitment processing.
 func (t *Updates) IsConcurrentCommitment() bool {
 	return t.mode == ModeParallel || t.sortPerNibble
 }
@@ -1563,10 +1547,8 @@ type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
-// NewEmpty creates a fresh Updates with the same mode, tmpdir, hasher, and
-// streaming sink as the receiver. The commitment calculator rotates its buffer
-// through this on every block, so the streamer must carry over or the attached
-// StreamingCommitter stops receiving touches and silently computes a stale root.
+// NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
+// carry over, or a buffer rotated mid-stream silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
 	n := NewUpdates(t.mode, t.tmpdir, t.hasher)
 	n.streamer = t.streamer
@@ -1646,11 +1628,7 @@ func (t *Updates) initCollector() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
-// SetStreamingCommitter routes every ModeParallel touch to sink (a
-// StreamingCommitter) in addition to the prefix trie, so the owning split can be
-// (re-)folded under execution. Passing nil disables streaming. Requires
-// ModeParallel — the intern/copy that keeps the forwarded key/update stable
-// lives only in that branch.
+// SetStreamingCommitter forwards ModeParallel touches to sink; nil disables streaming.
 func (t *Updates) SetStreamingCommitter(sink streamingSink) {
 	t.streamer = sink
 	t.streaming = sink != nil
@@ -1660,8 +1638,7 @@ func (t *Updates) SetStreamingCommitter(sink streamingSink) {
 func (t *Updates) Streaming() bool { return t.streaming }
 
 // PlainKeys returns a copy of the set of plain keys that have been touched.
-// Meaningful in ModeDirect and ModeParallel (both populate t.keys); returns
-// nil otherwise.
+// Meaningful only in ModeDirect and ModeParallel; nil otherwise.
 func (t *Updates) PlainKeys() map[string]struct{} {
 	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
 		return nil
@@ -1797,9 +1774,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hasher(keyBytes)
-		// Carry the value so the parallel fold uses it directly instead of
-		// re-reading account/storage from ctx (which lags cc.state). A re-touch
-		// merges into the stored update via the trie's Insert, like ModeUpdate.
+		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
@@ -1842,8 +1817,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			// No plainKey for a hashed-only touch; the parallel fold rejects such a
-			// terminator. Only witness gen uses this, and it runs the sequential trie.
+			// Hashed-only touch has no plainKey; the parallel fold rejects such a terminator.
 			t.parallel.Insert(hashedKey, nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}

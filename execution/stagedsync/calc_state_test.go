@@ -533,8 +533,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
-// mockStorageEnum stands in for the roTx-backed RangeAsOf enumeration of an
-// account's persisted storage subtree, returning a fixed slot set per address.
+// mockStorageEnum returns a fixed persisted-slot set per address.
 type mockStorageEnum struct {
 	slots map[accounts.Address][]accounts.StorageKey
 }
@@ -548,20 +547,11 @@ func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key acc
 	return nil
 }
 
-// TestSDOfPreExistingContract_DeletesUntouchedSlots locks in that a
-// self-destruct deletes the WHOLE persisted storage subtree, not just the
-// slots the EVM touched this block. Serial's BlockStateCache.Flush wipes the
-// subtree via DomainDelPrefix(StorageDomain, addr), which enumerates every
-// on-disk slot and DomainDel's it (each TouchKey'd into the commitment
-// buffer). The parallel calculator builds the commitment key set from
-// calcState alone (the exec loop's DomainDel runs with inline TouchKey
-// disabled), and slots the EVM never read/wrote never enter vm.StorageKeys,
-// so without enumerating the subtree those slots survive as stale trie
-// leaves and the root diverges.
+// TestSDOfPreExistingContract_DeletesUntouchedSlots checks that a self-destruct
+// deletes the whole persisted storage subtree, not just the EVM-touched slots.
 func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
-	// Slots that exist on disk but are never read/written this block, so they
-	// never enter cs.storageState through the writes stream.
+	// On-disk slots never read/written this block, so they never enter storageState.
 	untouched1 := accounts.InternKey(common.Hash{0x11})
 	untouched2 := accounts.InternKey(common.Hash{0x22})
 
@@ -570,7 +560,6 @@ func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
 		addr: {untouched1, untouched2},
 	}}
 
-	// Pure SD of a pre-existing contract, no storage writes in the block.
 	cs.ApplyWrites(state.VersionedWrites{
 		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: uint64(3)},
 		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},

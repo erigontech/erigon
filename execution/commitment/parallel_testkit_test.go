@@ -30,9 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// whaleOpts describes a deterministic account/storage corpus: smallBefore small
-// accounts, an optional bigSlots whale, extraWhales, smallAfter small accounts,
-// then tailAccounts single-slot accounts. Each balance is rnd.Uint64()+1.
 type whaleOpts struct {
 	seed             int64
 	smallBefore      int
@@ -44,9 +41,6 @@ type whaleOpts struct {
 	tailAccounts     int
 }
 
-// buildWhaleCorpus generates the account/storage corpus described by opts. The
-// RNG draw order (addr, balance, then per-slot loc+val) is identical for every
-// account so a given (seed, layout) reproduces a fixed set of keys and updates.
 func buildWhaleCorpus(opts whaleOpts) (pk [][]byte, upds []Update) {
 	rnd := rand.New(rand.NewSource(opts.seed))
 	ub := NewUpdateBuilder()
@@ -81,21 +75,15 @@ func buildWhaleCorpus(opts whaleOpts) (pk [][]byte, upds []Update) {
 	return ub.Build()
 }
 
-// bigAccountWhale: several small accounts surrounding one account with bigSlots
-// storage entries (> deepStorageThreshold) that triggers the deep fan-out.
 func bigAccountWhale(bigSlots int) whaleOpts {
 	return whaleOpts{seed: 771, smallBefore: 8, smallBeforeSlots: 3, bigSlots: bigSlots, smallAfter: 8, smallAfterSlots: 2}
 }
 
-// whale1M: three whale accounts (750k/150k/5k storage slots) plus a 95k
-// single-slot tail — ~1M storage keys. Stresses within-account storage, which
-// single-level mount cannot parallelise (the 750k whale runs on one worker).
+// whale1M stresses within-account storage, which single-level mount cannot parallelise.
 func whale1M() whaleOpts {
 	return whaleOpts{seed: 919273, bigSlots: 750_000, extraWhales: []int{150_000, 5_000}, tailAccounts: 95_000}
 }
 
-// runMode selects which commitment engine the engineRoot/incrementalRoot
-// dispatch drives.
 type runMode int
 
 const (
@@ -106,15 +94,11 @@ const (
 	modeStreamingPublic
 )
 
-// newSeqTrie builds the sequential HexPatriciaHashed over ms. Caller defers Release.
 func newSeqTrie(t *testing.T, ms *MockState) *HexPatriciaHashed {
 	t.Helper()
 	return NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 }
 
-// newParTrie builds a ParallelPatriciaHashed over ms with workers set and the
-// context reset. workers <= 0 falls back to NumCPU on the engine side. Caller
-// defers Release.
 func newParTrie(t *testing.T, ms *MockState, workers int) *ParallelPatriciaHashed {
 	t.Helper()
 	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
@@ -123,9 +107,7 @@ func newParTrie(t *testing.T, ms *MockState, workers int) *ParallelPatriciaHashe
 	return tr
 }
 
-// newStreamCommitter builds a StreamingCommitter over ms (ms must already
-// SetConcurrentCommitment(true)). When scheduler is true the background
-// scheduler is started. Caller defers Release.
+// newStreamCommitter requires ms to have SetConcurrentCommitment(true) already set.
 func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool) *StreamingCommitter {
 	t.Helper()
 	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
@@ -136,7 +118,6 @@ func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool
 	return sc
 }
 
-// processRoot runs trie.Process over ut and returns a copy of the root.
 func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 	t.Helper()
 	root, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})
@@ -144,8 +125,6 @@ func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 	return common.Copy(root)
 }
 
-// processBatch applies one batch to ms and folds it through the engine selected
-// by mode, returning the resulting root.
 func processBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update) []byte {
 	t.Helper()
 	ctx := context.Background()
@@ -198,8 +177,6 @@ func processBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [
 	}
 }
 
-// engineRoot folds a single batch through the engine selected by mode and
-// returns the root plus the MockState (carrying committed branches).
 func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -209,8 +186,7 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 	return processBatch(t, ms, mode, workers, keys, upds), ms
 }
 
-// incrementalRoot applies two batches to one MockState (batch-1 branches become
-// DB state for batch-2) and returns the final root and the MockState.
+// incrementalRoot folds two batches into one MockState so batch-1 branches become DB state for batch-2.
 func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -221,8 +197,6 @@ func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []
 	return processBatch(t, ms, mode, workers, k2, u2), ms
 }
 
-// requireRootParity drives the sequential and parallel engines over one batch and
-// asserts their roots match, returning the (shared) sequential root.
 func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int) []byte {
 	t.Helper()
 	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
@@ -232,9 +206,6 @@ func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int) 
 	return seqRoot
 }
 
-// requireAllEnginesParity asserts the parallel, streaming and scheduled-streaming
-// roots all match the sequential root after the same two batches, dumping
-// divergent branches on mismatch.
 func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
 	seqRoot, seqMs := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
@@ -258,7 +229,6 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 	require.Equalf(t, seqRoot, schRoot, "streaming-scheduled(workers=%d) vs sequential root mismatch", workers)
 }
 
-// requireBranchParity asserts the two MockStates hold byte-identical branches.
 func requireBranchParity(t *testing.T, seq, got *MockState) {
 	t.Helper()
 	mism := 0
@@ -283,8 +253,6 @@ func requireBranchParity(t *testing.T, seq, got *MockState) {
 	require.Zero(t, mism, "stored branch metadata differs between streaming and sequential")
 }
 
-// branchDiff logs every stored branch prefix whose encoding differs between the
-// sequential and parallel runs, decoding both afterMaps so dropped nibbles show.
 func branchDiff(t *testing.T, seq, par *MockState) {
 	t.Helper()
 	seen := map[string]struct{}{}
@@ -317,8 +285,6 @@ func branchDiff(t *testing.T, seq, par *MockState) {
 	t.Logf("total divergent branches: %d", n)
 }
 
-// snapshotBranches deep-copies a MockState's stored branches so a later
-// comparison can detect any mid-block write.
 func snapshotBranches(ms *MockState) map[string][]byte {
 	snap := make(map[string][]byte, len(ms.cm))
 	for k, v := range ms.cm {
@@ -327,8 +293,6 @@ func snapshotBranches(ms *MockState) map[string][]byte {
 	return snap
 }
 
-// requireBranchesUnchanged asserts ms holds exactly the snapshot branches — used
-// to prove a mid-block re-fold deferred everything and wrote nothing.
 func requireBranchesUnchanged(t *testing.T, snap map[string][]byte, ms *MockState) {
 	t.Helper()
 	require.Equalf(t, len(snap), len(ms.cm), "a mid-block re-fold changed the stored branch count")
@@ -337,29 +301,22 @@ func requireBranchesUnchanged(t *testing.T, snap map[string][]byte, ms *MockStat
 	}
 }
 
-// nibs returns a copy of the given nibble values as a slice.
 func nibs(vals ...byte) []byte {
 	out := make([]byte, len(vals))
 	copy(out, vals)
 	return out
 }
 
-// nibbleAddr returns an address whose hashed first nibble matches targetNibble
-// and whose seed differentiates it from other addresses in the same nibble.
 func nibbleAddr(targetNibble, seed int) []byte {
 	return findAddressForNibble(targetNibble, seed)
 }
 
-// slotHashBytes returns a deterministic 32-byte storage slot identifier derived
-// from i; each i produces a distinct slot.
 func slotHashBytes(i int) []byte {
 	var out [32]byte
 	binary.BigEndian.PutUint64(out[24:], uint64(i)+1)
 	return out[:]
 }
 
-// buildMixedCorpus builds approximately nKeys keys: random accounts each with a
-// small random number of storage slots.
 func buildMixedCorpus(seed int64, nKeys int) ([][]byte, []Update) {
 	rnd := rand.New(rand.NewSource(seed))
 	ub := NewUpdateBuilder()
@@ -407,7 +364,7 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 		ub.Balance(addrs[i], rnd.Uint64())
 	}
 
-	const slotsPerAccount = 499 // 1000 * 499 = 499_000 storage + 1000 accounts = 500_000 total
+	const slotsPerAccount = 499
 	for _, addr := range addrs {
 		for range slotsPerAccount {
 			loc := make([]byte, length.Hash)

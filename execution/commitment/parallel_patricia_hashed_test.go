@@ -43,16 +43,12 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
-	// Existing variants still parse to the expected values.
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
 	assert.Equal(t, VariantConcurrentHexPatricia, ParseTrieVariant("hex-parallel"))
 	assert.Equal(t, VariantBinPatriciaTrie, ParseTrieVariant("bin"))
-	// Unknown falls back to the default hex variant.
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("nonsense"))
 }
 
-// TestParallelPatriciaHashedSkeletonPlumbing covers the pass-through setters and
-// accessors on ParallelPatriciaHashed, one subtest per delegated method.
 func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 	t.Run("RootTrie", func(t *testing.T) {
 		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
@@ -71,7 +67,6 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		p.SetNumWorkers(4)
 		assert.Equal(t, 4, p.numWorkers)
 
-		// Non-positive values fall back to runtime.NumCPU.
 		p.SetNumWorkers(0)
 		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
 		p.SetNumWorkers(-3)
@@ -140,8 +135,6 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 
 	t.Run("EnableCsvMetricsNoPanic", func(t *testing.T) {
 		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-		// Empty prefix is a valid no-op in HexPatriciaHashed.EnableCsvMetrics —
-		// we only verify the delegation does not panic.
 		require.NotPanics(t, func() { p.EnableCsvMetrics("") })
 	})
 }
@@ -157,9 +150,6 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 	require.NotNil(t, p.template, "Reset preserves the template")
 }
 
-// TestParallelPatriciaHashedSkeletonRelease covers Release idempotency, that
-// plumbing methods stay safe after Release, and that RootHash on a released
-// instance returns nil without error.
 func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	require.NotNil(t, p.template)
@@ -167,10 +157,8 @@ func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 	p.Release()
 	assert.Nil(t, p.template, "Release drops the template")
 
-	// Subsequent Release is a no-op.
 	require.NotPanics(t, func() { p.Release() })
 
-	// Plumbing methods stay safe after Release.
 	require.NotPanics(t, func() {
 		p.SetTrace(true)
 		p.SetTraceDomain(true)
@@ -197,8 +185,7 @@ func TestParallelPatriciaHashedSkeletonRootHashStashed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, stored, got)
 
-	// Returned slice must be a copy so callers cannot mutate the published
-	// value.
+	// Returned slice must be a copy so callers cannot mutate the published value.
 	got[0] = 0xff
 	regot, err := p.RootHash()
 	require.NoError(t, err)
@@ -215,8 +202,6 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 	got, err := p.RootHash()
 	require.NoError(t, err)
 
-	// Reference: a freshly constructed sequential trie returns the same hash
-	// for the no-updates path.
 	seq := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	defer seq.Release()
 	expected, err := seq.RootHash()
@@ -225,17 +210,7 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 	assert.Equal(t, expected, got, "RootHash falls back to template for the no-updates path")
 }
 
-// assertEquivalentRoot drives the same update set through sequential
-// HexPatriciaHashed (ModeDirect) and ParallelPatriciaHashed (ModeParallel)
-// against independent in-memory MockState backends and asserts byte-equal
-// root hashes. Returns the (shared) root hash so callers can do additional
-// assertions.
-//
-// This is the helper that enforces the cardinal correctness rule for every
-// end-to-end ModeParallel test.
-//
-// Worker count defaults to 1. Use assertEquivalentRootWorkers when a test
-// needs multiple workers running concurrently for race detector coverage.
+// assertEquivalentRoot asserts the sequential and parallel modes produce byte-equal root hashes for the update set, returning that root.
 func assertEquivalentRoot(
 	t *testing.T,
 	plainKeys [][]byte,
@@ -244,9 +219,7 @@ func assertEquivalentRoot(
 	return assertEquivalentRootWorkers(t, plainKeys, updates, 1)
 }
 
-// assertEquivalentRootWorkers is the multi-worker variant of
-// assertEquivalentRoot. numWorkers <= 0 falls back to runtime.NumCPU on the
-// ParallelPatriciaHashed side.
+// assertEquivalentRootWorkers is the multi-worker variant of assertEquivalentRoot; numWorkers <= 0 falls back to runtime.NumCPU.
 func assertEquivalentRootWorkers(
 	t *testing.T,
 	plainKeys [][]byte,
@@ -257,8 +230,6 @@ func assertEquivalentRootWorkers(
 	return requireRootParity(t, plainKeys, updates, numWorkers)
 }
 
-// TestParallelProcessSkeleton_DenseSingleNibbleBucket: many accounts under one
-// root nibble, so a single mount worker carries the whole batch.
 func TestParallelProcessSkeleton_DenseSingleNibbleBucket(t *testing.T) {
 	t.Parallel()
 
@@ -276,9 +247,6 @@ func TestParallelProcessSkeleton_DenseSingleNibbleBucket(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelProcessSkeleton_RejectsMissingFactory verifies that calling
-// Process without a trieCtxFactory returns an explicit error rather than
-// crashing inside the worker.
 func TestParallelProcessSkeleton_RejectsMissingFactory(t *testing.T) {
 	t.Parallel()
 
@@ -309,8 +277,6 @@ func TestParallelProcessSkeleton_RejectsMissingFactory(t *testing.T) {
 	assert.Contains(t, err.Error(), "TrieContextFactory")
 }
 
-// TestParallelProcessSkeleton_RejectsNonParallelMode verifies the mode guard
-// trips when Updates is in ModeDirect.
 func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 	t.Parallel()
 
@@ -327,9 +293,6 @@ func TestParallelProcessSkeleton_RejectsNonParallelMode(t *testing.T) {
 	assert.Contains(t, err.Error(), "ModeParallel")
 }
 
-// TestDFSSubtree walks a built subtree and asserts keys emerge in sorted nibble
-// order with their plainKeys, and that a terminator that is a prefix of others
-// (account above storage) emits before its children.
 func TestDFSSubtree(t *testing.T) {
 	t.Parallel()
 
@@ -354,8 +317,6 @@ func TestDFSSubtree(t *testing.T) {
 	}, got)
 }
 
-// TestDFSSubtree_NilPlainKeyLeafErrors: a hashed-only touch leaves a terminator
-// without a plainKey, which the parallel fold cannot resolve — fail loudly.
 func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
 	t.Parallel()
 
@@ -366,15 +327,7 @@ func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "plainKey")
 }
 
-// --- multi-worker fanout parity tests -------------------------------
-//
-// Every test below drives a multi-nibble update set through both modes via
-// assertEquivalentRootWorkers, so several mount workers fold concurrently
-// (race detector coverage included).
-
-// twoLeafTaskAddrs constructs N/2 addresses hashing to firstNibble + N/2
-// addresses hashing to secondNibble, giving the prefix-trie root a fanout of
-// exactly 2.
+// twoLeafTaskAddrs returns perSide addresses hashing to firstNibble and perSide to secondNibble, giving the root a fanout of exactly 2.
 func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) [][]byte {
 	t.Helper()
 	out := make([][]byte, 0, perSide*2)
@@ -387,9 +340,6 @@ func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) 
 	return out
 }
 
-// TestParallelFanout drives multi-nibble update sets through both modes via
-// assertEquivalentRootWorkers, so several mount workers fold concurrently. Each
-// row varies the fanout shape and worker count.
 func TestParallelFanout(t *testing.T) {
 	t.Parallel()
 
@@ -399,7 +349,6 @@ func TestParallelFanout(t *testing.T) {
 		build   func(t *testing.T) ([][]byte, []Update)
 	}{
 		{
-			// minimal concurrent scenario — two mount workers, one per touched root nibble.
 			name:    "TwoNibbles",
 			workers: 2,
 			build: func(t *testing.T) ([][]byte, []Update) {
@@ -413,7 +362,6 @@ func TestParallelFanout(t *testing.T) {
 			},
 		},
 		{
-			// four mount workers folding concurrently.
 			name:    "FourNibbles",
 			workers: 4,
 			build: func(t *testing.T) ([][]byte, []Update) {
@@ -430,8 +378,6 @@ func TestParallelFanout(t *testing.T) {
 			},
 		},
 		{
-			// three workers with a 6:1:1 size ratio, verifying completion order
-			// does not change the resulting root hash.
 			name:    "AsymmetricWorkload",
 			workers: 3,
 			build: func(t *testing.T) ([][]byte, []Update) {
@@ -454,8 +400,6 @@ func TestParallelFanout(t *testing.T) {
 			},
 		},
 		{
-			// one wide bucket (its second nibbles fan out broadly inside the
-			// worker's subtree) next to a small one.
 			name:    "LopsidedBuckets",
 			workers: 8,
 			build: func(t *testing.T) ([][]byte, []Update) {
@@ -483,13 +427,6 @@ func TestParallelFanout(t *testing.T) {
 	}
 }
 
-// TestParallelPatriciaHashedTemplateMirrorsPublishedRoot verifies that after a
-// successful Process the template's root cell mirrors the publishing worker's
-// final root, so RootHash() returns the correct value via the template
-// fallback. Without the mirror, the template stays at its initial empty state
-// and downstream paths (zero-update fast-path, encode/restore for the parallel
-// trie variant in commitmentdb) return the empty-trie hash instead of the
-// computed root.
 func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 	t.Parallel()
 
@@ -522,9 +459,7 @@ func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, published)
 
-	// Drop the atomic publish so RootHash must compute from the template's
-	// root cell — emulating a fresh instance (post-restart) or any caller
-	// that hits the template fallback.
+	// Drop the atomic publish so RootHash must fall back to the template's root cell.
 	p.rootHash.Store(nil)
 
 	got, err := p.RootHash()
@@ -533,11 +468,6 @@ func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 		"template.RootHash must return the published root once the worker has folded into it")
 }
 
-// TestParallelPatriciaHashedStateRoundTrip drives Process, encodes the
-// resulting trie state via the template, restores it into a fresh template,
-// and asserts the restored RootHash matches the originally published value.
-// This is the persistence path the commitmentdb layer takes for the parallel
-// trie variant.
 func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -570,9 +500,6 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, published)
 
-	// The template's root flags must mirror the worker's terminal state. They
-	// are serialized below and any drift surfaces as a restore-then-continue
-	// bug on the next unfold/fold cycle.
 	tmpl := p.RootTrie()
 	require.True(t, tmpl.rootChecked, "template.rootChecked must be promoted from the worker")
 	require.True(t, tmpl.rootTouched, "template.rootTouched must be promoted from the worker")
@@ -582,7 +509,6 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, encoded, "EncodeCurrentState must capture template state mirrored from the worker")
 
-	// Restore on a brand-new instance, simulating a process restart.
 	p2 := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
 	defer p2.Release()
 	p2.ResetContext(parMs)
@@ -598,36 +524,16 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 		"RootHash after SetState must reproduce the published root")
 }
 
-// Edge-case tests for ParallelPatriciaHashed.
-//
-// Every end-to-end test in this file MUST drive the same update set through
-// both sequential HexPatriciaHashed (ModeDirect) and ParallelPatriciaHashed
-// (ModeParallel) and assert byte-equal root hashes — the cardinal correctness
-// rule. Single-batch tests use assertEquivalentRootWorkers from
-// parallel_patricia_hashed_test.go. Multi-batch tests (delete patterns that
-// need an established DB state before the test batch runs) use the
-// stagedRootEquivalence helper defined below; it persists MockState across
-// batches so PutBranch writes from batch N visit ctx.Branch on batch N+1.
-
-// stagedBatch is one phase in a multi-phase test: a (plainKeys, updates)
-// pair plus a short label for failure messages.
+// stagedBatch is one phase in a multi-phase test: a (plainKeys, updates) pair plus a short label for failure messages.
 type stagedBatch struct {
 	label      string
 	plainKeys  [][]byte
 	updates    []Update
-	expectSame bool // when true, root hash must equal the previous batch's
+	expectSame bool // root hash must equal the previous batch's
 }
 
-// stagedRootEquivalence applies a sequence of batches against persistent
-// sequential and parallel tries and asserts both sides produce byte-equal
-// root hashes after every batch. State persists across batches: the MockState
-// PutBranch/Branch maps survive, so a later batch sees the DB state the
-// earlier batches established. This is what lets delete-pattern tests
-// validate the untouched-nibble fix in Prepare — by phase 2 the DB already
-// carries the cells phase 1 wrote.
-//
-// numWorkers controls the parallel side's worker pool. Returns the final
-// root hash for caller-side assertions.
+// stagedRootEquivalence applies batches against persistent sequential and parallel tries, asserting byte-equal roots after each.
+// MockState persists across batches, so a later batch sees the DB state earlier batches established.
 func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) []byte {
 	t.Helper()
 	ctx := context.Background()
@@ -683,18 +589,10 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 	return prevRoot
 }
 
-// TestParallelDeleteWithSurvivingSiblings exercises touched-and-deleted cells
-// together with untouched DB siblings. Phase 1 populates 8 top
-// nibbles, each with multiple accounts, giving the root branch in the DB a
-// rich bitmap. Phase 2 deletes some touched accounts in two of those nibbles
-// while leaving the other six entirely untouched — the encoded branch must
-// carry the surviving siblings forward, and assertEquivalentRoot pins that
-// invariant to the sequential root.
+// TestParallelDeleteWithSurvivingSiblings deletes touched accounts in two nibbles while six others stay untouched in the DB and must survive in the encoded branch.
 func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
 	t.Parallel()
 
-	// Phase 1: 8 top-level nibbles populated with 4 accounts each (32 total).
-	// Every nibble ends up in the root branch encoded in the DB.
 	ub1 := NewUpdateBuilder()
 	for nib := range 8 {
 		for s := range 4 {
@@ -703,10 +601,6 @@ func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
 	}
 	pk1, up1 := ub1.Build()
 
-	// Phase 2: touch only nibbles 0x0 and 0x5. Delete two of nibble 0x0's
-	// accounts; modify two of nibble 0x5's. Nibbles 0x1..0x4, 0x6, 0x7
-	// remain in the DB untouched — the untouched-nibble fix in Prepare
-	// must preload them so the last-finisher's grid carries them through.
 	ub2 := NewUpdateBuilder()
 	ub2.Delete(addrHex(nibbleAddr(0x0, 0)))
 	ub2.Delete(addrHex(nibbleAddr(0x0, 1)))
@@ -721,22 +615,16 @@ func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelAllDeleted deletes every touched key without any untouched
-// siblings in the DB. After phase 2 the trie should be empty again — phase 3
-// (a no-op batch) asserts the empty-trie root is reached.
+// TestParallelAllDeleted deletes every touched key with no untouched siblings, so the trie must return to its empty-trie root.
 func TestParallelAllDeleted(t *testing.T) {
 	t.Parallel()
 
-	// Phase 1: 4 nibbles populated with 1 account each (4 total). No
-	// other nibbles are populated, so phase 2's deletion leaves the trie
-	// empty.
 	ub1 := NewUpdateBuilder()
 	for nib := range 4 {
 		ub1.Balance(addrHex(nibbleAddr(nib, 0)), uint64(200+nib))
 	}
 	pk1, up1 := ub1.Build()
 
-	// Phase 2: delete every account from phase 1.
 	ub2 := NewUpdateBuilder()
 	for nib := range 4 {
 		ub2.Delete(addrHex(nibbleAddr(nib, 0)))
@@ -750,13 +638,7 @@ func TestParallelAllDeleted(t *testing.T) {
 	require.NotEmpty(t, root, "empty-trie root should still be a well-known hash")
 }
 
-// TestParallelDeleteAllTouchedWithUntouchedSurviving is the critical
-// untouched-nibble regression test. Phase 1 populates nibbles 0x0..0x3 with
-// several accounts. Phase 2 deletes EVERY touched account in nibble 0x0 and
-// updates nibbles 0x1..0x3. The deletion at nibble 0x0 must not collapse the
-// root branch — the cells at 0x1..0x3 are untouched but present in DB and
-// must survive in the final branch. assertEquivalentRoot is the entire
-// diagnostic surface here.
+// TestParallelDeleteAllTouchedWithUntouchedSurviving deletes every touched account in one nibble; the deletion must not collapse the root branch while untouched DB siblings survive.
 func TestParallelDeleteAllTouchedWithUntouchedSurviving(t *testing.T) {
 	t.Parallel()
 
@@ -772,8 +654,6 @@ func TestParallelDeleteAllTouchedWithUntouchedSurviving(t *testing.T) {
 	for s := range 3 {
 		ub2.Delete(addrHex(nibbleAddr(0x0, s)))
 	}
-	// Update 0x1..0x3 so the parallel batch fans out across several mount
-	// workers instead of degenerating to a single nibble bucket.
 	for nib := 1; nib < 4; nib++ {
 		for s := range 3 {
 			ub2.Balance(addrHex(nibbleAddr(nib, s)), uint64(7000+nib*10+s))
@@ -788,15 +668,7 @@ func TestParallelDeleteAllTouchedWithUntouchedSurviving(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelBloatnetShape exercises a synthetic bloatnet-style workload:
-// many accounts, each carrying many storage slots, spread across the trie
-// so the root has fanout 16 and the per-nibble subtrees are large.
-//
-// Memory budget: ~250 accounts × 40 storage slots ≈ 10K touched keys. The
-// prefix-trie node count stays comfortably under 100K nodes (each ~80B), so
-// peak RSS is well under 100MB — small enough to run alongside other
-// commitment tests under -short=false. The "bloatnet stress" gating is kept
-// because the test still runs ~5-15s end-to-end in race-detector mode.
+// TestParallelBloatnetShape exercises a synthetic bloatnet-style workload: many accounts each with many storage slots, spread to give the root fanout 16.
 func TestParallelBloatnetShape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("bloatnet stress test — skipped in -short mode (~10K touched keys end-to-end)")
@@ -808,9 +680,6 @@ func TestParallelBloatnetShape(t *testing.T) {
 
 	ub := NewUpdateBuilder()
 	for accIdx := range numAccounts {
-		// Spread accounts across every top nibble so the root branch ends
-		// up with full fanout. With 64 accounts and 16 nibbles, each
-		// nibble holds ~4 accounts on average.
 		targetNibble := accIdx % 16
 		addr := nibbleAddr(targetNibble, accIdx)
 		ah := addrHex(addr)
@@ -829,21 +698,12 @@ func TestParallelBloatnetShape(t *testing.T) {
 		len(plainKeys), numAccounts, root)
 }
 
-// TestParallelSingleAccountManyStorage stresses the deep storage subtree
-// path: one account, many storage slots. The prefix trie collapses the
-// shared 64-nibble account hash into one extension; the fan-out happens at
-// depth 64 onwards as the slot hashes diverge.
-//
-// Workers folding from deep storage depth must not overflow cell.extension
-// (sized [64]byte) when their folded subtree cell lands in the base row.
+// TestParallelSingleAccountManyStorage stresses the deep storage subtree path; workers folding from deep storage depth must not overflow the fixed-size cell.extension.
 func TestParallelSingleAccountManyStorage(t *testing.T) {
 	t.Parallel()
 
 	const numSlots = 96
 
-	// Pick a deterministic account address. The exact value is unimportant;
-	// using a fixed string keeps the test reproducible without depending on
-	// findAddressForNibble's search ordering.
 	accHex := "68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9"
 
 	ub := NewUpdateBuilder()
@@ -860,17 +720,12 @@ func TestParallelSingleAccountManyStorage(t *testing.T) {
 	t.Logf("single-account-%d-slots root: %x", numSlots, root)
 }
 
-// TestParallelEmptyUpdates: ModeParallel must handle a zero-touched-key
-// batch by returning the same empty-trie root the sequential path returns.
-// This duplicates the skeleton test's coverage so the edge-case sweep is
-// self-contained.
 func TestParallelEmptyUpdates(t *testing.T) {
 	t.Parallel()
 	root := assertEquivalentRoot(t, nil, nil)
 	require.NotEmpty(t, root, "empty-trie root is the empty hash")
 }
 
-// TestParallelSingleTouchedKey: one TouchPlainKey, one mount worker.
 func TestParallelSingleTouchedKey(t *testing.T) {
 	t.Parallel()
 	plainKeys, updates := NewUpdateBuilder().
@@ -880,10 +735,6 @@ func TestParallelSingleTouchedKey(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelOnlyOneAccountTouchedManyTimes: the same account hit with
-// several distinct field updates (Balance, Nonce, CodeHash). UpdateBuilder
-// merges field updates per key before hashing, so the resulting batch has
-// a single touched key whose cell carries the union of all field updates.
 func TestParallelOnlyOneAccountTouchedManyTimes(t *testing.T) {
 	t.Parallel()
 
@@ -900,17 +751,11 @@ func TestParallelOnlyOneAccountTouchedManyTimes(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelDeleteWithSurvivingSiblings_BranchInspection extends
-// TestParallelDeleteWithSurvivingSiblings with a direct check of the
-// final root branch: after phase 2 the encoded branch at the empty prefix
-// must still expose nibbles 0x1..0x4, 0x6, 0x7 — the untouched siblings.
+// TestParallelDeleteWithSurvivingSiblings_BranchInspection asserts the final root branch still exposes the untouched sibling nibbles after phase-2 deletions.
 func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	// Reuse the same setup as TestParallelDeleteWithSurvivingSiblings but
-	// keep a reference to the parallel MockState so we can inspect the
-	// final commitment after phase 2.
 	seqMs := NewMockState(t)
 	parMs := NewMockState(t)
 	parMs.SetConcurrentCommitment(true)
@@ -967,16 +812,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	pk2, up2 := ub2.Build()
 	runBatch("phase2-delete-and-modify", pk2, up2)
 
-	// Inspect the root branch in the parallel MockState's commitment map.
-	// It must carry every nibble whose accounts were populated in phase 1
-	// minus any that were entirely cleared. Since phase 2 only touched
-	// nibbles 0x0 and 0x5 (and 0x0 still has surviving siblings: seeds
-	// 2 and 3 from phase 1 were not deleted), all 8 nibbles 0x0..0x7
-	// must still be present.
-	//
-	// Branches are stored under their HexToCompact-encoded prefix —
-	// HexToCompact(nil) is the single byte 0x00 (the compact "empty path"
-	// header), not the empty string. Use that lookup key.
+	// Root branch is stored under HexToCompact(nil) (the single byte 0x00), not the empty string.
 	branch, _, err := parMs.Branch(nibbles.HexToCompact(nil))
 	require.NoError(t, err)
 	require.NotEmpty(t, branch, "root branch must exist after phase 2")
@@ -990,8 +826,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	}
 }
 
-// findHashForNibbles brute-forces a key whose keccak hash begins with prefix.
-// counterOff is the byte offset of the search counter within key.
+// findHashForNibbles brute-forces a key whose keccak hash begins with prefix; counterOff is the byte offset of the search counter within key.
 func findHashForNibbles(t testing.TB, key []byte, counterOff int, prefix []byte, seed, salt uint64) {
 	t.Helper()
 	counter := seed*salt + 1
@@ -1036,9 +871,7 @@ var (
 	storageSubN byte = 2
 )
 
-// genWideNested builds a trie wide at the top that forks at depths 1..4: 8 top
-// nibbles × 4 × 2, several keys per leaf group — nested forks at every level,
-// the structure random keys never produce.
+// genWideNested builds a trie wide at the top with nested forks at depths 1..4 that random keys never produce.
 func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1)
@@ -1064,9 +897,7 @@ func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	return keys, upds
 }
 
-// genAccountsWithNestedStorage builds nAccounts accounts, each with an account
-// update plus storage slots whose keccak(slot) forks at depths 1..4 — exercising
-// deep extensions and account-terminator nodes below depth 64.
+// genAccountsWithNestedStorage builds nAccounts accounts, each with storage slots whose keccak forks at depths 1..4, exercising deep extensions and account-terminator nodes below depth 64.
 func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1000)
@@ -1104,8 +935,7 @@ func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, u
 	return keys, upds
 }
 
-// genRandomAccountsStorage builds nAcc accounts with uncontrolled (real keccak)
-// hash distribution, each with a few storage slots — the production-like shape.
+// genRandomAccountsStorage builds nAcc accounts with uncontrolled keccak distribution, each with a few storage slots — the production-like shape.
 func genRandomAccountsStorage(nAcc int) (keys [][]byte, upds []Update) {
 	for a := 0; a < nAcc; a++ {
 		var addr [20]byte
@@ -1134,9 +964,7 @@ func genRandomAccountsStorage(nAcc int) (keys [][]byte, upds []Update) {
 	return keys, upds
 }
 
-// sparseBatch2 selects every modN-th key as an incremental batch: a balance/nonce
-// update for accounts, a storage update for storage keys, and — when deletes is
-// set — a delete for every other selected key.
+// sparseBatch2 selects every modN-th key as an incremental batch: account or storage update by key length, and — when deletes is set — a delete for every other selected key.
 func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Update) {
 	for i := range keys {
 		if i%modN != 0 {
@@ -1161,31 +989,24 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 	return k2, u2
 }
 
-// runIncremental applies two batches to one MockState (batch-1 branches become
-// DB state for batch-2) and returns the final root and the MockState.
+// runIncremental applies two batches to one MockState (batch-1 branches become DB state for batch-2) and returns the final root and the MockState.
 func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	return incrementalRoot(t, mode, workers, k1, u1, k2, u2)
 }
 
-// requireIncrementalEquiv asserts the parallel AND streaming roots match the
-// sequential root after the same two batches, dumping divergent branches on
-// mismatch.
+// requireIncrementalEquiv asserts the parallel and streaming roots match the sequential root after the same two batches, dumping divergent branches on mismatch.
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
 }
 
-// TestVerifyParallel_WideNested: single batch over a deeply-nested wide trie.
 func TestVerifyParallel_WideNested(t *testing.T) {
 	t.Parallel()
 	keys, upds := genWideNested(t)
 	require.NotEmpty(t, assertEquivalentRootWorkers(t, keys, upds, 8))
 }
 
-// TestVerifyParallel_WideNestedIncremental: batch 1 commits the whole wide-nested
-// trie, batch 2 touches a sparse subset so split-points have untouched DB-only
-// siblings.
 func TestVerifyParallel_WideNestedIncremental(t *testing.T) {
 	t.Parallel()
 	keys, upds := genWideNested(t)
@@ -1193,9 +1014,7 @@ func TestVerifyParallel_WideNestedIncremental(t *testing.T) {
 	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
-// TestVerifyParallel_StorageMinimal: one storage slot per account (storageTopN/
-// SubN=1) so each top nibble holds a single account+storage leaf with a shared
-// extension — the shape that broke the deposit/mount extension trim.
+// TestVerifyParallel_StorageMinimal: one storage slot per account, so each top nibble holds a single account+storage leaf sharing one extension.
 func TestVerifyParallel_StorageMinimal(t *testing.T) {
 	oldTop, oldSub := storageTopN, storageSubN
 	storageTopN, storageSubN = 1, 1
@@ -1205,9 +1024,7 @@ func TestVerifyParallel_StorageMinimal(t *testing.T) {
 	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
-// TestVerifyParallel_StorageBranchEquiv asserts that after a single batch the
-// parallel run's stored branches (not just the root) match the sequential ones —
-// catching wrong branch metadata that a matching root would hide.
+// TestVerifyParallel_StorageBranchEquiv asserts the stored branches match, not just the root, catching wrong branch metadata a matching root would hide.
 func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1252,8 +1069,6 @@ func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	}
 }
 
-// TestVerifyParallel_RandomStorageIncremental: production-like distribution,
-// incremental, across worker counts.
 func TestVerifyParallel_RandomStorageIncremental(t *testing.T) {
 	t.Parallel()
 	keys, upds := genRandomAccountsStorage(256)
@@ -1263,8 +1078,6 @@ func TestVerifyParallel_RandomStorageIncremental(t *testing.T) {
 	}
 }
 
-// TestVerifyParallel_StorageIncrementalDeletes: incremental batch mixing updates
-// and deletes (storage zeroing / account removal), across worker counts.
 func TestVerifyParallel_StorageIncrementalDeletes(t *testing.T) {
 	t.Parallel()
 	keys, upds := genRandomAccountsStorage(256)

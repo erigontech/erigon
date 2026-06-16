@@ -20,8 +20,8 @@ import (
 	"sync"
 )
 
-// plainKeyArena hands out stable plainKey copies from fixed chunks; a full chunk
-// is replaced, not grown, so earlier sub-slices keep their backing until reset.
+// plainKeyArena hands out stable plainKey copies; a full chunk is replaced, not
+// grown, so earlier sub-slices keep their backing until reset.
 type plainKeyArena struct {
 	buf []byte
 }
@@ -42,13 +42,8 @@ func (a *plainKeyArena) intern(b []byte) []byte {
 
 func (a *plainKeyArena) reset() { a.buf = nil }
 
-// parallelUpdate owns the per-batch state that drives parallel commitment: the
-// path-compressed prefix trie of touched keys and a mutex-guarded slice that
-// collects deferred branch updates from all workers.
-//
-// All Insert calls must be serialized by the caller (same constraint as
-// prefixTrie). deferredCombined is the one mutable shared slice during the
-// parallel phase — appendDeferred guards it.
+// parallelUpdate owns the per-batch state that drives parallel commitment.
+// Insert calls must be serialized by the caller.
 type parallelUpdate struct {
 	trie *prefixTrie
 
@@ -64,19 +59,17 @@ func newParallelUpdate() *parallelUpdate {
 	}
 }
 
-// Insert adds a hashed key (in nibble form), its plainKey, and an optional
-// carried value (nil = fold re-reads from ctx) to the prefix trie.
+// Insert adds a hashed key, its plainKey, and an optional carried value (nil =
+// fold re-reads from ctx) to the prefix trie.
 func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte, update *Update) {
 	pu.trie.Insert(hashedKey, plainKey, update)
 }
 
-// internKey copies plainKey into the per-batch arena for stable trie retention.
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
 	return pu.keyArena.intern(plainKey)
 }
 
 // Reset clears all per-batch state so the parallelUpdate can be reused.
-// The underlying arena is recycled.
 func (pu *parallelUpdate) Reset() {
 	if pu.trie != nil {
 		pu.trie.Reset()
@@ -90,8 +83,7 @@ func (pu *parallelUpdate) Reset() {
 	pu.keyArena.reset()
 }
 
-// Close releases references owned by the parallelUpdate. After Close the
-// instance must not be reused.
+// Close releases references owned by the parallelUpdate; it must not be reused after.
 func (pu *parallelUpdate) Close() {
 	pu.trie = nil
 	pu.deferredMu.Lock()
@@ -103,8 +95,7 @@ func (pu *parallelUpdate) Close() {
 	pu.keyArena.reset()
 }
 
-// appendDeferred merges a worker's deferred branch updates into the shared
-// slice. Safe for concurrent callers.
+// appendDeferred merges a worker's deferred branch updates into the shared slice; safe for concurrent callers.
 func (pu *parallelUpdate) appendDeferred(updates []*DeferredBranchUpdate) {
 	if len(updates) == 0 {
 		return

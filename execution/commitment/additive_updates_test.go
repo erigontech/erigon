@@ -26,11 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// additiveCorpus builds a batch where every key is touched twice with partial
-// updates, plus the merged equivalents the sequential oracle folds:
-//   - accA: Balance then Nonce (flags must accumulate)
-//   - accB: Delete then Balance (resurrection must clear DeleteUpdate)
-//   - one storage slot of accA: 42 then 7 (last write wins)
+// additiveCorpus returns keys touched twice with partial updates and the merged equivalents the sequential oracle folds.
 func additiveCorpus() (keys [][]byte, partials [][2]*Update, merged []Update) {
 	accA := []byte("\x4c\x88\x85\x35\x84\x1a\xcb\xe0\x70\x9b\x07\x58\x08\x3f\x61\xd3\x75\xbc\x02\xb4")
 	accB := []byte("\x68\xee\x6c\x0e\x9c\xdc\x73\xb2\xb2\xd5\x2d\xbd\x79\xf1\x9d\x24\xfe\x25\xe2\xf9")
@@ -60,10 +56,7 @@ func additiveCorpus() (keys [][]byte, partials [][2]*Update, merged []Update) {
 	return keys, partials, merged
 }
 
-// TestAdditiveTouch asserts both concurrent engines merge two partial touches of
-// the same key like ModeUpdate, producing the sequential merged-state root. The
-// parallel subtest drives TouchPlainKeyDirect; the streaming subtest drives the
-// committer's carried TouchKey.
+// TestAdditiveTouch asserts both concurrent engines merge two partial touches of the same key into the sequential merged-state root.
 func TestAdditiveTouch(t *testing.T) {
 	t.Parallel()
 

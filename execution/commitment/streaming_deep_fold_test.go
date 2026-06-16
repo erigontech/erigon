@@ -28,8 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// computeCellHashAt hashes a folded subtree cell exactly as a parent branch would
-// when it stitches the cell into its row at the given depth.
+// computeCellHashAt hashes a cell as a parent branch would at the given depth.
 func computeCellHashAt(t *testing.T, ms *MockState, c cell, depth int16) []byte {
 	t.Helper()
 	w := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
@@ -39,8 +38,7 @@ func computeCellHashAt(t *testing.T, ms *MockState, c cell, depth int16) []byte 
 	return append([]byte(nil), h...)
 }
 
-// foldWhaleStorageChildren folds each present storage nibble subtree through the
-// production deep-fold helper and returns the depth-65 child cells.
+// foldWhaleStorageChildren folds each present storage nibble subtree and returns the depth-65 child cells.
 func foldWhaleStorageChildren(t *testing.T, ms *MockState, accNib int, groups [16][]storKV) ([16]cell, uint16) {
 	t.Helper()
 	var children [16]cell
@@ -63,12 +61,8 @@ func foldWhaleStorageChildren(t *testing.T, ms *MockState, accNib int, groups [1
 	return children, present
 }
 
-// TestAggregateStorageRoot_ResetsDestinationCell is the stale-grid regression: a
-// pooled worker whose destination grid cell still carries account fields from a
-// prior use must not leak them into the folded subtree cell. foldBranch at
-// depth >= 64 does not clear upCell.accountAddrLen, so without resetting the
-// destination cell the folded storageRoot cell is hashed by a parent as an
-// account leaf and diverges.
+// foldBranch at depth >= 64 does not clear upCell.accountAddrLen, so account fields left in a
+// reused destination cell leak into the folded storageRoot cell unless it is reset first.
 func TestAggregateStorageRoot_ResetsDestinationCell(t *testing.T) {
 	_, accHash, accNib, _, pk, upds, groups := whaleByNibble(3000)
 	ms := NewMockState(t)
@@ -106,9 +100,6 @@ func TestAggregateStorageRoot_ResetsDestinationCell(t *testing.T) {
 		"folded storageRoot cell inherited stale pooled-grid state")
 }
 
-// TestDeepFold_StorageRootParity drives the production deep-fold child helper
-// (foldChildSubtree at depth 64) and checks the resulting account root equals
-// the sequential ModeDirect oracle.
 func TestDeepFold_StorageRootParity(t *testing.T) {
 	addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(20_000)
 	ms := NewMockState(t)
@@ -153,11 +144,8 @@ func TestDeepFold_StorageRootParity(t *testing.T) {
 	require.Equal(t, seqRoot, conRoot, "deep-fold account root != sequential")
 }
 
-// TestAggregateSubtreeRoot_DepthGeneralization checks the generalized mount folds
-// the same child set to the same branch hash at a mid-account depth, the
-// account/storage boundary, and a storage-interior (mid-extension) depth — a
-// branch node's hash is independent of the prefix path above it, and the children
-// here are hash-only so their hashing is depth-independent.
+// A branch node's hash is independent of the prefix above it, so the same hash-only child set
+// must fold to the same branch hash at every depth.
 func TestAggregateSubtreeRoot_DepthGeneralization(t *testing.T) {
 	ms := NewMockState(t)
 	rnd := rand.New(rand.NewSource(99))

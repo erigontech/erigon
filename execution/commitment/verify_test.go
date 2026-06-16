@@ -341,49 +341,20 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// --- ModeParallel root-hash equivalence harness ----------------------------
-//
-// Every test below drives a (plainKeys, updates) batch through both
-// sequential HexPatriciaHashed (ModeDirect) and ParallelPatriciaHashed
-// (ModeParallel) and asserts byte-equal root hashes. The cardinal
-// correctness rule for ParallelPatriciaHashed is same-root-as-sequential:
-// a batch that produces a root in one mode but a different (or no) root in
-// the other indicates a bug regardless of which root looks "more correct".
-//
-// The shared helper assertEquivalentRootWorkers lives in
-// parallel_patricia_hashed_test.go (same package).
-
-// randomBatchShape categorises the structural shape of an update batch the
-// ModeParallel arm must handle. Each shape stresses a different portion of
-// the mount/fold pipeline.
+// ModeParallel must produce byte-equal root hashes to sequential ModeDirect
+// for any batch; these tests assert that equivalence.
 type randomBatchShape int
 
 const (
-	// shapeAccountsOnly — every key is an EOA-style address; no storage.
-	// Touches one nibble bucket per address; addresses across distinct top
-	// nibbles fan out to separate mount workers.
 	shapeAccountsOnly randomBatchShape = iota
-	// shapeStorageHeavySingle — one account with many storage slots. The
-	// prefix trie's first 64 nibbles collapse via path compression; the
-	// fork sits deep under the account's hashed prefix.
 	shapeStorageHeavySingle
-	// shapeStorageSpread — several accounts each with their own storage; a
-	// realistic mainnet-shape batch.
 	shapeStorageSpread
-	// shapeInsertsAndDeletes — a mix of insert / delete account updates.
 	shapeInsertsAndDeletes
-	// shapeEmpty — no touched keys. Both modes must return the empty-trie
-	// root.
 	shapeEmpty
 )
 
-// generateBatch builds a (plainKeys, updates) pair for the given shape, with
-// a target key count and a seed for deterministic regeneration. Plain keys
-// are unique within the batch (duplicates would just be deduped by Updates'
-// keys map — keeping them unique keeps the touched-key count predictable).
-//
-// n is the target post-dedup size; the generator rejects collisions and
-// retries, so the returned slice length matches n unless shape == shapeEmpty.
+// generateBatch builds n unique-keyed (plainKeys, updates) for the given shape
+// from seed; returns nil for shapeEmpty or n <= 0.
 func generateBatch(shape randomBatchShape, n int, seed int64) ([][]byte, []Update) {
 	if shape == shapeEmpty {
 		return nil, nil
@@ -399,8 +370,7 @@ func generateBatch(shape randomBatchShape, n int, seed int64) ([][]byte, []Updat
 	var sharedAddr [length.Addr]byte
 	if shape == shapeStorageHeavySingle {
 		rnd.Read(sharedAddr[:])
-		// First key always touches the account itself so the encoded
-		// branch shape mirrors what production callers produce.
+		// Touch the account itself first so the branch shape matches production.
 		accKey := append([]byte(nil), sharedAddr[:]...)
 		used[string(accKey)] = struct{}{}
 		acc := Update{Flags: BalanceUpdate | NonceUpdate}
@@ -422,9 +392,7 @@ func generateBatch(shape randomBatchShape, n int, seed int64) ([][]byte, []Updat
 	return plainKeys, updates
 }
 
-// generateKey returns a single plain key matching the requested shape. The
-// returned isStorage flag tells the caller whether the key encodes a storage
-// slot (length.Addr+length.Hash) or an account (length.Addr).
+// generateKey returns a single plain key matching the requested shape.
 func generateKey(shape randomBatchShape, sharedAddr []byte, rnd *rand.Rand) (key []byte, isStorage bool) {
 	switch shape {
 	case shapeAccountsOnly, shapeInsertsAndDeletes:
@@ -437,8 +405,7 @@ func generateKey(shape randomBatchShape, sharedAddr []byte, rnd *rand.Rand) (key
 		rnd.Read(key[length.Addr:])
 		return key, true
 	case shapeStorageSpread:
-		// Two-thirds storage, one-third account so the batch covers both
-		// trie depths and both branch-encoder paths.
+		// Two-thirds storage, one-third account to cover both trie depths.
 		if rnd.Intn(3) == 0 {
 			key = make([]byte, length.Addr)
 			rnd.Read(key)
@@ -448,17 +415,12 @@ func generateKey(shape randomBatchShape, sharedAddr []byte, rnd *rand.Rand) (key
 		rnd.Read(key)
 		return key, true
 	}
-	// shapeEmpty is handled by the caller; any other unrecognised shape
-	// falls back to a plain account key so the harness fails loudly rather
-	// than silently degenerating.
 	key = make([]byte, length.Addr)
 	rnd.Read(key)
 	return key, false
 }
 
-// generateUpdate fills an Update payload appropriate for the shape and key
-// type. For shapeInsertsAndDeletes ~1/3 of account updates become deletes;
-// storage keys always carry StorageUpdate.
+// generateUpdate fills an Update payload appropriate for the shape and key type.
 func generateUpdate(shape randomBatchShape, isStorage bool, rnd *rand.Rand) Update {
 	u := Update{}
 	if isStorage {
@@ -482,9 +444,6 @@ func generateUpdate(shape randomBatchShape, isStorage bool, rnd *rand.Rand) Upda
 	return u
 }
 
-// TestVerifyParallel_AllShapes exercises one batch per named shape. Each
-// shape is run as a subtest so failures point at the offending shape rather
-// than the bulk loop below.
 func TestVerifyParallel_AllShapes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -509,30 +468,18 @@ func TestVerifyParallel_AllShapes(t *testing.T) {
 	}
 }
 
-// TestVerifyParallel_RandomBatches drives ≥1000 randomised batches through
-// both ModeDirect and ModeParallel and asserts byte-equal root hashes on
-// every iteration. The shape is cycled deterministically so each of the
-// five named shapes runs at least 200 times; sizes and seeds are drawn from
-// a single seeded RNG so failures reproduce exactly.
-//
-// Skipped under -short because the harness creates a temp dir and two
-// MockState/Trie pairs per iteration (~25-30s wall time uncontended).
 func TestVerifyParallel_RandomBatches(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1100 batches x two Process calls")
 	}
 	rnd := rand.New(rand.NewSource(0xC0FFEE))
 	const totalBatches = 1100
-	// All five named shapes participate; each gets ≥220 iterations.
 	shapes := []randomBatchShape{
 		shapeAccountsOnly, shapeStorageHeavySingle, shapeStorageSpread,
 		shapeInsertsAndDeletes, shapeEmpty,
 	}
 	for i := range totalBatches {
 		shape := shapes[i%len(shapes)]
-		// Keep batches small enough to keep the loop under a minute while
-		// still spanning enough top-level nibbles to produce split-points
-		// in the multi-bucket shapes.
 		n := 0
 		if shape != shapeEmpty {
 			n = 1 + rnd.Intn(96)
@@ -543,18 +490,10 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 	}
 }
 
-// FuzzParallelEquivalence is the testing.F entry point for randomised
-// ModeDirect ↔ ModeParallel root-hash equivalence. Run with:
+// FuzzParallelEquivalence fuzzes ModeDirect <-> ModeParallel root-hash equivalence:
 //
 //	go test -fuzz=FuzzParallelEquivalence -fuzztime=60s ./execution/commitment/
-//
-// Seeded inputs cover the named shapes; the fuzz engine explores variations
-// in keys count and seeds. Oversized batches are skipped so a runaway input
-// cannot wedge the worker.
 func FuzzParallelEquivalence(f *testing.F) {
-	// Seed corpus: one entry per named shape, plus a couple of mixed-size
-	// account-only batches so the fuzz engine starts with a meaningful
-	// distribution.
 	f.Add(uint16(8), uint8(0), int64(0xA1))
 	f.Add(uint16(32), uint8(0), int64(0xA2))
 	f.Add(uint16(96), uint8(1), int64(0xB1))
@@ -563,9 +502,7 @@ func FuzzParallelEquivalence(f *testing.F) {
 	f.Add(uint16(0), uint8(4), int64(0xE1))
 
 	f.Fuzz(func(t *testing.T, keysCount uint16, shapeByte uint8, seed int64) {
-		// Cap batch size: the fuzzer occasionally produces huge counts that
-		// make the assertion loop slow without adding coverage. 512 is well
-		// above the smallest multi-split-point shape.
+		// Cap batch size: huge counts slow the loop without adding coverage.
 		if keysCount > 512 {
 			t.Skip("oversized batch")
 		}

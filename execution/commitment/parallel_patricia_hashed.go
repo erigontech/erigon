@@ -29,17 +29,6 @@ import (
 )
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
-// It owns:
-//
-//   - a template *HexPatriciaHashed that exposes ctx/cache/metrics/trace
-//     configuration to callers and serves as the mount base during Process: it
-//     is unfolded to the root branch, the per-nibble workers' folded cells are
-//     dropped into its row, and it folds the merged root.
-//   - a worker pool of fresh *HexPatriciaHashed instances mounted per touched
-//     root nibble in Process.
-//   - a TrieContextFactory that yields per-worker PatriciaContext instances so
-//     DB reads run concurrently.
-//   - an atomic root-hash pointer published at the end of Process.
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
@@ -49,26 +38,15 @@ type ParallelPatriciaHashed struct {
 	accountKeyLen int16
 	numWorkers    int
 
-	// rootHash holds the root hash produced by the mount fold. Nil until
-	// Process completes successfully.
 	rootHash atomic.Pointer[[]byte]
 
-	// leaveDeferredForCaller makes Process skip the inline applyDeferredUpdates
-	// and hand the worker-accumulated deferred branch updates to the caller
-	// instead — the deferred-commitment (fork validation / parallel apply) path.
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
 
-	// streaming, when non-nil (the VariantStreamingHexPatricia path), makes
-	// Process delegate to the StreamingCommitter, which folds touched splits
-	// (overlapping with execution) and merges at Process. The Updates buffer
-	// forwards touches to the same committer.
 	streaming *StreamingCommitter
 }
 
-// NewParallelPatriciaHashed constructs a fresh ParallelPatriciaHashed. The
-// returned instance is usable for configuration immediately; Process requires
-// a non-nil ctxFactory.
+// NewParallelPatriciaHashed constructs a fresh ParallelPatriciaHashed.
 func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
@@ -81,8 +59,6 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 	return p
 }
 
-// resetPool replaces workerPool with a fresh sync.Pool. Used by Reset and
-// Release to drop any pooled workers that were configured for a prior run.
 func (p *ParallelPatriciaHashed) resetPool() {
 	akl := p.accountKeyLen
 	cfg := p.cfg
@@ -93,8 +69,7 @@ func (p *ParallelPatriciaHashed) resetPool() {
 	}
 }
 
-// SetNumWorkers overrides the worker count for the next Process call. Values
-// <= 0 fall back to runtime.NumCPU.
+// SetNumWorkers overrides the worker count for the next Process call; n <= 0 falls back to runtime.NumCPU.
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	if n <= 0 {
 		n = runtime.NumCPU()
@@ -105,10 +80,7 @@ func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	}
 }
 
-// SetLeaveDeferredForCaller makes Process leave the worker-accumulated deferred
-// branch updates for the caller to flush instead of applying them inline.
-// Mirrors HexPatriciaHashed; used by the deferred-commitment (fork validation /
-// parallel apply) path.
+// SetLeaveDeferredForCaller makes Process leave the deferred branch updates for the caller to flush instead of applying them inline.
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	p.leaveDeferredForCaller = leave
 	if p.streaming != nil {
@@ -116,30 +88,24 @@ func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	}
 }
 
-// HasPendingDeferredUpdates reports whether Process left deferred branch updates
-// for the caller to flush.
+// HasPendingDeferredUpdates reports whether Process left deferred branch updates for the caller to flush.
 func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
 	return len(p.deferredForCaller) > 0
 }
 
-// TakeDeferredUpdates returns the deferred branch updates staged for the caller
-// and clears them; the caller takes ownership and returns them to the pool after
-// flushing (via PendingCommitmentUpdate.Clear).
+// TakeDeferredUpdates returns the deferred branch updates staged for the caller and clears them; the caller takes ownership.
 func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	d := p.deferredForCaller
 	p.deferredForCaller = nil
 	return d
 }
 
-// RootTrie exposes the configuration template. Callers must NOT use it as
-// live root state; it carries ctx/cache/metrics/trace settings only.
+// RootTrie exposes the configuration template only; it must not be used as live root state.
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
-// Reset clears the published root hash and drops any pooled workers from the
-// previous run. The template's mutable trie state is also reset so callers can
-// reuse the instance for another batch.
+// Reset clears the published root hash, drops pooled workers, and resets the template so the instance can be reused.
 func (p *ParallelPatriciaHashed) Reset() {
 	if p.template != nil {
 		p.template.Reset()
@@ -151,9 +117,7 @@ func (p *ParallelPatriciaHashed) Reset() {
 	}
 }
 
-// Release returns the template to its pool, drops the worker pool, and clears
-// the published root hash. After Release the instance must not be used.
-// Repeat calls are safe no-ops.
+// Release frees the template and worker pool; the instance must not be used afterwards. Repeat calls are no-ops.
 func (p *ParallelPatriciaHashed) Release() {
 	if p.template != nil {
 		p.template.Release()
@@ -167,16 +131,14 @@ func (p *ParallelPatriciaHashed) Release() {
 	}
 }
 
-// ResetContext propagates a new PatriciaContext to the template. Per-worker
-// contexts are produced from trieCtxFactory by Process.
+// ResetContext propagates a new PatriciaContext to the template; per-worker contexts come from trieCtxFactory.
 func (p *ParallelPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	if p.template != nil {
 		p.template.ResetContext(ctx)
 	}
 }
 
-// SetTrieContextFactory replaces the per-worker context factory. Useful for
-// tests that swap in a mock factory.
+// SetTrieContextFactory replaces the per-worker context factory.
 func (p *ParallelPatriciaHashed) SetTrieContextFactory(f TrieContextFactory) {
 	p.trieCtxFactory = f
 	if p.streaming != nil {
@@ -184,9 +146,7 @@ func (p *ParallelPatriciaHashed) SetTrieContextFactory(f TrieContextFactory) {
 	}
 }
 
-// SetStreamingCommitter attaches a StreamingCommitter, switching Process to the
-// streaming path. The same committer must be wired to the Updates buffer so
-// touches are forwarded to it.
+// SetStreamingCommitter switches Process to the streaming path; the same committer must also be wired to the Updates buffer.
 func (p *ParallelPatriciaHashed) SetStreamingCommitter(sc *StreamingCommitter) {
 	p.streaming = sc
 	if sc != nil && p.trieCtxFactory != nil {
@@ -241,9 +201,7 @@ func (p *ParallelPatriciaHashed) Variant() TrieVariant {
 	return VariantParallelHexPatricia
 }
 
-// RootHash returns the root hash published by Process. If Process has not
-// completed (or no updates were applied), it falls back to the template's
-// current root — this matches the "no updates" path on a fresh trie.
+// RootHash returns the root hash published by Process, falling back to the template's current root if none was published.
 func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 	if r := p.rootHash.Load(); r != nil {
 		src := *r
@@ -257,12 +215,7 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 	return p.template.RootHash()
 }
 
-// processStreaming delegates Process to the attached StreamingCommitter, which
-// folded the touched splits (overlapping with execution when the scheduler ran)
-// and merges them here. The committer owns its own prefix trie populated by the
-// forwarded touches, so updates.parallel is unused on this path. The factory and
-// leave-deferred flag are kept in sync via SetTrieContextFactory /
-// SetLeaveDeferredForCaller, so this only runs the fold and republishes the root.
+// processStreaming delegates Process to the attached StreamingCommitter and republishes the root.
 func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
 	rh, err := p.streaming.Process(ctx)
 	if err != nil {
@@ -271,8 +224,7 @@ func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, 
 	if p.leaveDeferredForCaller {
 		p.deferredForCaller = p.streaming.TakeDeferredUpdates()
 	}
-	// Promote the committer's terminal root into the persistence template so
-	// RootTrie().EncodeCurrentState serializes a root SetState can restore.
+	// Promote the root into the template so EncodeCurrentState serializes a root SetState can restore.
 	p.streaming.PromoteRootInto(p.template)
 	out := make([]byte, len(rh))
 	copy(out, rh)
@@ -280,10 +232,7 @@ func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, 
 	return out, nil
 }
 
-// Process is the entry point for parallel commitment computation. It expects
-// updates.mode == ModeParallel with a populated parallelUpdate. It delegates to
-// processMounted, which unfolds the root branch, mounts a worker per touched
-// child nibble, folds each subtree into a cell, and folds the merged root.
+// Process is the entry point for parallel commitment computation; it requires updates.mode == ModeParallel.
 func (p *ParallelPatriciaHashed) Process(
 	ctx context.Context,
 	updates *Updates,
@@ -308,8 +257,6 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 
 	pu := updates.parallel
-	// Empty update set: no touches occurred. Fall back to the template's
-	// existing root; matches the sequential no-op path.
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
 		rh, rerr := p.template.RootHash()
 		if rerr != nil {
@@ -318,11 +265,7 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
-	// Warmup setup mirrors HexPatriciaHashed.Process: it is optional and the
-	// trie functions without it. The warmuper threads its own context internally.
-	// When the warmup cache is enabled, expose it on the template so every
-	// worker inherits it during runNibbleBucket — otherwise the warmuper's
-	// prefetches are wasted and workers re-read every branch from the DB.
+	// The warmup cache must be exposed on the template so workers inherit it; otherwise its prefetches are wasted.
 	var warmuper *Warmuper
 	if warmup.Enabled && dbg.EnvWarmupParallelProcess {
 		if warmup.CtxFactory == nil {
@@ -350,10 +293,6 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 
 	if p.leaveDeferredForCaller {
-		// Deferred-commitment mode: hand the worker-accumulated deferred branch
-		// updates to the caller to flush into the correct block's changeset
-		// instead of applying them inline. The root hash comes from the in-memory
-		// fold and does not depend on the branch apply.
 		pu.deferredMu.Lock()
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
@@ -371,10 +310,7 @@ func (p *ParallelPatriciaHashed) Process(
 	return out, nil
 }
 
-// dfsSubtree visits node's subtree in nibble order, calling fn(hashedKey, plainKey,
-// update) at every terminating node; hashedKey is path, grown/truncated in place
-// down the walk (fn must not retain it). A node emits its key BEFORE descending,
-// so an account precedes its storage.
+// dfsSubtree visits the subtree in nibble order, emitting each node before its children; the hashedKey passed to fn is mutated in place and must not be retained.
 func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
 	if node == nil {
 		return nil
@@ -403,10 +339,7 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 	return nil
 }
 
-// applyDeferredUpdates merges every worker's deferred branch updates and
-// applies them via a single PatriciaContext acquired from the factory.
-// Entries are returned to deferredUpdatePool whether the apply succeeds or
-// fails so the pool's allocation-reuse contract is preserved.
+// applyDeferredUpdates applies the merged deferred branch updates, returning every entry to the pool on success or failure.
 func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined
