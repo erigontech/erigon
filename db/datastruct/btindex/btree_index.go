@@ -29,7 +29,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common"
@@ -175,7 +174,6 @@ func (c *Cursor) readKV() error {
 type BtIndexWriter struct {
 	maxOffset  uint64
 	prevOffset uint64
-	minDelta   uint64
 	indexF     *os.File
 	ef         *eliasfano32.EliasFano
 	collector  *etl.Collector
@@ -194,12 +192,11 @@ type BtIndexWriter struct {
 }
 
 type BtIndexWriterArgs struct {
-	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir      string
-	M           uint64
-	KeyCount    int
-	EtlBufLimit datasize.ByteSize
-	Lvl         log.Lvl
+	IndexFile string // File name where the index and the minimal perfect hash function will be written to
+	TmpDir    string
+	M         uint64
+	KeyCount  int
+	Lvl       log.Lvl
 }
 
 // NewBtIndexWriter creates a new BtIndexWriter instance with given number of keys
@@ -207,9 +204,6 @@ type BtIndexWriterArgs struct {
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
 func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
-	if args.EtlBufLimit == 0 {
-		args.EtlBufLimit = etl.BufferOptimalSize / 2
-	}
 	if args.Lvl == 0 {
 		args.Lvl = log.LvlTrace
 	}
@@ -238,10 +232,6 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 
 	keepKey := keep
 	if btw.keysWritten > 0 {
-		delta := offset - btw.prevOffset
-		if btw.keysWritten == 1 || delta < btw.minDelta {
-			btw.minDelta = delta
-		}
 		keepKey = btw.keysWritten%btw.args.M == 0
 	}
 
