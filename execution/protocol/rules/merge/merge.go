@@ -238,6 +238,29 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
 		}
+	}
+
+	if config.IsAmsterdam(header.Time) {
+		// EIP-8282
+		builderDepositReq, err := misc.DequeueBuilderDepositRequests(syscall, state, config.GetBuilderDepositContract())
+		if err != nil {
+			return nil, err
+		}
+		if builderDepositReq != nil {
+			rs = append(rs, *builderDepositReq)
+		}
+
+		// EIP-8282
+		builderExitReq, err := misc.DequeueBuilderExitRequests(syscall, state, config.GetBuilderExitContract())
+		if err != nil {
+			return nil, err
+		}
+		if builderExitReq != nil {
+			rs = append(rs, *builderExitReq)
+		}
+	}
+
+	if config.IsPrague(header.Time) && !skipReceiptsEval {
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
@@ -449,6 +472,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 			return err
 		}
 	}
+
 	return nil
 }
 
