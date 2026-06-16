@@ -17,9 +17,11 @@
 package forkchoice
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"math"
+	"sort"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -40,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -169,4 +172,73 @@ func BenchmarkHeadWeight_IndexedVsFullScan(b *testing.B) {
 			_ = full.GetAttestationScore(node)
 		}
 	})
+}
+
+// TestIndexedWeightStoreIncrementalMatchesFullScan drives vote reassignments
+// through the production maintenance path (setLatestMessage -> RemoveVote +
+// IndexVote) on top of a seeded index, then asserts the incrementally
+// maintained index still matches the full-scan oracle for every node under each
+// of the PENDING/EMPTY/FULL payload-status views.
+func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	full := NewWeightStore(f)
+	idx := f.headWeightStore(cs) // seed the cold index from the fixture's latestMessages
+
+	voters := make([]uint64, 0)
+	for i := 0; i < f.latestMessages.latestMessagesCount(); i++ {
+		if msg, has := f.latestMessages.get(i); has && msg != (LatestMessage{}) {
+			voters = append(voters, uint64(i))
+		}
+	}
+	require.GreaterOrEqual(t, len(voters), 2, "fixture must seed multiple voters to exercise reassignment")
+
+	blocks := f.getFilteredBlockTree(justified.Root)
+	roots := make([]common.Hash, 0, len(blocks))
+	for r := range blocks {
+		roots = append(roots, r)
+	}
+	require.GreaterOrEqual(t, len(roots), 2)
+	sort.Slice(roots, func(i, j int) bool { return bytes.Compare(roots[i][:], roots[j][:]) < 0 })
+
+	// Spread each voter onto a different target and toggle payload_present so
+	// getSupportedNode hits its post-reveal EMPTY/FULL branches; every call
+	// removes the validator's seeded vote and re-indexes the new one.
+	for n, vi := range voters {
+		target := roots[n%len(roots)]
+		hdr, ok := f.forkGraph.GetHeader(target)
+		require.True(t, ok)
+		f.setLatestMessage(vi, LatestMessage{
+			Root:           target,
+			Slot:           hdr.Slot + 1,
+			PayloadPresent: n%2 == 0,
+		}, true)
+	}
+
+	sawNonZero := false
+	for _, root := range roots {
+		for _, ps := range []cltypes.PayloadStatus{
+			cltypes.PayloadStatusPending,
+			cltypes.PayloadStatusEmpty,
+			cltypes.PayloadStatusFull,
+		} {
+			node := ForkChoiceNode{Root: root, PayloadStatus: ps}
+			want := full.GetAttestationScore(node)
+			require.Equalf(t, want, idx.GetAttestationScore(node),
+				"attestation score mismatch at %x (payload status %d)", root, ps)
+			require.Equalf(t, full.GetWeight(node), idx.GetWeight(node),
+				"weight mismatch at %x (payload status %d)", root, ps)
+			if want > 0 {
+				sawNonZero = true
+			}
+		}
+	}
+	require.True(t, sawNonZero, "differential check is vacuous: no node carried weight")
 }
