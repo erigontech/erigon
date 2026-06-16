@@ -683,7 +683,23 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	return sd.flushMem(ctx, tx)
 }
 
-func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
+// CommitmentFlushCallback receives each commitment-domain (key, value, step,
+// txNum) tuple flushed by the mem batch, so Commit can keep the BranchCache in
+// sync with the durable state.
+type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
+
+// commitmentFlusher is the optional flush-with-callback path on the mem batch.
+// It is kept off kv.TemporalMemBatch so the cache concern stays in db/state +
+// execctx; test stubs need not implement it.
+type commitmentFlusher interface {
+	FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb CommitmentFlushCallback) error
+}
+
+func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx) error {
+	return sd.flushMemWithCallback(ctx, tx, nil)
+}
+
+func (sd *SharedDomains) flushMemWithCallback(ctx context.Context, tx kv.RwTx, cb CommitmentFlushCallback) error {
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
@@ -696,7 +712,12 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 			return err
 		}
 	}
-	return sd.mem.Flush(ctx, tx, opts...)
+	if cb != nil {
+		if cf, ok := sd.mem.(commitmentFlusher); ok {
+			return cf.FlushWithCommitmentCallback(ctx, tx, cb)
+		}
+	}
+	return sd.mem.Flush(ctx, tx)
 }
 
 type branchCacheUpdate struct {
@@ -727,11 +748,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
 	// the cache only after the commit succeeds. On a failed commit the stash is
 	// discarded, so the cache is never advanced past durable MDBX state.
 	var pending []branchCacheUpdate
-	if err := sd.flushMem(ctx, tx, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+	if err := sd.flushMemWithCallback(ctx, tx, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 		pending = append(pending, branchCacheUpdate{
 			key: append([]byte(nil), k...), val: append([]byte(nil), v...), step: step, txN: txNum,
 		})
-	})); err != nil {
+	}); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
