@@ -249,7 +249,19 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.version = sdVersion
 				return
 			}
-			if sd, ok := s.versionedWriteSelfDestruct(addr); !ok || sd {
+			// Match main's `versionedWrite(addr, SelfDestructPath, key)`: the
+			// own-write lookup is keyed by `key`, so for a StoragePath read
+			// (key=slot) it never matches the per-address SelfDestructPath write
+			// (stored under NilKey) and the slot reads as the post-SD zero — a
+			// fresh contract's slots are empty. Only an account-field read
+			// (key=NilKey) consults the SelfDestructPath own-write; a same-tx
+			// SelfDestructPath=false there means the account was revived, so we
+			// fall through.
+			sd, sdOK := false, false
+			if key == accounts.NilKey {
+				sd, sdOK = s.versionedWriteSelfDestruct(addr)
+			}
+			if !sdOK || sd {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 					Val:        true,
