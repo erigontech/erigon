@@ -409,7 +409,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
-	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,
 			Port:               int(config.CaplinDiscoveryPort),
