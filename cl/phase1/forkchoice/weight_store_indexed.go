@@ -168,18 +168,7 @@ func (w *indexedWeightStore) pruneFinalized(finalizedSlot uint64) {
 // So: PENDING OR not-previous-slot → calculate weight
 // NOT PENDING AND is-previous-slot → return 0
 func (w *indexedWeightStore) GetWeight(node ForkChoiceNode) uint64 {
-	// Get the block for this node
-	block, has := w.f.forkGraph.GetBlock(node.Root)
-	if !has || block == nil {
-		return 0
-	}
-
-	currentSlot := w.f.Slot()
-	isPreviousSlot := block.Block.Slot+1 == currentSlot
-	isPending := node.PayloadStatus == cltypes.PayloadStatusPending
-
-	// If NOT PENDING AND is previous slot → return 0
-	if !isPending && isPreviousSlot {
+	if w.f.isPreviousSlotPayloadDecision(node) {
 		return 0
 	}
 
@@ -196,14 +185,11 @@ func (w *indexedWeightStore) GetWeight(node ForkChoiceNode) uint64 {
 		return attestationScore
 	}
 
-	// Create a LatestMessage for the proposer boost root
-	proposerMessage := LatestMessage{
-		Root:           proposerBoostRoot,
-		Slot:           currentSlot,
-		PayloadPresent: false,
+	proposerBoostNode := ForkChoiceNode{
+		Root:          proposerBoostRoot,
+		PayloadStatus: cltypes.PayloadStatusPending,
 	}
-
-	if w.f.isSupportingVote(node, proposerMessage) {
+	if w.f.isAncestor(proposerBoostNode, node) {
 		return attestationScore + w.GetProposerScore()
 	}
 
@@ -218,11 +204,6 @@ func (w *indexedWeightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 
 	cs := w.checkpointState
 	if cs == nil {
-		return 0
-	}
-
-	block, has := w.f.forkGraph.GetBlock(node.Root)
-	if !has || block == nil {
 		return 0
 	}
 
@@ -249,7 +230,7 @@ func (w *indexedWeightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 				Slot:           entry.Slot,
 				PayloadPresent: entry.PayloadPresent,
 			}
-			if w.f.isSupportingVote(node, message) {
+			if w.f.isAncestor(w.f.getSupportedNode(message), node) {
 				score += cs.balances[idx]
 			}
 		}

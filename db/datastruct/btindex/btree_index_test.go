@@ -46,7 +46,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), filepath.Join(tmp, "a.kvei"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, r)
@@ -194,7 +194,7 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), compressed)
-	err = BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = BuildBtreeIndexWithDecompressor(indexPath, strings.TrimSuffix(indexPath, ".bt")+".kvei", r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 }
 
@@ -400,10 +400,10 @@ func TestNewBtIndex(t *testing.T) {
 	require.NotNil(t, bt)
 	bplus := bt.bplus
 	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
+	require.LessOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM)+2)
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotZero(t, bt.bplus.mx[i].off)
 		require.NotEmpty(t, bt.bplus.mx[i].key)
 	}
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -995,4 +996,64 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	require.Equal(t, invalidTxIdx, res.DepIdx(),
 		"phantom write is recorded as Estimate, not deleted — downstream "+
 			"OCC must still see it as a dependency")
+}
+
+// Pins wrapAsExecAbort: a real underlying err must survive as OriginError
+// (or remain a true nil interface), never be substituted by a zero
+// ErrExecAbortError whose Error() reads "execution aborted due to dependency 0".
+func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
+	realErr := errors.New("engine.Initialize: validator set call reverted")
+	tests := []struct {
+		name       string
+		origErr    error
+		depTxIndex int
+		check      func(t *testing.T, got error)
+	}{
+		{
+			name:       "nil err is wrapped with nil OriginError (no bogus dep-0 string)",
+			origErr:    nil,
+			depTxIndex: 5,
+			check: func(t *testing.T, got error) {
+				abort, ok := got.(protocol.ErrExecAbortError)
+				require.True(t, ok)
+				require.Equal(t, 5, abort.DependencyTxIndex)
+				require.Nil(t, abort.OriginError,
+					"OriginError must be a true nil interface so IsError() reports false")
+				require.False(t, abort.IsError(),
+					"a wrapped nil err must NOT classify as a genuine execution error")
+			},
+		},
+		{
+			name:       "non-abort err survives as OriginError",
+			origErr:    realErr,
+			depTxIndex: 0,
+			check: func(t *testing.T, got error) {
+				abort, ok := got.(protocol.ErrExecAbortError)
+				require.True(t, ok)
+				require.Equal(t, 0, abort.DependencyTxIndex)
+				require.True(t, abort.IsError())
+				require.Equal(t, realErr.Error(), abort.OriginError.Error(),
+					"real err must reach OriginError verbatim, not be replaced by "+
+						"a zero ErrExecAbortError whose Error() reads as "+
+						"\"execution aborted due to dependency 0\"")
+			},
+		},
+		{
+			name:       "already-wrapped err is returned unchanged",
+			origErr:    protocol.ErrExecAbortError{DependencyTxIndex: 7, OriginError: nil},
+			depTxIndex: 99,
+			check: func(t *testing.T, got error) {
+				abort, ok := got.(protocol.ErrExecAbortError)
+				require.True(t, ok)
+				require.Equal(t, 7, abort.DependencyTxIndex,
+					"depTxIndex of the passed-through err must not be overwritten")
+				require.Nil(t, abort.OriginError)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.check(t, wrapAsExecAbort(tc.origErr, tc.depTxIndex))
+		})
+	}
 }
