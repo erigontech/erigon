@@ -777,6 +777,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			if bn+1 >= block { // last block committed; nothing more to run
+				break
+			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -785,9 +788,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			doms.SetInMemHistoryReads(false)
-		}
-		if err := doms.Commit(ctx, tx); err != nil {
-			return err
 		}
 		doms.Close()
 		return nil

@@ -906,9 +906,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
 	}
-	// Only cache a branch when the read's txN is known: a txN=0 entry would
-	// be treated as immortal by UnwindTo, so skip the Put rather than insert
-	// an entry that can never be unwind-evicted.
+	// Correct only because commitment is computed on the latest committed
+	// snapshot: an SD reading an older snapshot could re-insert a stale value.
+	// txN=0 is skipped (UnwindTo treats it as immortal).
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
 		sd.branchCache.Put(k, v, uint64(step), readTxN)
 	}

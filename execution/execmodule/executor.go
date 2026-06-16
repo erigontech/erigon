@@ -237,7 +237,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
-			// Commit() commits tx and advances the BranchCache only on success.
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
 			if err := sd.Commit(ctx, tx); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)

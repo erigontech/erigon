@@ -22,6 +22,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -464,29 +465,11 @@ type DomainIOMetrics struct {
 	DbReadDuration    time.Duration
 	FileReadCount     int64
 	FileReadDuration  time.Duration
-	// UniqueFileReadCount tracks distinct prefixes that ever fell through
-	// to a file read (process-cumulative). The ratio FileReadCount /
-	// UniqueFileReadCount is the read amplification factor: how many
-	// times each unique prefix was re-read from the file layer (cache
-	// misses on the same prefix). Updated by UpdateFileReadsUnique;
-	// gated by dbg.KVReadLevelledMetrics same as FileReadCount.
+	// UniqueFileReadCount counts distinct prefixes that fell through to a file
+	// read; FileReadCount / UniqueFileReadCount is the read-amplification ratio.
 	UniqueFileReadCount int64
-	// UniqueLenBuckets is the byte-length distribution of distinct
-	// prefixes seen by UpdateFileReadsUnique. The compact-encoded
-	// prefix length is 1 + ⌈depth/2⌉ bytes (HP encoding), so byte
-	// length maps to trie depth as follows:
-	//   0 : 1 byte    (depth 0-1, root)
-	//   1 : 2-4 bytes (depth 2-7, top trunk)
-	//   2 : 5-8 bytes (depth 8-15)
-	//   3 : 9-16 bytes (depth 16-31)
-	//   4 : 17-32 bytes (depth 32-63, near account leaf)
-	//   5 : 33 bytes (depth 64, storage subtree root)
-	//   6 : 34-36 bytes (depth 65-70, storage subtree top)
-	//   7 : 37-44 bytes (depth 71-86, mid storage)
-	//   8 : 45-64 bytes (depth 87-127, leaf-parents and deep)
-	//   9 : 65+ bytes (out of range)
-	// Used to localise where the per-block commitment file reads concentrate
-	// by prefix length (storage-subtree-trunk vs leaf-parents).
+	// UniqueLenBuckets is the prefix-byte-length distribution of those distinct
+	// prefixes, bucketed by lenBucket (maps compact-encoded length to trie depth).
 	UniqueLenBuckets [10]int64
 
 	// StateCache hit/miss tracks the SharedDomains.stateCache layer
@@ -503,20 +486,16 @@ type DomainMetrics struct {
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
 
-	// seenFileReads is a process-cumulative dedup set for
-	// UpdateFileReadsUnique. Keys are (domain.String() + prefixBytes);
-	// LoadOrStore on each read decides whether the prefix is new and
-	// therefore contributes to UniqueFileReadCount. Held outside the
-	// mutex (sync.Map handles its own concurrency) so the unique check
-	// doesn't serialise with other metric updates.
-	//
-	// Trade-off: this grows to one entry per distinct prefix ever file-read
-	// (unbounded over a long run) and is intentionally NOT capped — a cap would
-	// re-count already-seen prefixes and corrupt UniqueFileReadCount. It only
-	// accumulates when dbg.KVReadLevelledMetrics is enabled, a short-lived
-	// diagnostic toggle rather than a production long-running setting.
-	seenFileReads sync.Map
+	// seenFileReads dedups prefixes for UpdateFileReadsUnique. Capped at
+	// maxSeenFileReads entries: past the cap, uniqueness counting stops so the
+	// set can't grow without bound under a long-lived dbg.KVReadLevelledMetrics run.
+	seenFileReads    sync.Map
+	seenFileReadsLen atomic.Int64
 }
+
+// maxSeenFileReads bounds the read-amplification dedup set; beyond it
+// UniqueFileReadCount saturates rather than tracking every prefix forever.
+const maxSeenFileReads = 1 << 20
 
 func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
@@ -631,7 +610,13 @@ func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, sta
 	// shape (commitment compact-encoded paths vs accounts plain addresses)
 	// without colliding.
 	domainKey := domain.String() + ":" + string(key)
-	_, alreadySeen := dm.seenFileReads.LoadOrStore(domainKey, struct{}{})
+	alreadySeen := true
+	if dm.seenFileReadsLen.Load() < maxSeenFileReads {
+		if _, loaded := dm.seenFileReads.LoadOrStore(domainKey, struct{}{}); !loaded {
+			dm.seenFileReadsLen.Add(1)
+			alreadySeen = false
+		}
+	}
 	bucket := lenBucket(len(key))
 
 	dm.Lock()

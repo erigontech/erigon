@@ -471,8 +471,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("isDomainAhead: begin rw: %w", err), false)
 		}
 		defer commitRwTx.Rollback()
-		// Commit() commits commitRwTx and only then advances the BranchCache,
-		// so a failed commit can't poison it.
 		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -546,8 +544,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
 			defer commitRwTx.Rollback() // safety net; idempotent after successful Commit
-			// Commit() commits commitRwTx and advances the BranchCache only on
-			// success, so a failed commit can't leave the cache ahead of MDBX.
 			// The committed sd is spent; RunLoop closes it and continues on the
 			// fresh SD built below (no ClearRam reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
@@ -840,9 +836,7 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		return nil, fmt.Errorf("fcu flush+commit: begin rw: %w", err)
 	}
 	defer rwTx.Rollback()
-	// Release the read snapshot before committing (Flush doesn't read it).
-	// Commit() commits rwTx and advances the BranchCache only on success,
-	// so a failed commit can't leave the cache ahead of MDBX.
+	// Release the read snapshot before committing — Commit doesn't read it.
 	if roTxToCloseBeforeCommit != nil {
 		roTxToCloseBeforeCommit.Rollback()
 	}
