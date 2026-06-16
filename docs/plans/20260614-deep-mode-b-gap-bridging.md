@@ -1,6 +1,24 @@
 # Deep Mode-B recovery: the post-snapshot-tip gap-bridging problem
 
-**Status**: open finding, surfaced live during the 5-iter soak on
+**Status**: SUPERSEDED 2026-06-15 — original diagnosis (Caplin
+backward-fetch / recompute-primitive cliff) was wrong. Re-investigation
+showed the wedge was Mode-B SetHead not cancelling in-flight
+`BlockRetire` whose range crossed the unwind target. Retire kept
+producing snapshot/.idx files for blocks above target, racing the
+unwind's EthTx wipe (endless recsplit-collision retries) and leaving
+`inv_extras=3` orphan inventory entries. Fix landed in the
+`feat/snapshot-flow-app-integration` branch — see the
+[retire/unwind coordination pickup memo](../../../.claude/projects/-erigon-mark-hive-clients-erigon-erigon/memory/2026-06-15-pickup-retire-unwind-coordination-fix.md)
+for the corrected narrative.
+
+Keeping the document below as the contemporaneous record of the
+investigation. Sections referring to "Caplin backward-fetch / EL
+self-bridges" should be read as the hypothesis that was eliminated,
+not the implementation plan.
+
+---
+
+**Original status**: open finding, surfaced live during the 5-iter soak on
 2026-06-13 (iter 2 mode_b, depth 10k).
 
 **Severity**: blocks the original Gate-1 soak profile (5k/10k/30k/60k/30k)
