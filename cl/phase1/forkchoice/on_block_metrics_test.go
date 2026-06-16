@@ -37,14 +37,12 @@ func TestCollectOnBlockLatency(t *testing.T) {
 
 	// A non-current-slot block (e.g. backfill) must not update the metric.
 	g.Set(-1)
-	clock.EXPECT().GetCurrentSlot().Return(uint64(100))
-	collectOnBlockLatencyToUnixTime(clock, 99)
+	collectOnBlockLatencyToUnixTime(clock, 99, 100)
 	require.Equal(t, float64(-1), g.GetValue(), "non-current-slot block must not update the metric")
 
 	// A current-slot block must record a non-negative latency.
-	clock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	clock.EXPECT().GetSlotTime(uint64(100)).Return(time.Now().Add(-1500 * time.Millisecond))
-	collectOnBlockLatencyToUnixTime(clock, 100)
+	collectOnBlockLatencyToUnixTime(clock, 100, 100)
 	v := g.GetValue()
 	require.NotEqual(t, float64(-1), v, "current-slot block must update the metric")
 	require.GreaterOrEqual(t, v, float64(0))
