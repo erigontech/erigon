@@ -1,7 +1,7 @@
 ---
 title: "Architecture"
 description: "How Erigon is built — staged sync, modular processes, flat-DB on MDBX, immutable snapshots, and an embedded consensus layer."
-sidebar_position: 3
+sidebar_position: 2
 ---
 
 # Architecture
@@ -22,7 +22,7 @@ flowchart TB
         Caplin["Caplin (CL)<br/>embedded by default"]
         Datadir[("datadir<br/>MDBX chaindata<br/>+ .seg snapshots")]
 
-        Caplin -->|new blocks<br/>(Engine API)| Execution
+        Caplin -->|"new blocks<br/>(Engine API)"| Execution
         Sentry -->|tx gossip| TxPool
         Execution --> RPC
 
@@ -125,11 +125,11 @@ Erigon 3 has one sync pipeline. The user-facing choice is *what to retain after 
 | `blocks` | All blocks, but no state history | Full block/receipt history without archive-size state |
 | `minimal` | Latest state only (shortest block window) | Solo stakers, constrained hardware |
 
-See [Prune Modes](prune-modes) for the full comparison.
+See [Pruning Modes](pruning-modes) for the full comparison.
 
 ## Where to go next
 
 - [Database](database) — datadir layout, MDBX internals, mainnet sizing
 - [Modules](modules) — running RPC Daemon, TxPool, Sentry, Downloader as separate processes
-- [Prune Modes](prune-modes) — choosing what history to keep
+- [Pruning Modes](pruning-modes) — choosing what history to keep
 - [Optimizing Storage](optimizing-storage) — splitting datadir across fast and slow disks

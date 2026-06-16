@@ -185,6 +185,14 @@ func (r *Reader) MadvNormal() {
 		panic(err)
 	}
 }
+func (r *Reader) MadvRandom() {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseRandom(r.m); err != nil {
+		panic(err)
+	}
+}
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
 func (r *Reader) Close() {
@@ -308,13 +316,8 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 	return s.ContainsHash(v)
 }
 
-// ForceInMem clones the entire mmap region into anonymous heap memory in a
-// single allocation, then re-points each shard's Fingerprints slice into the
-// clone at the same byte offset. Avoids 256 separate allocations.
+// ForceInMem clones each shard's fingerprints into anonymous heap memory.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
-	if len(r.m) == 0 {
-		return 0
-	}
 	var res datasize.ByteSize
 	for i := range r.shards {
 		res += r.shards[i].ForceInMem()
@@ -339,6 +342,14 @@ func (r *ReaderSharded) MadvNormal() {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
+		panic(err)
+	}
+}
+func (r *ReaderSharded) MadvRandom() {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }

@@ -222,7 +222,7 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 
 			nodes := make([]Node, nodeCount)
 			for i, k := range allKeys {
-				nodes[i] = Node{key: k, di: uint64(i) * uint64(cfg.M), off: uint64(i) * 100}
+				nodes[i] = Node{key: k, di: uint64(i) * uint64(cfg.M)}
 			}
 
 			totalCount := uint64(cfg.N)
