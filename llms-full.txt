@@ -705,7 +705,7 @@ The location of your Erigon data directory (`datadir`) is the most crucial facto
 
 **RPC Daemon Configuration**
 
-The choice of data location directly impacts how you must configure the RPC daemon:
+The choice of data location directly impacts how you must configure the RPC Daemon:
 
 | **Scenario**                                  | **RPC Daemon Requirement**                                                               |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -889,7 +889,7 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 ## Flag explanation
 
-* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
+* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technology` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
   * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](../../fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
@@ -1028,7 +1028,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
     ```
 
-Check Erigon and your chosen CL logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
+Check Erigon and your chosen CL logs to make sure that the Execution Layer (EL) and CL are communicating and that your node is syncing correctly.
 
 ---
 
@@ -1422,7 +1422,7 @@ Erigon processes the chain in a series of **stages** rather than the traditional
 
 A simplified pipeline:
 
-```
+```text
 1. Snapshots    → fetch immutable history files via BitTorrent (OtterSync)
 2. Headers      → download and verify block headers
 3. Bodies       → download block bodies
@@ -1521,7 +1521,7 @@ This page covers the *what* and *where* of Erigon's data. For the *why* — flat
 
 ## The datadir at a glance
 
-```
+```text
 datadir/
 ├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
 ├── snapshots/        # Historical data as immutable .seg files. Large, cold.
@@ -3337,7 +3337,7 @@ Generate a key pair for the Erigon node:
 openssl ecparam -name prime256v1 -genkey -noout -out erigon-key.pem
 ```
 
-Also generate a key pair for the RPC daemon:
+Also generate a key pair for the RPC Daemon:
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
@@ -3902,7 +3902,7 @@ ERIGON_USER=erigon
 sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
-`makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and RPC Daemon which is required to open Erigon's DB from another process (RPC Daemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
+`makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between Erigon and RPC Daemon which is required to open Erigon's DB from another process (RPC Daemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
 
 If your Docker installation requires the Docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running Docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
