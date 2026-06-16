@@ -593,6 +593,11 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 	return sd.stateCache
 }
 
+// ClearRam drops the in-memory batch (and, when resetCommitment, the commitment
+// context) without committing.
+//
+// Deprecated: a committed SharedDomains is spent — open a fresh one (Commit then
+// a new SharedDomains, or Close) rather than reset and reuse.
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	// When the commitment calculator goroutine owns the Updates buffer,
 	// skip ClearRam on the commitment context to avoid concurrent btree access.
