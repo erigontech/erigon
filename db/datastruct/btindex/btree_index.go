@@ -24,12 +24,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common"
@@ -175,7 +173,6 @@ func (c *Cursor) readKV() error {
 type BtIndexWriter struct {
 	maxOffset  uint64
 	prevOffset uint64
-	minDelta   uint64
 	indexF     *os.File
 	ef         *eliasfano32.EliasFano
 	collector  *etl.Collector
@@ -194,12 +191,11 @@ type BtIndexWriter struct {
 }
 
 type BtIndexWriterArgs struct {
-	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir      string
-	M           uint64
-	KeyCount    int
-	EtlBufLimit datasize.ByteSize
-	Lvl         log.Lvl
+	IndexFile string // File name where the index and the minimal perfect hash function will be written to
+	TmpDir    string
+	M         uint64
+	KeyCount  int
+	Lvl       log.Lvl
 }
 
 // NewBtIndexWriter creates a new BtIndexWriter instance with given number of keys
@@ -207,9 +203,6 @@ type BtIndexWriterArgs struct {
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
 func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
-	if args.EtlBufLimit == 0 {
-		args.EtlBufLimit = etl.BufferOptimalSize / 2
-	}
 	if args.Lvl == 0 {
 		args.Lvl = log.LvlTrace
 	}
@@ -238,10 +231,6 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 
 	keepKey := keep
 	if btw.keysWritten > 0 {
-		delta := offset - btw.prevOffset
-		if btw.keysWritten == 1 || delta < btw.minDelta {
-			btw.minDelta = delta
-		}
 		keepKey = btw.keysWritten%btw.args.M == 0
 	}
 
@@ -364,8 +353,8 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
+func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, M uint64, decompressor *seg.Reader, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors statecfg.Accessors) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, existenceFilterPath, decompressor, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
@@ -392,19 +381,17 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return d, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath string, kv *seg.Reader, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors statecfg.Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
 	defer kv.MadvNormal().DisableReadAhead()
-	existenceFilterPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
 		var err error
-		useFuse := false
-		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath, useFuse)
+		existenceFilter, err = existence.NewFilter(uint64(kv.Count()/2), existenceFilterPath)
 		if err != nil {
 			return err
 		}
