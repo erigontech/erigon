@@ -109,7 +109,7 @@ func TestStreaming_RandomOrderParity(t *testing.T) {
 // (foldStorageRoot) and the account-leaf storageRoot/CodeHash assembly.
 func TestStreaming_DeepBranchParity(t *testing.T) {
 	t.Parallel()
-	keys, upds := buildBigAccountCorpus(15_000)
+	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
 
 	idx := make([]int, len(keys))
 	for i := range idx {
@@ -132,7 +132,7 @@ func TestStreaming_DeepBranchParity(t *testing.T) {
 // root must still match sequential. This is the Task-2 isolation gate.
 func TestStreaming_DeepLocalWalkUsed(t *testing.T) {
 	t.Parallel()
-	keys, upds := buildBigAccountCorpus(15_000)
+	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
 
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
@@ -775,7 +775,7 @@ func streamingViaPublicProcessRoot(t *testing.T, workers int, keys [][]byte, upd
 // the big-storage corpus across worker counts.
 func TestStreaming_PublicProcessParity(t *testing.T) {
 	t.Parallel()
-	keys, upds := buildBigAccountCorpus(15_000)
+	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
 	for _, w := range []int{1, 4, 8} {

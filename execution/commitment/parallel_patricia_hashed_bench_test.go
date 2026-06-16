@@ -162,40 +162,6 @@ func buildMixedCorpus(seed int64, nKeys int) ([][]byte, []Update) {
 	return ub.Build()
 }
 
-// build1MWhaleCorpus: three whale accounts (750k/150k/5k storage slots) plus a
-// 95k single-slot tail — ~1M storage keys. Stresses within-account storage,
-// which single-level mount cannot parallelise (the 750k whale runs on one
-// worker).
-func build1MWhaleCorpus(b testing.TB) ([][]byte, []Update) {
-	b.Helper()
-	rnd := rand.New(rand.NewSource(919273))
-	ub := NewUpdateBuilder()
-	addStorage := func(a string, slots int) {
-		for range slots {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			val := make([]byte, 32)
-			rnd.Read(val)
-			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
-		}
-	}
-	for _, slots := range []int{750_000, 150_000, 5_000} {
-		addr := make([]byte, length.Addr)
-		rnd.Read(addr)
-		a := hex.EncodeToString(addr)
-		ub.Balance(a, rnd.Uint64()+1)
-		addStorage(a, slots)
-	}
-	for range 95_000 {
-		addr := make([]byte, length.Addr)
-		rnd.Read(addr)
-		a := hex.EncodeToString(addr)
-		ub.Balance(a, rnd.Uint64()+1)
-		addStorage(a, 1)
-	}
-	return ub.Build()
-}
-
 func Benchmark_Commitment_SmallCounts(b *testing.B) {
 	workers := benchWorkerCounts()
 	for _, nKeys := range []int{10, 20, 241, 1546} {
@@ -210,7 +176,7 @@ func Benchmark_Commitment_SmallCounts(b *testing.B) {
 }
 
 func Benchmark_Commitment_1MWhales(b *testing.B) {
-	pk, updates := build1MWhaleCorpus(b)
+	pk, updates := buildWhaleCorpus(whale1M())
 	b.Logf("corpus keys=%d", len(pk))
 	ncpu := runtime.NumCPU()
 	workers := []int{ncpu, ncpu * 2, ncpu * 4}

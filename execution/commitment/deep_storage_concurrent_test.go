@@ -2,9 +2,7 @@ package commitment
 
 import (
 	"context"
-	"encoding/hex"
 	"math/bits"
-	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,33 +23,18 @@ func foldSubWorkerTo(t *testing.T, w *HexPatriciaHashed, mountRow, col int) cell
 	return w.grid[mountRow][col]
 }
 
-// buildDenseWhale: one account + `slots` random storage slots (dense — with many
-// slots every depth-64 nibble branches, sidestepping the single-child case).
-func buildDenseWhale(slots int) (addr []byte, accUpd Update, pk [][]byte, upds []Update) {
-	rnd := rand.New(rand.NewSource(424242))
-	addr = make([]byte, length.Addr)
-	rnd.Read(addr)
-	a := hex.EncodeToString(addr)
-	ub := NewUpdateBuilder()
-	ub.Balance(a, 12345)
-	for i := 0; i < slots; i++ {
-		loc := make([]byte, length.Hash)
-		rnd.Read(loc)
-		val := make([]byte, 32)
-		rnd.Read(val)
-		ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
-	}
-	pk, upds = ub.Build()
+func TestDeepConcurrent_DenseStorageParity(t *testing.T) {
+	// dense whale: one account + 2048 random storage slots — with many slots every
+	// depth-64 nibble branches, sidestepping the single-child case.
+	pk, upds := buildWhaleCorpus(whaleOpts{seed: 424242, bigSlots: 2048, fixedBalance: 12345})
+	var addr []byte
+	var accUpd Update
 	for i, k := range pk {
 		if len(k) == length.Addr {
+			addr = k
 			accUpd = upds[i]
 		}
 	}
-	return addr, accUpd, pk, upds
-}
-
-func TestDeepConcurrent_DenseStorageParity(t *testing.T) {
-	addr, accUpd, pk, upds := buildDenseWhale(2048)
 
 	// ---- sequential oracle ----
 	seqMs := NewMockState(t)

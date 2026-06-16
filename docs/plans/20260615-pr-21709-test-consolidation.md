@@ -323,9 +323,9 @@ output is **byte-identical** (keys and updates, in order) to
 Only once green, replace call sites, delete the 4 originals, and delete the
 scratch test.
 
-- [ ] Scratch byte-identity test green for all 4 shapes.
-- [ ] `go test ./execution/commitment/... -run 'Parity|Equiv|Deep|Streaming|Whale' -count=1` green (roots unchanged).
-- [ ] Scratch test and 4 old builders removed.
+- [x] Scratch byte-identity test green for all 4 shapes.
+- [x] `go test ./execution/commitment/... -run 'Parity|Equiv|Deep|Streaming|Whale' -count=1` green (roots unchanged).
+- [x] Scratch test and 4 old builders removed.
 
 ### Task 3: Theme regrouping + bench consolidation (relocate, no logic change)
 

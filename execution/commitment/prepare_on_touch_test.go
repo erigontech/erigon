@@ -161,7 +161,7 @@ func TestPrepareOnTouch_Parity(t *testing.T) {
 // execution in production) vs process (fold+stitch, the commitment-time cost) on
 // the whale corpus, with top-nibble split points.
 func Benchmark_PrepareOnTouch(b *testing.B) {
-	pk, upds := build1MWhaleCorpus(b)
+	pk, upds := buildWhaleCorpus(whale1M())
 	for b.Loop() {
 		b.StopTimer()
 		ms := NewMockState(b)

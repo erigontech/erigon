@@ -28,7 +28,7 @@ func Benchmark_RegularVsStreaming(b *testing.B) {
 // ~1M-key corpus where a few accounts hold huge storage shards (3 whales
 // 750k/150k/5k + 95k single-slot accounts).
 func Benchmark_TrieVariants_1MWhale(b *testing.B) {
-	pk, upds := build1MWhaleCorpus(b)
+	pk, upds := buildWhaleCorpus(whale1M())
 	b.Logf("corpus keys=%d", len(pk))
 	ncpu := runtime.NumCPU()
 	b.Run("Regular-Direct", func(b *testing.B) { runDirectBench(b, pk, upds) })

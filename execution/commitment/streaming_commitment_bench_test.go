@@ -43,20 +43,16 @@ func burnCPU(iters int) {
 	benchCPUSink.Add(x)
 }
 
-// buildStreamingWhaleCorpus is a bench-scale whale: one big-storage account
-// (deep fan-out) plus accounts spread across the top nibbles so the background
-// scheduler has multiple splits to fold in parallel under execution.
-func buildStreamingWhaleCorpus() ([][]byte, []Update) {
-	return buildBigAccountCorpus(40_000)
-}
-
-// streamingBenchCorpora is the (whale, mixed) pair Task 9 measures.
+// streamingBenchCorpora is the (whale, mixed) pair Task 9 measures. The whale is
+// a bench-scale big-storage account (deep fan-out) plus accounts spread across
+// the top nibbles so the background scheduler has multiple splits to fold in
+// parallel under execution.
 func streamingBenchCorpora() []struct {
 	name string
 	pk   [][]byte
 	upds []Update
 } {
-	wk, wu := buildStreamingWhaleCorpus()
+	wk, wu := buildWhaleCorpus(bigAccountWhale(40_000))
 	mk, mu := buildMixedCorpus(99, 20_000)
 	return []struct {
 		name string

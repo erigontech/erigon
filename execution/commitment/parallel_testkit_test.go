@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +29,76 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
+
+// whaleOpts describes a deterministic account/storage corpus: smallBefore small
+// accounts, an optional bigSlots whale, extraWhales, smallAfter small accounts,
+// then tailAccounts single-slot accounts. fixedBalance != 0 uses a constant
+// balance (no RNG draw); otherwise each balance is rnd.Uint64()+1.
+type whaleOpts struct {
+	seed             int64
+	smallBefore      int
+	smallBeforeSlots int
+	bigSlots         int
+	extraWhales      []int
+	smallAfter       int
+	smallAfterSlots  int
+	tailAccounts     int
+	fixedBalance     uint64
+}
+
+// buildWhaleCorpus generates the account/storage corpus described by opts. The
+// RNG draw order (addr, balance, then per-slot loc+val) is identical for every
+// account so a given (seed, layout) reproduces a fixed set of keys and updates.
+func buildWhaleCorpus(opts whaleOpts) (pk [][]byte, upds []Update) {
+	rnd := rand.New(rand.NewSource(opts.seed))
+	ub := NewUpdateBuilder()
+	addAcc := func(slots int) {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		a := hex.EncodeToString(addr)
+		if opts.fixedBalance != 0 {
+			ub.Balance(a, opts.fixedBalance)
+		} else {
+			ub.Balance(a, rnd.Uint64()+1)
+		}
+		for range slots {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			val := make([]byte, 32)
+			rnd.Read(val)
+			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+		}
+	}
+	for range opts.smallBefore {
+		addAcc(opts.smallBeforeSlots)
+	}
+	if opts.bigSlots > 0 {
+		addAcc(opts.bigSlots)
+	}
+	for _, w := range opts.extraWhales {
+		addAcc(w)
+	}
+	for range opts.smallAfter {
+		addAcc(opts.smallAfterSlots)
+	}
+	for range opts.tailAccounts {
+		addAcc(1)
+	}
+	return ub.Build()
+}
+
+// bigAccountWhale: several small accounts surrounding one account with bigSlots
+// storage entries (> deepStorageThreshold) that triggers the deep fan-out.
+func bigAccountWhale(bigSlots int) whaleOpts {
+	return whaleOpts{seed: 771, smallBefore: 8, smallBeforeSlots: 3, bigSlots: bigSlots, smallAfter: 8, smallAfterSlots: 2}
+}
+
+// whale1M: three whale accounts (750k/150k/5k storage slots) plus a 95k
+// single-slot tail — ~1M storage keys. Stresses within-account storage, which
+// single-level mount cannot parallelise (the 750k whale runs on one worker).
+func whale1M() whaleOpts {
+	return whaleOpts{seed: 919273, bigSlots: 750_000, extraWhales: []int{150_000, 5_000}, tailAccounts: 95_000}
+}
 
 // runMode selects which commitment engine the engineRoot/incrementalRoot
 // dispatch drives.
