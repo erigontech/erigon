@@ -54,7 +54,13 @@ func (w *WriterOffHeap) Close() {
 }
 
 func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
-	defer dir.RemoveFile(w.tmpFilePath)
+	defer func() {
+		if w.tmpFile != nil {
+			w.tmpFile.Close()
+			w.tmpFile = nil
+		}
+		dir.RemoveFile(w.tmpFilePath)
+	}()
 	if w.count%bufSize != 0 {
 		if _, err := w.tmpFile.Write(castToBytes(w.buf[:w.count%bufSize])); err != nil {
 			return nil, err
@@ -247,7 +253,13 @@ func (w *WriterSharded) Build() error {
 // Format: [4 bytes header] then 256 × [8 bytes size | blob] pairs (size==0 means absent).
 // Fully streaming: no intermediate files, one shard's fingerprints in RAM at a time.
 func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
-	defer dir.RemoveFile(w.tmpFilePath)
+	defer func() {
+		if w.tmpFile != nil {
+			w.tmpFile.Close()
+			w.tmpFile = nil
+		}
+		dir.RemoveFile(w.tmpFilePath)
+	}()
 
 	if rem := w.count % bufSize; rem != 0 {
 		if _, err := w.tmpFile.Write(castToBytes(w.buf[:rem])); err != nil {
