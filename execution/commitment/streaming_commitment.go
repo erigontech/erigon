@@ -293,14 +293,18 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 }
 
 // endBlock drains the per-block touch funnel (prefix trie + split state) so a
-// reused committer folds only the next block's touches; the scheduler base and
-// worker pool survive, and the caller's staged root/deferred snapshots are kept.
+// reused committer folds only the next block's touches. The scheduler base is
+// released: Process folds it down to the terminal root, so it cannot be reused
+// for the next block, and keeping it would let a no-reset block stitch into a
+// collapsed root row. The worker pool and the caller's staged root/deferred
+// snapshots are kept.
 func (sc *StreamingCommitter) endBlock() {
 	if sc.trie != nil {
 		sc.trie.Reset()
 	}
 	sc.dropSplitDeferred()
 	clear(sc.splits)
+	sc.releaseBase()
 }
 
 // captureRoot snapshots the base trie's terminal root cell and flags (by value,
@@ -369,7 +373,7 @@ func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
 // background scheduler ran it reuses the persistent base the cached cells were
 // folded against (identical on-disk root row), so a freshly built base is only
 // needed in the pure lazy path. The returned cleanup is a no-op for the
-// persistent base (released by Reset/Release).
+// persistent base, whose lifecycle the committer owns.
 func (sc *StreamingCommitter) processBase(ctx context.Context) (*HexPatriciaHashed, func(), *prefixNode, error) {
 	if sc.base != nil {
 		root := sc.trie.root
@@ -419,6 +423,7 @@ func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	if sc.started.Load() {
 		return nil
 	}
+	sc.releaseBase()
 	base, cleanup, err := sc.buildBase(ctx)
 	if err != nil {
 		return err

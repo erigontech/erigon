@@ -892,6 +892,40 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 		require.Equal(t, seqRoot2, root2, "block-2 streaming root without reset != sequential")
 		requireBranchParity(t, seqMs, ms)
 	})
+
+	t.Run("scheduler_then_no_reset", func(t *testing.T) {
+		ctx := context.Background()
+		k1, u1 := genRandomAccountsStorage(400)
+		k2, u2 := sparseBatch2(k1, 3, true)
+
+		seqRoot1, _ := sequentialRoot(t, k1, u1)
+		seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(4)
+
+		require.NoError(t, ms.applyPlainUpdates(k1, u1))
+		require.NoError(t, sc.StartScheduler(ctx))
+		for _, k := range k1 {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root1, err := sc.Process(ctx)
+		require.NoError(t, err)
+		require.Equal(t, seqRoot1, root1, "block-1 scheduler root != sequential")
+		require.Nil(t, sc.base, "Process must release the scheduler base after folding it down")
+
+		require.NoError(t, ms.applyPlainUpdates(k2, u2))
+		for _, k := range k2 {
+			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+		}
+		root2, err := sc.Process(ctx)
+		require.NoError(t, err)
+		require.Equal(t, seqRoot2, root2, "block-2 lazy root after scheduler block (no reset) != sequential")
+		requireBranchParity(t, seqMs, ms)
+	})
 }
 
 // TestStreamingCommitterStateRoundTrip drives the streaming variant through the
