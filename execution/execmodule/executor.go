@@ -146,46 +146,51 @@ type RunLoopConfig struct {
 
 // RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
 // Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
-func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
+// RunLoop returns the final tx and the final operational SharedDomains. The
+// caller owns that SD: it must commit it if its CommitCycle didn't (the FCU
+// chain-tip path commits post-loop) and then close it. Intermediate SDs rotated
+// in by NewSD are committed by CommitCycle and closed here.
+func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 	stop := false
 	for hasMore := true; hasMore && !stop; {
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 
 		if err := cfg.PruneFn(ctx, cfg.InitialCycle, tx, sd); err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 
 		if cfg.ShouldBreak != nil {
 			stop, err = cfg.ShouldBreak(tx)
 			if err != nil {
-				return tx, err
+				return tx, sd, err
 			}
 		}
 
 		newTx, err := cfg.CommitCycle(ctx, hasMore, sd)
 		if err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 		if newTx != nil {
 			tx = newTx
 		}
-		if cfg.NewSD != nil {
-			old := sd
-			if hasMore && !stop {
-				sd, err = cfg.NewSD(tx)
-				if err != nil {
-					old.Close()
-					return tx, err
-				}
+		// Rotate to a fresh SD only when another iteration will run: CommitCycle
+		// has committed the current one, so close it and open a fresh one. The
+		// exit SD is returned for the caller to finalize, never closed here.
+		if cfg.NewSD != nil && hasMore && !stop {
+			oldSD := sd
+			sd, err = cfg.NewSD(tx)
+			if err != nil {
+				oldSD.Close()
+				return tx, sd, err
 			}
-			old.Close()
+			oldSD.Close()
 		}
 	}
-	return tx, nil
+	return tx, sd, nil
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
@@ -218,7 +223,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return err
 	}
-	defer doms.Close()
+	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
@@ -232,7 +237,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
-	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
+	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
