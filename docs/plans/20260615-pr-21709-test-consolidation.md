@@ -375,8 +375,8 @@ Apply merges 1–8 (Fanout table, Skeleton Plumbing/Release, parallel-update
 lifecycle/append, prefix-trie divergence/counts/popcount). Carry every listed
 "Keep" assertion verbatim as a subtest.
 
-- [ ] `go test ./execution/commitment/... -run 'Fanout|Skeleton|ParallelUpdate|PrefixTrie' -count=1` green.
-- [ ] Diff confirms each "Keep" assertion present in the new owner.
+- [x] `go test ./execution/commitment/... -run 'Fanout|Skeleton|ParallelUpdate|PrefixTrie' -count=1` green.
+- [x] Diff confirms each "Keep" assertion present in the new owner.
 
 ### Task 5: Streaming / deep merges (incl. the gated branch-parity wiring)
 

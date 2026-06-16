@@ -41,17 +41,6 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 	assert.Nil(t, p.rootHash.Load())
 }
 
-func TestParallelPatriciaHashedSkeletonRootTrie(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	require.Same(t, p.template, p.RootTrie())
-}
-
-func TestParallelPatriciaHashedSkeletonVariant(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	assert.Equal(t, VariantParallelHexPatricia, p.Variant())
-	assert.Equal(t, TrieVariant("hex-parallel-patricia-hashed"), p.Variant())
-}
-
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
 	// Existing variants still parse to the expected values.
@@ -62,17 +51,99 @@ func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("nonsense"))
 }
 
-func TestParallelPatriciaHashedSkeletonSetNumWorkers(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+// TestParallelPatriciaHashedSkeletonPlumbing covers the pass-through setters and
+// accessors on ParallelPatriciaHashed, one subtest per delegated method.
+func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
+	t.Run("RootTrie", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+		require.Same(t, p.template, p.RootTrie())
+	})
 
-	p.SetNumWorkers(4)
-	assert.Equal(t, 4, p.numWorkers)
+	t.Run("Variant", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+		assert.Equal(t, VariantParallelHexPatricia, p.Variant())
+		assert.Equal(t, TrieVariant("hex-parallel-patricia-hashed"), p.Variant())
+	})
 
-	// Non-positive values fall back to runtime.NumCPU.
-	p.SetNumWorkers(0)
-	assert.Equal(t, runtime.NumCPU(), p.numWorkers)
-	p.SetNumWorkers(-3)
-	assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+	t.Run("SetNumWorkers", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+
+		p.SetNumWorkers(4)
+		assert.Equal(t, 4, p.numWorkers)
+
+		// Non-positive values fall back to runtime.NumCPU.
+		p.SetNumWorkers(0)
+		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+		p.SetNumWorkers(-3)
+		assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+	})
+
+	t.Run("ResetContextPropagates", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+		ms := NewMockState(t)
+
+		p.ResetContext(ms)
+		assert.Same(t, ms, PatriciaContext(p.template.ctx), "context propagated to template")
+	})
+
+	t.Run("SetTrieContextFactory", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+		assert.Nil(t, p.trieCtxFactory)
+
+		ms := NewMockState(t)
+		called := 0
+		f := func() (PatriciaContext, func()) {
+			called++
+			return ms, func() {}
+		}
+		p.SetTrieContextFactory(f)
+		require.NotNil(t, p.trieCtxFactory)
+
+		got, cleanup := p.trieCtxFactory()
+		assert.Same(t, ms, got)
+		assert.NotNil(t, cleanup)
+		assert.Equal(t, 1, called)
+	})
+
+	t.Run("SetTraceFlags", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+
+		p.SetTrace(true)
+		assert.True(t, p.template.trace)
+		p.SetTrace(false)
+		assert.False(t, p.template.trace)
+
+		p.SetTraceDomain(true)
+		assert.True(t, p.template.traceDomain)
+		p.SetTraceDomain(false)
+		assert.False(t, p.template.traceDomain)
+	})
+
+	t.Run("EnableWarmupCache", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+
+		p.EnableWarmupCache(true)
+		assert.True(t, p.template.enableWarmupCache)
+		p.EnableWarmupCache(false)
+		assert.False(t, p.template.enableWarmupCache)
+	})
+
+	t.Run("CaptureRoundTrip", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+
+		capture := []string{"alpha", "beta"}
+		p.SetCapture(capture)
+		assert.Equal(t, capture, p.GetCapture(false), "GetCapture returns the set capture without truncation")
+		assert.Equal(t, capture, p.GetCapture(true), "truncating GetCapture returns the previous capture")
+		assert.Nil(t, p.GetCapture(false), "capture cleared after truncate")
+	})
+
+	t.Run("EnableCsvMetricsNoPanic", func(t *testing.T) {
+		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
+		// Empty prefix is a valid no-op in HexPatriciaHashed.EnableCsvMetrics —
+		// we only verify the delegation does not panic.
+		require.NotPanics(t, func() { p.EnableCsvMetrics("") })
+	})
 }
 
 func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
@@ -86,74 +157,10 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 	require.NotNil(t, p.template, "Reset preserves the template")
 }
 
-func TestParallelPatriciaHashedSkeletonResetContextPropagates(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	ms := NewMockState(t)
-
-	p.ResetContext(ms)
-	assert.Same(t, ms, PatriciaContext(p.template.ctx), "context propagated to template")
-}
-
-func TestParallelPatriciaHashedSkeletonSetTrieContextFactory(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	assert.Nil(t, p.trieCtxFactory)
-
-	ms := NewMockState(t)
-	called := 0
-	f := func() (PatriciaContext, func()) {
-		called++
-		return ms, func() {}
-	}
-	p.SetTrieContextFactory(f)
-	require.NotNil(t, p.trieCtxFactory)
-
-	got, cleanup := p.trieCtxFactory()
-	assert.Same(t, ms, got)
-	assert.NotNil(t, cleanup)
-	assert.Equal(t, 1, called)
-}
-
-func TestParallelPatriciaHashedSkeletonSetTraceFlags(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-
-	p.SetTrace(true)
-	assert.True(t, p.template.trace)
-	p.SetTrace(false)
-	assert.False(t, p.template.trace)
-
-	p.SetTraceDomain(true)
-	assert.True(t, p.template.traceDomain)
-	p.SetTraceDomain(false)
-	assert.False(t, p.template.traceDomain)
-}
-
-func TestParallelPatriciaHashedSkeletonEnableWarmupCache(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-
-	p.EnableWarmupCache(true)
-	assert.True(t, p.template.enableWarmupCache)
-	p.EnableWarmupCache(false)
-	assert.False(t, p.template.enableWarmupCache)
-}
-
-func TestParallelPatriciaHashedSkeletonCaptureRoundTrip(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-
-	capture := []string{"alpha", "beta"}
-	p.SetCapture(capture)
-	assert.Equal(t, capture, p.GetCapture(false), "GetCapture returns the set capture without truncation")
-	assert.Equal(t, capture, p.GetCapture(true), "truncating GetCapture returns the previous capture")
-	assert.Nil(t, p.GetCapture(false), "capture cleared after truncate")
-}
-
-func TestParallelPatriciaHashedSkeletonEnableCsvMetricsNoPanic(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	// Empty prefix is a valid no-op in HexPatriciaHashed.EnableCsvMetrics —
-	// we only verify the delegation does not panic.
-	require.NotPanics(t, func() { p.EnableCsvMetrics("") })
-}
-
-func TestParallelPatriciaHashedSkeletonReleaseNilSafe(t *testing.T) {
+// TestParallelPatriciaHashedSkeletonRelease covers Release idempotency, that
+// plumbing methods stay safe after Release, and that RootHash on a released
+// instance returns nil without error.
+func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 	require.NotNil(t, p.template)
 
@@ -173,6 +180,10 @@ func TestParallelPatriciaHashedSkeletonReleaseNilSafe(t *testing.T) {
 		p.EnableCsvMetrics("")
 		p.ResetContext(nil)
 	})
+
+	got, err := p.RootHash()
+	require.NoError(t, err)
+	assert.Nil(t, got, "RootHash on released instance returns nil")
 }
 
 func TestParallelPatriciaHashedSkeletonRootHashStashed(t *testing.T) {
@@ -212,15 +223,6 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 	require.NoError(t, err)
 
 	assert.Equal(t, expected, got, "RootHash falls back to template for the no-updates path")
-}
-
-func TestParallelPatriciaHashedSkeletonRootHashAfterRelease(t *testing.T) {
-	p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-	p.Release()
-
-	got, err := p.RootHash()
-	require.NoError(t, err)
-	assert.Nil(t, got, "RootHash on released instance returns nil")
 }
 
 // assertEquivalentRoot drives the same update set through sequential
@@ -422,89 +424,100 @@ func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) 
 	return out
 }
 
-// TestParallelFanout_TwoNibbles: the minimal concurrent scenario — two mount
-// workers, one per touched root nibble.
-func TestParallelFanout_TwoNibbles(t *testing.T) {
+// TestParallelFanout drives multi-nibble update sets through both modes via
+// assertEquivalentRootWorkers, so several mount workers fold concurrently. Each
+// row varies the fanout shape and worker count.
+func TestParallelFanout(t *testing.T) {
 	t.Parallel()
 
-	const perSide = 16
-	addrs := twoLeafTaskAddrs(t, 0x3, 0x5, perSide)
-
-	ub := NewUpdateBuilder()
-	for i, addr := range addrs {
-		ub.Balance(addrHex(addr), uint64(1_000+i))
+	cases := []struct {
+		name    string
+		workers int
+		build   func(t *testing.T) ([][]byte, []Update)
+	}{
+		{
+			// minimal concurrent scenario — two mount workers, one per touched root nibble.
+			name:    "TwoNibbles",
+			workers: 2,
+			build: func(t *testing.T) ([][]byte, []Update) {
+				const perSide = 16
+				addrs := twoLeafTaskAddrs(t, 0x3, 0x5, perSide)
+				ub := NewUpdateBuilder()
+				for i, addr := range addrs {
+					ub.Balance(addrHex(addr), uint64(1_000+i))
+				}
+				return ub.Build()
+			},
+		},
+		{
+			// four mount workers folding concurrently.
+			name:    "FourNibbles",
+			workers: 4,
+			build: func(t *testing.T) ([][]byte, []Update) {
+				const perBucket = 8
+				buckets := []int{0x1, 0x4, 0x7, 0xC}
+				ub := NewUpdateBuilder()
+				for _, nib := range buckets {
+					for i := range perBucket {
+						addr := findAddressForNibble(nib, i)
+						ub.Balance(addrHex(addr), uint64(2_000+nib*100+i))
+					}
+				}
+				return ub.Build()
+			},
+		},
+		{
+			// three workers with a 6:1:1 size ratio, verifying completion order
+			// does not change the resulting root hash.
+			name:    "AsymmetricWorkload",
+			workers: 3,
+			build: func(t *testing.T) ([][]byte, []Update) {
+				big := 24
+				small := 4
+				ub := NewUpdateBuilder()
+				for i := range big {
+					addr := findAddressForNibble(0x2, i)
+					ub.Balance(addrHex(addr), uint64(3_000+i))
+				}
+				for i := range small {
+					addr := findAddressForNibble(0x6, i)
+					ub.Balance(addrHex(addr), uint64(5_000+i))
+				}
+				for i := range small {
+					addr := findAddressForNibble(0xB, i)
+					ub.Balance(addrHex(addr), uint64(7_000+i))
+				}
+				return ub.Build()
+			},
+		},
+		{
+			// one wide bucket (its second nibbles fan out broadly inside the
+			// worker's subtree) next to a small one.
+			name:    "LopsidedBuckets",
+			workers: 8,
+			build: func(t *testing.T) ([][]byte, []Update) {
+				ub := NewUpdateBuilder()
+				for i := range 32 {
+					addr := findAddressForNibble(0x0, i)
+					ub.Balance(addrHex(addr), uint64(9_000+i))
+				}
+				for i := range 16 {
+					addr := findAddressForNibble(0xF, i)
+					ub.Balance(addrHex(addr), uint64(11_000+i))
+				}
+				return ub.Build()
+			},
+		},
 	}
-	plainKeys, updates := ub.Build()
 
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 2)
-	require.NotEmpty(t, root)
-}
-
-// TestParallelFanout_FourNibbles: four mount workers folding concurrently.
-func TestParallelFanout_FourNibbles(t *testing.T) {
-	t.Parallel()
-
-	const perBucket = 8
-	buckets := []int{0x1, 0x4, 0x7, 0xC}
-
-	ub := NewUpdateBuilder()
-	for _, nib := range buckets {
-		for i := range perBucket {
-			addr := findAddressForNibble(nib, i)
-			ub.Balance(addrHex(addr), uint64(2_000+nib*100+i))
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plainKeys, updates := tc.build(t)
+			root := assertEquivalentRootWorkers(t, plainKeys, updates, tc.workers)
+			require.NotEmpty(t, root)
+		})
 	}
-	plainKeys, updates := ub.Build()
-
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 4)
-	require.NotEmpty(t, root)
-}
-
-// TestParallelFanout_AsymmetricWorkload: three workers with a 6:1:1 size
-// ratio, verifying completion order does not change the resulting root hash.
-func TestParallelFanout_AsymmetricWorkload(t *testing.T) {
-	t.Parallel()
-
-	big := 24
-	small := 4
-
-	ub := NewUpdateBuilder()
-	for i := range big {
-		addr := findAddressForNibble(0x2, i)
-		ub.Balance(addrHex(addr), uint64(3_000+i))
-	}
-	for i := range small {
-		addr := findAddressForNibble(0x6, i)
-		ub.Balance(addrHex(addr), uint64(5_000+i))
-	}
-	for i := range small {
-		addr := findAddressForNibble(0xB, i)
-		ub.Balance(addrHex(addr), uint64(7_000+i))
-	}
-	plainKeys, updates := ub.Build()
-
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 3)
-	require.NotEmpty(t, root)
-}
-
-// TestParallelFanout_LopsidedBuckets: one wide bucket (its second nibbles fan
-// out broadly inside the worker's subtree) next to a small one.
-func TestParallelFanout_LopsidedBuckets(t *testing.T) {
-	t.Parallel()
-
-	ub := NewUpdateBuilder()
-	for i := range 32 {
-		addr := findAddressForNibble(0x0, i)
-		ub.Balance(addrHex(addr), uint64(9_000+i))
-	}
-	for i := range 16 {
-		addr := findAddressForNibble(0xF, i)
-		ub.Balance(addrHex(addr), uint64(11_000+i))
-	}
-	plainKeys, updates := ub.Build()
-
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 8)
-	require.NotEmpty(t, root)
 }
 
 // TestParallelPatriciaHashedTemplateMirrorsPublishedRoot verifies that after a
