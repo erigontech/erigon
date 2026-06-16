@@ -151,9 +151,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 				return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
 			}
-			if f.highestSeen.Load() < block.Block.Slot {
-				collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
-			}
 		}
 	}
 
@@ -228,6 +225,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	if block.Block.Slot > f.highestSeen.Load() {
 		f.highestSeen.Store(block.Block.Slot)
+		// Recorded on the fork-agnostic tip advance so block_importing_latency
+		// also populates on Fulu+ (the prior call site sat in the Deneb-only blob path).
+		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
 	}
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
