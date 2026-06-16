@@ -469,6 +469,25 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
+		// The committed execution progress (s.BlockNumber) is at or below the
+		// unwind point, so MDBX has nothing above u.UnwindPoint to roll back and
+		// the disk unwind below would be a no-op. However the in-RAM
+		// SharedDomains / TemporalMemBatch overlay can still hold *uncommitted*
+		// writes for blocks above u.UnwindPoint — e.g. a block whose
+		// post-execution gas check failed mid-batch, before its step was ever
+		// flushed. Those entries must still be pruned: the overlay is reused
+		// across the unwind→retry loop within a single sync.Run, so leaving them
+		// makes the re-execution read a stale value (observed on Hoodi 3004265:
+		// ca5daf64 slot0 kept tx19's first-write, the contract took the
+		// "already initialised" branch, skipped an SSTORE_SET, came up 21045 gas
+		// short, and the node spun in an unwind/retry loop). The committed prune
+		// (#20625) only runs from unwindExec3, which the early return skipped.
+		txNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, u.UnwindPoint+1)
+		if err != nil {
+			return err
+		}
+		doms.Unwind(txNum, nil)
+		doms.SetTxNum(txNum)
 		return nil
 	}
 
