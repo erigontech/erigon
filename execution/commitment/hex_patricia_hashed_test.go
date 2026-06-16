@@ -3440,6 +3440,54 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			[][]byte{accountA, fullStorageKey},
 			[]bool{true, false})
 	})
+
+	t.Run("AbsentStorageSlotDivergingAtFoldedExtension", func(t *testing.T) {
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hph.SetTrace(false)
+
+		// several accounts so the storage-bearing account sits inside a branch
+		acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
+		acctPlain := acctPlains[0]
+		// two storage slots sharing a 5-nibble hashed prefix -> storage extension over a branch
+		storPlain, storHashed := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 5, 2)
+
+		builder := NewUpdateBuilder()
+		for i, a := range acctPlains {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		}
+		for _, sk := range storPlain {
+			builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+		}
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// absent slot sharing the first two nibbles of the extension prefix then diverging at
+		// the third, i.e. it diverges inside the folded extension.
+		shared := storHashed[0]
+		absentPrefix := []byte{shared[0], shared[1], (shared[2] + 1) & 0xf}
+		absentSlotPlain, _ := generateKeyWithHashedPrefix(absentPrefix, length.Hash)
+		storagePlainKey := append(common.Copy(acctPlain), absentSlotPlain...)
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(acctPlain), nil, toWitness.TouchAccount)
+		toWitness.TouchPlainKey(string(storagePlainKey), nil, toWitness.TouchStorage)
+
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		require.NoError(t, err)
+		require.Equal(t, root, rootW, "witness root must equal commitment root")
+
+		hashedAbsent := KeyToHexNibbleHash(storagePlainKey)
+		require.True(t, witnessResolvesAbsence(witnessTrie.RootNode, hashedAbsent, 0),
+			"witness must materialize the branch behind the diverging extension to prove the absent slot")
+	})
 }
 
 // Test_ModeUpdate_SiblingConsistency verifies that ModeUpdate produces

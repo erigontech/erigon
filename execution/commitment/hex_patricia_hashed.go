@@ -1451,6 +1451,49 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `triedeprecated.Trie` for that key
+// witnessMaterializeBranch decodes the branch stored at the given hashed-nibble prefix into
+// a trie.FullNode whose children are HashNodes. Mirrors unfoldBranchNode's branch decode.
+func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, childDepth int16) (*trie.FullNode, error) {
+	compact := nibbles.HexToCompact(branchPrefix)
+	branchData, err := hph.readBranchAndCheckForFlushing(compact)
+	if err != nil {
+		return nil, err
+	}
+	if len(branchData) < 2 {
+		return nil, fmt.Errorf("[witness] empty branch data at prefix %x", branchPrefix)
+	}
+	branchData = branchData[2:] // skip touch map
+	bitmap := binary.BigEndian.Uint16(branchData[0:])
+	pos := 2
+	fullNode := &trie.FullNode{}
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		var c cell
+		fieldBits := branchData[pos]
+		pos++
+		if pos, err = c.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
+			return nil, fmt.Errorf("[witness] fillFromFields at prefix %x: %w", branchPrefix, err)
+		}
+		if childDepth > 64 {
+			c.accountAddrLen = 0
+		}
+		if err = c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			return nil, err
+		}
+		cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(&c, childDepth, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(cellHash) == length.Hash+1 { // strip the 0xa0 prefix
+			cellHash = cellHash[1:]
+		}
+		fullNode.Children[nibble] = trie.NewHashNode(common.Copy(cellHash))
+		bitset ^= bit
+	}
+	return fullNode, nil
+}
+
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	var rootNode trie.Node = &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -1503,9 +1546,27 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// path has diverged due to the hashedKey not leading to any account or storage
 				// the traversal can be stopped at this level
 				pathDivergenceFound = true
-				// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
-				// Currently necessary, because the commented out code above which reads branch data and converts it
-				nextNode = &trie.ShortNode{Key: common.Copy(hashedExtKey)}
+				short := &trie.ShortNode{Key: common.Copy(hashedExtKey)}
+				// For an absent storage slot diverging at a folded extension, a strict
+				// sparse-trie verifier needs the branch behind the extension
+				// materialized, not a bare HashNode. The branch hashes
+				// to the same value, so the witness root is unchanged.
+				if len(hashedKey) == 128 && cellToExpand.hashLen > 0 {
+					branchPrefix := make([]byte, 0, int(keyPos)+1+len(hashedExtKey))
+					branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
+					branchPrefix = append(branchPrefix, hashedExtKey...)
+					branchNode, err := hph.witnessMaterializeBranch(branchPrefix, int16(len(branchPrefix))+1)
+					if err != nil {
+						return nil, err
+					}
+					subRoot := trie.NewInMemoryTrie(branchNode).Hash()
+					if !bytes.Equal(subRoot[:], cellToExpand.hash[:cellToExpand.hashLen]) {
+						return nil, fmt.Errorf("[witness] materialized extension-child branch root mismatch at prefix %x: got %x want %x", branchPrefix, subRoot, cellToExpand.hash[:cellToExpand.hashLen])
+					}
+					short.Val = branchNode
+				}
+				// Otherwise Val is set to a HashNode of the branch it points to when the current node is processed.
+				nextNode = short
 			} else {
 				keyPos += extKeyLength // jump ahead
 
@@ -1628,9 +1689,12 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 			// this deals with the edge case where the extension key in nextNode diverges from hashedKey
 			// and points to a branch node. In this case we just need to provide the hash of this branch node
+			// (unless the branch was already materialized for an absent-slot exclusion proof).
 			if pathDivergenceFound {
-				terminalCell := &hph.grid[row][currentNibble]
-				nextNode.(*trie.ShortNode).Val = trie.NewHashNode(common.Copy(terminalCell.hash[:]))
+				if sn, ok := nextNode.(*trie.ShortNode); ok && sn.Val == nil {
+					terminalCell := &hph.grid[row][currentNibble]
+					sn.Val = trie.NewHashNode(common.Copy(terminalCell.hash[:]))
+				}
 			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
