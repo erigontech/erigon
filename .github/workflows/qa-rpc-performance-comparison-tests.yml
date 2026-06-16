@@ -373,7 +373,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest${{ matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel' || '' }}-$method \
+              --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
@@ -446,7 +446,7 @@ jobs:
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel' || '' }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}
           path: ${{ env.past_test_dir }}
 
       - name: Stop Erigon
@@ -466,7 +466,7 @@ jobs:
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: erigon-logs-${{ env.CHAIN }}${{ github.event.inputs.exec_mode == 'parallel' && '-parallel' || '' }}
+          name: erigon-logs-${{ env.CHAIN }}${{ (github.event.inputs.exec_mode == 'parallel' && '-parallel') || (github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Delete Erigon Testbed Data Directory
