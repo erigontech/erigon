@@ -412,3 +412,83 @@ func TestEIP8037_StateGasRefundPreexistingWithCodeDeposit(t *testing.T) {
 	// Verify that the state gas used for pre-existing account is exactly 10 * CostPerStateByte
 	require.Equal(t, 10*uint64(params.CostPerStateByte), preexistingStateGas)
 }
+
+func TestEIP8037_StateGasSpilloverRevert(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 60_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+	}
+
+	// Parent initcode that runs CREATE on a child that reverts.
+	// Bytecode: 6460006000fd6000526005601b6000f05000
+	initCode := common.Hex2Bytes("6460006000fd6000526005601b6000f05000")
+
+	ibs := state.New(state.NewNoopReader())
+	gp := NewGasPool(blockGasLimit, 0)
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+
+	// Use a small gas limit (but enough to run without OOG) so that the state reservoir split is 0,
+	// forcing the 183.6k CREATE state gas charge to spill over into the regular gas pool.
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 500_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		initCode, nil,
+		false, false, true, false, nil,
+	)
+	st := NewTxnExecutor(evm, msg, gp)
+	result, err := st.Execute(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	t.Logf("Spillover revert test - regular gas used: %d, state gas used: %d", result.BlockRegularGasUsed, result.BlockStateGasUsed)
+
+	// Since the sub-creation reverted, the state gas charged for it should be fully refunded.
+	// The parent creation itself succeeded (it returned empty code via STOP).
+	// So the only net state gas charge should be the parent contract creation cost (params.StateGasNewAccount = 183600).
+	require.Equal(t, uint64(params.StateGasNewAccount), result.BlockStateGasUsed,
+		"The reverted sub-creation must not leave any net state gas charge")
+}
+
+func TestEIP8037_StateGasSpilloverHalt(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 60_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+	}
+
+	// Parent initcode that runs CREATE on a child that executes INVALID (0xfe).
+	// Bytecode: 626000fe6000526003601d6000f05000
+	initCode := common.Hex2Bytes("626000fe6000526003601d6000f05000")
+
+	ibs := state.New(state.NewNoopReader())
+	gp := NewGasPool(blockGasLimit, 0)
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 500_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		initCode, nil,
+		false, false, true, false, nil,
+	)
+	st := NewTxnExecutor(evm, msg, gp)
+	result, err := st.Execute(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	t.Logf("Spillover halt test - regular gas used: %d, state gas used: %d", result.BlockRegularGasUsed, result.BlockStateGasUsed)
+
+	// The child halted, so the child's state changes are reverted and the sub-creation cost is refunded.
+	// Parent creation succeeded.
+	require.Equal(t, uint64(params.StateGasNewAccount), result.BlockStateGasUsed,
+		"The halted sub-creation must not leave any net state gas charge")
+}
+

@@ -163,7 +163,7 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 // evm.create depth==0 defers fold the error semantics into gasUsed.State
 // (reset to 0 for CALL, -StateGasNewAccount for CREATE) so TxnExecutor
 // can read gasUsed.State directly without checking the error.
-func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth int, snapshot int, stateGasUsed int64) {
+func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth int, snapshot int, gasUsed *mdgas.MdGasUsage) {
 
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
@@ -186,35 +186,17 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 	// refund flows through gasUsed.State (see func doc).
 	//
 	if evm.chainRules.IsAmsterdam && depth > 0 {
-		// Invariant: gasRemaining.State + stateGasUsed >= 0. useMdGas
-		// (charge: stateGas -= a, frameStateUsed += a) and
-		// creditStateGasRefund (refund: stateGas += a, frameStateUsed -= a)
-		// are the only mutators and update both sides in lock-step, so
-		// the sum can only grow (via spillover charges) from the parent's
-		// reservoir R ≥ 0. A negative sum here means some new code path
-		// mutated stateGas or frameStateUsed without the paired update,
-		// or the EIP-8037 accounting was reimplemented incorrectly. We
-		// surface this loudly via a log + clamp; the corrupted accounting
-		// will manifest downstream as wrong execution / gas accounting /
-		// state root.
-		//
-		// The comparison stays in uint64 (`uint64(-stateGasUsed) >
-		// gasRemaining.State`) rather than promoting both sides to int64.
-		// gasRemaining.State is a reservoir balance — unsigned by design
-		// and free to use the full uint64 range — so an int64 cast would
-		// flip any value above 2^63 to negative and break the comparison.
-		// Comparing the magnitudes directly in uint64 keeps the check
-		// correct at any gas size.
-		if stateGasUsed < 0 && uint64(-stateGasUsed) > gasRemaining.State {
+		reservoir := int64(gasRemaining.State) + gasUsed.State - int64(gasUsed.StateGasFromGasLeft)
+		if reservoir < 0 {
 			log.Error("EIP-8037 invariant violated; clamping parent reservoir to 0",
-				"gasRemainingState", gasRemaining.State, "stateGasUsed", stateGasUsed, "depth", depth)
-			gasRemaining.State = 0
-			return
+				"gasRemainingState", gasRemaining.State, "stateGasUsed", gasUsed.State, "spillover", gasUsed.StateGasFromGasLeft, "depth", depth)
+			reservoir = 0
 		}
-		// uint64(negative int64) = 2^64 − |stateGasUsed|; the += then
-		// overflows and wraps into the correct subtraction for negative
-		// stateGasUsed.
-		gasRemaining.State += uint64(stateGasUsed)
+		if err == ErrExecutionReverted {
+			gasRemaining.Regular += gasUsed.StateGasFromGasLeft
+		}
+		gasRemaining.State = uint64(reservoir)
+		gasUsed.StateGasFromGasLeft = 0
 	}
 }
 
@@ -428,11 +410,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gas, input, readOnly)
 	}
-	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State)
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, &gasUsed)
 	}
 
 	return ret, gasRemaining, gasUsed, err
@@ -704,11 +685,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		}
 	}
 
-	// When an error was returned by the EVM or when setting the creation code
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State)
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, &gasUsed)
 		return ret, address, gasRemaining, gasUsed, false, err
 	}
 
