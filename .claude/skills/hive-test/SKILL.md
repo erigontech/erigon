@@ -72,7 +72,7 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | eest-devnet (CI shard: `glamsterdam-devnet`) | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
+The CI `glamsterdam-devnet` shard runs BAL EIPs (`7708|7778|7843|7928|7954|7976|7981|8024|8037`)
 against the URL and hive `branch` pinned under the `eest_devnet`
 entry in `test-fixtures.json` (currently `tests-bal@v7.3.2` / `devnets/bal/7`),
 with `--experimental.bal` enabled on the erigon side. Reproduce locally by

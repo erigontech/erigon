@@ -1609,11 +1609,12 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 		if !ok {
 			return
 		}
-		// A non-zero balance written in the SAME transaction as a selfdestruct
-		// (e.g. a transfer to the pending-destroyed account, or a priority fee
-		// applied during finalize) burns with the account at end of tx, so per
-		// EIP-7928 the account's post-tx balance is zero. Balance writes from
-		// LATER transactions are real state changes and pass through unchanged.
+		// account.selfDestructed is set only for a same-tx deleting SELFDESTRUCT
+		// (the EIP-6780 new-contract case); a non-zero balance written in that
+		// tx — a transfer to the pending-destroyed account, or the finalize-time
+		// priority fee — burns when the account is destroyed at end of tx, so per
+		// EIP-7928 its post-tx balance is zero. Writes from LATER transactions are
+		// real state changes and pass through unchanged.
 		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
 			val.Clear()
 		}
