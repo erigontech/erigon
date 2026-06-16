@@ -68,7 +68,7 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
-	for i := 0; i < len(nodes); i++ {
+	for i := range len(nodes) {
 		if envAssertBTKeys {
 			if cmp := bt.compareKey(kv, nodes[i].key, nodes[i].di); cmp != 0 {
 				panic(fmt.Errorf("key mismatch at di=%d i=%d cmp=%d", nodes[i].di, i, cmp))
@@ -152,13 +152,13 @@ func encodeListNodes(nodes []Node, w io.Writer) error {
 	if _, err := w.Write(header[:8]); err != nil {
 		return err
 	}
-	for i := range nodes {
-		binary.BigEndian.PutUint64(header[:8], nodes[i].di)
-		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
+	for ni := range len(nodes) {
+		binary.BigEndian.PutUint64(header[:8], nodes[ni].di)
+		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[ni].key)))
 		if _, err := w.Write(header[:]); err != nil {
 			return err
 		}
-		if _, err := w.Write(nodes[i].key); err != nil {
+		if _, err := w.Write(nodes[ni].key); err != nil {
 			return err
 		}
 	}
@@ -169,7 +169,7 @@ func decodeListNodes(data []byte) ([]Node, error) {
 	count := binary.BigEndian.Uint64(data[:8])
 	nodes := make([]Node, count)
 	pos := 8
-	for ni := 0; ni < int(count); ni++ {
+	for ni := range int(count) {
 		dp, err := nodes[ni].Decode(data[pos:])
 		if err != nil {
 			return nil, fmt.Errorf("decode node %d: %w", ni, err)
@@ -365,29 +365,27 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	// small window is handed to the linear scan below either way.
 	if BtInterp && len(klo) > 0 && len(khi) > 0 {
 		probes := uint64(0)
-		var kmBuf, kloBuf, khiBuf []byte
+		var kmArr, kloArr, khiArr [64]byte // stack; spills to heap only for keys > 64B
+		km := kmArr[:0]
 		for l < r && r-l > DefaultBtreeStartSkip {
 			if probes >= BtInterpBudget {
-				m = (l + r) >> 1
-			} else {
-				m = interpMid(key, klo, khi, l, r)
+				break
 			}
+			m = interpMid(key, klo, khi, l, r)
 			probes++
-			g.Reset(b.offt.Get(m))
-			km, _ := g.Next(kmBuf[:0])
-			kmBuf = km
+			off := b.offt.Get(m)
+			g.Reset(off)
+			km, _ = g.Next(km[:0])
 			cmp = bytes.Compare(key, km)
 			if cmp == 0 {
 				v, _ = g.Next(nil)
-				return v, true, b.offt.Get(m), nil
+				return v, true, off, nil
 			} else if cmp < 0 {
 				r = m
-				khiBuf = append(khiBuf[:0], km...)
-				khi = khiBuf
+				khi = append(khiArr[:0], km...)
 			} else {
 				l = m + 1
-				kloBuf = append(kloBuf[:0], km...)
-				klo = kloBuf
+				klo = append(kloArr[:0], km...)
 			}
 		}
 	}
@@ -444,21 +442,16 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	return v, true, b.offt.Get(l), nil
 }
 
-// interpMid estimates the index of key within [l,r) by linear interpolation on
+// interpMid estimates the index of searchKey within [l,r) by linear interpolation on
 // the first 8 key bytes after the common prefix of the bound keys. Falls back to
 // the binary midpoint when the span is degenerate; result is clamped to [l, r-1].
-func interpMid(key, klo, khi []byte, l, r uint64) uint64 {
+func interpMid(searchKey, klo, khi []byte, l, r uint64) uint64 {
 	p := commonPrefixLen(klo, khi)
-	a, hi, x := u64At(klo, p), u64At(khi, p), u64At(key, p)
+	a, hi, x := u64At(klo, p), u64At(khi, p), u64At(searchKey, p)
 	if hi <= a {
 		return (l + r) >> 1
 	}
 	f := float64(x-a) / float64(hi-a)
-	if f < 0 {
-		f = 0
-	} else if f > 1 {
-		f = 1
-	}
 	m := l + uint64(f*float64(r-1-l)+0.5)
 	if m < l {
 		m = l
@@ -470,10 +463,8 @@ func interpMid(key, klo, khi []byte, l, r uint64) uint64 {
 
 func commonPrefixLen(a, b []byte) int {
 	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n = min(n, len(b))
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}
@@ -481,12 +472,17 @@ func commonPrefixLen(a, b []byte) int {
 	return n
 }
 
+// Left-aligned + zero-padded so the u64 keeps lexicographic key order across
+// differing key lengths, which interpolation relies on (klo <= key <= khi).
 func u64At(k []byte, p int) uint64 {
-	var buf [8]byte
-	for i := 0; i < 8 && p+i < len(k); i++ {
-		buf[i] = k[p+i]
+	if p+8 <= len(k) {
+		return binary.BigEndian.Uint64(k[p:])
 	}
-	return binary.BigEndian.Uint64(buf[:])
+	var x uint64
+	for i := p; i < len(k); i++ {
+		x |= uint64(k[i]) << (56 - 8*uint(i-p))
+	}
+	return x
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }

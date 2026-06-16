@@ -52,12 +52,7 @@ var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
-// BtInterp selects interpolation search inside the leaf window instead of plain
-// binary search. Leaf keys are near-uniformly distributed, so interpolating on
-// the bytes after the bound keys' common prefix lands close to the target and
-// keeps probes spatially clustered -> far fewer distinct cold .kv page faults
-// than binary search's midpoint jumps (cold reads ~1.5-2.4x faster). After
-// BtInterpBudget probes it falls back to binary, bounding degenerate windows.
+// BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
 var BtInterp = dbg.EnvBool("BT_INTERP", true)
 var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
 
