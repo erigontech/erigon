@@ -149,7 +149,7 @@ func (n Node) Encode(w io.Writer, headerBuf []byte) error {
 	if len(n.key) > math.MaxUint16 {
 		return fmt.Errorf("node key too long: %d bytes", len(n.key))
 	}
-	binary.BigEndian.PutUint16(headerBuf[:2], uint16(len(n.key)))
+	binary.BigEndian.PutUint16(headerBuf, uint16(len(n.key)))
 	if _, err := w.Write(headerBuf[:2]); err != nil {
 		return err
 	}

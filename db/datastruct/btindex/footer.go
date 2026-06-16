@@ -17,6 +17,7 @@
 package btindex
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -119,7 +120,7 @@ var alignPad [btKeysAlign]byte
 
 // countingWriter tracks the byte offset so sections can be padded to alignment.
 type countingWriter struct {
-	w       io.Writer
+	w       *bufio.Writer
 	written int
 }
 
@@ -128,6 +129,8 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	c.written += n
 	return n, err
 }
+
+func (c *countingWriter) Flush() error { return c.w.Flush() }
 
 func (c *countingWriter) padTo(align int) error {
 	pad := alignUp(c.written, align) - c.written

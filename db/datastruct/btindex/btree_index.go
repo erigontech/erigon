@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -177,10 +176,9 @@ func (c *Cursor) readKV() error {
 
 type BtIndexWriter struct {
 	indexF    *os.File
+	writer    *countingWriter
 	ef        *eliasfano32.EliasFano
 	efBuilder *eliasfano32.OffHeapBuilder
-	nodesF    *os.File
-	nodesW    *bufio.Writer
 
 	args BtIndexWriterArgs
 
@@ -217,21 +215,21 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
 
+	indexF, err := dir.CreateTemp(args.IndexFile)
+	if err != nil {
+		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
+	}
+	btw.indexF = indexF
+	btw.writer = &countingWriter{w: bufio.NewWriterSize(indexF, etl.BufIOSize)}
+
 	if args.KeyCount > 0 {
 		efBuilder, err := eliasfano32.NewEliasFanoOffHeap(args.KeyCount, args.MaxOffset, args.TmpDir)
 		if err != nil {
+			btw.Close()
 			return nil, fmt.Errorf("[index] create offheap ef: %w", err)
 		}
 		btw.efBuilder = efBuilder
 		btw.ef = efBuilder.EliasFano
-
-		nodesF, err := dir.CreateTempWithExtension(args.TmpDir, "bt-nodes.tmp")
-		if err != nil {
-			efBuilder.Close()
-			return nil, err
-		}
-		btw.nodesF = nodesF
-		btw.nodesW = bufio.NewWriterSize(nodesF, etl.BufIOSize)
 	}
 
 	return btw, nil
@@ -254,7 +252,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if di%btw.args.M != 0 {
 		return nil
 	}
-	if err := (Node{key: key}).Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
+	if err := (Node{key: key}).Encode(btw.writer, btw.nodeHeaderBuf[:]); err != nil {
 		return err
 	}
 	return nil
@@ -271,42 +269,26 @@ func (btw *BtIndexWriter) Build() error {
 		return fmt.Errorf("[index] %s: KeyCount=%d but %d keys added", btw.indexFileName, btw.args.KeyCount, btw.ef.AddedCount())
 	}
 
-	var err error
-	if btw.indexF, err = dir.CreateTemp(btw.args.IndexFile); err != nil {
-		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
-	}
-	defer btw.indexF.Close()
-	indexW := bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
-
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
+	var err error
 	if btw.args.KeyCount > 0 {
-		cw := &countingWriter{w: indexW}
-
-		if err = btw.nodesW.Flush(); err != nil {
-			return fmt.Errorf("[index] flush nodes: %w", err)
-		}
-		if _, err = btw.nodesF.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("[index] seek nodes: %w", err)
-		}
-		if _, err = io.Copy(cw, btw.nodesF); err != nil {
-			return fmt.Errorf("[index] copy nodes: %w", err)
-		}
-		if err = cw.padTo(btKeysAlign); err != nil {
+		// nodes were streamed straight into the index file during AddKey
+		if err = btw.writer.padTo(btKeysAlign); err != nil {
 			return fmt.Errorf("[index] pad before ef: %w", err)
 		}
-		efOffset := uint64(cw.written)
+		efOffset := uint64(btw.writer.written)
 
 		btw.ef.Build()
-		if err = btw.ef.Write(cw); err != nil {
+		if err = btw.ef.Write(btw.writer); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
 		}
-		if err = cw.padTo(btFooterAlign); err != nil {
+		if err = btw.writer.padTo(btFooterAlign); err != nil {
 			return fmt.Errorf("[index] pad before footer: %w", err)
 		}
 
 		footer := Footer{Meta: Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M, EfOffset: efOffset}, FormatVersion: btFooterFormatVersion}
-		if err = footer.Encode(cw); err != nil {
+		if err = footer.Encode(btw.writer); err != nil {
 			return fmt.Errorf("[index] write footer: %w", err)
 		}
 	}
@@ -314,7 +296,7 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.args.Lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	if err = indexW.Flush(); err != nil {
+	if err = btw.writer.Flush(); err != nil {
 		return err
 	}
 	if err = btw.fsync(); err != nil {
@@ -326,6 +308,7 @@ func (btw *BtIndexWriter) Build() error {
 	if err = os.Rename(btw.indexF.Name(), btw.args.IndexFile); err != nil {
 		return err
 	}
+	btw.indexF = nil // renamed to the final path; nothing for Close to clean up
 	return nil
 }
 
@@ -351,18 +334,14 @@ func (btw *BtIndexWriter) closeTemps() {
 		btw.efBuilder = nil
 		btw.ef = nil
 	}
-	if btw.nodesF != nil {
-		name := btw.nodesF.Name()
-		btw.nodesF.Close()
-		_ = dir.RemoveFile(name)
-		btw.nodesW = nil
-		btw.nodesF = nil
-	}
 }
 
 func (btw *BtIndexWriter) Close() {
-	if btw.indexF != nil {
+	if btw.indexF != nil { // non-nil means Build didn't rename it: drop the partial .tmp
+		name := btw.indexF.Name()
 		btw.indexF.Close()
+		_ = dir.RemoveFile(name)
+		btw.indexF = nil
 	}
 	btw.closeTemps()
 }
