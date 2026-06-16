@@ -476,7 +476,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := currentContext.Commit(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		currentContext.ClearRam(true)
 		return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusTooFarAway,
@@ -537,40 +536,50 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			return nil
 		},
-		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 			// Chain tip: post-RunLoop path commits.
 			if !initialCycle {
-				return nil, nil
+				return nil, nil, nil
 			}
 			commitRwTx, err := e.db.BeginTemporalRw(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
+				return nil, nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
 			defer commitRwTx.Rollback() // safety net; idempotent after successful Commit
 			// Commit() commits commitRwTx and advances the BranchCache only on
 			// success, so a failed commit can't leave the cache ahead of MDBX.
+			// The committed sd is spent; RunLoop closes it and continues on the
+			// fresh SD built below (no ClearRam reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
-				return nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
+				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
-			sd.ClearRam(true)
-			// Recreate RO tx + block overlay on the fresh committed state.
+			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
-				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
+				return nil, nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
 			}
-			if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			freshSD, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+			if err != nil {
 				roTx.Rollback()
-				return nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
+				return nil, nil, fmt.Errorf("updateForkChoice: new sd after hasMore: %w", err)
 			}
-			newTx := sd.BlockOverlay()
+			freshSD.SetInMemHistoryReads(inMemHistoryReads)
+			freshSD.SetStateCache(e.stateCache)
+			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+				roTx.Rollback()
+				freshSD.Close()
+				return nil, nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
+			}
+			newTx := freshSD.BlockOverlay()
 			// Re-flush InsertBlocks data into the fresh overlay.
 			if hasOverlay {
 				e.currentContext.BlockOverlay().UpdateTxn(roTx)
 				if err := e.currentContext.BlockOverlay().Flush(ctx, newTx); err != nil {
-					return nil, fmt.Errorf("updateForkChoice: re-flush overlay after hasMore: %w", err)
+					freshSD.Close()
+					return nil, nil, fmt.Errorf("updateForkChoice: re-flush overlay after hasMore: %w", err)
 				}
 			}
-			return newTx, nil
+			return newTx, freshSD, nil
 		},
 	})
 	if err != nil {
