@@ -17,12 +17,23 @@
 package sentinel
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
+func TestMain(m *testing.M) {
+	if peerCountGauge != nil {
+		fmt.Fprintln(os.Stderr, "caplin_peer_count gauge is registered before sentinel metrics are recorded")
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
 func TestRecordPeerMetrics(t *testing.T) {
 	recordPeerMetrics(7)
+	require.NotNil(t, peerCountGauge)
 	require.Equal(t, float64(7), peerCountGauge.GetValue())
 }
