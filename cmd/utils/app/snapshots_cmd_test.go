@@ -348,6 +348,8 @@ func Test_parseStepRange(t *testing.T) {
 		{name: "plus only", in: "+", wantErr: true},
 		{name: "single number", in: "5", wantErr: true},
 		{name: "bad plus prefix", in: "5x+", wantErr: true},
+		{name: "range trailing chars", in: "5-10x", wantErr: true},
+		{name: "range extra dash", in: "5-10-20", wantErr: true},
 		{name: "not a number", in: "abc", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

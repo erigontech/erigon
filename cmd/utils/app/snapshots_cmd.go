@@ -758,7 +758,16 @@ func parseStepRange(stepRange string, maxAvailableStep uint64) (from, to uint64,
 		}
 		return from, maxAvailableStep, nil
 	}
-	if _, err = fmt.Sscanf(stepRange, "%d-%d", &from, &to); err != nil {
+	fromS, toS, ok := strings.Cut(stepRange, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	from, err = strconv.ParseUint(fromS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	to, err = strconv.ParseUint(toS, 10, 64)
+	if err != nil {
 		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
 	}
 	return from, to, nil
