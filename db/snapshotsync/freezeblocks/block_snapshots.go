@@ -258,6 +258,26 @@ func NewBlockRetire(
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
 
+// NotifyDeletedSnapshotFiles fires the registered NotifyOnFilesDelete
+// callback for the given block-snapshot file names. MergeBlocks calls
+// this after a merge has consolidated sub-chunks into a wider file,
+// so the Provider's onDelete hook can run inv.RemoveFile and keep
+// Inventory in sync with disk. Without this, Inventory keeps stale
+// sub-chunk entries that point at files merge already removed —
+// surfaced as a Provider.Unwind seedLeftoverBlocks failure trying to
+// open a path that no longer exists (2026-06-15 5-iter soak iter 1
+// mode_a2).
+//
+// nil-safe on three axes: nil notifier (CLI tool / standalone use),
+// nil/empty names list (caller didn't capture any deletions),
+// nil-registered callback inside the notifier.
+func (br *BlockRetire) NotifyDeletedSnapshotFiles(names []string) {
+	if br == nil || br.filesNotifier == nil || len(names) == 0 {
+		return
+	}
+	br.filesNotifier.NotifyOnFilesDelete(names)
+}
+
 // Working reports whether a retire goroutine is currently running.
 // Mirror accessor for the unexported atomic; ExecModule needs it via
 // the narrow retireCanceller interface to decide whether to call
@@ -489,16 +509,30 @@ func (br *BlockRetire) MergeBlocks(
 
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	// Capture every deleted sub-chunk so we can fire NotifyOnFilesDelete
+	// after the merge — that's what drives the Provider's onDelete
+	// hook (inv.RemoveFile). Without it Inventory keeps stale per-step
+	// entries that point at files the merge consolidated away (Mode-B
+	// seedLeftoverBlocks then tries to open the wrong path; live-caught
+	// 2026-06-15 soak iter 1 mode_a2).
+	var deletedSubChunks []string
+	captureDelete := func(ctx context.Context, names []string) error {
+		deletedSubChunks = append(deletedSubChunks, names...)
+		return seeder.Delete(ctx, names)
+	}
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, captureDelete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
 	if err = snapshots.RemoveOverlaps(func(l []string) error {
+		deletedSubChunks = append(deletedSubChunks, l...)
 		return seeder.Delete(ctx, l)
 	}); err != nil {
 		return false, err
 	}
+
+	br.NotifyDeletedSnapshotFiles(deletedSubChunks)
 	return
 }
 
