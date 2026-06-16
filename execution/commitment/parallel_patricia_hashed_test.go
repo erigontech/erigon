@@ -185,7 +185,6 @@ func TestParallelPatriciaHashedSkeletonRootHashStashed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, stored, got)
 
-	// Returned slice must be a copy so callers cannot mutate the published value.
 	got[0] = 0xff
 	regot, err := p.RootHash()
 	require.NoError(t, err)
@@ -210,7 +209,6 @@ func TestParallelPatriciaHashedSkeletonRootHashFallsBackToTemplate(t *testing.T)
 	assert.Equal(t, expected, got, "RootHash falls back to template for the no-updates path")
 }
 
-// assertEquivalentRoot asserts the sequential and parallel modes produce byte-equal root hashes for the update set, returning that root.
 func assertEquivalentRoot(
 	t *testing.T,
 	plainKeys [][]byte,
@@ -219,7 +217,6 @@ func assertEquivalentRoot(
 	return assertEquivalentRootWorkers(t, plainKeys, updates, 1)
 }
 
-// assertEquivalentRootWorkers is the multi-worker variant of assertEquivalentRoot; numWorkers <= 0 falls back to runtime.NumCPU.
 func assertEquivalentRootWorkers(
 	t *testing.T,
 	plainKeys [][]byte,
@@ -300,7 +297,7 @@ func TestDFSSubtree(t *testing.T) {
 	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
 	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
 	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"), nil)
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil) // terminator that is a prefix of A and B
+	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil) // prefix of A and B
 
 	type kv struct{ hk, pk string }
 	var got []kv
@@ -327,7 +324,6 @@ func TestDFSSubtree_NilPlainKeyLeafErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "plainKey")
 }
 
-// twoLeafTaskAddrs returns perSide addresses hashing to firstNibble and perSide to secondNibble, giving the root a fanout of exactly 2.
 func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) [][]byte {
 	t.Helper()
 	out := make([][]byte, 0, perSide*2)
@@ -459,7 +455,7 @@ func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, published)
 
-	// Drop the atomic publish so RootHash must fall back to the template's root cell.
+	// drop the atomic publish so RootHash falls back to the template's root cell
 	p.rootHash.Store(nil)
 
 	got, err := p.RootHash()
@@ -524,16 +520,14 @@ func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
 		"RootHash after SetState must reproduce the published root")
 }
 
-// stagedBatch is one phase in a multi-phase test: a (plainKeys, updates) pair plus a short label for failure messages.
 type stagedBatch struct {
 	label      string
 	plainKeys  [][]byte
 	updates    []Update
-	expectSame bool // root hash must equal the previous batch's
+	expectSame bool // root must equal the previous batch's root
 }
 
-// stagedRootEquivalence applies batches against persistent sequential and parallel tries, asserting byte-equal roots after each.
-// MockState persists across batches, so a later batch sees the DB state earlier batches established.
+// one MockState per mode persists across batches, so a later batch sees the DB state earlier batches established
 func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) []byte {
 	t.Helper()
 	ctx := context.Background()
@@ -589,7 +583,6 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 	return prevRoot
 }
 
-// TestParallelDeleteWithSurvivingSiblings deletes touched accounts in two nibbles while six others stay untouched in the DB and must survive in the encoded branch.
 func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
 	t.Parallel()
 
@@ -615,7 +608,6 @@ func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelAllDeleted deletes every touched key with no untouched siblings, so the trie must return to its empty-trie root.
 func TestParallelAllDeleted(t *testing.T) {
 	t.Parallel()
 
@@ -638,7 +630,6 @@ func TestParallelAllDeleted(t *testing.T) {
 	require.NotEmpty(t, root, "empty-trie root should still be a well-known hash")
 }
 
-// TestParallelDeleteAllTouchedWithUntouchedSurviving deletes every touched account in one nibble; the deletion must not collapse the root branch while untouched DB siblings survive.
 func TestParallelDeleteAllTouchedWithUntouchedSurviving(t *testing.T) {
 	t.Parallel()
 
@@ -668,7 +659,6 @@ func TestParallelDeleteAllTouchedWithUntouchedSurviving(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelBloatnetShape exercises a synthetic bloatnet-style workload: many accounts each with many storage slots, spread to give the root fanout 16.
 func TestParallelBloatnetShape(t *testing.T) {
 	if testing.Short() {
 		t.Skip("bloatnet stress test — skipped in -short mode (~10K touched keys end-to-end)")
@@ -698,7 +688,7 @@ func TestParallelBloatnetShape(t *testing.T) {
 		len(plainKeys), numAccounts, root)
 }
 
-// TestParallelSingleAccountManyStorage stresses the deep storage subtree path; workers folding from deep storage depth must not overflow the fixed-size cell.extension.
+// guards against workers folding from deep storage depth overflowing the fixed-size cell.extension
 func TestParallelSingleAccountManyStorage(t *testing.T) {
 	t.Parallel()
 
@@ -751,7 +741,6 @@ func TestParallelOnlyOneAccountTouchedManyTimes(t *testing.T) {
 	require.NotEmpty(t, root)
 }
 
-// TestParallelDeleteWithSurvivingSiblings_BranchInspection asserts the final root branch still exposes the untouched sibling nibbles after phase-2 deletions.
 func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -812,7 +801,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	pk2, up2 := ub2.Build()
 	runBatch("phase2-delete-and-modify", pk2, up2)
 
-	// Root branch is stored under HexToCompact(nil) (the single byte 0x00), not the empty string.
+	// root branch key is HexToCompact(nil) (byte 0x00), not the empty string
 	branch, _, err := parMs.Branch(nibbles.HexToCompact(nil))
 	require.NoError(t, err)
 	require.NotEmpty(t, branch, "root branch must exist after phase 2")
@@ -826,7 +815,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	}
 }
 
-// findHashForNibbles brute-forces a key whose keccak hash begins with prefix; counterOff is the byte offset of the search counter within key.
+// counterOff is the byte offset of the search counter within key
 func findHashForNibbles(t testing.TB, key []byte, counterOff int, prefix []byte, seed, salt uint64) {
 	t.Helper()
 	counter := seed*salt + 1
@@ -852,14 +841,12 @@ func findHashForNibbles(t testing.TB, key []byte, counterOff int, prefix []byte,
 	t.Fatalf("findHashForNibbles(%x): not found in 2^26 tries", prefix)
 }
 
-// findAddrForNibbles returns a 20-byte address whose keccak hash starts with prefix.
 func findAddrForNibbles(t testing.TB, prefix []byte, seed uint64) []byte {
 	addr := make([]byte, 20)
 	findHashForNibbles(t, addr, 8, prefix, seed, 1_000_003)
 	return addr
 }
 
-// findSlotForNibbles returns a 32-byte storage slot whose keccak hash starts with prefix.
 func findSlotForNibbles(t testing.TB, prefix []byte, seed uint64) []byte {
 	slot := make([]byte, 32)
 	findHashForNibbles(t, slot, 16, prefix, seed, 2_000_003)
@@ -871,7 +858,7 @@ var (
 	storageSubN byte = 2
 )
 
-// genWideNested builds a trie wide at the top with nested forks at depths 1..4 that random keys never produce.
+// deterministic nested forks at depths 1..4 that random keccak keys never produce
 func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1)
@@ -897,7 +884,7 @@ func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	return keys, upds
 }
 
-// genAccountsWithNestedStorage builds nAccounts accounts, each with storage slots whose keccak forks at depths 1..4, exercising deep extensions and account-terminator nodes below depth 64.
+// storage slots fork at depths 1..4 to exercise deep extensions and account-terminator nodes below depth 64
 func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1000)
@@ -935,7 +922,7 @@ func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, u
 	return keys, upds
 }
 
-// genRandomAccountsStorage builds nAcc accounts with uncontrolled keccak distribution, each with a few storage slots — the production-like shape.
+// uncontrolled keccak distribution, the production-like counterpart to the forked generators
 func genRandomAccountsStorage(nAcc int) (keys [][]byte, upds []Update) {
 	for a := 0; a < nAcc; a++ {
 		var addr [20]byte
@@ -964,7 +951,6 @@ func genRandomAccountsStorage(nAcc int) (keys [][]byte, upds []Update) {
 	return keys, upds
 }
 
-// sparseBatch2 selects every modN-th key as an incremental batch: account or storage update by key length, and — when deletes is set — a delete for every other selected key.
 func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Update) {
 	for i := range keys {
 		if i%modN != 0 {
@@ -989,13 +975,12 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 	return k2, u2
 }
 
-// runIncremental applies two batches to one MockState (batch-1 branches become DB state for batch-2) and returns the final root and the MockState.
+// one MockState across both batches: batch-1 branches become DB state for batch-2
 func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	return incrementalRoot(t, mode, workers, k1, u1, k2, u2)
 }
 
-// requireIncrementalEquiv asserts the parallel and streaming roots match the sequential root after the same two batches, dumping divergent branches on mismatch.
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
@@ -1014,7 +999,7 @@ func TestVerifyParallel_WideNestedIncremental(t *testing.T) {
 	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
-// TestVerifyParallel_StorageMinimal: one storage slot per account, so each top nibble holds a single account+storage leaf sharing one extension.
+// one storage slot per account, so each top nibble holds a single account+storage leaf sharing one extension
 func TestVerifyParallel_StorageMinimal(t *testing.T) {
 	oldTop, oldSub := storageTopN, storageSubN
 	storageTopN, storageSubN = 1, 1
@@ -1024,7 +1009,7 @@ func TestVerifyParallel_StorageMinimal(t *testing.T) {
 	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
-// TestVerifyParallel_StorageBranchEquiv asserts the stored branches match, not just the root, catching wrong branch metadata a matching root would hide.
+// compares stored branches, not just the root, catching wrong branch metadata a matching root would hide
 func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

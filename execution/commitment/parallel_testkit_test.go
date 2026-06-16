@@ -79,7 +79,7 @@ func bigAccountWhale(bigSlots int) whaleOpts {
 	return whaleOpts{seed: 771, smallBefore: 8, smallBeforeSlots: 3, bigSlots: bigSlots, smallAfter: 8, smallAfterSlots: 2}
 }
 
-// whale1M stresses within-account storage, which single-level mount cannot parallelise.
+// Within-account storage stress; single-level mount cannot parallelise it.
 func whale1M() whaleOpts {
 	return whaleOpts{seed: 919273, bigSlots: 750_000, extraWhales: []int{150_000, 5_000}, tailAccounts: 95_000}
 }
@@ -107,7 +107,7 @@ func newParTrie(t *testing.T, ms *MockState, workers int) *ParallelPatriciaHashe
 	return tr
 }
 
-// newStreamCommitter requires ms to have SetConcurrentCommitment(true) already set.
+// Requires ms.SetConcurrentCommitment(true) already set.
 func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool) *StreamingCommitter {
 	t.Helper()
 	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
@@ -186,7 +186,7 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 	return processBatch(t, ms, mode, workers, keys, upds), ms
 }
 
-// incrementalRoot folds two batches into one MockState so batch-1 branches become DB state for batch-2.
+// Folds two batches into one MockState so batch-1 branches become on-disk state for batch-2.
 func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)

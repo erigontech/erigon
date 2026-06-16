@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// withCommitmentFlag pins the experimental commitment flags to select the requested trie variant, restoring originals on cleanup.
 func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	t.Helper()
 	origStream := statecfg.ExperimentalStreamingCommitment
@@ -47,7 +46,7 @@ func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	statecfg.ExperimentalConcurrentCommitment = false
 }
 
-// runWriteCommitBatch writes a fixed single-account update and returns the resulting commitment root; the update set is identical across calls so roots can be compared.
+// Update set is identical across calls so the returned roots can be compared.
 func runWriteCommitBatch(t *testing.T, sd *execctx.SharedDomains, rwTx kv.TemporalRwTx) []byte {
 	t.Helper()
 
@@ -75,7 +74,7 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// No t.Parallel(): withCommitmentFlag mutates process-global flags.
+	// No t.Parallel: mutates process-global statecfg flags.
 
 	stepSize := uint64(16)
 
@@ -115,7 +114,7 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 }
 
 func TestPickTrieVariant_StreamingFlag(t *testing.T) {
-	// No t.Parallel(): mutates process-global statecfg flags.
+	// No t.Parallel: mutates process-global statecfg flags.
 	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
 	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
 
@@ -131,7 +130,7 @@ func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// No t.Parallel(): mutates process-global statecfg flags.
+	// No t.Parallel: mutates process-global statecfg flags.
 
 	stepSize := uint64(16)
 

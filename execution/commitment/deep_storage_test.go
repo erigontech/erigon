@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// TestDeepIntegration_BranchParity asserts parallel and sequential produce identical stored branch metadata, not just an equal root.
 func TestDeepIntegration_BranchParity(t *testing.T) {
 	pk, upds := buildWhaleCorpus(bigAccountWhale(15_000))
 	ctx := context.Background()
@@ -87,7 +86,6 @@ type storKV struct {
 	upd Update
 }
 
-// whaleByNibble builds one account with `slots` storage slots, partitioning the storage entries by their first hashed nibble.
 func whaleByNibble(slots int) (addr []byte, accHash []byte, accNib int, accUpd Update, pk [][]byte, upds []Update, groups [16][]storKV) {
 	rnd := rand.New(rand.NewSource(424242))
 	addr = make([]byte, length.Addr)
@@ -117,7 +115,6 @@ func whaleByNibble(slots int) (addr []byte, accHash []byte, accNib int, accUpd U
 	return addr, accHash, accNib, accUpd, pk, upds, groups
 }
 
-// foldChildAt folds one storage nibble's keys into its depth-65 child cell, trimming the leading storage nibble now carried by the column index.
 func foldChildAt(w *HexPatriciaHashed, accNib int, g []storKV) (cell, error) {
 	for i := range g {
 		if err := w.followAndUpdate(g[i].hk, g[i].pk, &g[i].upd); err != nil {
@@ -141,7 +138,6 @@ func foldChildAt(w *HexPatriciaHashed, accNib int, g []storKV) (cell, error) {
 	return c, nil
 }
 
-// concurrentAccountRoot folds each storage-nibble subtree independently then mounts them under the account leaf to produce the root.
 func concurrentAccountRoot(ms *MockState, addr, accHash []byte, accNib int, accUpd Update, groups [16][]storKV, parallel bool) ([]byte, error) {
 	var children [16]cell
 	var present uint16

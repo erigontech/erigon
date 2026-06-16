@@ -341,8 +341,6 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ModeParallel must produce byte-equal root hashes to sequential ModeDirect
-// for any batch; these tests assert that equivalence.
 type randomBatchShape int
 
 const (
@@ -353,8 +351,6 @@ const (
 	shapeEmpty
 )
 
-// generateBatch builds n unique-keyed (plainKeys, updates) for the given shape
-// from seed; returns nil for shapeEmpty or n <= 0.
 func generateBatch(shape randomBatchShape, n int, seed int64) ([][]byte, []Update) {
 	if shape == shapeEmpty {
 		return nil, nil
@@ -370,7 +366,7 @@ func generateBatch(shape randomBatchShape, n int, seed int64) ([][]byte, []Updat
 	var sharedAddr [length.Addr]byte
 	if shape == shapeStorageHeavySingle {
 		rnd.Read(sharedAddr[:])
-		// Touch the account itself first so the branch shape matches production.
+		// Seed the account before its storage so the branch shape matches production.
 		accKey := append([]byte(nil), sharedAddr[:]...)
 		used[string(accKey)] = struct{}{}
 		acc := Update{Flags: BalanceUpdate | NonceUpdate}
@@ -392,7 +388,6 @@ func generateBatch(shape randomBatchShape, n int, seed int64) ([][]byte, []Updat
 	return plainKeys, updates
 }
 
-// generateKey returns a single plain key matching the requested shape.
 func generateKey(shape randomBatchShape, sharedAddr []byte, rnd *rand.Rand) (key []byte, isStorage bool) {
 	switch shape {
 	case shapeAccountsOnly, shapeInsertsAndDeletes:
@@ -405,7 +400,7 @@ func generateKey(shape randomBatchShape, sharedAddr []byte, rnd *rand.Rand) (key
 		rnd.Read(key[length.Addr:])
 		return key, true
 	case shapeStorageSpread:
-		// Two-thirds storage, one-third account to cover both trie depths.
+		// Mix accounts and storage to exercise both trie depths.
 		if rnd.Intn(3) == 0 {
 			key = make([]byte, length.Addr)
 			rnd.Read(key)
@@ -420,7 +415,6 @@ func generateKey(shape randomBatchShape, sharedAddr []byte, rnd *rand.Rand) (key
 	return key, false
 }
 
-// generateUpdate fills an Update payload appropriate for the shape and key type.
 func generateUpdate(shape randomBatchShape, isStorage bool, rnd *rand.Rand) Update {
 	u := Update{}
 	if isStorage {
@@ -490,9 +484,7 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 	}
 }
 
-// FuzzParallelEquivalence fuzzes ModeDirect <-> ModeParallel root-hash equivalence:
-//
-//	go test -fuzz=FuzzParallelEquivalence -fuzztime=60s ./execution/commitment/
+// Run: go test -fuzz=FuzzParallelEquivalence -fuzztime=60s ./execution/commitment/
 func FuzzParallelEquivalence(f *testing.F) {
 	f.Add(uint16(8), uint8(0), int64(0xA1))
 	f.Add(uint16(32), uint8(0), int64(0xA2))
@@ -502,7 +494,7 @@ func FuzzParallelEquivalence(f *testing.F) {
 	f.Add(uint16(0), uint8(4), int64(0xE1))
 
 	f.Fuzz(func(t *testing.T, keysCount uint16, shapeByte uint8, seed int64) {
-		// Cap batch size: huge counts slow the loop without adding coverage.
+		// Larger batches only slow the loop without adding coverage.
 		if keysCount > 512 {
 			t.Skip("oversized batch")
 		}

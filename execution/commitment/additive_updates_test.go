@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// additiveCorpus returns keys touched twice with partial updates and the merged equivalents the sequential oracle folds.
 func additiveCorpus() (keys [][]byte, partials [][2]*Update, merged []Update) {
 	accA := []byte("\x4c\x88\x85\x35\x84\x1a\xcb\xe0\x70\x9b\x07\x58\x08\x3f\x61\xd3\x75\xbc\x02\xb4")
 	accB := []byte("\x68\xee\x6c\x0e\x9c\xdc\x73\xb2\xb2\xd5\x2d\xbd\x79\xf1\x9d\x24\xfe\x25\xe2\xf9")
@@ -56,7 +55,6 @@ func additiveCorpus() (keys [][]byte, partials [][2]*Update, merged []Update) {
 	return keys, partials, merged
 }
 
-// TestAdditiveTouch asserts both concurrent engines merge two partial touches of the same key into the sequential merged-state root.
 func TestAdditiveTouch(t *testing.T) {
 	t.Parallel()
 

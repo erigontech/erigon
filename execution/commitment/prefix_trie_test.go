@@ -33,7 +33,6 @@ type walkEntry struct {
 	bitmap       uint16
 }
 
-// collectWalk records each node's accumulated prefix, subtreeCount, and bitmap in DFS pre-order.
 func collectWalk(t *prefixTrie) []walkEntry {
 	var out []walkEntry
 	var dfs func(n *prefixNode, accPrefix []byte)
@@ -146,7 +145,6 @@ func TestPrefixTrieDivergenceInsideExtension(t *testing.T) {
 
 	t.Run("atEndOfExtension", func(t *testing.T) {
 		tr := newPrefixTrie()
-		// Second key shares the leaf's full extension then descends with a new nibble: exercises descend-into-existing-child after splitting.
 		tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05), nil, nil)
 		tr.Insert(nibs(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07), nil, nil)
 
@@ -229,7 +227,7 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
-	// Stuff the arena directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
+	// Allocate directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
 	for i := 0; i < prefixSlabSize+5; i++ {
 		tr.arena.allocNode()
 	}
@@ -274,7 +272,7 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 		idx, ok = childIndex(n, 0x0A)
 		assert.True(t, ok)
 		assert.Equal(t, 2, idx)
-		// missing nibble — index reports where it would be inserted
+		// missing nibble: idx is the insertion position, not a hit
 		idx, ok = childIndex(n, 0x03)
 		assert.False(t, ok)
 		assert.Equal(t, 1, idx)

@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// computeCellHashAt hashes a cell as a parent branch would at the given depth.
 func computeCellHashAt(t *testing.T, ms *MockState, c cell, depth int16) []byte {
 	t.Helper()
 	w := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
@@ -38,7 +37,6 @@ func computeCellHashAt(t *testing.T, ms *MockState, c cell, depth int16) []byte 
 	return append([]byte(nil), h...)
 }
 
-// foldWhaleStorageChildren folds each present storage nibble subtree and returns the depth-65 child cells.
 func foldWhaleStorageChildren(t *testing.T, ms *MockState, accNib int, groups [16][]storKV) ([16]cell, uint16) {
 	t.Helper()
 	var children [16]cell
@@ -61,8 +59,7 @@ func foldWhaleStorageChildren(t *testing.T, ms *MockState, accNib int, groups [1
 	return children, present
 }
 
-// foldBranch at depth >= 64 does not clear upCell.accountAddrLen, so account fields left in a
-// reused destination cell leak into the folded storageRoot cell unless it is reset first.
+// foldBranch at depth >= 64 doesn't clear accountAddrLen, so a reused destination cell leaks account fields unless reset first.
 func TestAggregateStorageRoot_ResetsDestinationCell(t *testing.T) {
 	_, accHash, accNib, _, pk, upds, groups := whaleByNibble(3000)
 	ms := NewMockState(t)
@@ -144,8 +141,7 @@ func TestDeepFold_StorageRootParity(t *testing.T) {
 	require.Equal(t, seqRoot, conRoot, "deep-fold account root != sequential")
 }
 
-// A branch node's hash is independent of the prefix above it, so the same hash-only child set
-// must fold to the same branch hash at every depth.
+// A branch node's hash is independent of the prefix above it, so the same child set folds to the same hash at every depth.
 func TestAggregateSubtreeRoot_DepthGeneralization(t *testing.T) {
 	ms := NewMockState(t)
 	rnd := rand.New(rand.NewSource(99))
