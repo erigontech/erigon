@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -295,4 +296,119 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
 		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
 	})
+}
+
+func TestEIP8037_StateGasRefundPreexisting(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 60_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+	}
+
+	// 1. Creation at a brand-new address (must charge state gas)
+	ibs1 := state.New(state.NewNoopReader())
+	gp1 := NewGasPool(blockGasLimit, 0)
+	evm1 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs1, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+	// Initcode = STOP (0x00)
+	msg1 := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 300_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		[]byte{0x00}, nil,
+		false, false, true, false, nil,
+	)
+	st1 := NewTxnExecutor(evm1, msg1, gp1)
+	result1, err := st1.Execute(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result1)
+
+	regularStateGas := result1.BlockStateGasUsed
+	require.GreaterOrEqual(t, regularStateGas, uint64(params.StateGasNewAccount))
+
+	// 2. Creation at a pre-existing address (must refund/exclude params.StateGasNewAccount)
+	ibs2 := state.New(state.NewNoopReader())
+	gp2 := NewGasPool(blockGasLimit, 0)
+	evm2 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs2, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+
+	// Compute the contract address for sender at nonce 0
+	targetAddr := accounts.InternAddress(types.CreateAddress(sender.Value(), 0))
+	// Make it pre-existing by giving it balance
+	ibs2.AddBalance(targetAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified)
+
+	st2 := NewTxnExecutor(evm2, msg1, gp2)
+	result2, err := st2.Execute(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result2)
+
+	preexistingStateGas := result2.BlockStateGasUsed
+	t.Logf("State gas used: brand-new = %d, pre-existing = %d", regularStateGas, preexistingStateGas)
+
+	// Verify that the state gas used for pre-existing account is exactly StateGasNewAccount less
+	require.Equal(t, regularStateGas-uint64(params.StateGasNewAccount), preexistingStateGas,
+		"State gas for pre-existing account must be StateGasNewAccount less than brand-new account")
+}
+
+func TestEIP8037_StateGasRefundPreexistingWithCodeDeposit(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 60_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+	}
+
+	// Bytecode that returns a 10-byte code:
+	// PUSH10 0x0102030405060708090a (0x69 0102030405060708090a)
+	// PUSH1 0x00 (0x60 00)
+	// MSTORE (0x52)
+	// PUSH1 10 (0x60 0a)
+	// PUSH1 22 (0x60 16) - MSTORE stores at offset 32 - 10 = 22 for right alignment
+	// RETURN (0xf3)
+	// Total initcode: 690102030405060708090a600052600a6016f3
+	initCode := common.Hex2Bytes("690102030405060708090a600052600a6016f3")
+
+	// 1. Creation at a brand-new address (must charge state gas for new account + 10 bytes code deposit)
+	ibs1 := state.New(state.NewNoopReader())
+	gp1 := NewGasPool(blockGasLimit, 0)
+	evm1 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs1, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+	msg1 := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 300_000,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+		initCode, nil,
+		false, false, true, false, nil,
+	)
+	st1 := NewTxnExecutor(evm1, msg1, gp1)
+	result1, err := st1.Execute(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result1)
+
+	regularStateGas := result1.BlockStateGasUsed
+	expectedNewAccountGas := uint64(params.StateGasNewAccount) + 10*uint64(params.CostPerStateByte)
+	require.Equal(t, expectedNewAccountGas, regularStateGas)
+
+	// 2. Creation at a pre-existing address (must refund params.StateGasNewAccount but keep 10 bytes code deposit)
+	ibs2 := state.New(state.NewNoopReader())
+	gp2 := NewGasPool(blockGasLimit, 0)
+	evm2 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs2, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
+
+	// Compute the contract address for sender at nonce 0
+	targetAddr := accounts.InternAddress(types.CreateAddress(sender.Value(), 0))
+	// Make it pre-existing by giving it balance
+	ibs2.AddBalance(targetAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified)
+
+	st2 := NewTxnExecutor(evm2, msg1, gp2)
+	result2, err := st2.Execute(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result2)
+
+	preexistingStateGas := result2.BlockStateGasUsed
+	t.Logf("State gas used with code: brand-new = %d, pre-existing = %d", regularStateGas, preexistingStateGas)
+
+	// Verify that the state gas used for pre-existing account is exactly 10 * CostPerStateByte
+	require.Equal(t, 10*uint64(params.CostPerStateByte), preexistingStateGas)
 }
