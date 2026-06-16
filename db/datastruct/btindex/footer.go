@@ -54,7 +54,7 @@ type Metadata struct {
 // `Footer` style file (for example `.bt`):
 //
 //	[ body ] # variable length. 4kb-alignment
-//	[ footer: keys_count | M | feature_flags | body_checksum ] # variable length. 8-bytes-alignment
+//	[ footer: keys_count | M | ef_offset ] # variable length. 8-bytes-alignment
 //	[ ANCHOR: footer_len:u32 | flags:u16 | format_version:u16 | magic:u64 ] # Fixed length. 8-bytes-alignment
 //
 // Build such files will be much more streaming-style-friendly. Don't need `etl` all incoming keys

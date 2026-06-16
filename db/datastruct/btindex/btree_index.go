@@ -241,17 +241,21 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	if btw.ef == nil || btw.ef.AddedCount() >= btw.args.KeyCount {
+	if btw.ef == nil {
+		return fmt.Errorf("[index] %s: AddKey called with KeyCount==0", btw.indexFileName)
+	}
+	di := btw.ef.AddedCount()
+	if di >= btw.args.KeyCount {
 		return fmt.Errorf("[index] %s: AddKey beyond KeyCount=%d", btw.indexFileName, btw.args.KeyCount)
 	}
-
-	di := btw.ef.AddedCount()
 	btw.ef.AddOffset(offset)
 
-	if di%btw.args.M == 0 { // every M-th key (di==0 included) is kept as a B-tree node
-		if err := (Node{key: key}).Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
-			return err
-		}
+	// every M-th key (di==0 included) is kept as a B-tree node
+	if di%btw.args.M != 0 {
+		return nil
+	}
+	if err := (Node{key: key}).Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
+		return err
 	}
 	return nil
 }
@@ -513,10 +517,13 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	idx.data = idx.m[:idx.size]
 
 	var nodes []Node
-	footer, _, err := ReadFooter(idx.data)
+	footer, footerStart, err := ReadFooter(idx.data)
 	switch {
 	case err == nil: // current layout: [nodes][EF][footer][anchor]
 		M = footer.Meta.M
+		if M == 0 || footer.Meta.EfOffset >= uint64(footerStart) {
+			return nil, fmt.Errorf("btindex: corrupt footer in %s (M=%d ef_offset=%d body=%d)", indexPath, M, footer.Meta.EfOffset, footerStart)
+		}
 		nodesCount := (footer.Meta.KeysCount + M - 1) / M // nodes are kept at di = 0, M, 2M, … < KeysCount → ceil(KeysCount/M)
 		nodes, _, err = decodeNodes(idx.data, nodesCount, M)
 		if err != nil {
