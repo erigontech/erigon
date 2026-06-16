@@ -38,7 +38,7 @@ func writeIndex(writes VersionedWrites) map[AccountKey]any {
 	idx := make(map[AccountKey]any, len(writes))
 	for _, w := range writes {
 		h := w.Header()
-		idx[AccountKey{Path: h.Path, Key: h.Key}] = w.ValAny()
+		idx[AccountKey{Path: h.Path, Key: h.Key}] = anyWriteVal(w)
 	}
 	return idx
 }
@@ -49,7 +49,7 @@ func addrWriteIndex(writes VersionedWrites, addr accounts.Address) map[AccountKe
 	for _, w := range writes {
 		h := w.Header()
 		if h.Address == addr {
-			idx[AccountKey{Path: h.Path, Key: h.Key}] = w.ValAny()
+			idx[AccountKey{Path: h.Path, Key: h.Key}] = anyWriteVal(w)
 		}
 	}
 	return idx

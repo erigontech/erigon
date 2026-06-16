@@ -428,7 +428,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	// And it must NOT have emitted spurious StoragePath=0 writes.
 	for _, w := range ibs.VersionedWrites(false) {
 		if w.Header().Address == addr && w.Header().Path == StoragePath {
-			v := w.ValAny().(uint256.Int)
+			v, _ := Val[uint256.Int](w)
 			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Header().Key.Value())
 		}
 	}

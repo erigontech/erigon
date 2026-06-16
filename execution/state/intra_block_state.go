@@ -2833,7 +2833,7 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 		var selfDestructed bool
 		for _, v := range vwrites {
 			if v.Header().Path == SelfDestructPath {
-				if sd, _ := v.ValAny().(bool); sd {
+				if sd, _ := Val[bool](v); sd {
 					selfDestructed = true
 					break
 				}
@@ -2888,22 +2888,22 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			continue
 		case StoragePath:
 			stateKey := hdr.Key
-			state, _ := writes[i].ValAny().(uint256.Int)
+			state, _ := Val[uint256.Int](writes[i])
 			if err := sdb.setState(addr, stateKey, state, true); err != nil {
 				return err
 			}
 		case BalancePath:
-			balance, _ := writes[i].ValAny().(uint256.Int)
+			balance, _ := Val[uint256.Int](writes[i])
 			if err := sdb.SetBalance(addr, balance, hdr.Reason); err != nil {
 				return err
 			}
 		case NoncePath:
-			nonce, _ := writes[i].ValAny().(uint64)
+			nonce, _ := Val[uint64](writes[i])
 			if err := sdb.SetNonce(addr, nonce, tracing.NonceChangeUnspecified); err != nil {
 				return err
 			}
 		case IncarnationPath:
-			incarnation, _ := writes[i].ValAny().(uint64)
+			incarnation, _ := Val[uint64](writes[i])
 			if err := sdb.SetIncarnation(addr, incarnation); err != nil {
 				return err
 			}
@@ -2911,7 +2911,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			// finalize IBS's writes are correctly flushed to the global versionMap.
 			sdb.recordWriteIncarnation(addr, incarnation)
 		case CodePath:
-			code, _ := writes[i].ValAny().(accounts.Code)
+			code, _ := Val[accounts.Code](writes[i])
 			stateObject, err := sdb.GetOrNewStateObject(addr)
 			if err != nil {
 				return err
@@ -2934,7 +2934,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		case CodeHashPath, CodeSizePath:
 			// set by CodePath case above
 		case SelfDestructPath:
-			deleted, _ := writes[i].ValAny().(bool)
+			deleted, _ := Val[bool](writes[i])
 			if deleted {
 				// Ensure the state object exists before calling Selfdestruct.
 				// For newly-created accounts (e.g. coinbase born via CREATE in the

@@ -19,6 +19,33 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+func anyWriteVal(w state.AnyVersionedWrite) any {
+	switch w.Header().Path {
+	case state.AddressPath:
+		v, _ := state.Val[*accounts.Account](w)
+		return v
+	case state.BalancePath, state.StoragePath:
+		v, _ := state.Val[uint256.Int](w)
+		return v
+	case state.NoncePath, state.IncarnationPath:
+		v, _ := state.Val[uint64](w)
+		return v
+	case state.CodeHashPath:
+		v, _ := state.Val[accounts.CodeHash](w)
+		return v
+	case state.CodePath:
+		v, _ := state.Val[accounts.Code](w)
+		return v
+	case state.CodeSizePath:
+		v, _ := state.Val[int](w)
+		return v
+	case state.SelfDestructPath, state.CreateContractPath:
+		v, _ := state.Val[bool](w)
+		return v
+	}
+	return nil
+}
+
 // senderIsCoinbaseKeyHolder pairs a deterministic test key with its derived
 // address in both raw common.Address (needed by SignTx + Tx.To) and interned
 // accounts.Address (needed by the versioned write set) forms.
@@ -534,7 +561,7 @@ func TestFinalizeTxSimple_BasicFeeCredit(t *testing.T) {
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
 
-	coinbaseBalance := coinbaseWrite.ValAny().(uint256.Int)
+	coinbaseBalance, _ := state.Val[uint256.Int](coinbaseWrite)
 	expected := new(uint256.Int).Add(priorBalance, &s.feeTipped)
 	assert.Equal(t, *expected, coinbaseBalance,
 		"coinbase should be priorBalance + FeeTipped (no delta, no double-count)")
@@ -597,7 +624,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize must produce a coinbase BalancePath write")
 
-	got := coinbaseWrite.ValAny().(uint256.Int)
+	got, _ := state.Val[uint256.Int](coinbaseWrite)
 	want := uint256.NewInt(expectedFinal)
 	assert.Equal(t, *want, got,
 		"senderIsCoinbase: finalize must use TxOut value (%d) + tip (%d) = %d, NOT versionMap base (%d) + tip (%d) = %d (the bug)",
@@ -659,7 +686,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutWinsOverCollectorWrites(t *testi
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize must produce coinbase BalancePath write")
 
-	got := coinbaseWrite.ValAny().(uint256.Int)
+	got, _ := state.Val[uint256.Int](coinbaseWrite)
 	want := uint256.NewInt(expectedFinal)
 	assert.Equal(t, *want, got,
 		"senderIsCoinbase=true: TxOut value (%d) + tip (%d) = %d MUST WIN over CollectorWrites value (%d) + tip = %d",
@@ -701,13 +728,13 @@ func TestFinalizeTxSimple_SenderIsCoinbase_PostLondon(t *testing.T) {
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "coinbase BalancePath write must exist")
-	gotCoinbase := coinbaseWrite.ValAny().(uint256.Int)
+	gotCoinbase, _ := state.Val[uint256.Int](coinbaseWrite)
 	assert.Equal(t, *uint256.NewInt(expectedCoinbase), gotCoinbase,
 		"coinbase: TxOut (%d) + tip (%d) = %d expected", postDebitBal, tip, expectedCoinbase)
 
 	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
 	require.NotNil(t, burntWrite, "burnt BalancePath write must exist under London")
-	gotBurnt := burntWrite.ValAny().(uint256.Int)
+	gotBurnt, _ := state.Val[uint256.Int](burntWrite)
 	assert.Equal(t, *uint256.NewInt(expectedBurntBal), gotBurnt,
 		"burnt: versionMap base (%d) + burn (%d) = %d expected", burntPreBlockBal, burn, expectedBurntBal)
 }
@@ -784,7 +811,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 		require.NotNil(t, coinbaseWrite, "tx %d: coinbase BalancePath write must exist (workerWroteCoinbase gate fires when newBal==oldBal)", txIdx)
-		got := coinbaseWrite.ValAny().(uint256.Int)
+		got, _ := state.Val[uint256.Int](coinbaseWrite)
 		want := uint256.NewInt(postDebitBal + tip) // = preBlockBal: each tx cancels back
 		assert.Equal(t, *want, got, "tx %d: coinbase must net to preBlockBal", txIdx)
 	}
@@ -849,7 +876,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "coinbase BalancePath write must exist")
-	got := coinbaseWrite.ValAny().(uint256.Int)
+	got, _ := state.Val[uint256.Int](coinbaseWrite)
 	want := uint256.NewInt(expectedFinal)
 	assert.Equal(t, *want, got,
 		"re-execution: finalize must use re-executed TxOut value (%d) + tip (%d) = %d, NOT abandoned incarnation-0 value (%d) + tip = %d",
@@ -889,7 +916,7 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
 	require.NotNil(t, burntWrite, "finalize should produce burnt contract BalancePath write")
 
-	burntBalance := burntWrite.ValAny().(uint256.Int)
+	burntBalance, _ := state.Val[uint256.Int](burntWrite)
 	// Burnt contract gets existing balance (500000) + FeeBurnt
 	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
 	assert.Equal(t, *expected, burntBalance,
@@ -909,7 +936,7 @@ func TestFinalizeTxSimple_NoCoinbaseInVersionMap(t *testing.T) {
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
 
-	coinbaseBalance := coinbaseWrite.ValAny().(uint256.Int)
+	coinbaseBalance, _ := state.Val[uint256.Int](coinbaseWrite)
 	assert.Equal(t, s.feeTipped, coinbaseBalance,
 		"coinbase should be 0 + FeeTipped when no prior balance in versionMap")
 }
@@ -947,7 +974,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Verify accumulated balance.
 		coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 		require.NotNil(t, coinbaseWrite, "TX %d: should have coinbase write", txIdx)
-		bal := coinbaseWrite.ValAny().(uint256.Int)
+		bal, _ := state.Val[uint256.Int](coinbaseWrite)
 		expectedBal := new(uint256.Int).Mul(tipPerTx, uint256.NewInt(uint64(txIdx)))
 		assert.Equal(t, *expectedBal, bal,
 			"TX %d: coinbase should have accumulated %d tips", txIdx, txIdx)
@@ -1011,7 +1038,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 
 	// Late timing — the dependent worker read after calcFees, recording the
 	// post-tip value at the worker's version (MapRead). Validate passes.
-	coinbaseVal := coinbaseWrite.ValAny().(uint256.Int)
+	coinbaseVal, _ := state.Val[uint256.Int](coinbaseWrite)
 	assert.Equal(t, state.VersionValid, validateCoinbaseRead(state.MapRead, coinbaseVal),
 		"a fresh read of post-tip value at the same version must stay valid")
 }
@@ -1108,7 +1135,7 @@ func TestResolveStorageWrites_IBSvsSimple(t *testing.T) {
 		if w.Header().Path == state.StoragePath {
 			storageCount++
 			t.Errorf("unexpected storage write: addr=%x slot=%x val=%v (should be filtered as no-op)",
-				w.Header().Address, w.Header().Key, w.ValAny())
+				w.Header().Address, w.Header().Key, anyWriteVal(w))
 		}
 	}
 
@@ -1345,7 +1372,7 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "changed storage write should be kept")
 	if storageCount > 0 {
-		v := result[0].ValAny().(uint256.Int)
+		v, _ := state.Val[uint256.Int](result[0])
 		assert.Equal(t, val200, v, "should have resolved value 200")
 	}
 }
@@ -1443,7 +1470,7 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	// Verify DELETEs have zero values
 	for _, w := range result {
 		if w.Header().Path == state.StoragePath {
-			v := w.ValAny().(uint256.Int)
+			v, _ := state.Val[uint256.Int](w)
 			assert.True(t, v.IsZero(), "self-destruct storage DELETE should have zero value")
 		}
 	}
@@ -1472,7 +1499,7 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	require.Equal(t, 1, len(result))
-	v := result[0].ValAny().(uint256.Int)
+	v, _ := state.Val[uint256.Int](result[0])
 	assert.Equal(t, *uint256.NewInt(150), v,
 		"balance should be resolved from versionMap (150), not worker's stale value (120)")
 }
@@ -1646,7 +1673,8 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 	// Verify nonce is 0 (not missing)
 	for _, w := range result {
 		if w.Header().Path == state.NoncePath {
-			assert.Equal(t, uint64(0), w.ValAny().(uint64), "nonce should be 0")
+			gotNonce, _ := state.Val[uint64](w)
+			assert.Equal(t, uint64(0), gotNonce, "nonce should be 0")
 		}
 	}
 }
@@ -1695,7 +1723,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 	for _, w := range result {
 		if w.Header().Address == addr {
 			if w.Header().Path == state.SelfDestructPath {
-				if v, ok := w.ValAny().(bool); ok && v {
+				if v, ok := state.Val[bool](w); ok && v {
 					hasDelete = true
 				}
 			}
@@ -1759,7 +1787,7 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 	coinbaseBalance := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseBalance,
 		"calcFees should emit coinbase BalancePath write")
-	balVal, ok := coinbaseBalance.ValAny().(uint256.Int)
+	balVal, ok := state.Val[uint256.Int](coinbaseBalance)
 	require.True(t, ok, "BalancePath value must be uint256.Int")
 	require.Equal(t, s.feeTipped, balVal,
 		"BalancePath value must equal feeTipped (no prior balance)")
@@ -1770,7 +1798,7 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 			"downstream parallel txs see the account record (mainnet "+
 			"25151825 tx 31 SD+CREATE2-on-coinbase +25k regression pin)")
 
-	addrAcc, ok := coinbaseAddress.ValAny().(*accounts.Account)
+	addrAcc, ok := state.Val[*accounts.Account](coinbaseAddress)
 	require.True(t, ok, "AddressPath value must be *accounts.Account")
 	require.NotNil(t, addrAcc, "AddressPath account must not be nil")
 	require.Equal(t, s.feeTipped, addrAcc.Balance,

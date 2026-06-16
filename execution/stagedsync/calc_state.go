@@ -223,7 +223,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 	for _, w := range writes {
 		h := w.Header()
 		if h.Path == state.SelfDestructPath {
-			if destructed, ok := w.ValAny().(bool); ok {
+			if destructed, ok := state.Val[bool](w); ok {
 				// Last SelfDestructPath entry wins (matches normalizeWriteSet /
 				// applyVersionedWrites): a SELFDESTRUCT followed by a same-tx
 				// CREATE2-recreate ends ALIVE, so the recreate's writes must
@@ -236,29 +236,26 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 		return nonZero || !sdThisCall[addr]
 	}
 	for _, w := range writes {
-		if w.ValAny() == nil {
-			continue
-		}
 		h := w.Header()
 
 		switch h.Path {
 		case state.BalancePath:
 			acc := cs.ensureAccount(h.Address)
-			acc.Balance = w.ValAny().(uint256.Int)
+			acc.Balance, _ = state.Val[uint256.Int](w)
 			acc.dirty = true
 			if clearsDeleted(h.Address, !acc.Balance.IsZero()) {
 				acc.Deleted = false
 			}
 		case state.NoncePath:
 			acc := cs.ensureAccount(h.Address)
-			acc.Nonce = w.ValAny().(uint64)
+			acc.Nonce, _ = state.Val[uint64](w)
 			acc.dirty = true
 			if clearsDeleted(h.Address, acc.Nonce != 0) {
 				acc.Deleted = false
 			}
 		case state.CodeHashPath:
 			acc := cs.ensureAccount(h.Address)
-			v := w.ValAny().(accounts.CodeHash)
+			v, _ := state.Val[accounts.CodeHash](w)
 			acc.CodeHash = v.Value()
 			acc.dirty = true
 			if clearsDeleted(h.Address, v.Value() != empty.CodeHash) {
@@ -266,14 +263,14 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			}
 		case state.CodePath:
 			acc := cs.ensureAccount(h.Address)
-			code := w.ValAny().(accounts.Code)
+			code, _ := state.Val[accounts.Code](w)
 			acc.CodeHash = code.Hash.Value()
 			acc.dirty = true
 			if clearsDeleted(h.Address, code.Len() > 0) {
 				acc.Deleted = false
 			}
 		case state.SelfDestructPath:
-			if destructed, ok := w.ValAny().(bool); ok && destructed {
+			if destructed, ok := state.Val[bool](w); ok && destructed {
 				acc := cs.ensureAccount(h.Address)
 				acc.Deleted = true
 				acc.dirty = true
@@ -296,7 +293,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				}
 			}
 		case state.StoragePath:
-			v := w.ValAny().(uint256.Int)
+			v, _ := state.Val[uint256.Int](w)
 			cs.ensureStorage(h.Address, h.Key) // lazy-load if needed
 			cs.storageState[h.Address][h.Key] = v
 			if cs.storageDirty[h.Address] == nil {
@@ -305,7 +302,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			cs.storageDirty[h.Address][h.Key] = true
 		case state.IncarnationPath:
 			acc := cs.ensureAccount(h.Address)
-			acc.Incarnation = w.ValAny().(uint64)
+			acc.Incarnation, _ = state.Val[uint64](w)
 			acc.dirty = true
 		}
 	}

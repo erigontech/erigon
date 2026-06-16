@@ -387,7 +387,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	for _, w := range normalized {
 		switch w.Header().Path {
 		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.IncarnationPath, state.SelfDestructPath:
-			pathSeen[w.Header().Path] = w.ValAny()
+			pathSeen[w.Header().Path] = anyWriteVal(w)
 		}
 	}
 	require.Contains(t, pathSeen, state.SelfDestructPath,
@@ -497,7 +497,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	storageZeroCount := 0
 	for _, w := range normalized {
 		if w.Header().Path == state.StoragePath {
-			val := w.ValAny().(uint256.Int)
+			val, _ := state.Val[uint256.Int](w)
 			assert.True(t, val.IsZero(),
 				"normalizeWriteSet must emit StoragePath=0 for SD'd slots, got %v", val)
 			storageZeroCount++

@@ -104,28 +104,28 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 			switch h.Path {
 			case BalancePath:
-				v, _ := w.ValAny().(uint256.Int)
+				v, _ := Val[uint256.Int](w)
 				d.balance = &v
 			case NoncePath:
-				v, _ := w.ValAny().(uint64)
+				v, _ := Val[uint64](w)
 				d.nonce = &v
 			case IncarnationPath:
-				v, _ := w.ValAny().(uint64)
+				v, _ := Val[uint64](w)
 				d.incarnation = &v
 			case CodeHashPath:
-				v, _ := w.ValAny().(accounts.CodeHash)
+				v, _ := Val[accounts.CodeHash](w)
 				d.codeHash = &v
 			case CodePath:
-				v, _ := w.ValAny().(accounts.Code)
+				v, _ := Val[accounts.Code](w)
 				d.code = v.Bytes
 			case SelfDestructPath:
-				v, _ := w.ValAny().(bool)
+				v, _ := Val[bool](w)
 				d.selfDestruct = v
 			case CreateContractPath:
-				v, _ := w.ValAny().(bool)
+				v, _ := Val[bool](w)
 				d.createContract = v
 			case StoragePath:
-				v, _ := w.ValAny().(uint256.Int)
+				v, _ := Val[uint256.Int](w)
 				d.storage = append(d.storage, storageItem{h.Key, v})
 			}
 		}
@@ -800,7 +800,7 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 				p = &pendingAccount{}
 				pending[h.Address] = p
 			}
-			v, _ := w.ValAny().(uint256.Int)
+			v, _ := Val[uint256.Int](w)
 			p.balance = &v
 		case NoncePath:
 			p := pending[h.Address]
@@ -808,7 +808,7 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 				p = &pendingAccount{}
 				pending[h.Address] = p
 			}
-			v, _ := w.ValAny().(uint64)
+			v, _ := Val[uint64](w)
 			p.nonce = &v
 		case IncarnationPath:
 			p := pending[h.Address]
@@ -816,7 +816,7 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 				p = &pendingAccount{}
 				pending[h.Address] = p
 			}
-			v, _ := w.ValAny().(uint64)
+			v, _ := Val[uint64](w)
 			p.incarnation = &v
 		case CodeHashPath:
 			p := pending[h.Address]
@@ -824,17 +824,17 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 				p = &pendingAccount{}
 				pending[h.Address] = p
 			}
-			v, _ := w.ValAny().(accounts.CodeHash)
+			v, _ := Val[accounts.CodeHash](w)
 			p.codeHash = &v
 		case CodePath:
-			c, _ := w.ValAny().(accounts.Code)
+			c, _ := Val[accounts.Code](w)
 			var inc uint64
 			if p := pending[h.Address]; p != nil && p.incarnation != nil {
 				inc = *p.incarnation
 			}
 			accumulator.ChangeCode(h.Address.Value(), inc, c.Bytes)
 		case StoragePath:
-			val, _ := w.ValAny().(uint256.Int)
+			val, _ := Val[uint256.Int](w)
 			var inc uint64
 			if p := pending[h.Address]; p != nil && p.incarnation != nil {
 				inc = *p.incarnation

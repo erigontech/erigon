@@ -624,15 +624,25 @@ type VersionedWrite[T any] struct {
 // crossing the any boundary on the hot path.
 type AnyVersionedWrite interface {
 	Header() WriteHeader
-	ValAny() any
 	Clone() AnyVersionedWrite
 }
 
 func (w *VersionedWrite[T]) Header() WriteHeader { return w.WriteHeader }
-func (w *VersionedWrite[T]) ValAny() any         { return w.Val }
 func (w *VersionedWrite[T]) Clone() AnyVersionedWrite {
 	c := *w
 	return &c
+}
+
+// Val extracts the typed value from a write whose concrete type is
+// *VersionedWrite[T]. The path determines T at every call site, so the
+// concrete assertion (a pointer check) reads w.Val in place — avoiding the
+// any-box that returning w.Val as any would force on value types.
+func Val[T any](w AnyVersionedWrite) (T, bool) {
+	if c, ok := w.(*VersionedWrite[T]); ok {
+		return c.Val, true
+	}
+	var zero T
+	return zero, false
 }
 
 func (w *VersionedWrite[T]) String() string {
@@ -718,32 +728,32 @@ func valueStringFromAnyVW(w AnyVersionedWrite) string {
 	hdr := w.Header()
 	switch hdr.Path {
 	case AddressPath:
-		acc, _ := w.ValAny().(*accounts.Account)
+		acc, _ := Val[*accounts.Account](w)
 		return fmt.Sprintf("%+v", acc)
 	case BalancePath:
-		num, _ := w.ValAny().(uint256.Int)
+		num, _ := Val[uint256.Int](w)
 		return (&num).String()
 	case StoragePath:
-		num, _ := w.ValAny().(uint256.Int)
+		num, _ := Val[uint256.Int](w)
 		return fmt.Sprintf("%x", &num)
 	case NoncePath, IncarnationPath:
-		v, _ := w.ValAny().(uint64)
+		v, _ := Val[uint64](w)
 		return strconv.FormatUint(v, 10)
 	case CodePath:
-		code, _ := w.ValAny().(accounts.Code)
+		code, _ := Val[accounts.Code](w)
 		l := min(len(code.Bytes), 40)
 		return hex.EncodeToString(code.Bytes[0:l])
 	case SelfDestructPath, CreateContractPath:
-		v, _ := w.ValAny().(bool)
+		v, _ := Val[bool](w)
 		if v {
 			return "true"
 		}
 		return "false"
 	case CodeHashPath:
-		h, _ := w.ValAny().(accounts.CodeHash)
+		h, _ := Val[accounts.CodeHash](w)
 		return fmt.Sprintf("%x", h.Value())
 	case CodeSizePath:
-		v, _ := w.ValAny().(int)
+		v, _ := Val[int](w)
 		return strconv.Itoa(v)
 	}
 	return "<unknown-path>"
@@ -1707,38 +1717,38 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 
 		switch hdr.Path {
 		case BalancePath:
-			v, _ := w.ValAny().(uint256.Int)
+			v, _ := Val[uint256.Int](w)
 			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
 				Flags:   commitment.BalanceUpdate,
 				Balance: v,
 			})
 		case NoncePath:
-			v, _ := w.ValAny().(uint64)
+			v, _ := Val[uint64](w)
 			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
 				Flags: commitment.NonceUpdate,
 				Nonce: v,
 			})
 		case CodeHashPath:
-			v, _ := w.ValAny().(accounts.CodeHash)
+			v, _ := Val[accounts.CodeHash](w)
 			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
 				Flags:    commitment.CodeUpdate,
 				CodeHash: v.Value(),
 			})
 		case CodePath:
-			v, _ := w.ValAny().(accounts.Code)
+			v, _ := Val[accounts.Code](w)
 			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
 				Flags:    commitment.CodeUpdate,
 				CodeHash: v.Hash.Value(),
 			})
 		case SelfDestructPath:
-			v, _ := w.ValAny().(bool)
+			v, _ := Val[bool](w)
 			if v {
 				updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
 					Flags: commitment.DeleteUpdate,
 				})
 			}
 		case StoragePath:
-			val, _ := w.ValAny().(uint256.Int)
+			val, _ := Val[uint256.Int](w)
 			vBytes := val.Bytes()
 			keyVal := hdr.Key.Value()
 			composite := make([]byte, 20+32)
@@ -1882,7 +1892,7 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	for i, w := range stripped {
 		h := w.Header()
 		if h.Address == addr && h.Path == BalancePath {
-			staleWrite, _ := w.ValAny().(uint256.Int)
+			staleWrite, _ := Val[uint256.Int](w)
 			// Remove the stale absolute write
 			stripped = append(stripped[:i], stripped[i+1:]...)
 			// Compute the TX's net effect on this balance
@@ -2393,7 +2403,7 @@ func (account *accountState) updateWrite(vw AnyVersionedWrite, accessIndex uint3
 	hdr := vw.Header()
 	switch hdr.Path {
 	case StoragePath:
-		val, _ := vw.ValAny().(uint256.Int)
+		val, _ := Val[uint256.Int](vw)
 		// Skip intra-tx net-zero storage writes: if this is the first write
 		// to the slot (no prior tx wrote to it) and the written value equals
 		// the original read value, it's a no-op that should remain as a read.
@@ -2404,7 +2414,7 @@ func (account *accountState) updateWrite(vw AnyVersionedWrite, accessIndex uint3
 		}
 		addStorageUpdate(account.changes, hdr.Key, val, accessIndex)
 	case BalancePath:
-		val, _ := vw.ValAny().(uint256.Int)
+		val, _ := Val[uint256.Int](vw)
 		// Skip non-zero balance writes for selfdestructed accounts within the
 		// SAME transaction (e.g. priority fee applied during finalize of the
 		// selfdestructing tx). Balance writes from LATER transactions (e.g. a
@@ -2449,13 +2459,13 @@ func (account *accountState) updateWrite(vw AnyVersionedWrite, accessIndex uint3
 		account.setBalanceValue(val)
 		account.balance.recordWrite(accessIndex, val)
 	case NoncePath:
-		val, _ := vw.ValAny().(uint64)
+		val, _ := Val[uint64](vw)
 		account.nonce.recordWrite(accessIndex, val)
 	case CodePath:
-		val, _ := vw.ValAny().(accounts.Code)
+		val, _ := Val[accounts.Code](vw)
 		account.code.recordWrite(accessIndex, val)
 	case SelfDestructPath:
-		val, _ := vw.ValAny().(bool)
+		val, _ := Val[bool](vw)
 		if val {
 			account.selfDestructed = true
 			account.selfDestructedAt = accessIndex

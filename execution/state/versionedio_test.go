@@ -29,6 +29,33 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func anyWriteVal(w AnyVersionedWrite) any {
+	switch w.Header().Path {
+	case AddressPath:
+		v, _ := Val[*accounts.Account](w)
+		return v
+	case BalancePath, StoragePath:
+		v, _ := Val[uint256.Int](w)
+		return v
+	case NoncePath, IncarnationPath:
+		v, _ := Val[uint64](w)
+		return v
+	case CodeHashPath:
+		v, _ := Val[accounts.CodeHash](w)
+		return v
+	case CodePath:
+		v, _ := Val[accounts.Code](w)
+		return v
+	case CodeSizePath:
+		v, _ := Val[int](w)
+		return v
+	case SelfDestructPath, CreateContractPath:
+		v, _ := Val[bool](w)
+		return v
+	}
+	return nil
+}
+
 // minimalStateReader is a no-op StateReader for tests that create fresh accounts.
 // All methods return zero/nil — the IBS will create new empty state objects.
 type minimalStateReader struct{}
@@ -552,7 +579,7 @@ func TestSetAccountBalanceOrDelete_UpdateExisting(t *testing.T) {
 	require.Len(t, result, 2, "no new entries should be added")
 	for _, w := range result {
 		if w.Header().Path == BalancePath {
-			bal := w.ValAny().(uint256.Int)
+			bal, _ := Val[uint256.Int](w)
 			require.Equal(t, uint256.NewInt(200), &bal, "balance should be updated to 200")
 		}
 	}
@@ -605,11 +632,14 @@ func TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty(t *testing.T) {
 		require.Equal(t, addr, w.Header().Address)
 		switch w.Header().Path {
 		case NoncePath:
-			require.Equal(t, uint64(0), w.ValAny())
+			gotNonce, _ := Val[uint64](w)
+			require.Equal(t, uint64(0), gotNonce)
 		case IncarnationPath:
-			require.Equal(t, uint64(0), w.ValAny())
+			gotInc, _ := Val[uint64](w)
+			require.Equal(t, uint64(0), gotInc)
 		case CodeHashPath:
-			require.Equal(t, accounts.EmptyCodeHash, w.ValAny())
+			gotCH, _ := Val[accounts.CodeHash](w)
+			require.Equal(t, accounts.EmptyCodeHash, gotCH)
 		}
 	}
 }
@@ -632,7 +662,8 @@ func TestSetAccountBalanceOrDelete_EIP161EmptyDeletion(t *testing.T) {
 
 	require.Len(t, result, 1, "existing writes should be stripped")
 	require.Equal(t, SelfDestructPath, result[0].Header().Path)
-	require.Equal(t, true, result[0].ValAny())
+	gotSD, _ := Val[bool](result[0])
+	require.Equal(t, true, gotSD)
 	require.Equal(t, addr, result[0].Header().Address)
 }
 
@@ -653,7 +684,7 @@ func TestSetAccountBalanceOrDelete_EIP161NonEmptyNotDeleted(t *testing.T) {
 	// Should update in-place, not delete.
 	require.Len(t, result, 1)
 	require.Equal(t, BalancePath, result[0].Header().Path)
-	bal := result[0].ValAny().(uint256.Int)
+	bal, _ := Val[uint256.Int](result[0])
 	require.True(t, bal.IsZero(), "balance should be set to zero")
 }
 

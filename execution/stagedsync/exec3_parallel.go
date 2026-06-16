@@ -1675,7 +1675,7 @@ func (result *execResult) calcFees(
 		}
 		switch h.Path {
 		case state.BalancePath:
-			v, ok := w.ValAny().(uint256.Int)
+			v, ok := state.Val[uint256.Int](w)
 			if !ok {
 				continue
 			}
@@ -1686,7 +1686,7 @@ func (result *execResult) calcFees(
 			}
 		case state.NoncePath:
 			if h.Address == result.Coinbase {
-				if n, ok := w.ValAny().(uint64); ok {
+				if n, ok := state.Val[uint64](w); ok {
 					coinbaseNonce = n
 				}
 			}
@@ -2567,7 +2567,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							if wh.Path != state.BalancePath {
 								continue
 							}
-							bal, ok := w.ValAny().(uint256.Int)
+							bal, ok := state.Val[uint256.Int](w)
 							if !ok {
 								continue
 							}
@@ -3090,7 +3090,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	for _, w := range writes {
 		h := w.Header()
 		if h.Path == state.SelfDestructPath && h.Version.Incarnation == incarnation {
-			if v, ok := w.ValAny().(bool); ok {
+			if v, ok := state.Val[bool](w); ok {
 				sdSet[h.Address] = v
 			}
 		}
@@ -3133,7 +3133,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			writeVal, _ := w.ValAny().(uint256.Int)
+			writeVal, _ := state.Val[uint256.Int](w)
 			// If addr was self-destructed by an earlier TX in this block, its
 			// storage was wiped — the effective baseline for any slot not
 			// re-written since is 0, regardless of what the versionMap (prior
@@ -3214,7 +3214,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// self-destructed (val=true). SelfDestructPath=false means the
 			// account was NOT deleted (e.g., contract creation via CREATE2
 			// sets selfdestructed=false after createObject).
-			destructed, _ := w.ValAny().(bool)
+			destructed, _ := state.Val[bool](w)
 			if destructed {
 				filtered = append(filtered, w)
 				for _, slot := range sdStorageSlots(h.Address) {
@@ -3308,7 +3308,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		for _, w := range writes {
 			h := w.Header()
 			if h.Address == addr && h.Path == state.CreateContractPath {
-				if v, ok := w.ValAny().(bool); ok && v {
+				if v, ok := state.Val[bool](w); ok && v {
 					hasCreateContract = true
 					break
 				}
@@ -3374,7 +3374,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				s = &acctState{}
 				acctStates[h.Address] = s
 			}
-			s.balance = w.ValAny().(uint256.Int)
+			s.balance, _ = state.Val[uint256.Int](w)
 			s.hasBal = true
 		case state.NoncePath:
 			s := acctStates[h.Address]
@@ -3382,7 +3382,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				s = &acctState{}
 				acctStates[h.Address] = s
 			}
-			s.nonce = w.ValAny().(uint64)
+			s.nonce, _ = state.Val[uint64](w)
 			s.hasNonce = true
 		case state.CodeHashPath:
 			s := acctStates[h.Address]
@@ -3390,7 +3390,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				s = &acctState{}
 				acctStates[h.Address] = s
 			}
-			s.codeHash = w.ValAny().(accounts.CodeHash)
+			s.codeHash, _ = state.Val[accounts.CodeHash](w)
 			s.hasCode = true
 		}
 	}
@@ -3464,7 +3464,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 				if rr.Value() != nil {
 					resolved = rr.Value().(uint256.Int)
 				} else {
-					resolved, _ = w.ValAny().(uint256.Int)
+					resolved, _ = state.Val[uint256.Int](w)
 				}
 			} else {
 				continue // not written by this TX

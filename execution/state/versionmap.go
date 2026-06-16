@@ -1007,7 +1007,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 
 // flushVWLocked routes a VersionedWrite into the typed AddressEntry field
 // matching its Path. Caller must hold vm.mu.Lock(). Cold (flush) path —
-// crosses the any boundary via ValAny() once per write.
+// asserts the concrete value via Val[T] once per write.
 func (vm *VersionMap) flushVWLocked(vw AnyVersionedWrite, complete bool) {
 	hdr := vw.Header()
 	e := vm.entryOrCreate(hdr.Address)
@@ -1015,38 +1015,37 @@ func (vm *VersionMap) flushVWLocked(vw AnyVersionedWrite, complete bool) {
 	addr := hdr.Address
 	switch hdr.Path {
 	case AddressPath:
-		v, _ := vw.ValAny().(*accounts.Account)
+		v, _ := Val[*accounts.Account](vw)
 		e.Address = putCell(e.Address, addr, AddressPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellAccount)
 	case SelfDestructPath:
-		v, _ := vw.ValAny().(bool)
+		v, _ := Val[bool](vw)
 		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellSelfDestruct)
 	case BalancePath:
-		v, _ := vw.ValAny().(uint256.Int)
+		v, _ := Val[uint256.Int](vw)
 		e.Balance = putCell(e.Balance, addr, BalancePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellBalance)
 	case NoncePath:
-		v, _ := vw.ValAny().(uint64)
+		v, _ := Val[uint64](vw)
 		e.Nonce = putCell(e.Nonce, addr, NoncePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellNonce)
 	case IncarnationPath:
-		v, _ := vw.ValAny().(uint64)
+		v, _ := Val[uint64](vw)
 		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellIncarnation)
 	case CodePath:
-		switch v := vw.ValAny().(type) {
-		case accounts.Code:
-			e.Code = putCell(e.Code, addr, CodePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v.Bytes, getCellCode)
-		case []byte:
-			e.Code = putCell(e.Code, addr, CodePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCode)
+		if c, ok := Val[accounts.Code](vw); ok {
+			e.Code = putCell(e.Code, addr, CodePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, c.Bytes, getCellCode)
+		} else if b, ok := Val[[]byte](vw); ok {
+			e.Code = putCell(e.Code, addr, CodePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, b, getCellCode)
 		}
 	case CodeHashPath:
-		v, _ := vw.ValAny().(accounts.CodeHash)
+		v, _ := Val[accounts.CodeHash](vw)
 		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCodeHash)
 	case CodeSizePath:
-		v, _ := vw.ValAny().(int)
+		v, _ := Val[int](vw)
 		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCodeSize)
 	case CreateContractPath:
-		v, _ := vw.ValAny().(bool)
+		v, _ := Val[bool](vw)
 		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCreateContract)
 	case StoragePath:
-		v, _ := vw.ValAny().(uint256.Int)
+		v, _ := Val[uint256.Int](vw)
 		if e.Storage == nil {
 			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 		}
