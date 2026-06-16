@@ -1,6 +1,8 @@
 name: Docs - Update disk sizes
 
-# Triggers after a successful sync-from-scratch run (archive, full, or minimal node).
+# Triggers after a successful sync-from-scratch run (full or minimal node).
+# Archive sizes are not handled here: they are read manually from the Grafana
+# dashboard and committed by hand in a dedicated monthly PR.
 # Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
 # and opens (or updates) a draft PR against a pinned base branch (release/3.5).
 on:
@@ -32,7 +34,6 @@ on:
         options:
           - full
           - minimal
-          - archive
 
 permissions:
   contents: write
@@ -66,7 +67,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             case "$INPUT_PRUNE_MODE" in
-              full|minimal|archive) ;;
+              full|minimal) ;;
               *)
                 echo "::error::Invalid prune mode: $INPUT_PRUNE_MODE"
                 exit 1
@@ -87,13 +88,13 @@ jobs:
             # Map the producing workflow → the mode it measured:
             #   "QA - Sync from scratch (minimal node)" → minimal
             #   "QA - Sync from scratch (full node)"    → full
-            #   "QA - Sync from scratch" (archive)      → archive
             if [[ "$WORKFLOW_RUN_NAME" == *"minimal"* ]]; then
               MODE=minimal
             elif [[ "$WORKFLOW_RUN_NAME" == *"full node"* ]]; then
               MODE=full
             else
-              MODE=archive
+              echo "::error::Unexpected producing workflow: $WORKFLOW_RUN_NAME"
+              exit 1
             fi
             printf 'prune_mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
