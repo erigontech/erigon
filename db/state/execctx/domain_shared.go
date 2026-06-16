@@ -727,18 +727,34 @@ type branchCacheUpdate struct {
 	txN  uint64
 }
 
-// Commit flushes the in-memory batch into tx, commits tx, and only then applies
-// the flushed commitment branches to the BranchCache. The flush is implicit in
-// committing the shared-domain state. Tying cache population to commit success
-// makes it impossible by construction for the aggregator-lifetime cache to hold
-// a value a failed commit rolled back — so no caller clears the cache or reaches
-// into the SD's internal caches after committing. tx MUST be a flush-specific
-// transaction: it is committed here.
-func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
+// Commit flushes the in-memory batch into tx, runs the optional validate hooks
+// (which see the flushed-but-uncommitted state on tx and may fail the commit),
+// commits tx, and only then applies the flushed commitment branches to the
+// BranchCache. Tying cache population to commit success makes it impossible by
+// construction for the aggregator-lifetime cache to hold a value a failed commit
+// rolled back. Commit is terminal: the SharedDomains is spent afterwards (its
+// mem is left for GC), so callers needing another batch open a fresh one rather
+// than reuse this. tx MUST be a flush-specific transaction: it is committed here.
+func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+
+	runValidate := func() error {
+		for _, v := range validate {
+			if v == nil {
+				continue
+			}
+			if err := v(tx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	if sd.branchCache == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
+			return err
+		}
+		if err := runValidate(); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -753,6 +769,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
 			key: append([]byte(nil), k...), val: append([]byte(nil), v...), step: step, txN: txNum,
 		})
 	}); err != nil {
+		return err
+	}
+	if err := runValidate(); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
