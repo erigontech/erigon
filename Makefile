@@ -304,6 +304,16 @@ test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout
 test-bench:
 	$(GOTEST)
 
+## fuzz PKG=<pkg> FUZZ=<FuzzName> [FUZZTIME=60s]:  run one Go fuzz target (see docs/fuzzing.md)
+.PHONY: fuzz
+fuzz:
+	@if [ -z "$(FUZZ)" ] || [ -z "$(PKG)" ]; then \
+		echo "usage: make fuzz PKG=<pkg> FUZZ=<FuzzName> [FUZZTIME=60s]"; \
+		echo "   e.g. make fuzz PKG=./db/seg FUZZ=FuzzCompress FUZZTIME=30s"; \
+		exit 2; \
+	fi
+	$(GO) test $(PKG) -run '^$$' -fuzz '^$(FUZZ)$$' -fuzztime $(or $(FUZZTIME),60s)
+
 test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
 test-all-race: test-filtered
 
