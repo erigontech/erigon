@@ -248,44 +248,7 @@ func assertEquivalentRootWorkers(
 	numWorkers int,
 ) []byte {
 	t.Helper()
-	ctx := context.Background()
-
-	// Sequential side.
-	seqMs := NewMockState(t)
-	require.NoError(t, seqMs.applyPlainUpdates(plainKeys, updates))
-	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
-	defer seqTrie.Release()
-	seqUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer seqUpds.Close()
-	seqRoot, err := seqTrie.Process(ctx, seqUpds, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-
-	// Parallel side.
-	parMs := NewMockState(t)
-	parMs.SetConcurrentCommitment(true)
-	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
-	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
-	defer parTrie.Release()
-	parTrie.SetNumWorkers(numWorkers)
-	parTrie.ResetContext(parMs)
-
-	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer parUpds.Close()
-	for i, k := range plainKeys {
-		i, k := i, k
-		ks := string(k)
-		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &updates[i]
-		})
-	}
-	parRoot, err := parTrie.Process(ctx, parUpds, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-
-	require.Equal(t, seqRoot, parRoot,
-		"sequential and parallel root hashes must match (numWorkers=%d)", numWorkers)
-	return seqRoot
+	return requireRootParity(t, plainKeys, updates, numWorkers)
 }
 
 // TestParallelProcessSkeleton_EmptyUpdates: zero touched keys. Both modes

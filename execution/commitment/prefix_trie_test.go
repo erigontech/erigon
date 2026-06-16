@@ -25,13 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// nibs converts a byte slice (one nibble per byte) helper for readability.
-func nibs(vals ...byte) []byte {
-	out := make([]byte, len(vals))
-	copy(out, vals)
-	return out
-}
-
 // collectWalk returns the set of (prefix, subtreeCount) pairs in DFS order.
 type walkEntry struct {
 	prefix       []byte

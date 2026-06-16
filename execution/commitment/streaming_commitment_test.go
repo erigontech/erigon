@@ -63,9 +63,8 @@ func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxO
 	ms.SetConcurrentCommitment(true)
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	sc := newStreamCommitter(t, ms, workers, false)
 	defer sc.Release()
-	sc.SetNumWorkers(workers)
 	for _, i := range idxOrder {
 		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
 	}
@@ -77,40 +76,7 @@ func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxO
 // sequentialRoot drives the sequential HexPatriciaHashed, returning root + state.
 func sequentialRoot(t *testing.T, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	defer tr.Release()
-	ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
-	defer ut.Close()
-	root, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	return root, ms
-}
-
-// requireBranchParity asserts the two MockStates hold byte-identical branches.
-func requireBranchParity(t *testing.T, seq, got *MockState) {
-	t.Helper()
-	mism := 0
-	seen := map[string]struct{}{}
-	for k := range seq.cm {
-		seen[k] = struct{}{}
-	}
-	for k := range got.cm {
-		seen[k] = struct{}{}
-	}
-	for k := range seen {
-		sb, sok := seq.cm[k]
-		pb, pok := got.cm[k]
-		if !sok || !pok || !bytes.Equal(sb, pb) {
-			mism++
-		}
-	}
-	if mism != 0 {
-		branchDiff(t, seq, got)
-	}
-	require.Equal(t, len(seq.cm), len(got.cm), "branch count must match")
-	require.Zero(t, mism, "stored branch metadata differs between streaming and sequential")
+	return engineRoot(t, modeSeq, 0, keys, upds)
 }
 
 // TestStreaming_RandomOrderParity feeds the mixed corpus through TouchKey in
@@ -186,26 +152,6 @@ func TestStreaming_DeepLocalWalkUsed(t *testing.T) {
 	require.Equal(t, seqRoot, root, "streaming-local deep root != sequential")
 	requireBranchParity(t, seqMs, ms)
 	require.NotZero(t, sc.DeepLocalFolds(), "deep account must fold through the streaming-local walk")
-}
-
-// snapshotBranches deep-copies a MockState's stored branches so a later
-// comparison can detect any mid-block write.
-func snapshotBranches(ms *MockState) map[string][]byte {
-	snap := make(map[string][]byte, len(ms.cm))
-	for k, v := range ms.cm {
-		snap[k] = append([]byte(nil), v...)
-	}
-	return snap
-}
-
-// requireBranchesUnchanged asserts ms holds exactly the snapshot branches — used
-// to prove a mid-block re-fold deferred everything and wrote nothing.
-func requireBranchesUnchanged(t *testing.T, snap map[string][]byte, ms *MockState) {
-	t.Helper()
-	require.Equalf(t, len(snap), len(ms.cm), "a mid-block re-fold changed the stored branch count")
-	for k, v := range ms.cm {
-		require.Truef(t, bytes.Equal(snap[k], v), "a mid-block re-fold wrote branch %x", []byte(k))
-	}
 }
 
 // TestStreaming_NonEmptyPrevRefold is the novel-correctness claim: re-folding a
@@ -708,9 +654,8 @@ func streamingViaUpdatesRoot(t *testing.T, workers int, keys [][]byte, upds []Up
 	ms.SetConcurrentCommitment(true)
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	sc := newStreamCommitter(t, ms, workers, false)
 	defer sc.Release()
-	sc.SetNumWorkers(workers)
 
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
@@ -821,27 +766,7 @@ func TestInitializeTrieAndUpdates_StreamingVariant(t *testing.T) {
 // (the Trie interface), unlike streamingViaUpdatesRoot which calls sc.Process.
 func streamingViaPublicProcessRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantStreamingHexPatricia
-	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer ut.Close()
-	defer trie.Release()
-
-	pt := trie.(*ParallelPatriciaHashed)
-	pt.SetNumWorkers(workers)
-	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-	pt.ResetContext(ms)
-
-	for _, key := range keys {
-		ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
-	}
-	root, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	return root, ms
+	return engineRoot(t, modeStreamingPublic, workers, keys, upds)
 }
 
 // TestStreaming_PublicProcessParity is the Task-7 integration check: the

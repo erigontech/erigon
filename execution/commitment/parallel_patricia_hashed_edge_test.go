@@ -18,7 +18,6 @@ package commitment
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
@@ -113,22 +112,6 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 		prevRoot = seqRoot
 	}
 	return prevRoot
-}
-
-// nibbleAddr returns an address whose hashed first nibble matches targetNibble
-// and whose seed differentiates it from other addresses in the same nibble.
-// Wraps the existing findAddressForNibble cache.
-func nibbleAddr(targetNibble, seed int) []byte {
-	return findAddressForNibble(targetNibble, seed)
-}
-
-// slotHashBytes returns a 32-byte storage slot identifier derived from i.
-// Each i produces a distinct slot; the values are deterministic so tests
-// reproduce across runs.
-func slotHashBytes(i int) []byte {
-	var out [32]byte
-	binary.BigEndian.PutUint64(out[24:], uint64(i)+1)
-	return out[:]
 }
 
 // TestParallelDeleteWithSurvivingSiblings exercises touched-and-deleted cells

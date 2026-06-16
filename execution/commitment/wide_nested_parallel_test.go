@@ -1,7 +1,6 @@
 package commitment
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"testing"
@@ -183,79 +182,11 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 	return k2, u2
 }
 
-// runMode selects which commitment engine runIncremental drives.
-type runMode int
-
-const (
-	modeSeq runMode = iota
-	modeParallel
-	modeStreaming
-	modeStreamingScheduled
-)
-
 // runIncremental applies two batches to one MockState (batch-1 branches become
 // DB state for batch-2) and returns the final root and the MockState.
 func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
-	ctx := context.Background()
-	ms := NewMockState(t)
-	if mode != modeSeq {
-		ms.SetConcurrentCommitment(true)
-	}
-	process := func(keys [][]byte, upds []Update) []byte {
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-		switch mode {
-		case modeParallel:
-			tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-			defer tr.Release()
-			tr.SetNumWorkers(workers)
-			tr.ResetContext(ms)
-			ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-			defer ut.Close()
-			for i, k := range keys {
-				ks := string(k)
-				ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-					c.plainKey = ks
-					c.hashedKey = KeyToHexNibbleHash(k)
-					c.update = &upds[i]
-				})
-			}
-			r, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-			return r
-		case modeStreaming:
-			sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-			defer sc.Release()
-			sc.SetNumWorkers(workers)
-			for _, k := range keys {
-				sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-			}
-			r, err := sc.Process(ctx)
-			require.NoError(t, err)
-			return r
-		case modeStreamingScheduled:
-			sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-			defer sc.Release()
-			sc.SetNumWorkers(workers)
-			require.NoError(t, sc.StartScheduler(ctx))
-			for _, k := range keys {
-				sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-			}
-			r, err := sc.Process(ctx)
-			require.NoError(t, err)
-			return r
-		default:
-			tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-			defer tr.Release()
-			ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
-			defer ut.Close()
-			r, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-			return r
-		}
-	}
-	process(k1, u1)
-	return process(k2, u2), ms
+	return incrementalRoot(t, mode, workers, k1, u1, k2, u2)
 }
 
 // requireIncrementalEquiv asserts the parallel AND streaming roots match the
@@ -263,59 +194,7 @@ func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []U
 // mismatch.
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
-	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
-
-	parRoot, parMs := runIncremental(t, modeParallel, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, parRoot) {
-		branchDiff(t, seqMs, parMs)
-	}
-	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
-
-	strRoot, strMs := runIncremental(t, modeStreaming, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, strRoot) {
-		branchDiff(t, seqMs, strMs)
-	}
-	require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) vs sequential root mismatch", workers)
-
-	schRoot, schMs := runIncremental(t, modeStreamingScheduled, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, schRoot) {
-		branchDiff(t, seqMs, schMs)
-	}
-	require.Equalf(t, seqRoot, schRoot, "streaming-scheduled(workers=%d) vs sequential root mismatch", workers)
-}
-
-// branchDiff logs every stored branch prefix whose encoding differs between the
-// sequential and parallel runs, decoding both afterMaps so dropped nibbles show.
-func branchDiff(t *testing.T, seq, par *MockState) {
-	t.Helper()
-	seen := map[string]struct{}{}
-	for k := range seq.cm {
-		seen[k] = struct{}{}
-	}
-	for k := range par.cm {
-		seen[k] = struct{}{}
-	}
-	n := 0
-	for k := range seen {
-		sb, sok := seq.cm[k]
-		pb, pok := par.cm[k]
-		if sok && pok && bytes.Equal(sb, pb) {
-			continue
-		}
-		var sa, pa uint16
-		if sok {
-			_, sa, _, _ = BranchData(sb).decodeCells()
-		}
-		if pok {
-			_, pa, _, _ = BranchData(pb).decodeCells()
-		}
-		t.Logf("DIVERGENT prefix=%x depth=%d seq[%v %016b] par[%v %016b] dropped=%016b", []byte(k), len(k), sok, sa, pok, pa, sa&^pa)
-		if n++; n > 20 {
-			t.Log("... (more)")
-			break
-		}
-	}
-	t.Logf("total divergent branches: %d", n)
+	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
 }
 
 // TestVerifyParallel_WideNested: single batch over a deeply-nested wide trie.

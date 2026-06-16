@@ -44,28 +44,7 @@ func buildMultiDepthCorpus() (keys [][]byte, upds []Update) {
 // the MockState (with committed branches) for parity comparison.
 func parallelRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer tr.Release()
-	tr.SetNumWorkers(workers)
-	tr.ResetContext(ms)
-
-	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer ut.Close()
-	for i, k := range keys {
-		ks := string(k)
-		ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &upds[i]
-		})
-	}
-	root, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	return root, ms
+	return engineRoot(t, modeParallel, workers, keys, upds)
 }
 
 // TestStreaming_MultiDepthSplitParity is the headline Task-5 parity gate: a
