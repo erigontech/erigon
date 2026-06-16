@@ -285,6 +285,63 @@ func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
 	}
 }
 
+func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
+	f := Footer{
+		Meta:          Metadata{KeysCount: 12345, M: 256, EfOffset: 1 << 33}, // EfOffset > 4GiB: must be uint64
+		FormatVersion: btFooterFormatVersion,
+	}
+	var buf bytes.Buffer
+	require.NoError(t, f.Encode(&buf))
+	require.Equal(t, btMetadataLen+btAnchorLen, buf.Len())
+
+	got, footerStart, err := ReadFooter(buf.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, 0, footerStart) // no body in this isolated buffer
+	require.Equal(t, f.Meta.KeysCount, got.Meta.KeysCount)
+	require.Equal(t, f.Meta.M, got.Meta.M)
+	require.Equal(t, f.Meta.EfOffset, got.Meta.EfOffset)
+	require.Equal(t, f.FormatVersion, got.FormatVersion)
+
+	// missing/wrong magic -> legacy fallback signal, not a hard error
+	_, _, err = ReadFooter(bytes.Repeat([]byte{0xAB}, btMetadataLen+btAnchorLen))
+	require.ErrorIs(t, err, errNotFooterFormat)
+	_, _, err = ReadFooter([]byte{0x00})
+	require.ErrorIs(t, err, errNotFooterFormat)
+}
+
+func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	keyCount := 5000
+	compressFlags := seg.CompressKeys | seg.CompressVals
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+
+	v2Path := filepath.Join(tmp, "v2.bt")
+	buildBtreeIndex(t, dataPath, v2Path, compressFlags, 1, logger, true)
+
+	data, err := os.ReadFile(v2Path)
+	require.NoError(t, err)
+	footer, footerStart, err := ReadFooter(data)
+	require.NoError(t, err)
+	require.EqualValues(t, keyCount, footer.Meta.KeysCount)
+	require.EqualValues(t, DefaultBtreeM, footer.Meta.M)
+
+	require.Zero(t, footer.Meta.EfOffset%btKeysAlign, "EF must start 4kb-aligned")
+	require.Positive(t, footer.Meta.EfOffset)
+	require.Less(t, int(footer.Meta.EfOffset), footerStart)
+
+	// EfOffset must point at a valid EF holding all keys...
+	ef, _ := eliasfano32.ReadEliasFano(data[footer.Meta.EfOffset:])
+	require.EqualValues(t, keyCount, ef.Count())
+
+	// ...and equal the position the reader would otherwise derive from the nodes section.
+	nodesCount := (footer.Meta.KeysCount + footer.Meta.M - 1) / footer.Meta.M
+	_, nodesEnd, err := decodeNodes(data, nodesCount, footer.Meta.M)
+	require.NoError(t, err)
+	require.EqualValues(t, alignUp(nodesEnd, btKeysAlign), footer.Meta.EfOffset)
+}
+
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
 func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
 	tb.Helper()
