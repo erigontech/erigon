@@ -25,6 +25,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// TODO(EIP-8282): Define final compiled contract bytecodes here when finalized:
+// var builderDepositRequestCode = []byte{...}
+// var builderExitRequestCode = []byte{...}
+
 // https://eips.ethereum.org/EIPS/eip-8282
 func DequeueBuilderDepositRequests(syscall rules.SystemCall, state *state.IntraBlockState, builderDepositAddress accounts.Address) (*types.FlatRequest, error) {
 	codeSize, err := state.GetCodeSize(builderDepositAddress)
