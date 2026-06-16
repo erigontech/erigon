@@ -318,8 +318,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
 	// both operations that clear all storage.  If a prior TX wrote it, the
 	// account was created or destroyed in this block and HasStorage should
-	// return false.  This mirrors the same check in versionedRead for
-	// StoragePath (versionedio.go:660-703).
+	// return false. Mirrors the StoragePath check in versionedRead.
 	if sdb.versionMap != nil {
 		incRes := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex)
 		if incRes.Status() == MVReadResultDone {
@@ -339,7 +338,9 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
-	// Otherwise check in the DB
+	// EIP-684 CREATE-collision fall-through: the in-memory checks missed, so ask
+	// the reader — on snapshot-backed storage this is a kv.HasPrefix(StorageDomain)
+	// walk through the .bt index, a validation hot-path cost.
 	result, err := sdb.stateReader.HasStorage(addr)
 	return result, err
 }
