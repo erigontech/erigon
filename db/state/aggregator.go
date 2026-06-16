@@ -342,14 +342,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	}
 	a.configured = true
 
-	// Attach the long-lived commitment branch cache to the commitment
-	// domain. Lifetime = aggregator lifetime; shared by every
-	// SharedDomains derived from this aggregator. Idempotent across
-	// repeated ConfigureDomains calls (early return above). The BranchCache
-	// is a state cache, so it rides the same USE_STATE_CACHE switch as the
-	// account/storage StateCache: one operator switch turns all caching off
-	// (e.g. when bisecting a state-root mismatch), and a nil cache is the
-	// documented "disabled" path that every consumer already tolerates.
+	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated by USE_STATE_CACHE, nil = disabled.
 	if dbg.UseStateCache {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
@@ -2367,11 +2360,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-// BranchCache returns the long-lived commitment branch cache attached to
-// this aggregator's commitment domain. Implements
-// commitment.BranchCacheProvider so the SharedDomains construction path
-// can fetch the cache via a tx.AggTx() type assertion without forcing
-// db/state/execctx to import db/state (which would create a cycle).
+// BranchCache attached to the commitment domain (implements commitment.BranchCacheProvider).
 func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 	if at.d[kv.CommitmentDomain] == nil {
 		return nil

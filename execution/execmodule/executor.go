@@ -115,14 +115,7 @@ func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCyc
 	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
 }
 
-// CommitCycleFn is called after PruneFn to persist the iteration's writes
-// and refresh the loop's tx. Implementations typically open a fresh RwTx,
-// CommitCycleFn commits sd and, when another iteration follows, returns the
-// fresh tx + fresh SharedDomains to run it on (the committed sd is never reset
-// and reused). The impl builds its own SD because the coupling differs: the
-// executor opens a new tx then an SD on it; the FCU path builds the SD then
-// uses its block overlay as the tx. Returns (nil, nil, nil) to leave the loop's
-// tx/SD unchanged (e.g. the FCU chain-tip path that commits after the loop).
+// Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
 type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error)
 
 // PruneFn replaces the in-loop pe.sync.RunPrune call. It is called after
@@ -144,10 +137,7 @@ type RunLoopConfig struct {
 
 // RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
 // Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
-// RunLoop returns the final tx and the final operational SharedDomains. The
-// caller owns that SD: it must commit it if its CommitCycle didn't (the FCU
-// chain-tip path commits post-loop) and then close it. Intermediate SDs rotated
-// in by NewSD are committed by CommitCycle and closed here.
+// Returns the final tx and operational SD, owned by the caller (commit if CommitCycle didn't, then close). Intermediate SDs are closed here.
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 	stop := false
 	for hasMore := true; hasMore && !stop; {

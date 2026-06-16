@@ -225,10 +225,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 				}
 				defer tx.Rollback()
 
-				// Per-subtest SD scope: caller-owned, never Flushed. Closing
-				// without Flush discards every write made during the subtest
-				// (pre-state + tx execution + commitment), so per-subtest state
-				// never enters the long-lived branch cache.
+				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
 				sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
@@ -250,10 +247,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 					}
 				}
 				if bench {
-					// Reuse the subtest's tx + sd: a second concurrent rwtx on
-					// the same env would deadlock, and timedExec runs the closure
-					// once before the measured testing.Benchmark loop, so every
-					// timed iteration already runs against warmed-up state.
+					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
 						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
 						return nil, gasUsed, nil

@@ -26,10 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
-// A read-through populates the aggregator-scope BranchCache with the committed
-// value; the squeeze/rebuild loop overwrites that branch and persists it via
-// Commit (not plain Flush, which would leave the read-through entry stale).
-// A fresh SharedDomains must then read the newly committed branch.
+// Use Commit (not Flush) so the rebuilt branch refreshes the BranchCache entry.
 func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	stepSize := uint64(100)
 	db := newTestDb(t, stepSize)

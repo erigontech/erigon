@@ -174,11 +174,7 @@ func (l *LRU[V]) DeleteByHash(hash uint64) {
 // recency (uses Peek under the hood). Iteration order is unspecified.
 // Return false from fn to stop early.
 //
-// The original byte-key is not recoverable — Set hashes-and-discards.
-// Use the hash itself as the identity in callers that need cross-cache
-// comparisons; same byte-key always maps to the same hash, so equality
-// of (hash, value) sets is equivalent to equality of (key, value) sets
-// modulo collision (vanishingly unlikely at typical working-set sizes).
+// The original byte-key is not recoverable; use the hash as identity (same key → same hash, collisions aside).
 func (l *LRU[V]) Range(fn func(hash uint64, v V) bool) {
 	for _, h := range l.cache.Keys() {
 		v, ok := l.cache.Peek(h)

@@ -516,18 +516,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain the validation SD to the canonical generation (currentContext) so
-	// the parent link is available for two cases:
-	//  1. Head-extending payloads read the canonical generation's
-	//     not-yet-committed domain state instead of stale MDBX.
-	//  2. Fork payloads: unwindToCommonCanonical builds an unwind set from the
-	//     unwound canonical blocks' diffsets, which live in the canonical
-	//     generation's pastChangesAccumulator — reachable only through this
-	//     parent (GetDiffset chains to it). Without it the unwind runs with no
-	//     unwind set, leaving the BranchCache unmasked and corrupting the root.
-	// The parent does not shadow the unwound base: after unwindToCommonCanonical,
-	// doms.mem.unwindChangeset holds every unwound key and getLatest resolves
-	// those before consulting the parent.
+	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}

@@ -124,22 +124,10 @@ type SharedDomains struct {
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
-	// changesetMu serializes the parallel commitment calculator's swap of the
-	// global current-changeset-accumulator pointer against DomainPut/DomainDel.
-	// Without it, account/storage writes for block N+1 can land in block N's
-	// changeset during the calculator's swap+compute+restore window, so a later
-	// unwind reads stale prev-values and computes wrong roots (reorg/fork tests).
-	// A band-aid for execution being coupled to unwind-side accumulator
-	// machinery; removable once per-block changesets are derived post-hoc from
-	// the (now tx-granular) sd entries at Flush time.
+	// Serializes the calculator's changeset-accumulator swap against DomainPut/DomainDel; without it block N+1 writes can land in block N's changeset.
 	changesetMu sync.Mutex
 
-	// branchCache is the aggregator-scope commitment-branch cache. It sits
-	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
-	// both miss, before the aggTx files/MDBX read), so writers' in-flight
-	// bytes always mask the cache and cross-SD pollution is impossible.
-	// May be nil for test setups whose AggTx doesn't implement
-	// commitment.BranchCacheProvider.
+	// Aggregator-scope commitment-branch cache, consulted only after sd.mem/parent.mem miss. Nil when AggTx is not a BranchCacheProvider.
 	branchCache *commitment.BranchCache
 }
 
@@ -172,11 +160,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	// Fetch the aggregator-scope branch cache (lives on the commitment
-	// Domain, shared across all SharedDomains derived from this
-	// aggregator). The duck-typed BranchCacheProvider lookup avoids
-	// importing db/state directly — db/state already imports execctx, so
-	// the reverse import would create a cycle.
+	// Duck-typed lookup; see BranchCacheProvider for why this avoids an import cycle.
 	var branchCache *commitment.BranchCache
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
 		branchCache = p.BranchCache()
@@ -503,11 +487,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	if ok || err != nil {
 		return d, ok, err
 	}
-	// Resolve through the parent chain: a fork-validation SD is freshly
-	// constructed with an empty mem batch, so the diffsets of the canonical
-	// blocks it must unwind live in the canonical generation's
-	// pastChangesAccumulator, reachable only via the parent link. Without
-	// this an unwind silently runs with no unwind set.
+	// Fork-validation SDs hold the unwind diffsets only in the parent generation; resolve via the parent link.
 	if sd.parent != nil {
 		return sd.parent.GetDiffset(tx, blockHash, blockNumber)
 	}
@@ -671,18 +651,9 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-// The state caches (the account/storage StateCache and the commitment
-// BranchCache) are an internal implementation detail of SharedDomains. No
-// external entity accesses or mutates them directly — callers drive state
-// through Flush / Commit / GetLatest / DomainPut, and the cache lifecycle
-// (population, invalidation, commit-gating) is owned entirely here.
-
-// Flush writes the in-memory batch into tx without committing; unlike Commit it
-// does not refresh the BranchCache, so a self-committing caller can leave an
-// earlier read-through entry stale for the next SharedDomains.
+// Flush writes the batch to tx without committing and does not refresh the BranchCache.
 //
-// Deprecated: prefer Commit (atomic flush+commit+cache refresh). Use Flush only
-// when the caller must own the commit or flushes a tx it never commits.
+// Deprecated: prefer Commit (flush+commit+cache refresh, atomic). Use Flush only when the caller must own the commit or flushes a tx it never commits.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)
@@ -693,9 +664,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // sync with the durable state.
 type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
 
-// commitmentFlusher is the optional flush-with-callback path on the mem batch.
-// It is kept off kv.TemporalMemBatch so the cache concern stays in db/state +
-// execctx; test stubs need not implement it.
+// commitmentFlusher is the optional flush-with-callback path; test stubs need not implement it.
 type commitmentFlusher interface {
 	FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb CommitmentFlushCallback) error
 }
@@ -732,14 +701,7 @@ type branchCacheUpdate struct {
 	txN  uint64
 }
 
-// Commit flushes the in-memory batch into tx, runs the optional validate hooks
-// (which see the flushed-but-uncommitted state on tx and may fail the commit),
-// commits tx, and only then applies the flushed commitment branches to the
-// BranchCache. Tying cache population to commit success makes it impossible by
-// construction for the aggregator-lifetime cache to hold a value a failed commit
-// rolled back. Commit is terminal: the SharedDomains is spent afterwards (its
-// mem is left for GC), so callers needing another batch open a fresh one rather
-// than reuse this. tx MUST be a flush-specific transaction: it is committed here.
+// Commit flushes the batch, runs the validate hooks, commits tx, then applies the flushed commitment branches to the BranchCache only on success. Commit is terminal: the SharedDomains is spent afterwards. tx is committed here.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 
@@ -765,9 +727,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return tx.Commit()
 	}
 
-	// Stash the committed-domain branch tuples during the flush; apply them to
-	// the cache only after the commit succeeds. On a failed commit the stash is
-	// discarded, so the cache is never advanced past durable MDBX state.
+	// Applied to the cache only after commit succeeds.
 	var pending []branchCacheUpdate
 	if err := sd.flushMemWithCallback(ctx, tx, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 		pending = append(pending, branchCacheUpdate{
@@ -837,9 +797,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
-	// MeteredGetterWithTxN exposes the txN of the read so the
-	// BranchCache entry can be tagged; falls back to MeteredGetter
-	// when only the legacy interface is implemented (test stubs).
+	// Exposes read txN for BranchCache tagging; falls back to MeteredGetter.
 	type MeteredGetterWithTxN interface {
 		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
 	}
@@ -875,12 +833,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// branchCache sits between sd.mem/parent.mem and the aggTx files for
-	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
-	// bytes are held in sd.mem above, so a cache hit here is always
-	// equivalent to reading from MDBX. Refreshed per-key by sd.Flush and
-	// evicted by txN watermark on unwind, so a cache hit never coexists
-	// with a newer MDBX state.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cstep, ok := sd.branchCache.Get(k); ok {
 			return cv, kv.Step(cstep), nil

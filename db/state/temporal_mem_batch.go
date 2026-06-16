@@ -795,11 +795,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	return sd.flushLocked(ctx, tx)
 }
 
-// FlushWithCommitmentCallback flushes the batch and, if cb is non-nil, invokes it
-// for each commitment-domain (key, value, step, txNum) tuple after the write so
-// SharedDomains can keep the BranchCache in sync; the lock is held throughout so
-// the callback sees the flushed snapshot. Kept off kv.TemporalMemBatch so the
-// cache concern stays in db/state + execctx.
+// Flushes the batch then invokes cb per commitment tuple under the lock.
 func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()

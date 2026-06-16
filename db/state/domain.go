@@ -90,11 +90,7 @@ type Domain struct {
 
 	checker *DependencyIntegrityChecker
 
-	// branchCache is the long-lived commitment-trie branch cache pinned to
-	// the aggregator. Set in ConfigureDomains for the commitment domain
-	// only; nil for every other domain. Lifetime = aggregator lifetime,
-	// independent of any single tx, batch, or SharedDomains. See
-	// commitment.BranchCacheProvider for the SDs' access path.
+	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
 	branchCache *commitment.BranchCache
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor

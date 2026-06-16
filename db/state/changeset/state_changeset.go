@@ -570,10 +570,7 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	}
 }
 
-// lenBucket maps a prefix byte-length to its UniqueLenBuckets index.
-// See DomainIOMetrics.UniqueLenBuckets for the bucket layout. Buckets
-// 5-8 sub-divide the storage subtree (depths 64-127) so per-contract
-// trunk vs deep leaf-parent reads are distinguishable.
+// Maps prefix byte-length to a UniqueLenBuckets index.
 func lenBucket(n int) int {
 	switch {
 	case n <= 1:
@@ -599,16 +596,9 @@ func lenBucket(n int) int {
 	}
 }
 
-// UpdateFileReadsUnique records a file read while also tracking whether
-// the prefix has been seen before for this domain. Same gate as
-// UpdateFileReads (dbg.KVReadLevelledMetrics); call this instead when
-// the read-amplification ratio (FileReadCount / UniqueFileReadCount)
-// is wanted on the metric output. The key bytes are copied into the
-// internal dedup map; do not mutate after the call.
+// Like UpdateFileReads but also tracks prefix uniqueness for the read-amplification ratio; copies key.
 func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
-	// Composite "<domain>:<key>" so two domains can hold the same prefix
-	// shape (commitment compact-encoded paths vs accounts plain addresses)
-	// without colliding.
+	// Composite key so two domains can hold the same prefix shape without colliding.
 	domainKey := domain.String() + ":" + string(key)
 	alreadySeen := true
 	if dm.seenFileReadsLen.Load() < maxSeenFileReads {

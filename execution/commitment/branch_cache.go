@@ -24,12 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-// KeyCommitmentState is the commitment-domain key under which the trie
-// checkpoint (txNum / blockNum / encoded root state) is stored. It is NOT a
-// trie branch: it changes every block, so it must never enter the
-// BranchCache — serving a stale checkpoint restores the trie to the wrong
-// state and corrupts the computed root. BranchCache.Put/Get reject
-// it by construction so no caller can pollute the cache with it.
+// KeyCommitmentState is the trie checkpoint key, not a trie branch (changes every block); it must never enter the BranchCache. Put/Get reject it by construction.
 var KeyCommitmentState = []byte("state")
 
 func isCommitmentStateKey(prefix []byte) bool {
@@ -42,14 +37,7 @@ func isCommitmentStateKey(prefix []byte) bool {
 // trie walker/encoder drives all reads and writes; the cache never reaches
 // into underlying state.
 //
-// Concurrency: the LRU tail and the atomic-pointer root slot are individually
-// thread-safe, but the cache assumes a single writer per prefix (last-Put-wins
-// with no cross-writer coordination). The concurrent trie satisfies this by
-// partitioning the prefix space by first nibble across mounts and writing the
-// root branch only in the sequential post-Wait root fold. Any future design
-// that breaks single-writer-per-prefix (e.g. parallel tree-reduce fold, or a
-// different prefix partitioning) must add per-prefix coordination at the
-// orchestrator layer — do not add internal locking here.
+// Concurrency: thread-safe per prefix only; assumes a single writer per prefix (last-Put-wins). Callers must coordinate if that's broken — no internal locking here.
 type BranchCache struct {
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
@@ -71,11 +59,7 @@ type branchCacheEntry struct {
 	// prefix). Always populated by Put.
 	data []byte
 
-	// step is the on-disk file step the cached bytes came from. Returned
-	// by Get so callers (e.g. CheckDataAvailable) can validate against
-	// the latest visible step. 0 means "step not tracked" — fine for
-	// in-memory tests but real callers should always pass the step
-	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
+	// On-disk file step the bytes came from; 0 = not tracked.
 	step uint64
 
 	// txN is the high-water txN this entry is valid through. UnwindTo
@@ -89,15 +73,7 @@ type branchCacheEntry struct {
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
 
-// BranchCacheProvider exposes the long-lived BranchCache attached to the
-// commitment domain. Implemented by *db/state.AggregatorRoTx (via duck
-// typing) so callers in the SharedDomains construction path can fetch the
-// cache without forcing db/state/execctx to import db/state — that import
-// would create a cycle since db/state imports execctx (squeeze.go,
-// trie_reader_integration_test.go, …).
-//
-// Returning nil is permitted; callers MUST treat nil as "no shared cache,
-// behave as if disabled" rather than panic.
+// Implemented by *db/state.AggregatorRoTx via duck typing to avoid an execctx→db/state import cycle. Nil means caching is disabled.
 type BranchCacheProvider interface {
 	BranchCache() *BranchCache
 }

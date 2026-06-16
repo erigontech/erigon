@@ -2386,13 +2386,6 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 // needUnfolding returns 0. This is the per-key traversal primitive
 // that follows the fold step in followAndUpdate.
 //
-// Extracted as a primitive so future orchestrators can drive
-// unfold-only traversals (e.g. cache populators that walk a touched-key
-// path to fill cell state without doing a fold/update). HashSort's
-// per-key followAndUpdate is the sequential orchestrator over this
-// primitive today; future concurrent / parallel orchestrators (each
-// with their own HexPatriciaHashed instance) can reuse it.
-//
 // plainKey is used only for per-key metrics labelling (StartUnfolding).
 // Pass an empty/nil slice if no metric attribution is needed.
 func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
@@ -2883,23 +2876,18 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
-// branchFromCacheOrDB reads branch data via ctx.Branch, which goes
-// through sd.mem -> sd.parent.mem -> aggregator-scope BranchCache -> MDBX.
-// BranchCache is the only branch cache.
+// Reads via ctx.Branch (sd.mem → parent.mem → BranchCache → MDBX).
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	data, _, err := hph.ctx.Branch(key)
 	return data, err
 }
 
-// accountFromCacheOrDB reads account data via ctx.Account. There is no Go-side
-// caching layer; accounts go straight to the BTree-backed AccountsDomain via
-// SD, with the OS page cache as the only caching layer.
+// No Go-side cache; reads straight from the AccountsDomain.
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Account(plainKey)
 }
 
-// storageFromCacheOrDB reads storage data via ctx.Storage. No Go-side
-// caching layer (see accountFromCacheOrDB).
+// No Go-side cache; reads straight from the StorageDomain.
 func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Storage(plainKey)
 }
