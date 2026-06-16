@@ -758,13 +758,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
-			if err := doms.Flush(ctx, tx); err != nil {
+			if err := doms.Commit(ctx, tx); err != nil {
 				return err
 			}
 			doms.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return err
-			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -784,11 +781,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 		}
-		if err := doms.Flush(ctx, tx); err != nil {
+		if err := doms.Commit(ctx, tx); err != nil {
 			return err
 		}
 		doms.ClearRam(true)
-		return tx.Commit()
+		return nil
 	}
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))

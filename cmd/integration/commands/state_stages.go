@@ -283,13 +283,10 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 				return err
 			}
 
-			if err = sd.Flush(ctx, tx); err != nil {
+			if err = sd.Commit(ctx, tx); err != nil {
 				return err
 			}
 			sd.ClearRam(true)
-			if err = tx.Commit(); err != nil {
-				return err
-			}
 
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err

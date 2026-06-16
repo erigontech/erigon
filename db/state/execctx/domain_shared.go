@@ -672,12 +672,12 @@ func (sd *SharedDomains) Close() {
 // through Flush / Commit / GetLatest / DomainPut, and the cache lifecycle
 // (population, invalidation, commit-gating) is owned entirely here.
 
-// Flush writes the in-memory batch into tx without committing. It deliberately
-// does NOT touch the caches: a cache entry may only ever reflect committed
-// state, and plain Flush leaves the commit to the caller (who may still roll
-// back). Cache population is owned by Commit, which applies it only after a
-// successful commit. Callers that flush a tx they commit themselves get a
-// cache-safe (cold-but-correct) result; use Commit to also keep the cache warm.
+// Flush writes the in-memory batch into tx without committing; unlike Commit it
+// does not refresh the BranchCache, so a self-committing caller can leave an
+// earlier read-through entry stale for the next SharedDomains.
+//
+// Deprecated: prefer Commit (atomic flush+commit+cache refresh). Use Flush only
+// when the caller must own the commit or flushes a tx it never commits.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)
