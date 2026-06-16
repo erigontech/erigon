@@ -422,7 +422,7 @@ func TestBtIndex_MStoredInFile(t *testing.T) {
 	defer decomp.Close()
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
-	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: wantM}, logger)
+	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: wantM, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
 	require.NoError(t, err)
 
 	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)

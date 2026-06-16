@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -29,7 +30,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/background"
@@ -179,20 +179,20 @@ func (c *Cursor) readKV() error {
 }
 
 type BtIndexWriter struct {
-	maxOffset    uint64
-	prevOffset   uint64
-	minDelta     uint64
-	indexF       *os.File
-	ef           *eliasfano32.EliasFano
-	collector    *etl.Collector
+	indexF    *os.File
+	ef        *eliasfano32.EliasFano
+	efBuilder *eliasfano32.OffHeapBuilder
+	nodesF    *os.File
+	nodesW    *bufio.Writer
+
 	nodesWritten uint64 // count of M-th keys kept as B-tree nodes
 
 	args BtIndexWriterArgs
 
 	indexFileName string
 
-	numBuf      [8]byte
-	keysWritten uint64
+	numBuf        [8]byte
+	nodeHeaderBuf [10]byte
 
 	built   bool
 	lvl     log.Lvl
@@ -201,12 +201,12 @@ type BtIndexWriter struct {
 }
 
 type BtIndexWriterArgs struct {
-	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir      string
-	M           uint64
-	KeyCount    int
-	EtlBufLimit datasize.ByteSize
-	Lvl         log.Lvl
+	IndexFile string
+	TmpDir    string
+	M         uint64
+	KeyCount  uint64
+	MaxOffset uint64 // any upper bound on key offsets is fine (e.g. data file size)
+	Lvl       log.Lvl
 }
 
 // NewBtIndexWriter creates a new BtIndexWriter instance with given number of keys
@@ -214,9 +214,6 @@ type BtIndexWriterArgs struct {
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
 func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
-	if args.EtlBufLimit == 0 {
-		args.EtlBufLimit = etl.BufferOptimalSize / 2
-	}
 	if args.Lvl == 0 {
 		args.Lvl = log.LvlTrace
 	}
@@ -226,9 +223,22 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
 
-	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.SmallSortableBuffers, logger)
-	btw.collector.SortAndFlushInBackground(false)
-	btw.collector.LogLvl(btw.args.Lvl)
+	if args.KeyCount > 0 {
+		efBuilder, err := eliasfano32.NewEliasFanoOffHeap(args.KeyCount, args.MaxOffset, args.TmpDir)
+		if err != nil {
+			return nil, fmt.Errorf("[index] create offheap ef: %w", err)
+		}
+		btw.efBuilder = efBuilder
+		btw.ef = efBuilder.EliasFano
+
+		nodesF, err := dir.CreateTempWithExtension(args.TmpDir, "bt-nodes.tmp")
+		if err != nil {
+			efBuilder.Close()
+			return nil, err
+		}
+		btw.nodesF = nodesF
+		btw.nodesW = bufio.NewWriterSize(nodesF, etl.BufIOSize)
+	}
 
 	return btw, nil
 }
@@ -237,32 +247,24 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-
-	binary.BigEndian.PutUint64(btw.numBuf[:], offset)
-	if offset > btw.maxOffset {
-		btw.maxOffset = offset
+	if btw.ef == nil {
+		return errors.New("[index] AddKey called with KeyCount==0")
 	}
+
+	di := btw.ef.AddedCount()
+	btw.ef.AddOffset(offset)
 
 	keepKey := keep
-	if btw.keysWritten > 0 {
-		delta := offset - btw.prevOffset
-		if btw.keysWritten == 1 || delta < btw.minDelta {
-			btw.minDelta = delta
-		}
-		keepKey = btw.keysWritten%btw.args.M == 0
+	if di > 0 {
+		keepKey = di%btw.args.M == 0
 	}
-
-	var k []byte
 	if keepKey {
-		k = key
+		node := Node{di: di, key: key}
+		if err := node.Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
+			return err
+		}
 		btw.nodesWritten++
 	}
-
-	if err := btw.collector.Collect(btw.numBuf[:], k); err != nil {
-		return err
-	}
-	btw.keysWritten++
-	btw.prevOffset = offset
 	return nil
 }
 
@@ -272,6 +274,11 @@ func (btw *BtIndexWriter) Build() error {
 	if btw.built {
 		return errors.New("already built")
 	}
+	defer btw.closeTemps()
+	if btw.args.KeyCount > 0 && btw.ef.AddedCount() != btw.args.KeyCount {
+		return fmt.Errorf("[index] %s: KeyCount=%d but %d keys added", btw.indexFileName, btw.args.KeyCount, btw.ef.AddedCount())
+	}
+
 	var err error
 	if btw.indexF, err = dir.CreateTemp(btw.args.IndexFile); err != nil {
 		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
@@ -279,17 +286,9 @@ func (btw *BtIndexWriter) Build() error {
 	defer btw.indexF.Close()
 	indexW := bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
 
-	defer btw.collector.Close()
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
-	if btw.keysWritten > 0 {
-		efBuilder, err := eliasfano32.NewEliasFanoOffHeap(btw.keysWritten, btw.maxOffset, btw.args.TmpDir)
-		if err != nil {
-			return fmt.Errorf("[index] create offheap ef: %w", err)
-		}
-		defer efBuilder.Close()
-		btw.ef = efBuilder.EliasFano
-
+	if btw.args.KeyCount > 0 {
 		if _, err = indexW.Write([]byte{btIndexVersion1}); err != nil {
 			return fmt.Errorf("[index] write version: %w", err)
 		}
@@ -301,25 +300,19 @@ func (btw *BtIndexWriter) Build() error {
 		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
 			return fmt.Errorf("[index] write nodes count: %w", err)
 		}
-		var headerBuf [10]byte
-		var ki uint64
-		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
 
-			if len(k) > 0 {
-				node := Node{di: ki, key: k}
-				if err := node.Encode(indexW, headerBuf[:]); err != nil {
-					return fmt.Errorf("[index] write node: %w", err)
-				}
-			}
-			ki++
-			return nil
-		}, etl.TransformArgs{}); err != nil {
-			return err
+		if err = btw.nodesW.Flush(); err != nil {
+			return fmt.Errorf("[index] flush nodes: %w", err)
 		}
-		btw.ef.Build()
+		if _, err = btw.nodesF.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("[index] seek nodes: %w", err)
+		}
+		if _, err = io.Copy(indexW, btw.nodesF); err != nil {
+			return fmt.Errorf("[index] copy nodes: %w", err)
+		}
 
-		if err := btw.ef.Write(indexW); err != nil {
+		btw.ef.Build()
+		if err = btw.ef.Write(indexW); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
 		}
 	}
@@ -358,16 +351,26 @@ func (btw *BtIndexWriter) fsync() error {
 	return nil
 }
 
+func (btw *BtIndexWriter) closeTemps() {
+	if btw.efBuilder != nil {
+		btw.efBuilder.Close()
+		btw.efBuilder = nil
+		btw.ef = nil
+	}
+	if btw.nodesF != nil {
+		name := btw.nodesF.Name()
+		btw.nodesF.Close()
+		_ = dir.RemoveFile(name)
+		btw.nodesW = nil
+		btw.nodesF = nil
+	}
+}
+
 func (btw *BtIndexWriter) Close() {
 	if btw.indexF != nil {
 		btw.indexF.Close()
 	}
-	if btw.collector != nil {
-		btw.collector.Close()
-	}
-	//if btw.offsetCollector != nil {
-	//	btw.offsetCollector.Close()
-	//}
+	btw.closeTemps()
 }
 
 type BtIndex struct {
@@ -437,6 +440,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 		IndexFile: indexPath,
 		TmpDir:    tmpdir,
 		M:         DefaultBtreeM,
+		KeyCount:  uint64(kv.Count() / 2),
+		MaxOffset: uint64(kv.Size()),
 	}
 
 	iw, err := NewBtIndexWriter(args, logger)
