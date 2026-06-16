@@ -63,7 +63,7 @@ func generateVarLenKV(tb testing.TB, tmp string, keyCount int, logger log.Logger
 	defer decomp.Close()
 	idx := strings.TrimSuffix(dataPath, ".kv") + ".bt"
 	r := seg.NewReader(decomp.MakeGetter(), compress)
-	require.NoError(tb, BuildBtreeIndexWithDecompressor(idx, r,
+	require.NoError(tb, BuildBtreeIndexWithDecompressor(idx, strings.TrimSuffix(idx, ".bt")+".kvei", r,
 		background.NewProgressSet(), tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence))
 	return decomp.FilePath()
 }
