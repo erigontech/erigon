@@ -437,53 +437,6 @@ func Benchmark_StreamingOverlap(b *testing.B) {
 	}
 }
 
-// streamingCycle runs one full overlap cycle and returns total wall-clock,
-// Process-only time, and the re-fold count — the metric primitive the bench and
-// the metrics test share.
-func streamingCycle(tb testing.TB, pk [][]byte, upds []Update, cpuIters int, scheduler bool) (total, process time.Duration, refolds uint64) {
-	ctx := context.Background()
-	ms := NewMockState(tb)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(tb, ms.applyPlainUpdates(pk, upds))
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(runtime.NumCPU())
-	if scheduler {
-		require.NoError(tb, sc.StartScheduler(ctx))
-	}
-
-	start := time.Now()
-	for _, k := range pk {
-		burnCPU(cpuIters)
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-	procStart := time.Now()
-	_, err := sc.Process(ctx)
-	process = time.Since(procStart)
-	total = time.Since(start)
-	require.NoError(tb, err)
-	return total, process, sc.RefoldCount()
-}
-
-// TestStreaming_Metrics reports re-fold count and Process-only time for the
-// whale and mixed corpora, overlap vs batch, at a fixed synthetic CPU cost. It
-// is the reproducible source for the numbers documented in the plan — a
-// mechanism sanity-check, NOT a perf claim. Skipped under -short.
-func TestStreaming_Metrics(t *testing.T) {
-	if testing.Short() {
-		t.Skip("metrics report is heavy; skipped under -short")
-	}
-	const cpu = 2000
-	for _, c := range streamingBenchCorpora() {
-		bTotal, bProc, _ := streamingCycle(t, c.pk, c.upds, cpu, false)
-		oTotal, oProc, oRefold := streamingCycle(t, c.pk, c.upds, cpu, true)
-		t.Logf("%-6s keys=%d cpu=%d | batch:   total=%-12v process=%-12v",
-			c.name, len(c.pk), cpu, bTotal, bProc)
-		t.Logf("%-6s keys=%d cpu=%d | overlap: total=%-12v process=%-12v refolds=%d",
-			c.name, len(c.pk), cpu, oTotal, oProc, oRefold)
-	}
-}
-
 func Benchmark_DeepStorageWhale(b *testing.B) {
 	for _, slots := range []int{750_000} {
 		addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(slots)

@@ -403,9 +403,9 @@ Apply the 15 prunes only after Task 5's owners are live. Delete
 runners survive in `parallel_streaming_bench_test.go` before deleting
 `streaming_vs_direct_bench_test.go`.
 
-- [ ] `go build ./execution/commitment/... ./db/state/execctx/...` compiles (no orphaned helpers).
-- [ ] Each pruned test's distinct path still has a live named owner (cross-check the path-coverage checklist).
-- [ ] `go test ./... -count=1 -short` green for both packages.
+- [x] `go build ./execution/commitment/... ./db/state/execctx/...` compiles (no orphaned helpers).
+- [x] Each pruned test's distinct path still has a live named owner (cross-check the path-coverage checklist).
+- [x] `go test ./... -count=1 -short` green for both packages.
 
 ### Task 7: Final verification
 

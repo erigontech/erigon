@@ -259,41 +259,6 @@ func assertEquivalentRootWorkers(
 
 // TestParallelProcessSkeleton_EmptyUpdates: zero touched keys. Both modes
 // must return the empty-trie root.
-func TestParallelProcessSkeleton_EmptyUpdates(t *testing.T) {
-	t.Parallel()
-	root := assertEquivalentRoot(t, nil, nil)
-	require.NotEmpty(t, root)
-}
-
-// TestParallelProcessSkeleton_SingleAccount: one touched key, one mount worker.
-func TestParallelProcessSkeleton_SingleAccount(t *testing.T) {
-	t.Parallel()
-	plainKeys, updates := NewUpdateBuilder().
-		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 42).
-		Build()
-	root := assertEquivalentRoot(t, plainKeys, updates)
-	require.NotEmpty(t, root)
-}
-
-// TestParallelProcessSkeleton_SingleNibbleBucket: several accounts colliding
-// into one root nibble, handled by a single mount worker.
-func TestParallelProcessSkeleton_SingleNibbleBucket(t *testing.T) {
-	t.Parallel()
-
-	const targetNibble = 0x0
-	const numAddrs = 8
-
-	ub := NewUpdateBuilder()
-	for i := range numAddrs {
-		addr := findAddressForNibble(targetNibble, i)
-		ub.Balance(addrHex(addr), uint64(100+i))
-	}
-	plainKeys, updates := ub.Build()
-
-	root := assertEquivalentRoot(t, plainKeys, updates)
-	require.NotEmpty(t, root)
-}
-
 // TestParallelProcessSkeleton_DenseSingleNibbleBucket: many accounts under one
 // root nibble, so a single mount worker carries the whole batch.
 func TestParallelProcessSkeleton_DenseSingleNibbleBucket(t *testing.T) {
@@ -920,28 +885,6 @@ func TestParallelSingleTouchedKey(t *testing.T) {
 // TestParallelMixedAccountStorage: random mix of accounts and storage slots
 // across many accounts. Exercises both the account-leaf and storage-leaf
 // hashing paths through a single Process call.
-func TestParallelMixedAccountStorage(t *testing.T) {
-	t.Parallel()
-
-	ub := NewUpdateBuilder()
-	// 16 accounts spread across all top nibbles.
-	for nib := range 16 {
-		addr := nibbleAddr(nib, 0)
-		ah := addrHex(addr)
-		ub.Balance(ah, uint64(50_000+nib))
-		ub.Nonce(ah, uint64(nib))
-		// Each account gets 3 storage slots.
-		for s := range 3 {
-			loc := slotHashBytes(nib*10 + s)
-			ub.Storage(ah, hex.EncodeToString(loc), fmt.Sprintf("%02x", (s+nib)%255+1))
-		}
-	}
-	plainKeys, updates := ub.Build()
-
-	root := assertEquivalentRootWorkers(t, plainKeys, updates, 8)
-	require.NotEmpty(t, root)
-}
-
 // TestParallelOnlyOneAccountTouchedManyTimes: the same account hit with
 // several distinct field updates (Balance, Nonce, CodeHash). UpdateBuilder
 // merges field updates per key before hashing, so the resulting batch has
@@ -1312,15 +1255,6 @@ func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	for k, sb := range seqMs.cm {
 		require.Equalf(t, []byte(sb), []byte(parMs.cm[k]), "branch at prefix %x must match", []byte(k))
 	}
-}
-
-// TestVerifyParallel_StorageWideNestedIncremental: accounts+storage committed,
-// then a sparse subset touched.
-func TestVerifyParallel_StorageWideNestedIncremental(t *testing.T) {
-	t.Parallel()
-	keys, upds := genAccountsWithNestedStorage(t, 4)
-	k2, u2 := sparseBatch2(keys, 4, false)
-	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
 // TestVerifyParallel_RandomStorageIncremental: production-like distribution,

@@ -127,34 +127,6 @@ func TestStreaming_DeepBranchParity(t *testing.T) {
 	}
 }
 
-// TestStreaming_DeepLocalWalkUsed proves the deep big-storage fold now runs
-// through the streaming-local walk (the deep storage fan-out) rather than
-// parallel_mount.go: the committer's DeepLocalFolds counter must fire and the
-// root must still match sequential. This is the Task-2 isolation gate.
-func TestStreaming_DeepLocalWalkUsed(t *testing.T) {
-	t.Parallel()
-	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
-
-	seqRoot, seqMs := sequentialRoot(t, keys, upds)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	defer sc.Release()
-	sc.SetNumWorkers(4)
-	for i := range keys {
-		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
-	}
-	root, err := sc.Process(context.Background())
-	require.NoError(t, err)
-
-	require.Equal(t, seqRoot, root, "streaming-local deep root != sequential")
-	requireBranchParity(t, seqMs, ms)
-	require.NotZero(t, sc.DeepLocalFolds(), "deep account must fold through the streaming-local walk")
-}
-
 // TestStreaming_NonEmptyPrevRefold is the novel-correctness claim: re-folding a
 // split repeatedly over a NON-EMPTY on-disk pre-image stays parity-clean because
 // the committer flushes nothing mid-block, so every re-fold reads the same prev.
@@ -201,23 +173,6 @@ func TestStreaming_NonEmptyPrevRefold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, seqRoot, root2, "streaming block-2 root after re-folds != sequential")
 	requireBranchParity(t, seqMs, ms)
-}
-
-// TestStreaming_RefoldAfterCollapse is the focused collapse assertion: a streaming
-// fold over a delete batch that collapses branches, layered on a non-empty prev,
-// must match sequential root + branches. The lazy path folds each split once at
-// Process, so the engine's mid-fold self-flush stays correct here; the multi
-// re-fold of a collapsed split is a Task-4 concern (see foldDirtySplits).
-func TestStreaming_RefoldAfterCollapse(t *testing.T) {
-	t.Parallel()
-	k1, u1 := genRandomAccountsStorage(400)
-	k2, u2 := sparseBatch2(k1, 3, true)
-	for _, w := range []int{1, 4} {
-		seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
-		strRoot, strMs := runIncremental(t, modeStreaming, w, k1, u1, k2, u2)
-		require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) collapse root != sequential", w)
-		requireBranchParity(t, seqMs, strMs)
-	}
 }
 
 // makeBranch builds a hash-only-cell deferred branch update at prefix: afterMap

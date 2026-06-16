@@ -84,64 +84,6 @@ func runWriteCommitBatch(t *testing.T, sd *execctx.SharedDomains, rwTx kv.Tempor
 	return rh
 }
 
-// TestSharedDomains_ParallelFlagOff_UsesSequentialTrie verifies the default
-// (flag off): NewSharedDomains constructs a *HexPatriciaHashed trie. ModeParallel
-// codepath must not be exercised when the flag is off.
-func TestSharedDomains_ParallelFlagOff_UsesSequentialTrie(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	// Do not call t.Parallel() — withCommitmentFlag mutates a process-global
-	// flag; concurrent flag flips race against each other.
-
-	withCommitmentFlag(t, commitment.VariantHexPatriciaTrie)
-
-	stepSize := uint64(16)
-	db := newTestDb(t, stepSize)
-
-	ctx := t.Context()
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-
-	trie := sd.GetCommitmentCtx().Trie()
-	require.Equal(t, commitment.VariantHexPatriciaTrie, trie.Variant(),
-		"flag off must construct the sequential HexPatriciaHashed trie")
-}
-
-// TestSharedDomains_ParallelFlagOn_UsesParallelTrie verifies that turning the
-// flag on routes NewSharedDomains to construct a *ParallelPatriciaHashed trie
-// (and consequently a ModeParallel Updates buffer).
-func TestSharedDomains_ParallelFlagOn_UsesParallelTrie(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	// Do not call t.Parallel() — withCommitmentFlag mutates a process-global
-	// flag; concurrent flag flips race against each other.
-
-	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
-
-	stepSize := uint64(16)
-	db := newTestDb(t, stepSize)
-
-	ctx := t.Context()
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-
-	trie := sd.GetCommitmentCtx().Trie()
-	require.Equal(t, commitment.VariantParallelHexPatricia, trie.Variant(),
-		"flag on must construct the ParallelPatriciaHashed trie")
-}
-
 // TestSharedDomains_ParallelFlag_RootEquivalence is the cardinal correctness
 // check from the parallel-hph plan: the same update set must produce the same
 // root hash whether the trie is sequential (flag off) or parallel (flag on).
@@ -209,34 +151,6 @@ func TestPickTrieVariant_StreamingFlag(t *testing.T) {
 
 	statecfg.ExperimentalStreamingCommitment = false
 	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
-}
-
-// TestSharedDomains_StreamingFlagOn_UsesStreamingTrie verifies that turning the
-// streaming flag on routes NewSharedDomains to a streaming-backed trie (a
-// *ParallelPatriciaHashed shell whose Variant reports streaming).
-func TestSharedDomains_StreamingFlagOn_UsesStreamingTrie(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	// Do not call t.Parallel() — mutates process-global statecfg flags.
-
-	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
-
-	stepSize := uint64(16)
-	db := newTestDb(t, stepSize)
-
-	ctx := t.Context()
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-
-	trie := sd.GetCommitmentCtx().Trie()
-	require.Equal(t, commitment.VariantStreamingHexPatricia, trie.Variant(),
-		"flag on must construct the streaming-backed trie")
 }
 
 // TestSharedDomains_StreamingFlag_RootEquivalence asserts the streaming trie
