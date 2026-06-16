@@ -1,7 +1,7 @@
 ---
 title: "NAT"
 description: "Configure NAT traversal settings for proper peer discovery behind routers and firewalls."
-sidebar_position: 1
+sidebar_position: 11
 ---
 
 # NAT
