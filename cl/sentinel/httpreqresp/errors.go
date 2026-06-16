@@ -18,12 +18,17 @@ package httpreqresp
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/golang/snappy"
 )
+
+const maxErrorMessageBytes = 256
+
+var errMalformedErrorMessageLength = errors.New("malformed reqresp error message length")
 
 type HTTPError struct {
 	StatusCode int
@@ -76,17 +81,22 @@ func (r ResponseCode) ErrorMessage(resp *http.Response) (string, error) {
 	}
 	// Error response bodies are length-prefixed before the snappy payload.
 	rawReader := bufio.NewReader(resp.Body)
-	for {
+	lengthDone := false
+	for i := 0; i < 10; i++ {
 		b, err := rawReader.ReadByte()
 		if err != nil {
 			return "", err
 		}
 		if b&0x80 == 0 {
+			lengthDone = true
 			break
 		}
 	}
+	if !lengthDone {
+		return "", errMalformedErrorMessageLength
+	}
 	sr := snappy.NewReader(rawReader)
-	decoded, err := io.ReadAll(sr)
+	decoded, err := io.ReadAll(io.LimitReader(sr, maxErrorMessageBytes))
 	if err != nil {
 		return "", err
 	}

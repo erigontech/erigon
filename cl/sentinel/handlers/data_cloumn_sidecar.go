@@ -16,8 +16,7 @@ import (
 var errInvalidDataColumnIndex = errors.New("invalid column index")
 
 func writeDataColumnSidecarsEmptySuccess(s network.Stream) error {
-	_, err := s.Write([]byte{SuccessfulResponsePrefix})
-	return err
+	return nil
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
@@ -61,7 +60,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 	}
 
 	// Consume additional rate-limit tokens: slots × columns per slot, capped at config max.
-	if cost := min(int(req.Count)*req.Columns.Length(), int(c.beaconConfig.MaxRequestDataColumnSidecars)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := dataColumnSidecarsRequestCost(endSlot-startSlot, uint64(req.Columns.Length()), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -167,9 +166,6 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
-	if curEpoch < c.beaconConfig.FuluForkEpoch {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
-	}
 	if req.Len() > int(c.beaconConfig.MaxRequestBlocksDeneb) {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
@@ -191,10 +187,13 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 		}
 		totalColumns += columns.Length()
 	}
+	if curEpoch < c.beaconConfig.FuluForkEpoch {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	}
 	if totalColumns == 0 {
 		return writeDataColumnSidecarsEmptySuccess(s)
 	}
-	if cost := min(totalColumns, int(c.beaconConfig.MaxRequestDataColumnSidecars)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := dataColumnSidecarsRequestCost(1, uint64(totalColumns), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -289,4 +288,18 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	return nil
+}
+
+func dataColumnSidecarsRequestCost(slots, columns, maxSidecars uint64) int {
+	if slots == 0 || columns == 0 || maxSidecars == 0 {
+		return 0
+	}
+	if slots > maxSidecars/columns {
+		return int(maxSidecars) - 1
+	}
+	sidecars := slots * columns
+	if sidecars > maxSidecars {
+		sidecars = maxSidecars
+	}
+	return int(sidecars) - 1
 }

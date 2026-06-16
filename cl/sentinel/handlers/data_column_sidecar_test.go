@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handlers
 
 import (
@@ -73,6 +89,27 @@ func TestDataColumnSidecarsByRootBeforeFuluReturnsResourceUnavailable(t *testing
 	t.Cleanup(func() { stream.Close() })
 
 	expectDataColumnSidecarResourceUnavailable(t, stream, reqBuf.Bytes())
+}
+
+func TestDataColumnSidecarsByRootBeforeFuluInvalidColumnReturnsInvalidRequest(t *testing.T) {
+	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTestWithFuluForkEpoch(t, math.MaxUint64)
+
+	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	id := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: common.Hash{0x42},
+		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1),
+	}
+	id.Columns.Append(beaconCfg.NumberOfColumns)
+	req.Append(id)
+
+	var reqBuf bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
+
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.DataColumnSidecarsByRootProtocolV1))
+	require.NoError(t, err)
+	t.Cleanup(func() { stream.Close() })
+
+	expectDataColumnSidecarResponsePrefix(t, stream, reqBuf.Bytes(), InvalidRequestPrefix)
 }
 
 func TestDataColumnSidecarsByRootFoundSidecarReturnsSuccessWithoutTrailingResourceUnavailable(t *testing.T) {
@@ -478,11 +515,6 @@ func expectDataColumnSidecarEmptyResponse(t *testing.T, stream network.Stream, r
 
 	_, err := stream.Write(reqData)
 	require.NoError(t, err)
-
-	firstByte := make([]byte, 1)
-	_, err = io.ReadFull(stream, firstByte)
-	require.NoError(t, err)
-	require.Equal(t, byte(SuccessfulResponsePrefix), firstByte[0])
 
 	require.NoError(t, stream.SetReadDeadline(time.Now().Add(200*time.Millisecond)))
 	buf := make([]byte, 1)
