@@ -512,9 +512,9 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	idx.data = idx.m[:idx.size]
 
 	var nodes []Node
-	footer, _, ferr := ReadFooter(idx.data)
+	footer, _, err := ReadFooter(idx.data)
 	switch {
-	case ferr == nil: // current layout: [nodes][EF][footer][anchor]
+	case err == nil: // current layout: [nodes][EF][footer][anchor]
 		M = footer.Meta.M
 		nodesCount := (footer.Meta.KeysCount + M - 1) / M // di==0 always kept, so ceil(N/M)
 		var pos int
@@ -523,7 +523,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 			return nil, err
 		}
 		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[alignUp(pos, btKeysAlign):])
-	case errors.Is(ferr, errNotFooterFormat) && idx.data[0] == btIndexVersion0: // legacy [EF][nodesCount][di-nodes]
+	case errors.Is(err, errNotFooterFormat) && idx.data[0] == btIndexVersion0: // legacy [EF][nodesCount][di-nodes]
 		var pos int
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
@@ -532,10 +532,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 				return nil, err
 			}
 		}
-	case errors.Is(ferr, errNotFooterFormat):
+	case errors.Is(err, errNotFooterFormat):
 		return nil, fmt.Errorf("unsupported btree index format in %s: upgrade Erigon", indexPath)
 	default:
-		return nil, ferr
+		return nil, err
 	}
 
 	idx.indexM = M
