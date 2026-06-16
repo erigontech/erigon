@@ -223,7 +223,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	_, fname := filepath.Split(btw.args.IndexFile)
 	btw.indexFileName = fname
 
-	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.LargeSortableBuffers, logger)
+	btw.collector = etl.NewCollectorWithAllocator(BtreeLogPrefix+" "+fname, btw.args.TmpDir, etl.SmallSortableBuffers, logger)
 	btw.collector.SortAndFlushInBackground(false)
 	btw.collector.LogLvl(btw.args.Lvl)
 
@@ -279,7 +279,12 @@ func (btw *BtIndexWriter) Build() error {
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
 	if btw.keysWritten > 0 {
-		btw.ef = eliasfano32.NewEliasFano(btw.keysWritten, btw.maxOffset)
+		efBuilder, err := eliasfano32.NewEliasFanoOffHeap(btw.keysWritten, btw.maxOffset, btw.args.TmpDir)
+		if err != nil {
+			return fmt.Errorf("[index] create offheap ef: %w", err)
+		}
+		defer efBuilder.Close()
+		btw.ef = efBuilder.EliasFano
 
 		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
 		var ki uint64
