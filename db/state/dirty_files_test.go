@@ -116,8 +116,8 @@ func TestOpenDirtyFilesAcceptsMixedVersions(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
-	// Accept v2.1 reads here so the mixed-version scan does not panic in MustSupport
-	// before the global commitment ceiling is raised in a later task.
+	// Bump this (accounts) domain's read ceiling to v2.1 so the mixed-version fixtures open without
+	// tripping MustSupport; unrelated to commitment-domain versioning.
 	d.FileVersion.DataKV = version.Versions{Current: version.V2_1, MinSupported: version.V1_0}
 
 	tmp := t.TempDir()

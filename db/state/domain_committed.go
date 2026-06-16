@@ -414,6 +414,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	// transformer; hot contracts recur across many branches in the same merge range.
 	storageKeyCache := make(map[string]uint64)
 	accountKeyCache := make(map[string]uint64)
+	// fileReferencedByRange is a linear scan and the same (from,to) recurs across every branch of an
+	// input file, so cache the verdict per range.
+	referencedByRange := make(map[[2]uint64]bool)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if len(valBuf) == 0 {
@@ -422,7 +425,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		// Expand the input's short keys to plain whenever the input file was written referenced
 		// (its own version+range), independent of the live flag — otherwise a referenced input
 		// merged with the flag off would copy stale offsets into the merged file.
-		inputReferenced := dt.fileReferencedByRange(keyFromTxNum, keyEndTxNum)
+		rngKey := [2]uint64{keyFromTxNum, keyEndTxNum}
+		inputReferenced, cached := referencedByRange[rngKey]
+		if !cached {
+			inputReferenced = dt.fileReferencedByRange(keyFromTxNum, keyEndTxNum)
+			referencedByRange[rngKey] = inputReferenced
+		}
 		if !inputReferenced && !reshorten {
 			return valBuf, nil
 		}

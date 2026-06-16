@@ -445,6 +445,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
 	wantsReferencesInBranches := a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
+	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
 
 	// Disable ReferencesInCommitmentBranches before main loop; will be re-enabled for squeeze pass
 	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -838,6 +840,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
 	wantsReferencesInBranches := a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
+	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
 
 	// Disable ReferencesInCommitmentBranches during rebuild. The merge loop after each range would
 	// otherwise shorten keys in commitment branch data, embedding file-range references
