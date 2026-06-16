@@ -46,60 +46,70 @@ jobs:
             shard: paris+shanghai
             pool-size: 0
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: serial
           - sim: consume-engine
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
             pool-size: 0
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: parallel
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             pool-size: 4
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: serial
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             pool-size: 4
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: parallel
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             pool-size: 4
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: serial
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             pool-size: 4
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: parallel
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
             pool-size: 4
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: serial
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
             pool-size: 4
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: parallel
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
             pool-size: 0
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: serial
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
             shard: rlp
             pool-size: 0
             fixtures-tarball: eest_stable
+            max-failures: 0
             exec_mode: parallel
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
@@ -109,17 +119,7 @@ jobs:
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            # Budget breakdown:
-            #   - 2 wrong-test-expectation deterministic failures:
-            #     EIP-7928 test_invalid_{pre,post}_fork_block_*_bal_hash_field
-            #     expect -32602 InvalidParams but the requests are
-            #     well-formed V4/V5 newPayload — the only divergence is a
-            #     blockHash computed over a wrong-fork-schema header. Spec
-            #     convention is InvalidStatus + INVALID_BLOCK_HASH, which
-            #     is what erigon returns. Testing team has been notified.
-            #   - 1 flake slot for the EIP-7928
-            #     test_bal_invalid_extraneous_entries flake (#21364).
-            max-failures: 3
+            max-failures: 0
             exec_mode: parallel
     steps:
       - name: Clean docker system

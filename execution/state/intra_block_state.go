@@ -351,8 +351,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
 	// both operations that clear all storage.  If a prior TX wrote it, the
 	// account was created or destroyed in this block and HasStorage should
-	// return false.  This mirrors the same check in versionedRead for
-	// StoragePath (versionedio.go:660-703).
+	// return false. Mirrors the StoragePath check in versionedRead.
 	if sdb.versionMap != nil {
 		if inc, incRes, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && incRes.Status() == MVReadResultDone {
 			// Record IncarnationPath dependency for validation.
@@ -364,6 +363,9 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
+	// EIP-684 CREATE-collision fall-through: the in-memory checks missed, so ask
+	// the reader — on snapshot-backed storage this is a kv.HasPrefix(StorageDomain)
+	// walk through the .bt index, a validation hot-path cost.
 	result, err := sdb.stateReader.HasStorage(addr)
 	return result, err
 }
@@ -1826,6 +1828,11 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			// getVersionedAccount returned nil; preserve the deleted stateObject as
 			// `previous` so that after a REVERT CommitBlock can still emit
 			// DeleteAccount for it.
+			previous = so
+		} else if so, ok := sdb.stateObjects[addr]; ok {
+			// The serial block builder runs with a version map but does not flush
+			// per-tx writes to it, so a same-block credit on this IBS lives only in
+			// the cache; reuse it as `previous` to keep the balance carry-over below.
 			previous = so
 		}
 	}

@@ -100,8 +100,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
-	EnableWarmupCache(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -148,6 +146,7 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
+// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
@@ -342,7 +341,6 @@ type BranchEncoder struct {
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache              *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -549,10 +547,6 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-func (be *BranchEncoder) SetCache(cache *WarmupCache) {
-	be.cache = cache
-}
-
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -561,21 +555,12 @@ func (be *BranchEncoder) CollectUpdate(
 	isNew bool,
 ) error {
 	var prev []byte
-	var foundInCache bool
 	var err error
 
 	if !isNew {
-		if be.cache != nil {
-			prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-			if foundInCache && be.metrics != nil {
-				be.metrics.cacheBranch.Add(1)
-			}
-		}
-		if !foundInCache {
-			prev, _, err = ctx.Branch(prefix)
-			if err != nil {
-				return err
-			}
+		prev, _, err = ctx.Branch(prefix)
+		if err != nil {
+			return err
 		}
 	}
 	if prev == nil {
@@ -602,9 +587,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.cache != nil {
-		be.cache.PutBranch(prefixCopy, updateCopy)
-	}
+	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -641,22 +624,11 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	var (
-		prev         []byte
-		foundInCache bool
-		err          error
-	)
+	var prev []byte
+	var err error
 
 	if !isNew {
-		if be.cache != nil {
-			prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-			if foundInCache && be.metrics != nil {
-				be.metrics.cacheBranch.Add(1)
-			}
-		}
-		if !foundInCache {
-			prev, _, err = ctx.Branch(prefix)
-		}
+		prev, _, err = ctx.Branch(prefix)
 		if err != nil {
 			return err
 		}
@@ -1831,9 +1803,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if warmuper != nil && warmuper.Cache() != nil {
-				warmuper.Cache().EvictPlainKey(v)
-			}
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)
