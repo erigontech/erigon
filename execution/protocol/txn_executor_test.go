@@ -298,6 +298,14 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 	})
 }
 
+// TestEIP8037_StateGasRefundPreexisting is testing what happens when we create a contract at an address
+// that already exists.
+// Here, basically what we are doing is, first we deploy a contract with no code (initcode is STOP) at a
+// fresh new address. In this case, it must charge the full StateGasNewAccount fee of 183.6k.
+// Next, we try the same deployment, but this time at an address that already exists in the state
+// (we give it some balance first). Under EIP-8037, this pre-existing check should kick in and we must get
+// the StateGasNewAccount fee refunded. So, the state gas used for the pre-existing case should be exactly
+// StateGasNewAccount less than the brand-new creation (which in this case means it becomes 0).
 func TestEIP8037_StateGasRefundPreexisting(t *testing.T) {
 	t.Parallel()
 
@@ -351,6 +359,15 @@ func TestEIP8037_StateGasRefundPreexisting(t *testing.T) {
 		"State gas for pre-existing account must be StateGasNewAccount less than brand-new account")
 }
 
+// TestEIP8037_StateGasRefundPreexistingWithCodeDeposit is verifying how the refund works when code is
+// actually deposited.
+// Here, we deploy a contract that returns a 10-byte runtime code.
+// For a brand-new address, it should charge the new account fee (183.6k) plus the code deposit cost
+// (10 * 192 = 1,920 gas).
+// But for a pre-existing target address, the new account fee must be refunded, but the code deposit
+// fee of 1,920 gas must still be charged!
+// So, we are checking that the pre-existing target's state gas usage ends up being exactly the code
+// deposit cost, and the base creation fee is successfully refunded.
 func TestEIP8037_StateGasRefundPreexistingWithCodeDeposit(t *testing.T) {
 	t.Parallel()
 
@@ -413,6 +430,12 @@ func TestEIP8037_StateGasRefundPreexistingWithCodeDeposit(t *testing.T) {
 	require.Equal(t, 10*uint64(params.CostPerStateByte), preexistingStateGas)
 }
 
+// TestEIP8037_StateGasSpilloverRevert checks what happens when a nested contract creation reverts.
+// Here, basically what we are doing is, we are testing that if a sub-creation reverts,
+// then whatever state gas was charged for it (which actually spilled over into the regular gas pool
+// because the reservoir was empty) should be fully refunded back to the regular gas pool of the parent.
+// So, at the end, only the parent's creation state gas of 183.6k should be charged, and the reverted
+// child's state gas must be returned completely.
 func TestEIP8037_StateGasSpilloverRevert(t *testing.T) {
 	t.Parallel()
 
@@ -454,6 +477,12 @@ func TestEIP8037_StateGasSpilloverRevert(t *testing.T) {
 		"The reverted sub-creation must not leave any net state gas charge")
 }
 
+// TestEIP8037_StateGasSpilloverHalt checks the exceptional halt scenario.
+// In this test, we are checking that if the child contract creation execution fails with an INVALID
+// instruction, the child frame halts. According to EIP-8037 rules, since it is a halt, all the regular
+// gas given to it is gone/burned. But, the state changes are rolled back, so the state gas charged for
+// the sub-creation must still be restored/refunded. Therefore, the net state gas charged at the
+// transaction level should only be for the parent creation, and the child's charge must not be kept.
 func TestEIP8037_StateGasSpilloverHalt(t *testing.T) {
 	t.Parallel()
 
