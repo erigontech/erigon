@@ -25,6 +25,7 @@ on:
       base_branch:
         description: "Base branch to update"
         required: true
+        # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
         default: "release/3.5"
       prune_mode:
         description: "Prune mode measured in that run"
@@ -98,6 +99,7 @@ jobs:
             fi
             printf 'prune_mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
+            # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
             printf 'base_branch=release/3.5\n' >> "$GITHUB_OUTPUT"
           fi
 
