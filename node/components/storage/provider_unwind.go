@@ -238,6 +238,18 @@ func (p *Provider) unwindFinalize(ctx context.Context, tx kv.TemporalRwTx, toBlo
 		return fmt.Errorf("storage.Provider.Unwind: %w", err)
 	}
 
+	// Inventory-past-toBlock is not checked inline. At this point the
+	// snapshot-trim has only STAGED removals in pendingTrim;
+	// Inventory.RemoveFile + FS delete happen post-tx in
+	// FinalizeUnwind because they're irreversible. A transient
+	// "Inventory has entries past toBlock" state therefore exists by
+	// design between unwindFinalize and FinalizeUnwind, and any
+	// runtime check here would either false-positive on that
+	// transient state or require expensive FS rescans. The invariant
+	// "after FinalizeUnwind, FS and Inventory agree and contain no
+	// entries past toBlock" is enforced via unit tests (see
+	// provider_unwind_finalize_inventory_test.go).
+
 	return nil
 }
 
@@ -328,6 +340,37 @@ func (p *Provider) unwindWithReExec(ctx context.Context, tx kv.TemporalRwTx, toB
 	}
 
 	return recompute, nil
+}
+
+// findInventoryEntriesPastBlock returns Inventory block-file entries
+// whose FromBlock is strictly past toBlock. Mirror of
+// findInventoryOrphansPastBlock: that one catches files on disk not
+// in Inventory; this one catches Inventory entries that should have
+// been removed by snapshot-trim. The wedge it guards against — iter
+// 3 of the 5-iter mode-B soak 2026-06-14 reported inv_extras=3 from
+// a Retire that produced files past target while SetHead's quiescence
+// wait covered only SharedDomains. The cancel-before-unwind fix
+// prevents that race; this is the defense-in-depth assertion run in
+// the same tx so any regression rolls the unwind back instead of
+// committing silent corruption.
+//
+// Straddle files (FromBlock ≤ toBlock < ToBlock) are kept — they are
+// handled by the dedicated straddle-rebuild path in unwindFinalize
+// and are not "extras."
+//
+// Returns nil + nil when Inventory is unset (harness/test paths).
+func (p *Provider) findInventoryEntriesPastBlock(toBlock uint64) ([]string, error) {
+	if p.Inventory == nil {
+		return nil, nil
+	}
+	var extras []string
+	for _, e := range p.Inventory.BlockFiles() {
+		if e.FromBlock > toBlock {
+			extras = append(extras, e.Name)
+		}
+	}
+	sort.Strings(extras)
+	return extras, nil
 }
 
 // findInventoryOrphansPastBlock scans the snapshots dir for top-level
