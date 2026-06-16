@@ -243,7 +243,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	return btw, nil
 }
 
-func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
+func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
@@ -254,11 +254,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 	di := btw.ef.AddedCount()
 	btw.ef.AddOffset(offset)
 
-	keepKey := keep
-	if di > 0 {
-		keepKey = di%btw.args.M == 0
-	}
-	if keepKey {
+	if di%btw.args.M == 0 { // every M-th key (di==0 included) is kept as a B-tree node
 		node := Node{di: di, key: key}
 		if err := node.Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
 			return err
@@ -455,16 +451,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Reader, ps *backg
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	var b0 [256]bool
 	for kv.HasNext() {
 		key, _ = kv.Next(key[:0])
-		keep := false
-		if !b0[key[0]] {
-			b0[key[0]] = true
-			keep = true
-		}
-		err = iw.AddKey(key, pos, keep)
-		if err != nil {
+		if err = iw.AddKey(key, pos); err != nil {
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
@@ -540,7 +529,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		M = binary.BigEndian.Uint64(idx.data[pos : pos+8])
 		pos += 8
 		var nodesBytes int
-		nodes, nodesBytes, err = decodeListNodes(idx.data[pos:])
+		nodes, nodesBytes, err = decodeListNodesV1(idx.data[pos:], M)
 		if err != nil {
 			return nil, err
 		}
@@ -549,7 +538,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	case btIndexVersion0:
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
 		if len(idx.data[pos:]) > 0 {
-			nodes, _, err = decodeListNodes(idx.data[pos:])
+			nodes, _, err = decodeListNodesV0(idx.data[pos:])
 			if err != nil {
 				return nil, err
 			}

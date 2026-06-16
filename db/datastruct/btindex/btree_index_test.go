@@ -430,7 +430,7 @@ func TestBtIndex_MStoredInFile(t *testing.T) {
 	var pos uint64
 	for r.HasNext() {
 		key, _ := r.Next(nil)
-		require.NoError(t, iw.AddKey(key, pos, false))
+		require.NoError(t, iw.AddKey(key, pos))
 		pos, _ = r.Skip()
 	}
 	iw.DisableFsync()
@@ -483,21 +483,26 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 }
 
 func TestListNodes_EncodeDecodeRoundTrip(t *testing.T) {
-	for _, nodes := range [][]Node{
+	const M = 256
+	for _, keys := range [][][]byte{
 		nil,
-		{{di: 0, key: nil}},
-		{{di: 0, key: []byte("a")}, {di: 256, key: []byte("bcd")}, {di: 1 << 40, key: bytes.Repeat([]byte{0xff}, 300)}},
+		{[]byte("a")},
+		{[]byte("a"), []byte("bcd"), bytes.Repeat([]byte{0xff}, 300)},
 	} {
+		nodes := make([]Node, len(keys))
+		for i, k := range keys {
+			nodes[i] = Node{di: uint64(i) * M, key: k}
+		}
 		var buf bytes.Buffer
 		require.NoError(t, encodeListNodes(nodes, &buf))
 
-		got, n, err := decodeListNodes(buf.Bytes())
+		got, n, err := decodeListNodesV1(buf.Bytes(), M)
 		require.NoError(t, err)
 		require.Equal(t, buf.Len(), n)
-		require.Len(t, got, len(nodes))
-		for i := range nodes {
-			require.Equal(t, nodes[i].di, got[i].di)
-			require.True(t, bytes.Equal(nodes[i].key, got[i].key))
+		require.Len(t, got, len(keys))
+		for i := range keys {
+			require.Equal(t, uint64(i)*M, got[i].di) // di recomputed, not stored
+			require.True(t, bytes.Equal(keys[i], got[i].key))
 		}
 	}
 }
