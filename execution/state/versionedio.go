@@ -103,13 +103,6 @@ func NewAccountView(acc *accounts.Account) AccountView { return concreteAccountV
 // the per-path split keeps the record path off the heap and collapses
 // non-storage probes to a single map lookup.  All maps are lazily allocated
 // on first write.
-//
-// touched is the address-level ephemeral-access layer: an address marked
-// "touched" (a non-revertable EVM operation or an incidental revertable
-// gas-calc access) that has no path read of its own — e.g. the coinbase or
-// an EIP-7702 authority.  The map value is the revertable flag; a touch
-// carries no version and is not conflict-detected.  It feeds the EIP-7928
-// block access list only.
 type ReadSet struct {
 	address        map[accounts.Address]VersionedRead[AccountView]
 	balance        map[accounts.Address]VersionedRead[uint256.Int]
@@ -121,28 +114,6 @@ type ReadSet struct {
 	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize       map[accounts.Address]VersionedRead[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
-	touched        map[accounts.Address]bool // value = revertable
-}
-
-// Touch records an address-level ephemeral access.  revertable=false (a real
-// EVM operation) is sticky — once an address has a non-revertable touch a
-// later revertable touch does not downgrade it.
-//
-// A touch is non-versioned / not conflict-detected. That is safe only under
-// the invariant that every touch is accompanied by a versioned read of the
-// same address (which carries the conflict detection) or is deterministic
-// (coinbase, EIP-7702 authority) — see MarkAddressAccess.
-func (s *ReadSet) Touch(addr accounts.Address, revertable bool) {
-	if s.touched == nil {
-		s.touched = rsGetTouched()
-	}
-	if cur, ok := s.touched[addr]; ok {
-		if cur && !revertable {
-			s.touched[addr] = false
-		}
-		return
-	}
-	s.touched[addr] = revertable
 }
 
 // vrMapPool[T] pools the per-path map[Address]VersionedRead[T] containers.
@@ -184,7 +155,6 @@ var (
 	rsMapPoolStorageOuter = sync.Pool{New: func() any {
 		return make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
 	}}
-	rsMapPoolTouched = sync.Pool{New: func() any { return make(map[accounts.Address]bool) }}
 )
 
 func rsGetStorageInner() map[accounts.StorageKey]VersionedRead[uint256.Int] {
@@ -209,18 +179,6 @@ func rsPutStorageOuter(m map[accounts.Address]map[accounts.StorageKey]VersionedR
 	}
 	clear(m)
 	rsMapPoolStorageOuter.Put(m)
-}
-
-func rsGetTouched() map[accounts.Address]bool {
-	return rsMapPoolTouched.Get().(map[accounts.Address]bool)
-}
-
-func rsPutTouched(m map[accounts.Address]bool) {
-	if m == nil {
-		return
-	}
-	clear(m)
-	rsMapPoolTouched.Put(m)
 }
 
 // readSetPut lazily checks out a pooled map and inserts tr at addr.
@@ -469,13 +427,12 @@ func (s *ReadSet) Delete(addr accounts.Address) {
 	delete(s.storage, addr)
 }
 
-// Len returns the total entry count across all paths plus address-level
-// touches.  Value receiver so it can be called on a function-returned read
-// set directly.
+// Len returns the total entry count across all paths.  Value receiver so it
+// can be called on a function-returned read set directly.
 func (s ReadSet) Len() int {
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
 		len(s.selfDestruct) + len(s.createContract) +
-		len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.touched)
+		len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
 		n += len(inner)
 	}
@@ -516,9 +473,6 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 			s.SetStorage(a, k, tr)
 		}
 	}
-	for a, revertable := range src.touched {
-		s.Touch(a, revertable)
-	}
 }
 
 // Release returns every per-path map held by the set to its pool, then
@@ -542,7 +496,6 @@ func (s *ReadSet) Release() {
 		rsPutStorageInner(inner)
 	}
 	rsPutStorageOuter(s.storage)
-	rsPutTouched(s.touched)
 	*s = ReadSet{}
 }
 
@@ -1997,14 +1950,16 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs  []versionedReadSet
-	outputs []VersionedWrites // write sets that should be checked during validation
+	inputs   []versionedReadSet
+	outputs  []VersionedWrites // write sets that should be checked during validation
+	accessed []AccessSet
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:  make([]versionedReadSet, numTx+1),
-		outputs: make([]VersionedWrites, numTx+1),
+		inputs:   make([]versionedReadSet, numTx+1),
+		outputs:  make([]VersionedWrites, numTx+1),
+		accessed: make([]AccessSet, numTx+1),
 	}
 }
 
@@ -2012,7 +1967,7 @@ func (io *VersionedIO) Len() int {
 	if io == nil {
 		return 0
 	}
-	return max(len(io.inputs), len(io.outputs))
+	return max(len(io.inputs), max(len(io.outputs), len(io.accessed)))
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -2095,6 +2050,27 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 	io.outputs[txId+1] = output
 }
 
+func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
+	if len(addresses) == 0 {
+		return
+	}
+	if len(io.accessed) <= txVersion.TxIndex+1 {
+		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
+	}
+	dest := make(AccessSet, len(addresses))
+	for addr, opt := range addresses {
+		dest[addr] = opt
+	}
+	io.accessed[txVersion.TxIndex+1] = dest
+}
+
+func (io *VersionedIO) AccessedAddresses(txIndex int) AccessSet {
+	if len(io.accessed) <= txIndex+1 {
+		return nil
+	}
+	return io.accessed[txIndex+1]
+}
+
 func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
@@ -2117,6 +2093,15 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 			}
 		} else if i < len(other.outputs) {
 			merged.outputs[i] = other.outputs[i].Merge(nil)
+		}
+		if i < len(io.accessed) {
+			if i < len(other.accessed) {
+				merged.accessed[i] = io.accessed[i].Merge(other.accessed[i])
+			} else {
+				merged.accessed[i] = io.accessed[i].Merge(nil)
+			}
+		} else if i < len(other.accessed) {
+			merged.accessed[i] = other.accessed[i].Merge(nil)
 		}
 	}
 	return merged
@@ -2152,6 +2137,13 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 		for addr, tr := range rs.address {
 			if addr.IsNil() || tr.internal {
+				continue
+			}
+			// Skip validation-only reads for non-existent accounts.
+			// These are recorded when the version map has no entry
+			// (MVReadResultNone) so that conflict detection works across
+			// transactions, but they should not appear in the block access list.
+			if tr.Val == nil || tr.Val.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr)
@@ -2212,7 +2204,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 
 		isUserTx := txIndex >= 0
-		for addr, revertable := range io.ReadSet(txIndex).touched {
+		for addr, opts := range io.AccessedAddresses(txIndex) {
 			if addr.IsNil() {
 				continue
 			}
@@ -2224,7 +2216,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// a gas-calculation read. This is used to distinguish real state
 			// access from incidental reads (e.g. Empty() in gas calc) for
 			// the system address filter.
-			if isUserTx && !revertable {
+			if isUserTx && opts != nil && !opts.revertable {
 				account.nonRevertableUserAccess = true
 			}
 		}

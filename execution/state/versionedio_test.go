@@ -950,12 +950,10 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 		"newly-created account (not in DB) should NOT generate a BalancePath read")
 }
 
-// recordTouch records an address-level ephemeral touch for txIndex via the
-// read set (touches feed the BAL through RecordReads after the access-map fold).
+// recordTouch records an address-level ephemeral access for txIndex via the
+// access map (accesses feed the BAL through RecordAccesses).
 func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable bool) {
-	rs := ReadSet{}
-	rs.Touch(addr, revertable)
-	io.RecordReads(Version{TxIndex: txIndex}, rs)
+	io.RecordAccesses(Version{TxIndex: txIndex}, AccessSet{addr: &accessOptions{revertable: revertable}})
 }
 
 // hasRead reports whether the ReadSet has a read for the given address and path.

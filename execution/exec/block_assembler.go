@@ -182,10 +182,11 @@ func (ba *BlockAssembler) AddTransactions(
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
-	// EIP-8037: regular and state gas pools deplete independently. Each
-	// AddTransactions call must initialise both dimensions from their own
-	// cumulative usage; seeding both from BlockRegular over-inflates the
-	// state pool when state gas has run ahead of regular.
+	// EIP-8037: regular and state gas pools deplete independently. The
+	// builder calls AddTransactions repeatedly with batches from the txpool,
+	// so each call must initialise both dimensions from their own cumulative
+	// usage. Seeding both from BlockRegular only would over-inflate the
+	// state pool whenever state gas has run ahead of regular gas.
 	blobBudget := uint64(0)
 	if header.BlobGasUsed != nil {
 		blobBudget = ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
@@ -213,6 +214,7 @@ func (ba *BlockAssembler) AddTransactions(
 		if balIO == nil {
 			return
 		}
+		ibs.AccessedAddresses()
 		ibs.ResetVersionedIO()
 	}
 
@@ -220,9 +222,11 @@ func (ba *BlockAssembler) AddTransactions(
 
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
-		// EIP-8037: snapshot both regular and state dimensions so a failed
-		// tx's restore returns each pool to its pre-tx value, not the
-		// regular-only snapshot which would refill the state pool.
+		// EIP-8037: regular and state gas pool dimensions can deplete
+		// independently — execution-time state-gas (e.g. CREATE code deposit)
+		// is not visible to the txpool's intrinsic-state-gas filter and may
+		// drain the state pool faster than the regular pool. Snapshot both
+		// dimensions so a failed-inclusion restore puts each one back.
 		regularGasSnap := gasPool.RegularGasAvailable()
 		stateGasSnap := gasPool.StateGasAvailable()
 		blobGasSnap := gasPool.BlobGas()

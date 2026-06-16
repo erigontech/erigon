@@ -5,13 +5,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -225,18 +223,22 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 	for _, w := range writes {
 		h := w.Header()
 		if h.Path == state.SelfDestructPath {
-			destructed := w.ValAny().(bool)
-			// Last SelfDestructPath entry wins (matches normalizeWriteSet /
-			// applyVersionedWrites): a SELFDESTRUCT followed by a same-tx
-			// CREATE2-recreate ends ALIVE, so the recreate's writes must
-			// clear Deleted.
-			sdThisCall[h.Address] = destructed
+			if destructed, ok := w.ValAny().(bool); ok {
+				// Last SelfDestructPath entry wins (matches normalizeWriteSet /
+				// applyVersionedWrites): a SELFDESTRUCT followed by a same-tx
+				// CREATE2-recreate ends ALIVE, so the recreate's writes must
+				// clear Deleted.
+				sdThisCall[h.Address] = destructed
+			}
 		}
 	}
 	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
 		return nonZero || !sdThisCall[addr]
 	}
 	for _, w := range writes {
+		if w.ValAny() == nil {
+			continue
+		}
 		h := w.Header()
 
 		switch h.Path {
@@ -271,7 +273,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				acc.Deleted = false
 			}
 		case state.SelfDestructPath:
-			if destructed := w.ValAny().(bool); destructed {
+			if destructed, ok := w.ValAny().(bool); ok && destructed {
 				acc := cs.ensureAccount(h.Address)
 				acc.Deleted = true
 				acc.dirty = true
@@ -295,19 +297,8 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			}
 		case state.StoragePath:
 			v := w.ValAny().(uint256.Int)
-			// The previous slot value is irrelevant here: the next line
-			// overwrites it with the EVM-write value, and the only
-			// downstream consumer (FlushToUpdates) reads exactly the
-			// value we set. Skip the ensureStorage lazy-load — it
-			// triggers a cold .ef GetAsOf seek per first-touched slot
-			// (~5,910 wasted seeks per SSTORE-bloat block) and discards
-			// the loaded value. Initialize just the inner map.
-			slots := cs.storageState[h.Address]
-			if slots == nil {
-				slots = make(map[accounts.StorageKey]uint256.Int)
-				cs.storageState[h.Address] = slots
-			}
-			slots[h.Key] = v
+			cs.ensureStorage(h.Address, h.Key) // lazy-load if needed
+			cs.storageState[h.Address][h.Key] = v
 			if cs.storageDirty[h.Address] == nil {
 				cs.storageDirty[h.Address] = make(map[accounts.StorageKey]bool)
 			}
@@ -320,65 +311,6 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 	}
 }
 
-// finalChange returns the change carrying the highest tx Index from a BAL
-// per-field / per-slot change list — i.e. the block-end value, since the
-// BAL stores changes tx-indexed and the highest index is the last write in
-// the block. Scans for the max rather than assuming the list is sorted.
-// Returns (zero, false) for an empty list.
-func finalChange[T interface{ GetIndex() uint32 }](changes []T) (T, bool) {
-	var best T
-	var bestIdx uint32
-	found := false
-	for _, c := range changes {
-		if idx := c.GetIndex(); !found || idx >= bestIdx {
-			best, bestIdx, found = c, idx, true
-		}
-	}
-	return best, found
-}
-
-// LoadFromBAL populates calcState from an EIP-7928 Block Access List
-// instead of the per-tx VersionedWrites stream. The BAL declares the
-// block's post-state up front, so the commitment calculator can build the
-// trie without waiting for execution to stream writes tx-by-tx.
-//
-// For each touched account it takes the block-end value per field — the
-// highest-tx-indexed change — and feeds the existing ApplyWrites, so the
-// SELFDESTRUCT / Deleted / EIP-161 routing is reused unchanged rather than
-// reimplemented.
-//
-// Storage *reads* are ignored: commitment only consumes the changed
-// (dirty) set.
-//
-// Account deletion and fresh-contract incarnation are not modelled, and by
-// design need not be: BALs exist only for Amsterdam+ blocks, and
-// post-EIP-6780 SELFDESTRUCT removes an account only when it was created in
-// the same transaction — so no pre-existing account is deleted at block
-// scope, and a destroy+recreate (incarnation bump) cannot span a block
-// boundary. Pre-Amsterdam blocks, where unconditional SELFDESTRUCT could
-// delete any account, carry no BAL and never reach this path.
-func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
-	var writes state.VersionedWrites
-	for _, ac := range bal {
-		addr := ac.Address
-		if bc, ok := finalChange(ac.BalanceChanges); ok {
-			writes = append(writes, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bc.Value})
-		}
-		if nc, ok := finalChange(ac.NonceChanges); ok {
-			writes = append(writes, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nc.Value})
-		}
-		if cc, ok := finalChange(ac.CodeChanges); ok {
-			writes = append(writes, &state.VersionedWrite[accounts.Code]{WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.HashData(cc.Bytecode)), Bytes: cc.Bytecode}})
-		}
-		for _, sc := range ac.StorageChanges {
-			if chg, ok := finalChange(sc.Changes); ok {
-				writes = append(writes, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: sc.Slot}, Val: chg.Value})
-			}
-		}
-	}
-	cs.ApplyWrites(writes)
-}
-
 // FlushToUpdates writes the accumulated dirty state to a commitment.Updates
 // buffer. Only keys modified in this block are emitted. Account updates
 // always include the full current state (all fields) so the trie sees
@@ -388,6 +320,8 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		if !acc.dirty {
 			continue
 		}
+		address := addr.Value()
+		key := string(address[:])
 
 		// Three flavours of "Deleted" writeset, distinguished by whether
 		// the account fields actually became zero:
@@ -411,23 +345,22 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		//      balance-only or fully-populated account. Emit a regular
 		//      UPDATE with the actual values rather than zeroing them.
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
-		addrVal := addr.Value()
-		addrKey := string(addrVal[:])
 		switch {
 		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
+			updates.TouchPlainKeyDirect(key, &commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  uint256.Int{},
 				Nonce:    0,
 				CodeHash: empty.CodeHash,
 			})
 		case acc.Deleted && isAllZero:
-			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
+			updates.TouchPlainKeyDirect(key, &commitment.Update{
 				Flags:    commitment.DeleteUpdate,
 				CodeHash: empty.CodeHash,
 			})
 		default:
-			updates.TouchPlainKeyDirect(addrKey, &commitment.Update{
+			// Either not Deleted, or Deleted-with-retained-values.
+			updates.TouchPlainKeyDirect(key, &commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  acc.Balance,
 				Nonce:    acc.Nonce,
@@ -437,10 +370,14 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 	}
 
 	for addr, dirtySlots := range cs.storageDirty {
+		address := addr.Value()
 		slots := cs.storageState[addr]
-		addrVal := addr.Value()
 		for key := range dirtySlots {
 			val := slots[key]
+			keyVal := key.Value()
+			composite := make([]byte, 20+32)
+			copy(composite, address[:])
+			copy(composite[20:], keyVal[:])
 
 			vBytes := val.Bytes()
 			var u commitment.Update
@@ -451,10 +388,6 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 				u.StorageLen = int8(len(vBytes))
 				copy(u.Storage[:], vBytes)
 			}
-			keyVal := key.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, addrVal[:])
-			copy(composite[20:], keyVal[:])
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}

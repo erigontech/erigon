@@ -1275,6 +1275,17 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 	readVal any,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
+	return vm.validateReadImpl(txIndex, addr, path, key, source, version, readVal, checkVersion, traceInvalid, tracePrefix, false)
+}
+
+// validateReadImpl is validateRead with a recursive flag: the cross-validate
+// probes (AddressPath / SelfDestructPath / IncarnationPath) pass recursive=true
+// so they can be distinguished from a top-level read — a synthetic probe carries
+// no recorded value of its own and must not invalidate on a bare Done entry.
+func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+	readVal any,
+	checkVersion func(readVersion, writeVersion Version) VersionValidity,
+	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
 	valid := VersionValid
 
@@ -1297,12 +1308,14 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
-				// Value tiebreaker: if the StorageRead value matches the
-				// versionMap Done value, the read is still valid despite
-				// the source mismatch. This avoids unnecessary invalidation
-				// when a prior TX wrote the same value that was in storage.
-				if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
-					// Values match — read is valid
+				if recursive && readVal == nil {
+					// Synthetic cross-validate probe (no recorded value of its
+					// own) — the outer entry's validation covers it. Without this
+					// guard a recursive AddressPath/SelfDestructPath probe that
+					// lands on a Done cell would over-invalidate.
+				} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+					// Value tiebreaker: a Done entry now exists where the read
+					// saw storage, but it holds the same value — read stays valid.
 				} else {
 					valid = VersionInvalid
 				}
@@ -1310,10 +1323,44 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
+		// #21294 SD-staleness: a later tx self-destructed (with no Balance/
+		// Nonce/CodeHash revival), so this read predates the destruct. The
+		// serial path returns zero via the SD-zero short-circuit; checkVersion
+		// alone misses it because SD doesn't write the read's own path.
+		// revivalLimit excludes our own writes (validation runs post-flush).
+		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
+			path != IncarnationPath && path != CreateContractPath && path != CodePath {
+			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
+				destructTxIndex := sdRR.DepIdx()
+				if destructTxIndex > rr.Version().TxIndex {
+					revivalLimit := txIndex - 1
+					revived := false
+					for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+						if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+							revived = true
+							break
+						}
+					}
+					if !revived {
+						valid = VersionInvalid
+					}
+				}
+			}
+		}
 	case MVReadResultDependency:
 		valid = VersionInvalid
 	case MVReadResultNone:
-		if source != StorageRead {
+		if source == MapRead && !recursive &&
+			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath) {
+			// #21319: the recording side (versionedReadCore, MVReadResultNone)
+			// folds a sub-field read with no dedicated versionMap cell onto the
+			// account record — it stamps the read with AddressPath's source and
+			// version (a created account writes AddressPath but not NoncePath, so
+			// a later nonce read carries (AddressPath tx, MapRead)). Mirror that
+			// fold: valid iff AddressPath at the recorded version still holds.
+			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+				version, nil, checkVersion, traceInvalid, tracePrefix, true)
+		} else if source != StorageRead {
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
@@ -1322,17 +1369,17 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 				// self-destructed the account, invalidating storage reads of
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
-					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, nil, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
-						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, nil, checkVersion, traceInvalid, tracePrefix)
+					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					} else {
-						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, nil, checkVersion, traceInvalid, tracePrefix)
+						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
-					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, nil, checkVersion, traceInvalid, tracePrefix)
+					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+						version, nil, checkVersion, traceInvalid, tracePrefix, true)
 
 					// A prior tx re-creating this account makes a nil
 					// AddressPath read from storage stale. IncarnationPath is

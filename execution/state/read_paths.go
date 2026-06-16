@@ -28,6 +28,7 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 		return 0
 	}
 	if so.code.Bytes != nil {
+		sdb.callCodeAccessHook(addr, so.code.Bytes)
 		return so.code.Len()
 	}
 	if so.data.CodeHash.IsEmpty() {
@@ -48,7 +49,8 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 	sdb.stateReader.SetTrace(false, "")
 	l := len(code)
 	if codeErr == nil && code != nil {
-		so.code = sdb.stateCache.PutCode(so.data.CodeHash, code)
+		so.code = accounts.Code{Hash: so.data.CodeHash, Bytes: code}
+		sdb.callCodeAccessHook(addr, code)
 	}
 	return l
 }
@@ -182,6 +184,27 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	}
 
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
+		// When the in-memory deletion reflects a prior tx's selfdestruct
+		// (versionMap has SelfDestructPath=true), surface the SD version
+		// rather than UnknownVersion. Returning UnknownVersion here stamped
+		// CreateAccount's synthetic Balance/Incarnation read records with
+		// UnknownVersion while subsequent reads via the SD-zero path observed
+		// the real (tx.0) version — a versionedReads mismatch that panicked
+		// tx N+1 on every incarnation and exhausted the retry budget
+		// ("too many incarnations", #21231). Align with the SD-zero path below.
+		if destructed, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
+			if !commited {
+				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+					Val:        true,
+				})
+			}
+			r.outcome = outcomeReturnZero
+			r.source = MapRead
+			r.version = sdVer
+			return
+		}
 		r.outcome = outcomeReturnDefault
 		r.source = StorageRead
 		r.version = UnknownVersion
@@ -191,19 +214,32 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	var destructedVersion Version
 	if destructed, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
 		destructTxIndex := sdRes.DepIdx()
+		// #21286: a same-tx own write to this path (a value-transfer or recreate
+		// that revived the account) is returned directly as WriteSetRead. A tx
+		// always observes its own write regardless of a prior tx's self-destruct;
+		// routing it through the cross-tx dependency check below would spuriously
+		// abort.
+		if !commited {
+			if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
+				r.outcome = outcomeWriteSetHit
+				r.source = WriteSetRead
+				r.version = Version{TxIndex: s.txIndex, Incarnation: s.version}
+				return
+			}
+		}
+		// #21323: per-path revival resolution. THIS field is revived iff the
+		// version map holds a write to THIS path at a strictly higher TxIndex
+		// (Done, or Dependency for an in-flight revival). versionMap.Read floors
+		// at txIndex-1, so a prior incarnation of the current tx cannot pose as a
+		// later tx's revival. Per-path (vs the old account-wide Balance|Nonce|
+		// CodeHash scan) is precise: a field with no post-SD write reads as the
+		// fresh account's zero — correct for a value-transfer revival — and never
+		// surfaces a stale pre-SD nonce/codeHash for an account revived only via
+		// BalancePath.
 		revived := false
-		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+		if pathRevival := s.versionMap.Read(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
+			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
 			revived = true
-		}
-		if !revived {
-			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
-				revived = true
-			}
-		}
-		if !revived {
-			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
-				revived = true
-			}
 		}
 		if !revived && path != CodePath {
 			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdRes.Incarnation()}
@@ -212,22 +248,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.source = MapRead
 				r.version = sdVersion
 				return
-			}
-			// For StoragePath: the pre-SD storage was wiped — a fresh contract
-			// reads zero. Only fall through if the current tx has its OWN
-			// post-SD storage write for this slot (handled by versionedWriteHit
-			// below). Otherwise the stale pre-SD versionMap value would surface.
-			if path == StoragePath {
-				if _, ok := s.versionedWrites.GetStorage(addr, key); !ok {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
-						Val:        true,
-					})
-					r.outcome = outcomeReturnZero
-					r.source = MapRead
-					r.version = sdVersion
-					return
-				}
 			}
 			if sd, ok := s.versionedWriteSelfDestruct(addr); !ok || sd {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
@@ -390,6 +410,31 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					}
 					// Fall through to storage read.
 				}
+			}
+		}
+
+		// #21345: a self-destructed account's per-account field (Balance/Nonce/
+		// Incarnation/CodeHash/Code/CodeSize) with no dedicated versionMap cell
+		// reads as the post-SD zero value. Record the read as a dependency on the
+		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion —
+		// the latter is rejected on sight by the validator (path==AddressPath
+		// cross-check) and produces a non-converging validator-invalid retry loop.
+		// Per-path: reaching here means THIS path's versionMap read was None, so
+		// it is not revived regardless of whether sibling fields were.
+		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
+			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if destructed, sd, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sd.Status() == MVReadResultDone && destructed {
+				sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
+				if !commited {
+					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+						Val:        true,
+					})
+				}
+				r.outcome = outcomeReturnZero
+				r.source = MapRead
+				r.version = sdVer
+				return
 			}
 		}
 

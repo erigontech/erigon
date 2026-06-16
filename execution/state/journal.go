@@ -215,7 +215,22 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 }
 
 func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
+	// Symmetric with createObjectChange.dirtied: both journal entries
+	// represent the same logical operation (a stateObject was placed at
+	// this address); they differ only in revert behaviour
+	// (createObjectChange.revert deletes; resetObjectChange.revert swaps
+	// back to prev). Dirty tracking must be identical, otherwise the
+	// recreated address is missed from journal.dirties and downstream
+	// consumers (FinalizeTx, GetRemovedAccountsWithBalance, MakeWriteSet)
+	// silently skip it.
+	//
+	// Manifests under parallel-exec when tx1 SD's an address and tx2 hits
+	// CreateAccount / GetOrNewStateObject on the same address — the
+	// versionedRead-synthesised `previous` is non-nil so createObject's
+	// else-branch is taken; with dirtied() returning false the worker's
+	// MakeWriteSet drops the write for the recreated address and the
+	// receipts / state root diverge from serial. See #21138.
+	return ch.account, true
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {

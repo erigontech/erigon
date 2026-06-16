@@ -24,19 +24,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func (c *StateCache) PutCode(hash accounts.CodeHash, code []byte) accounts.Code {
-	return accounts.Code{Hash: hash, Bytes: code}
-}
-
 const (
-	// DefaultAccountCacheBytes is the byte limit for account cache (1 GB)
-	DefaultAccountCacheBytes = 1 * datasize.GB
-	// DefaultStorageCacheBytes is the byte limit for storage cache (1 GB)
-	DefaultStorageCacheBytes = 1 * datasize.GB
-	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
+	// DefaultAccountCacheBytes is the byte limit for account cache
+	DefaultAccountCacheBytes = 64 * datasize.MB
+	// DefaultStorageCacheBytes is the byte limit for storage cache
+	DefaultStorageCacheBytes = 64 * datasize.MB
+	// DefaultCommitmentCacheBytes is the byte limit for commitment cache
 	DefaultCommitmentCacheBytes = 128 * datasize.MB
 )
 
