@@ -16,12 +16,22 @@
 
 package sentinel
 
-import "github.com/erigontech/erigon/diagnostics/metrics"
+import (
+	"sync"
 
-// caplin_peer_count is the consensus-layer counterpart to the EL's p2p_peers
-// gauge: the number of currently-connected Caplin peers.
-var peerCountGauge = metrics.GetOrCreateGauge("caplin_peer_count")
+	"github.com/erigontech/erigon/diagnostics/metrics"
+)
+
+var (
+	peerCountGauge   metrics.Gauge
+	peerCountGaugeMu sync.Mutex
+)
 
 func recordPeerMetrics(connected int) {
+	peerCountGaugeMu.Lock()
+	defer peerCountGaugeMu.Unlock()
+	if peerCountGauge == nil {
+		peerCountGauge = metrics.GetOrCreateGauge("caplin_peer_count")
+	}
 	peerCountGauge.SetInt(connected)
 }
