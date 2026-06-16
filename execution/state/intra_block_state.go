@@ -1880,6 +1880,11 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			// `previous` so that after a REVERT CommitBlock can still emit
 			// DeleteAccount for it.
 			previous = so
+		} else if so, ok := sdb.stateObjects[addr]; ok {
+			// The serial block builder runs with a version map but does not flush
+			// per-tx writes to it, so a same-block credit on this IBS lives only in
+			// the cache; reuse it as `previous` to keep the balance carry-over below.
+			previous = so
 		}
 	}
 
