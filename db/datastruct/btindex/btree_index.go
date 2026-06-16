@@ -291,6 +291,7 @@ func (btw *BtIndexWriter) Build() error {
 		if err = cw.padTo(btKeysAlign); err != nil {
 			return fmt.Errorf("[index] pad before ef: %w", err)
 		}
+		efOffset := uint64(cw.written)
 
 		btw.ef.Build()
 		if err = btw.ef.Write(cw); err != nil {
@@ -300,7 +301,7 @@ func (btw *BtIndexWriter) Build() error {
 			return fmt.Errorf("[index] pad before footer: %w", err)
 		}
 
-		footer := Footer{Meta: Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M}, FormatVersion: btFooterFormatVersion}
+		footer := Footer{Meta: Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M, EfOffset: efOffset}, FormatVersion: btFooterFormatVersion}
 		if err = footer.Encode(cw); err != nil {
 			return fmt.Errorf("[index] write footer: %w", err)
 		}
@@ -516,13 +517,12 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	switch {
 	case err == nil: // current layout: [nodes][EF][footer][anchor]
 		M = footer.Meta.M
-		nodesCount := (footer.Meta.KeysCount + M - 1) / M // di==0 always kept, so ceil(N/M)
-		var pos int
-		nodes, pos, err = decodeNodes(idx.data, nodesCount, M)
+		nodesCount := (footer.Meta.KeysCount + M - 1) / M // nodes are kept at di = 0, M, 2M, … < KeysCount → ceil(KeysCount/M)
+		nodes, _, err = decodeNodes(idx.data, nodesCount, M)
 		if err != nil {
 			return nil, err
 		}
-		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[alignUp(pos, btKeysAlign):])
+		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[footer.Meta.EfOffset:])
 	case errors.Is(err, errNotFooterFormat) && idx.data[0] == btIndexVersion0: // legacy [EF][nodesCount][di-nodes]
 		var pos int
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)

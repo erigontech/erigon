@@ -29,7 +29,7 @@ const (
 	// btFooterFormatVersion lives next to the magic so the ANCHOR layout itself can change later.
 	btFooterFormatVersion = uint16(1)
 
-	btMetadataLen = 16 // keys_count(8) + M(8)
+	btMetadataLen = 24 // keys_count(8) + M(8) + ef_offset(8)
 	btAnchorLen   = 16 // footer_len(4) + flags(2) + format_version(2) + magic(8)
 
 	btKeysAlign   = 4096 // nodes and EF start page-aligned: mmap/SIMD-friendly unsafe reads
@@ -42,6 +42,7 @@ var errNotFooterFormat = errors.New("btindex: not a footer-format file")
 type Metadata struct {
 	KeysCount uint64
 	M         uint64
+	EfOffset  uint64 // byte offset of the EF section, so a reader can locate it without decoding nodes
 }
 
 // Footer is the trailing self-describing record of a footer-format file.
@@ -75,10 +76,11 @@ func (f Footer) Encode(w io.Writer) error {
 	var buf [btMetadataLen + btAnchorLen]byte
 	binary.BigEndian.PutUint64(buf[0:8], f.Meta.KeysCount)
 	binary.BigEndian.PutUint64(buf[8:16], f.Meta.M)
-	binary.BigEndian.PutUint32(buf[16:20], uint32(btMetadataLen))
-	binary.BigEndian.PutUint16(buf[20:22], f.Flags)
-	binary.BigEndian.PutUint16(buf[22:24], f.FormatVersion)
-	binary.BigEndian.PutUint64(buf[24:32], btFooterMagic)
+	binary.BigEndian.PutUint64(buf[16:24], f.Meta.EfOffset)
+	binary.BigEndian.PutUint32(buf[24:28], uint32(btMetadataLen))
+	binary.BigEndian.PutUint16(buf[28:30], f.Flags)
+	binary.BigEndian.PutUint16(buf[30:32], f.FormatVersion)
+	binary.BigEndian.PutUint64(buf[32:40], btFooterMagic)
 	_, err := w.Write(buf[:])
 	return err
 }
@@ -101,7 +103,11 @@ func ReadFooter(data []byte) (f Footer, footerStart int, err error) {
 	}
 	payload := data[footerStart : len(data)-btAnchorLen]
 	return Footer{
-		Meta:          Metadata{KeysCount: binary.BigEndian.Uint64(payload[0:8]), M: binary.BigEndian.Uint64(payload[8:16])},
+		Meta: Metadata{
+			KeysCount: binary.BigEndian.Uint64(payload[0:8]),
+			M:         binary.BigEndian.Uint64(payload[8:16]),
+			EfOffset:  binary.BigEndian.Uint64(payload[16:24]),
+		},
 		Flags:         binary.BigEndian.Uint16(anchor[4:6]),
 		FormatVersion: binary.BigEndian.Uint16(anchor[6:8]),
 	}, footerStart, nil
