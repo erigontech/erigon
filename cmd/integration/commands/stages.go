@@ -761,7 +761,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := doms.Commit(ctx, tx); err != nil {
 				return err
 			}
-			doms.ClearRam(true)
+			doms.Close()
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -780,11 +780,16 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
+			// Fresh SD for the next block: a committed SD is never reused.
+			if doms, err = execctx.NewSharedDomains(ctx, tx, logger); err != nil {
+				return err
+			}
+			doms.SetInMemHistoryReads(false)
 		}
 		if err := doms.Commit(ctx, tx); err != nil {
 			return err
 		}
-		doms.ClearRam(true)
+		doms.Close()
 		return nil
 	}
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)

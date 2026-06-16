@@ -138,6 +138,10 @@ type RunLoopConfig struct {
 	CommitCycle  CommitCycleFn
 	PruneFn      PruneFn
 	ShouldBreak  ShouldBreakFn // optional
+	// NewSD, when set, makes RunLoop open a fresh SharedDomains on the tx
+	// returned by CommitCycle and close the spent one — a committed SD is
+	// never reset and reused. When nil, the same SD is reused across cycles.
+	NewSD func(tx kv.TemporalRwTx) (*execctx.SharedDomains, error)
 }
 
 // RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
@@ -168,6 +172,17 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 		}
 		if newTx != nil {
 			tx = newTx
+		}
+		if cfg.NewSD != nil {
+			old := sd
+			if hasMore && !stop {
+				sd, err = cfg.NewSD(tx)
+				if err != nil {
+					old.Close()
+					return tx, err
+				}
+			}
+			old.Close()
 		}
 	}
 	return tx, nil
@@ -224,10 +239,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Commit() commits tx and advances the BranchCache only on success.
+			// The spent SD is closed by RunLoop (NewSD path); a fresh one opens
+			// for the next cycle.
 			if err := sd.Commit(ctx, tx); err != nil {
 				return nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
-			sd.ClearRam(true)
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
 			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
@@ -245,6 +261,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			tx = newTx
 			return newTx, nil
+		},
+		NewSD: func(tx kv.TemporalRwTx) (*execctx.SharedDomains, error) {
+			sd, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
+			if err != nil {
+				return nil, err
+			}
+			sd.SetInMemHistoryReads(inMemHistoryReads)
+			return sd, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
 			if pe.blockReader.FrozenBlocks() > 0 {
