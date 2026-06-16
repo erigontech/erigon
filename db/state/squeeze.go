@@ -693,9 +693,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						return err
 					}
 				}
-				// Set correct state reader before TouchKey calls begin. The previous
-				// ClearWarmupCache call here cleared the now-removed Go-side warmup
-				// cache; with no such cache, no clear is needed.
+				// Set correct state reader before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))

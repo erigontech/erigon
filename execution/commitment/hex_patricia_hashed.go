@@ -226,9 +226,9 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 }
 
 // Release clears all mutable state and returns this HexPatriciaHashed to the pool for reuse.
-// This ensures no stale database cursor references (PatriciaContext, WarmupCache) survive
-// in the pool and releases large transient data (maps, buffers) for GC promptly.
-// After calling Release, the caller must not use the struct.
+// This ensures no stale database cursor references survive in the pool and releases large
+// transient data (maps, buffers) for GC promptly. After calling Release, the caller must
+// not use the struct.
 func (hph *HexPatriciaHashed) Release() {
 	hph.resetForReuse()
 	hphPool.Put(hph)

@@ -233,8 +233,7 @@ func (c *BranchCache) Clear() {
 }
 
 // Stats returns a one-line summary of root-tier and tail-tier hit/miss
-// counters plus bytes served. Format mirrors WarmupCache.Stats() so
-// per-Process log lines can compose them.
+// counters plus bytes served.
 func (c *BranchCache) Stats() string {
 	rh, rm := c.rootHits.Load(), c.rootMisses.Load()
 	th, tm := c.tailHits.Load(), c.tailMisses.Load()

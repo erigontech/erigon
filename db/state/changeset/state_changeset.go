@@ -485,10 +485,8 @@ type DomainIOMetrics struct {
 	//   7 : 37-44 bytes (depth 71-86, mid storage)
 	//   8 : 45-64 bytes (depth 87-127, leaf-parents and deep)
 	//   9 : 65+ bytes (out of range)
-	// Used to localise where the per-block file reads concentrate —
-	// e.g., are the 25K commitment reads on bloat workload
-	// storage-subtree-trunk (where per-contract pinning helps) or
-	// leaf-parents (where it doesn't)?
+	// Used to localise where the per-block commitment file reads concentrate
+	// by prefix length (storage-subtree-trunk vs leaf-parents).
 	UniqueLenBuckets [10]int64
 
 	// StateCache hit/miss tracks the SharedDomains.stateCache layer
