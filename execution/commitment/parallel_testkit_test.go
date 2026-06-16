@@ -377,3 +377,65 @@ func slotHashBytes(i int) []byte {
 	binary.BigEndian.PutUint64(out[24:], uint64(i)+1)
 	return out[:]
 }
+
+// buildMixedCorpus builds approximately nKeys keys: random accounts each with a
+// small random number of storage slots.
+func buildMixedCorpus(seed int64, nKeys int) ([][]byte, []Update) {
+	rnd := rand.New(rand.NewSource(seed))
+	ub := NewUpdateBuilder()
+	n := 0
+	for n < nKeys {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		a := hex.EncodeToString(addr)
+		ub.Balance(a, rnd.Uint64()+1)
+		n++
+		for s := 0; s < rnd.Intn(5) && n < nKeys; s++ {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			val := make([]byte, 32)
+			rnd.Read(val)
+			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+			n++
+		}
+	}
+	return ub.Build()
+}
+
+func build100KAccountsCorpus(b testing.TB) ([][]byte, []Update) {
+	b.Helper()
+	rnd := rand.New(rand.NewSource(133777))
+	ub := NewUpdateBuilder()
+	for range 100_000 {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		ub.Balance(hex.EncodeToString(addr), rnd.Uint64())
+	}
+	return ub.Build()
+}
+
+func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
+	b.Helper()
+	rnd := rand.New(rand.NewSource(244888))
+	ub := NewUpdateBuilder()
+
+	addrs := make([]string, 1000)
+	for i := range addrs {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		addrs[i] = hex.EncodeToString(addr)
+		ub.Balance(addrs[i], rnd.Uint64())
+	}
+
+	const slotsPerAccount = 499 // 1000 * 499 = 499_000 storage + 1000 accounts = 500_000 total
+	for _, addr := range addrs {
+		for range slotsPerAccount {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			val := make([]byte, 32)
+			rnd.Read(val)
+			ub.Storage(addr, hex.EncodeToString(loc), hex.EncodeToString(val))
+		}
+	}
+	return ub.Build()
+}

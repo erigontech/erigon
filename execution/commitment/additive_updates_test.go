@@ -21,45 +21,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
 )
-
-// TestPrefixTrieInsertDuplicateMerges: a second Insert of the same key must
-// merge the carried update per-field (copy-on-write, so a snapshot holding the
-// old pointer is unaffected) and must not inflate subtree counts.
-func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
-	t.Parallel()
-
-	trie := newPrefixTrie()
-	key := nibs(0x01, 0x02, 0x03)
-	first := &Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(100)}
-	trie.Insert(key, []byte("pk"), first)
-	require.Equal(t, uint32(1), trie.root.subtreeCount)
-
-	trie.Insert(key, []byte("pk"), &Update{Flags: NonceUpdate, Nonce: 5})
-
-	assert.Equal(t, uint32(1), trie.root.subtreeCount, "duplicate insert must not inflate subtreeCount")
-
-	var got *Update
-	count := 0
-	require.NoError(t, dfsSubtree(trie.root, nil, func(_, _ []byte, upd *Update) error {
-		got = upd
-		count++
-		return nil
-	}))
-	require.Equal(t, 1, count, "duplicate insert must not add a second key")
-	require.NotNil(t, got)
-	assert.Equal(t, BalanceUpdate|NonceUpdate, got.Flags, "flags must accumulate")
-	assert.Equal(t, uint64(100), got.Balance.Uint64())
-	assert.Equal(t, uint64(5), got.Nonce)
-
-	// Copy-on-write: the first update object must not have been mutated (a
-	// concurrent fold snapshot may still hold it).
-	assert.Equal(t, BalanceUpdate, first.Flags, "merge must not mutate the previously stored update")
-}
 
 // additiveCorpus builds a batch where every key is touched twice with partial
 // updates, plus the merged equivalents the sequential oracle folds:

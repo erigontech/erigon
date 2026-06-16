@@ -363,9 +363,9 @@ execctx merge: merge the two flag files into
 `t.Parallel`). **Carry over all six funcs**, including
 `TestPickTrieVariant_StreamingFlag` (not in any merge/prune list).
 
-- [ ] `go vet ./execution/commitment/... ./db/state/execctx/...` compiles, no duplicate or undefined symbols.
-- [ ] `go test ./execution/commitment/... ./db/state/execctx/... -count=1 -short` green.
-- [ ] Every relocated func accounted for (no test func lost — this task only relocates); the 6 execctx funcs all present.
+- [x] `go vet ./execution/commitment/... ./db/state/execctx/...` compiles, no duplicate or undefined symbols.
+- [x] `go test ./execution/commitment/... ./db/state/execctx/... -count=1 -short` green.
+- [x] Every relocated func accounted for (no test func lost — this task only relocates); the 6 execctx funcs all present.
 
 ### Task 4: Object-api / unit merges (assertion-preserving)
 

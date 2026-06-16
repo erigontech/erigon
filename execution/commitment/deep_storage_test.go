@@ -17,9 +17,9 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -29,6 +29,85 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
+
+func TestDeepIntegration_Parity(t *testing.T) {
+	pk, upds := buildWhaleCorpus(bigAccountWhale(15_000))
+	ctx := context.Background()
+
+	seqMs := NewMockState(t)
+	require.NoError(t, seqMs.applyPlainUpdates(pk, upds))
+	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
+	sUpd := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+	seqRoot, err := seq.Process(ctx, sUpd, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	sUpd.Close()
+
+	for _, workers := range []int{1, 4, 8} {
+		parMs := NewMockState(t)
+		parMs.SetConcurrentCommitment(true)
+		require.NoError(t, parMs.applyPlainUpdates(pk, upds))
+		pph := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
+		pph.SetNumWorkers(workers)
+		pph.ResetContext(parMs)
+		pUpd := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, pk, upds)
+		parRoot, err := pph.Process(ctx, pUpd, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		pUpd.Close()
+		pph.Release()
+		require.Equalf(t, seqRoot, parRoot, "deep parallel(workers=%d) root != sequential", workers)
+	}
+}
+
+// TestDeepIntegration_BranchParity checks not just the root but every stored
+// branch — execution writes branches to the DB and the next block reads them, so
+// a matching root with wrong branch metadata still breaks the chain.
+func TestDeepIntegration_BranchParity(t *testing.T) {
+	pk, upds := buildWhaleCorpus(bigAccountWhale(15_000))
+	ctx := context.Background()
+
+	seqMs := NewMockState(t)
+	require.NoError(t, seqMs.applyPlainUpdates(pk, upds))
+	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
+	sUpd := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+	seqRoot, err := seq.Process(ctx, sUpd, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	sUpd.Close()
+
+	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
+	require.NoError(t, parMs.applyPlainUpdates(pk, upds))
+	pph := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
+	pph.SetNumWorkers(8)
+	pph.ResetContext(parMs)
+	pUpd := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, pk, upds)
+	parRoot, err := pph.Process(ctx, pUpd, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	pUpd.Close()
+	pph.Release()
+
+	require.Equal(t, seqRoot, parRoot, "root")
+
+	mism := 0
+	seen := map[string]struct{}{}
+	for k := range seqMs.cm {
+		seen[k] = struct{}{}
+	}
+	for k := range parMs.cm {
+		seen[k] = struct{}{}
+	}
+	for k := range seen {
+		sb, sok := seqMs.cm[k]
+		pb, pok := parMs.cm[k]
+		if !sok || !pok || !bytes.Equal(sb, pb) {
+			mism++
+		}
+	}
+	t.Logf("seq branches=%d par branches=%d mismatched=%d", len(seqMs.cm), len(parMs.cm), mism)
+	if mism != 0 {
+		branchDiff(t, seqMs, parMs)
+	}
+	require.Zero(t, mism, "stored branch metadata differs between deep-parallel and sequential")
+}
 
 type storKV struct {
 	hk  []byte
@@ -180,45 +259,4 @@ func TestDeepConcurrent_WhaleParity(t *testing.T) {
 	conRoot, err := concurrentAccountRoot(ms, addr, accHash, accNib, accUpd, groups, true)
 	require.NoError(t, err)
 	require.Equal(t, seqRoot, conRoot, "concurrent storage-fold root != sequential")
-}
-
-func Benchmark_DeepStorageWhale(b *testing.B) {
-	for _, slots := range []int{750_000} {
-		addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(slots)
-		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
-			b.Run("Sequential", func(b *testing.B) {
-				for b.Loop() {
-					b.StopTimer()
-					ms := NewMockState(b)
-					require.NoError(b, ms.applyPlainUpdates(pk, upds))
-					hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-					upd := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, pk, upds)
-					b.StartTimer()
-					_, err := hph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-					b.StopTimer()
-					require.NoError(b, err)
-					upd.Close()
-					b.StartTimer()
-				}
-			})
-			for _, parallel := range []bool{false, true} {
-				name := "ConcurrentStorage-serial"
-				if parallel {
-					name = "ConcurrentStorage-parallel"
-				}
-				b.Run(name, func(b *testing.B) {
-					for b.Loop() {
-						b.StopTimer()
-						ms := NewMockState(b)
-						require.NoError(b, ms.applyPlainUpdates(pk, upds))
-						b.StartTimer()
-						_, err := concurrentAccountRoot(ms, addr, accHash, accNib, accUpd, groups, parallel)
-						b.StopTimer()
-						require.NoError(b, err)
-						b.StartTimer()
-					}
-				})
-			}
-		})
-	}
 }

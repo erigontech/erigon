@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"math/rand"
 	"sync"
 	"testing"
@@ -1040,5 +1041,213 @@ func TestKeyArena_PointerStability(t *testing.T) {
 			require.Equal(t, byte(i), got[i][j],
 				"key %d overlaps another arena slice (overwritten at byte %d)", i, j)
 		}
+	}
+}
+
+// buildMultiDepthCorpus mixes account-trie forks (thousands of independent
+// accounts → split-points at several shallow account-trie depths) with a whale
+// storage subtree whose deep forks split below the account/storage boundary
+// (depth > 64). Together they exercise concurrent folding at many depths in one
+// batch, which a single-whale or accounts-only corpus cannot.
+func buildMultiDepthCorpus() (keys [][]byte, upds []Update) {
+	mk, mu := buildMixedCorpus(0xD15C0DE, 6000)
+	_, _, _, _, pk, pu, _ := whaleByNibble(20_000)
+	keys = append(keys, mk...)
+	keys = append(keys, pk...)
+	upds = append(upds, mu...)
+	upds = append(upds, pu...)
+	return keys, upds
+}
+
+// parallelRoot drives ModeParallel over a single batch, returning the root and
+// the MockState (with committed branches) for parity comparison.
+func parallelRoot(t *testing.T, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
+	t.Helper()
+	return engineRoot(t, modeParallel, workers, keys, upds)
+}
+
+// TestStreaming_MultiDepthSplitParity is the headline Task-5 parity gate: a
+// corpus with split-points at SEVERAL depths must fold via the streaming
+// concurrent engine to the SAME root and stored-branch set as sequential
+// ModeDirect AND ModeParallel, at every worker count. DeepLocalFolds asserts the
+// whale's account@64 boundary still routes through foldStorageRoot (the flat
+// per-first-nibble fan-out).
+func TestStreaming_MultiDepthSplitParity(t *testing.T) {
+	t.Parallel()
+	keys, upds := buildMultiDepthCorpus()
+
+	seqRoot, seqMs := sequentialRoot(t, keys, upds)
+
+	parRoot, parMs := parallelRoot(t, 4, keys, upds)
+	require.Equal(t, seqRoot, parRoot, "parallel root != sequential")
+	requireBranchParity(t, seqMs, parMs)
+
+	for _, w := range []int{1, 4, 8} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc.SetNumWorkers(w)
+		for i := range keys {
+			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
+		}
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+
+		require.Equalf(t, seqRoot, root, "multi-depth streaming(workers=%d) root != ModeDirect", w)
+		require.Equalf(t, parRoot, root, "multi-depth streaming(workers=%d) root != ModeParallel", w)
+		requireBranchParity(t, seqMs, ms)
+		require.NotZerof(t, sc.DeepLocalFolds(), "account@64 must fold through foldStorageRoot (workers=%d)", w)
+		sc.Release()
+	}
+}
+
+// TestStreaming_MultiDepthCollapseParity is the deep-collapse parity gate: a
+// whale account whose deep storage collapses (block 2 deletes 1/3 + updates 1/3)
+// while embedded among thousands of other accounts must fold via the streaming
+// concurrent engine to the SAME root and stored-branch set as sequential
+// ModeDirect AND ModeParallel, at every worker count. This surfaces the
+// streaming-mode deep-collapse divergence fixed by
+// docs/plans/20260609-streaming-collapse-fold-fix.md.
+func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+	for _, w := range []int{1, 4, 8} {
+		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
+	}
+}
+
+// TestStreaming_FullCollapseParity is the full-deletion variant: block 2 deletes
+// EVERY whale storage slot (embedded among other accounts), so the whale becomes
+// storage-less. Streaming must yield the empty-trie storageRoot for the account
+// (not a zero hash) and match ModeDirect == ModeParallel at every worker count.
+func TestStreaming_FullCollapseParity(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleFullCollapseCorpus()
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+	for _, w := range []int{1, 4, 8} {
+		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
+	}
+}
+
+// TestStreaming_StorageInteriorSplits is the headline Task-3 check: a whale
+// account whose storage spans many slots must fold via the flat per-first-nibble
+// fan-out (foldStorageRoot, ~16-way below the account/storage boundary) while
+// still matching the sequential root and stored branch set. The account folds
+// through foldStorageRoot (DeepLocalFolds), never as a split-point (its depth-64
+// node carries the account terminator).
+func TestStreaming_StorageInteriorSplits(t *testing.T) {
+	t.Parallel()
+	_, _, _, _, pk, upds, _ := whaleByNibble(20_000)
+
+	seqRoot, seqMs := sequentialRoot(t, pk, upds)
+
+	for _, w := range []int{1, 4, 8} {
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(t, ms.applyPlainUpdates(pk, upds))
+
+		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc.SetNumWorkers(w)
+		for i := range pk {
+			sc.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
+		}
+		root, err := sc.Process(context.Background())
+		require.NoError(t, err)
+
+		require.Equalf(t, seqRoot, root, "whale storage-interior split(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, ms)
+		require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through foldStorageRoot (workers=%d)", w)
+		sc.Release()
+	}
+}
+
+// whaleCollapseCorpus builds a two-block whale-storage delete corpus that drives
+// the concurrent deep-fold path. Block 1 (pk/upds) is a whale whose storage spans
+// many slots. Block 2 (k2/u2) touches the account and rewrites a SUBSET of the
+// slots — a third deleted, a third updated, a third left untouched on disk — so
+// the block-2 fold still crosses deepStorageThreshold (routing through
+// foldStorageRoot's split fan-out) while the deletes collapse interior storage
+// branches AND untouched on-disk siblings must be preserved across the fold. That
+// untouched-sibling read is what makes the engine self-flush mid-fold; the fold
+// must write only deferred (applied once at end of block) and stay parity-clean.
+func whaleCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	var addr []byte
+	addr, _, _, _, pk, upds, _ = whaleByNibble(30_000)
+
+	k2 = [][]byte{addr}
+	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	u2[0].Balance.SetUint64(99)
+	u2[0].Nonce = 7
+	for i := range pk {
+		if len(pk[i]) == length.Addr || i%3 == 2 {
+			continue // leave every third slot untouched on disk
+		}
+		var u Update
+		if i%3 == 0 {
+			u.Flags = DeleteUpdate
+		} else {
+			u.Flags = StorageUpdate
+			u.StorageLen = 4
+			binary.BigEndian.PutUint32(u.Storage[:4], uint32(i)*97+3)
+		}
+		k2 = append(k2, pk[i])
+		u2 = append(u2, u)
+	}
+	return pk, upds, k2, u2
+}
+
+// whaleFullCollapseCorpus is whaleCollapseCorpus's full-deletion variant: block 2
+// touches the account and DELETES every storage slot, so the whale becomes
+// storage-less (storageRoot == emptyRoot). Every first-storage-nibble subtree
+// collapses to empty, exercising the all-children-collapsed path that must yield
+// the empty-trie root rather than a zero hash.
+func whaleFullCollapseCorpus() (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	var addr []byte
+	addr, _, _, _, pk, upds, _ = whaleByNibble(30_000)
+
+	k2 = [][]byte{addr}
+	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	u2[0].Balance.SetUint64(99)
+	u2[0].Nonce = 7
+	for i := range pk {
+		if len(pk[i]) == length.Addr {
+			continue
+		}
+		k2 = append(k2, pk[i])
+		u2 = append(u2, Update{Flags: DeleteUpdate})
+	}
+	return pk, upds, k2, u2
+}
+
+// TestStreaming_StorageCollapseAcrossSplit drives a delete batch that collapses
+// storage branches below the account/storage boundary while the whale is EMBEDDED
+// among thousands of other accounts. Embedding is load-bearing: a single-account
+// storage trie produces a degenerate incremental-collapse root that no
+// embedding-insensitive concurrent per-first-nibble fold can match (Task 3 of
+// docs/plans/20260609-streaming-collapse-fold-fix.md). Embedded, the collapse root
+// is canonical and the streaming fold must reproduce it — root + every stored
+// branch byte-identical to sequential at every worker count. A collapse self-flush
+// that dropped a deletion (phantom child) or clobbered an untouched on-disk sibling
+// would break branch parity.
+func TestStreaming_StorageCollapseAcrossSplit(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleCollapseCorpus()
+	mk, mu := buildMixedCorpus(0x5EED, 3000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+
+	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, wk2, wu2)
+
+	for _, w := range []int{1, 4, 8} {
+		strRoot, strMs := runIncremental(t, modeStreaming, w, k1, u1, wk2, wu2)
+		require.Equalf(t, seqRoot, strRoot, "whale storage collapse(workers=%d) root != sequential", w)
+		requireBranchParity(t, seqMs, strMs)
 	}
 }

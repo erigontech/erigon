@@ -31,19 +31,22 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// withParallelCommitmentFlag toggles statecfg.ExperimentalParallelCommitment for
-// the duration of the test and restores the original value on cleanup. It also
-// clears the older concurrent flag because NewSharedDomains routes parallel-first
-// when both are set — pinning concurrent=false isolates the parallel branch.
-func withParallelCommitmentFlag(t *testing.T, on bool) {
+// withCommitmentFlag pins the three experimental commitment flags to select the
+// requested trie variant for the duration of the test, restoring the originals
+// on cleanup. The non-selected flags are forced false so PickTrieVariant's
+// streaming-over-parallel-over-concurrent precedence is exercised in isolation.
+func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	t.Helper()
+	origStream := statecfg.ExperimentalStreamingCommitment
 	origPar := statecfg.ExperimentalParallelCommitment
 	origConc := statecfg.ExperimentalConcurrentCommitment
 	t.Cleanup(func() {
+		statecfg.ExperimentalStreamingCommitment = origStream
 		statecfg.ExperimentalParallelCommitment = origPar
 		statecfg.ExperimentalConcurrentCommitment = origConc
 	})
-	statecfg.ExperimentalParallelCommitment = on
+	statecfg.ExperimentalStreamingCommitment = variant == commitment.VariantStreamingHexPatricia
+	statecfg.ExperimentalParallelCommitment = variant == commitment.VariantParallelHexPatricia
 	statecfg.ExperimentalConcurrentCommitment = false
 }
 
@@ -88,10 +91,10 @@ func TestSharedDomains_ParallelFlagOff_UsesSequentialTrie(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Do not call t.Parallel() — withParallelCommitmentFlag mutates a
-	// process-global flag; concurrent flag flips race against each other.
+	// Do not call t.Parallel() — withCommitmentFlag mutates a process-global
+	// flag; concurrent flag flips race against each other.
 
-	withParallelCommitmentFlag(t, false)
+	withCommitmentFlag(t, commitment.VariantHexPatriciaTrie)
 
 	stepSize := uint64(16)
 	db := newTestDb(t, stepSize)
@@ -117,10 +120,10 @@ func TestSharedDomains_ParallelFlagOn_UsesParallelTrie(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Do not call t.Parallel() — withParallelCommitmentFlag mutates a
-	// process-global flag; concurrent flag flips race against each other.
+	// Do not call t.Parallel() — withCommitmentFlag mutates a process-global
+	// flag; concurrent flag flips race against each other.
 
-	withParallelCommitmentFlag(t, true)
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 
 	stepSize := uint64(16)
 	db := newTestDb(t, stepSize)
@@ -147,14 +150,18 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Do not call t.Parallel() — withParallelCommitmentFlag mutates a
-	// process-global flag; concurrent flag flips race against each other.
+	// Do not call t.Parallel() — withCommitmentFlag mutates a process-global
+	// flag; concurrent flag flips race against each other.
 
 	stepSize := uint64(16)
 
 	runOnce := func(t *testing.T, parallel bool) []byte {
 		t.Helper()
-		withParallelCommitmentFlag(t, parallel)
+		variant := commitment.VariantHexPatriciaTrie
+		if parallel {
+			variant = commitment.VariantParallelHexPatricia
+		}
+		withCommitmentFlag(t, variant)
 
 		db := newTestDb(t, stepSize)
 
@@ -175,11 +182,7 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 
 		// Sanity check that the flag-to-trie wiring matches the requested mode.
 		got := sd.GetCommitmentCtx().Trie().Variant()
-		want := commitment.VariantHexPatriciaTrie
-		if parallel {
-			want = commitment.VariantParallelHexPatricia
-		}
-		require.Equalf(t, want, got, "trie variant for parallel=%v", parallel)
+		require.Equalf(t, variant, got, "trie variant for parallel=%v", parallel)
 
 		return runWriteCommitBatch(t, sd, rwTx)
 	}
@@ -190,4 +193,94 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 	require.Equalf(t, seqRoot, parRoot,
 		"sequential and parallel commitment roots must match: sequential=%x parallel=%x",
 		seqRoot, parRoot)
+}
+
+// TestPickTrieVariant_StreamingFlag asserts the flag-to-variant mapping and its
+// precedence: streaming wins over parallel and concurrent when set.
+func TestPickTrieVariant_StreamingFlag(t *testing.T) {
+	// Do not call t.Parallel() — mutates process-global statecfg flags.
+	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
+	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
+
+	// Streaming precedence over the other concurrent paths.
+	statecfg.ExperimentalParallelCommitment = true
+	statecfg.ExperimentalConcurrentCommitment = true
+	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
+
+	statecfg.ExperimentalStreamingCommitment = false
+	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
+}
+
+// TestSharedDomains_StreamingFlagOn_UsesStreamingTrie verifies that turning the
+// streaming flag on routes NewSharedDomains to a streaming-backed trie (a
+// *ParallelPatriciaHashed shell whose Variant reports streaming).
+func TestSharedDomains_StreamingFlagOn_UsesStreamingTrie(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	// Do not call t.Parallel() — mutates process-global statecfg flags.
+
+	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
+
+	stepSize := uint64(16)
+	db := newTestDb(t, stepSize)
+
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	trie := sd.GetCommitmentCtx().Trie()
+	require.Equal(t, commitment.VariantStreamingHexPatricia, trie.Variant(),
+		"flag on must construct the streaming-backed trie")
+}
+
+// TestSharedDomains_StreamingFlag_RootEquivalence asserts the streaming trie
+// produces the same commitment root as the sequential trie over the same update
+// set. Both runs use isolated in-memory DBs so each starts from a clean state.
+func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	// Do not call t.Parallel() — mutates process-global statecfg flags.
+
+	stepSize := uint64(16)
+
+	runOnce := func(t *testing.T, streaming bool) []byte {
+		t.Helper()
+		variant := commitment.VariantHexPatriciaTrie
+		if streaming {
+			variant = commitment.VariantStreamingHexPatricia
+		}
+		withCommitmentFlag(t, variant)
+
+		db := newTestDb(t, stepSize)
+
+		ctx := t.Context()
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(t, err)
+		defer sd.Close()
+
+		sd.EnableParaTrieDB(db)
+
+		got := sd.GetCommitmentCtx().Trie().Variant()
+		require.Equalf(t, variant, got, "trie variant for streaming=%v", streaming)
+
+		return runWriteCommitBatch(t, sd, rwTx)
+	}
+
+	seqRoot := runOnce(t, false)
+	strRoot := runOnce(t, true)
+
+	require.Equalf(t, seqRoot, strRoot,
+		"sequential and streaming commitment roots must match: sequential=%x streaming=%x",
+		seqRoot, strRoot)
 }
