@@ -17,9 +17,12 @@
 package btindex
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -184,6 +187,101 @@ func Test_BtreeIndex_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
 		c.Close()
+	}
+}
+
+// writeV0Index writes a legacy v0-format .bt over dataPath: [EF][nodeCount(8)][di(8)+keyLen(2)+key per node],
+// nodes kept at di = 0, M, 2M, ... The writer no longer emits v0, so this reproduces the released layout to
+// keep the v0 read path (decodeListNodesV0 + EF-first detection) covered.
+func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, m uint64) {
+	tb.Helper()
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	r := seg.NewReader(decomp.MakeGetter(), compressed)
+	r.Reset(0)
+	count := uint64(r.Count() / 2)
+
+	f, err := os.Create(indexPath)
+	require.NoError(tb, err)
+	defer f.Close()
+	w := bufio.NewWriter(f)
+
+	if count > 0 {
+		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))
+		var nodes []Node
+		var key []byte
+		var pos, di uint64
+		for r.HasNext() {
+			key, _ = r.Next(key[:0])
+			ef.AddOffset(pos)
+			if di%m == 0 {
+				nodes = append(nodes, Node{key: common.Copy(key), di: di})
+			}
+			di++
+			pos, _ = r.Skip()
+		}
+		ef.Build()
+		require.NoError(tb, ef.Write(w))
+
+		var hdr [10]byte
+		binary.BigEndian.PutUint64(hdr[:8], uint64(len(nodes)))
+		_, err = w.Write(hdr[:8])
+		require.NoError(tb, err)
+		for i := range nodes {
+			binary.BigEndian.PutUint64(hdr[:8], nodes[i].di)
+			binary.BigEndian.PutUint16(hdr[8:10], uint16(len(nodes[i].key)))
+			_, err = w.Write(hdr[:10])
+			require.NoError(tb, err)
+			_, err = w.Write(nodes[i].key)
+			require.NoError(tb, err)
+		}
+	}
+	require.NoError(tb, w.Flush())
+}
+
+func Test_BtreeIndex_V0_V1_Read(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	const M = uint64(32)
+	keyCount := 500
+	compressFlags := seg.CompressKeys | seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+
+	v1Path := filepath.Join(tmp, "v1.bt")
+	buildBtreeIndex(t, dataPath, v1Path, compressFlags, 1, logger, true)
+
+	v0Path := filepath.Join(tmp, "v0.bt")
+	writeV0Index(t, dataPath, v0Path, compressFlags, M)
+
+	for _, tc := range []struct{ name, path string }{{"v0", v0Path}, {"v1", v1Path}} {
+		t.Run(tc.name, func(t *testing.T) {
+			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, M, compressFlags, false)
+			require.NoError(t, err)
+			defer bt.Close()
+			defer kv.Close()
+			require.EqualValues(t, keyCount, bt.KeyCount())
+
+			getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+			c, err := bt.Seek(getter, nil)
+			require.NoError(t, err)
+			for i := range keys {
+				require.Equalf(t, keys[i], c.Key(), "%s forward scan i=%d", tc.name, i)
+				c.Next()
+			}
+			c.Close()
+			for i := range keys {
+				cur, err := bt.Seek(getter, keys[i])
+				require.NoErrorf(t, err, "%s i=%d", tc.name, i)
+				require.Equalf(t, keys[i], cur.Key(), "%s seek i=%d", tc.name, i)
+				cur.Close()
+			}
+		})
 	}
 }
 
