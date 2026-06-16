@@ -18,7 +18,6 @@ package btindex
 
 import (
 	"bufio"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -52,12 +51,10 @@ var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
-const (
-	// old layout: [EF][nodesCount(8)][nodes...]; EF count's MSB is always 0x00 for realistic datasets.
-	btIndexVersion0 = byte(0x00)
-	// new layout: [version][M(8)][nodesCount(8)][nodes...][EF]; nodes stream during ETL Load, EF written last.
-	btIndexVersion1 = byte(0x01)
-)
+// btIndexVersion0 is the released legacy layout [EF][nodesCount(8)][di-nodes], detected by its
+// first byte being 0x00 (the EF count's MSB, always 0x00 for realistic datasets). The current
+// layout is footer-based ([nodes][EF][footer][anchor]) and is detected by the trailing magic.
+const btIndexVersion0 = byte(0x00)
 
 // BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
 var BtInterp = dbg.EnvBool("BT_INTERP", true)
@@ -185,14 +182,11 @@ type BtIndexWriter struct {
 	nodesF    *os.File
 	nodesW    *bufio.Writer
 
-	nodesWritten uint64 // count of M-th keys kept as B-tree nodes
-
 	args BtIndexWriterArgs
 
 	indexFileName string
 
-	numBuf        [8]byte
-	nodeHeaderBuf [10]byte
+	nodeHeaderBuf [2]byte
 
 	built   bool
 	lvl     log.Lvl
@@ -247,19 +241,17 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	if btw.ef == nil {
-		return errors.New("[index] AddKey called with KeyCount==0")
+	if btw.ef == nil || btw.ef.AddedCount() >= btw.args.KeyCount {
+		return fmt.Errorf("[index] %s: AddKey beyond KeyCount=%d", btw.indexFileName, btw.args.KeyCount)
 	}
 
 	di := btw.ef.AddedCount()
 	btw.ef.AddOffset(offset)
 
 	if di%btw.args.M == 0 { // every M-th key (di==0 included) is kept as a B-tree node
-		node := Node{di: di, key: key}
-		if err := node.Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
+		if err := (Node{key: key}).Encode(btw.nodesW, btw.nodeHeaderBuf[:]); err != nil {
 			return err
 		}
-		btw.nodesWritten++
 	}
 	return nil
 }
@@ -285,17 +277,7 @@ func (btw *BtIndexWriter) Build() error {
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
 
 	if btw.args.KeyCount > 0 {
-		if _, err = indexW.Write([]byte{btIndexVersion1}); err != nil {
-			return fmt.Errorf("[index] write version: %w", err)
-		}
-		binary.BigEndian.PutUint64(btw.numBuf[:], btw.args.M)
-		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
-			return fmt.Errorf("[index] write M: %w", err)
-		}
-		binary.BigEndian.PutUint64(btw.numBuf[:], btw.nodesWritten)
-		if _, err = indexW.Write(btw.numBuf[:]); err != nil {
-			return fmt.Errorf("[index] write nodes count: %w", err)
-		}
+		cw := &countingWriter{w: indexW}
 
 		if err = btw.nodesW.Flush(); err != nil {
 			return fmt.Errorf("[index] flush nodes: %w", err)
@@ -303,13 +285,24 @@ func (btw *BtIndexWriter) Build() error {
 		if _, err = btw.nodesF.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("[index] seek nodes: %w", err)
 		}
-		if _, err = io.Copy(indexW, btw.nodesF); err != nil {
+		if _, err = io.Copy(cw, btw.nodesF); err != nil {
 			return fmt.Errorf("[index] copy nodes: %w", err)
+		}
+		if err = cw.padTo(btKeysAlign); err != nil {
+			return fmt.Errorf("[index] pad before ef: %w", err)
 		}
 
 		btw.ef.Build()
-		if err = btw.ef.Write(indexW); err != nil {
+		if err = btw.ef.Write(cw); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
+		}
+		if err = cw.padTo(btFooterAlign); err != nil {
+			return fmt.Errorf("[index] pad before footer: %w", err)
+		}
+
+		footer := Footer{Meta: Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M}, FormatVersion: btFooterFormatVersion}
+		if err = footer.Encode(cw); err != nil {
+			return fmt.Errorf("[index] write footer: %w", err)
 		}
 	}
 
@@ -518,33 +511,31 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	}
 	idx.data = idx.m[:idx.size]
 
-	var pos int
 	var nodes []Node
-	switch idx.data[pos] {
-	case btIndexVersion1:
-		pos++
-		if len(idx.data[pos:]) < 8 {
-			return nil, fmt.Errorf("truncated btree index v1 (no M field): %s", indexPath)
-		}
-		M = binary.BigEndian.Uint64(idx.data[pos : pos+8])
-		pos += 8
-		var nodesBytes int
-		nodes, nodesBytes, err = decodeListNodesV1(idx.data[pos:], M)
+	footer, _, ferr := ReadFooter(idx.data)
+	switch {
+	case ferr == nil: // current layout: [nodes][EF][footer][anchor]
+		M = footer.Meta.M
+		nodesCount := (footer.Meta.KeysCount + M - 1) / M // di==0 always kept, so ceil(N/M)
+		var pos int
+		nodes, pos, err = decodeNodes(idx.data, nodesCount, M)
 		if err != nil {
 			return nil, err
 		}
-		pos += nodesBytes
-		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
-	case btIndexVersion0:
-		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
+		idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[alignUp(pos, btKeysAlign):])
+	case errors.Is(ferr, errNotFooterFormat) && idx.data[0] == btIndexVersion0: // legacy [EF][nodesCount][di-nodes]
+		var pos int
+		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
 			nodes, _, err = decodeListNodesV0(idx.data[pos:])
 			if err != nil {
 				return nil, err
 			}
 		}
+	case errors.Is(ferr, errNotFooterFormat):
+		return nil, fmt.Errorf("unsupported btree index format in %s: upgrade Erigon", indexPath)
 	default:
-		return nil, fmt.Errorf("unsupported btree index version %d in %s: upgrade Erigon", idx.data[pos], indexPath)
+		return nil, ferr
 	}
 
 	idx.indexM = M

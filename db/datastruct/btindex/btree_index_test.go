@@ -241,7 +241,7 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 	require.NoError(tb, w.Flush())
 }
 
-func Test_BtreeIndex_V0_V1_Read(t *testing.T) {
+func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 	logger := log.New()
@@ -253,13 +253,13 @@ func Test_BtreeIndex_V0_V1_Read(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	v1Path := filepath.Join(tmp, "v1.bt")
-	buildBtreeIndex(t, dataPath, v1Path, compressFlags, 1, logger, true)
+	v2Path := filepath.Join(tmp, "v2.bt")
+	buildBtreeIndex(t, dataPath, v2Path, compressFlags, 1, logger, true)
 
 	v0Path := filepath.Join(tmp, "v0.bt")
 	writeV0Index(t, dataPath, v0Path, compressFlags, M)
 
-	for _, tc := range []struct{ name, path string }{{"v0", v0Path}, {"v1", v1Path}} {
+	for _, tc := range []struct{ name, path string }{{"v0", v0Path}, {"v2", v2Path}} {
 		t.Run(tc.name, func(t *testing.T) {
 			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, M, compressFlags, false)
 			require.NoError(t, err)
@@ -580,21 +580,21 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 	}
 }
 
-func TestListNodes_EncodeDecodeRoundTrip(t *testing.T) {
+func TestDecodeNodes(t *testing.T) {
 	const M = 256
 	for _, keys := range [][][]byte{
 		nil,
 		{[]byte("a")},
 		{[]byte("a"), []byte("bcd"), bytes.Repeat([]byte{0xff}, 300)},
 	} {
-		nodes := make([]Node, len(keys))
-		for i, k := range keys {
-			nodes[i] = Node{di: uint64(i) * M, key: k}
-		}
 		var buf bytes.Buffer
-		require.NoError(t, encodeListNodes(nodes, &buf))
-
-		got, n, err := decodeListNodesV1(buf.Bytes(), M)
+		var hdr [2]byte
+		for _, k := range keys {
+			binary.BigEndian.PutUint16(hdr[:], uint16(len(k)))
+			buf.Write(hdr[:])
+			buf.Write(k)
+		}
+		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)), M)
 		require.NoError(t, err)
 		require.Equal(t, buf.Len(), n)
 		require.Len(t, got, len(keys))
