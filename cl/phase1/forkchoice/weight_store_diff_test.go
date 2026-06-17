@@ -126,7 +126,7 @@ func TestIndexedWeightStoreMatchesFullScan(t *testing.T) {
 	idx := f.headWeightStore(cs) // seeds the cold index from latestMessages
 	require.NotEmpty(t, f.indexedWeightStore.directVotes, "headWeightStore must seed the index")
 
-	blocks := f.getFilteredBlockTree(justified.Root)
+	blocks := f.getFilteredBlockTree(justified.Root, justified)
 	require.NotEmpty(t, blocks)
 
 	sawNonZero := false
@@ -200,7 +200,7 @@ func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, len(voters), 2, "fixture must seed multiple voters to exercise reassignment")
 
-	blocks := f.getFilteredBlockTree(justified.Root)
+	blocks := f.getFilteredBlockTree(justified.Root, justified)
 	roots := make([]common.Hash, 0, len(blocks))
 	for r := range blocks {
 		roots = append(roots, r)
@@ -241,4 +241,25 @@ func TestIndexedWeightStoreIncrementalMatchesFullScan(t *testing.T) {
 		}
 	}
 	require.True(t, sawNonZero, "differential check is vacuous: no node carried weight")
+}
+
+func TestComputeHeadGloasUsesCheckpointMatchingState(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	expected, _, err := f.computeHeadGloasWithAnchorFallback(justified, cs)
+	require.NoError(t, err)
+
+	_, newRoot := decodeDiffBlock(t, diffBlockc2Enc)
+	require.NotEqual(t, justified.Root, newRoot)
+	f.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: justified.Epoch + 1, Root: newRoot})
+
+	got, _, err := f.computeHeadGloasWithAnchorFallback(justified, cs)
+	require.NoError(t, err)
+	require.Equal(t, expected, got)
 }

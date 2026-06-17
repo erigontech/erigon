@@ -146,26 +146,31 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
-	// a nil state degrades to zero attestation weight, as before.
-	cs, _ := f.getCheckpointState(justifiedCheckpoint)
+	for {
+		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
+		// a nil state degrades to zero attestation weight, as before.
+		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
+		f.mu.Lock()
+		if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
+			f.mu.Unlock()
+			continue
+		}
+		defer f.mu.Unlock()
 
-	head, slot, err := f.computeHeadGloasWithAnchorFallback(cs)
-	if err != nil {
-		return common.Hash{}, 0, err
+		head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+		if err != nil {
+			return common.Hash{}, 0, err
+		}
+		f.headHash = head.Root
+		f.headSlot = slot
+		f.headPayloadStatus = head.PayloadStatus
+		return f.headHash, f.headSlot, nil
 	}
-	f.headHash = head.Root
-	f.headSlot = slot
-	f.headPayloadStatus = head.PayloadStatus
-	return f.headHash, f.headSlot, nil
 }
 
-func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(cs *checkpointState) (ForkChoiceNode, uint64, error) {
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
 	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
 		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
 			"justifiedRoot", justifiedCheckpoint.Root)
@@ -174,14 +179,12 @@ func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(cs *checkpointState
 			PayloadStatus: cltypes.PayloadStatusPending,
 		}, f.forkGraph.AnchorSlot(), nil
 	}
-	return f.computeHeadGloas(cs)
+	return f.computeHeadGloas(justifiedCheckpoint, cs)
 }
 
-func (f *ForkChoiceStore) computeHeadGloas(cs *checkpointState) (ForkChoiceNode, uint64, error) {
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-
+func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
 	// Get filtered block tree
-	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root)
+	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root, justifiedCheckpoint)
 
 	// Start from justified checkpoint with PENDING status
 	head := ForkChoiceNode{
@@ -258,7 +261,7 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
-	blocks := f.getFilteredBlockTree(f.headHash)
+	blocks := f.getFilteredBlockTree(f.headHash, justifiedCheckpoint)
 	// Do a simple scan to determine the fork votes.
 	votes := f.computeVotes(justifiedCheckpoint, justificationState, auxilliaryState)
 	// Account for weights on each head fork
@@ -312,32 +315,31 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 }
 
 // getFilteredBlockTree filters out dumb blocks.
-func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash) map[common.Hash]*cltypes.BeaconBlockHeader {
+func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash, justifiedCheckpoint solid.Checkpoint) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
 	// Snapshot the store epoch once for the whole walk: OnTick updates f.time
 	// without holding f.mu, so calling f.Slot() per-leaf can mix epochs across
 	// leaves around a slot boundary.
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	f.getFilterBlockTree(base, blocks, currentEpoch)
+	f.getFilterBlockTree(base, blocks, currentEpoch, justifiedCheckpoint)
 	return blocks
 }
 
 // getFilterBlockTree recursively traverses the block tree to identify viable blocks.
 // It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
 // whether the current block is viable.
-func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64) bool {
+func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {
 		return false
 	}
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	children := f.children(blockRoot)
 	// If there are children iterate down recursively and see which branches are viable.
 	if len(children) > 0 {
 		isAnyViable := false
 		for _, child := range children {
-			if f.getFilterBlockTree(child, blocks, currentEpoch) {
+			if f.getFilterBlockTree(child, blocks, currentEpoch, justifiedCheckpoint) {
 				isAnyViable = true
 			}
 		}

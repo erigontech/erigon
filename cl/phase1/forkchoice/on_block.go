@@ -134,8 +134,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
-		cs, _ := f.getCheckpointState(f.justifiedCheckpoint.Load().(solid.Checkpoint))
-		head, _, err := f.computeHeadGloasWithAnchorFallback(cs)
+		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		head, _, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 		if err != nil {
 			return err
 		}
