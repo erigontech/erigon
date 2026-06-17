@@ -38,16 +38,10 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// Sharded RecSplit splits keys into RecSplitShards self-contained RecSplit indexes,
-// each with its own non-sharded FuseFilter. Sharding uses the low byte of the bucket
-// hash, not the top byte, because the per-shard remap bucketing needs hashes that
-// stay uniform over the full 64-bit range within a shard.
-//
-// For enums=true the per-shard key→ordinal map shrinks from ~5 to ~3 bytes/key
-// (per-shard ordinals span 0..N/256 instead of 0..N). Each shard's inner EF stores
-// the global arrival ordinal rather than the raw offset, and a single global
-// arrival-order offset-EF (appended after all shards) provides OrdinalLookup. That
-// global EF is monotonically increasing, which BinarySearch in history relies on.
+// ShardedRecSplit partitions keys into RecSplitShards inner RecSplit indexes by the low
+// byte of the bucket hash (the high bits drive each shard's remap, so low-byte routing keeps
+// shards uniform). For enums each shard stores the global arrival ordinal, and one monotonic
+// arrival-order offset-EF appended after the shards backs OrdinalLookup.
 const (
 	RecSplitShards         = 256
 	shardedRSVersion uint8 = 1
