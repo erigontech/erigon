@@ -300,6 +300,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	e.semaphore.Release(1)
 }
 
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
+}
+
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
@@ -503,14 +516,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain the validation SD to currentContext when the payload extends the
-	// canonical head. FCU's MergeExtendingFork leaves the latest state in
-	// currentContext.mem; MDBX is committed only later under memory pressure,
-	// so between an FCU and the next newPayload this fresh doms would
-	// otherwise read stale MDBX and compute a wrong trie root. Head-extending
-	// payloads only — a fork payload needs unwindToCommonCanonical to revert
-	// doms to the common ancestor, which the parent link would shadow.
-	if e.currentContext != nil && header.ParentHash == rawdb.ReadHeadBlockHash(tx) {
+	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
 

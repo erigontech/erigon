@@ -19,6 +19,8 @@ type DomainCfg struct {
 	// Write shortened key references in commitment branch values; commitment domain only.
 	ReferencesInCommitmentBranches bool
 
+	ExistenceFilter ExistenceFilterMode
+
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
 
 	FileVersion DomainVersionTypes

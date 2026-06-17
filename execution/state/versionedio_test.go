@@ -1336,3 +1336,78 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	require.Equal(t, uint64(2), account.Incarnation,
 		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
 }
+
+// TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero verifies the
+// EIP-7928 rule for in-transaction SELFDESTRUCT: an account destroyed within a
+// transaction that had a positive pre-transaction balance MUST record a balance
+// change to zero — even when a later same-tx transfer (which burns with the
+// account at end of tx) leaves a non-zero value as the tx's final balance write.
+func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x9e1989c1ba17e9b8fdae0b5d43a2b0c676a2070f"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Val:     *uint256.NewInt(100000),
+	})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{
+			Address: addr,
+			Path:    BalancePath,
+			Version: Version{TxIndex: 0},
+			Val:     *uint256.NewInt(1),
+		},
+		&VersionedWrite{
+			Address: addr,
+			Path:    SelfDestructPath,
+			Version: Version{TxIndex: 0},
+			Val:     true,
+		},
+	})
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Equal(t, addr, bal[0].Address)
+	require.Len(t, bal[0].BalanceChanges, 1,
+		"destroyed account with positive pre-tx balance must record a balance change to zero")
+	require.Equal(t, uint32(1), bal[0].BalanceChanges[0].Index)
+	require.True(t, bal[0].BalanceChanges[0].Value.IsZero(),
+		"recorded post-balance must be zero for an account destroyed in-tx")
+}
+
+// TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange verifies the
+// EIP-7928 counterpart rule: same-tx SELFDESTRUCT of an account with a zero
+// pre-transaction balance must NOT produce a balance change entry.
+func TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x2222"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Val:     *uint256.NewInt(0),
+	})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{
+			Address: addr,
+			Path:    BalancePath,
+			Version: Version{TxIndex: 0},
+			Val:     *uint256.NewInt(1),
+		},
+		&VersionedWrite{
+			Address: addr,
+			Path:    SelfDestructPath,
+			Version: Version{TxIndex: 0},
+			Val:     true,
+		},
+	})
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Equal(t, addr, bal[0].Address)
+	require.Empty(t, bal[0].BalanceChanges,
+		"destroyed account with zero pre-tx balance must not record a balance change")
+}

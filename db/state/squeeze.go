@@ -485,10 +485,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
 	rebuildCfg := commitment.DefaultTrieConfig()
 	rebuildCfg.Variant = execctx.PickTrieVariant()
-	rebuildCfg.EnableWarmupCache = useWarmupCache
 	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(rebuildCfg))
 	if err != nil {
 		return nil, err
@@ -527,8 +525,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize,
-			"warmupCache", useWarmupCache)
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize)
 	}
 	var totalKeysProcessed uint64
 	var rh []byte
@@ -542,14 +539,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
 			"memBatchSize", common.ByteCount(domains.Size()), "root", hex.EncodeToString(rh))
 
-		if err := domains.Flush(ctx, rwTx); err != nil {
+		if err := domains.Commit(ctx, rwTx); err != nil {
 			return err
 		}
 		domains.Close()
-
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
@@ -595,7 +588,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		flushCfg := commitment.DefaultTrieConfig()
 		flushCfg.Variant = execctx.PickTrieVariant()
-		flushCfg.EnableWarmupCache = useWarmupCache
 		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(flushCfg))
 		if err != nil {
 			return err
@@ -710,11 +702,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						return err
 					}
 				}
-				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
+				// Set correct state reader before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
-				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}
 			var domain kv.Domain
@@ -902,7 +893,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
-	rebuildTrieCfg.EnableWarmupCache = false
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
