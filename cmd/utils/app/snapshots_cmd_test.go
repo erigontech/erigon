@@ -18,12 +18,14 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -37,6 +39,11 @@ type bundle struct {
 }
 
 type RootNum = kv.RootNum
+
+func TestSegLS_NoChaindata(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))
+}
 
 func Test_DeleteLatestStateSnaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
