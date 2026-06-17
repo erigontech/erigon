@@ -171,18 +171,6 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
-
-// SetBranchCache attaches the same BranchCache instance to the root trie
-// and all 16 mounts. Sharing one cache across mounts is correct under the
-// concurrency contract (branch_cache.go): mounts partition the prefix
-// space by first nibble, so cross-mount writes always target distinct
-// cache keys.
-func (p *ConcurrentPatriciaHashed) SetBranchCache(c *BranchCache) {
-	p.root.SetBranchCache(c)
-	for i := range p.mounts {
-		p.mounts[i].SetBranchCache(c)
-	}
-}
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {

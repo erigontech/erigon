@@ -188,12 +188,7 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 		return err
 	}
 
-	// Wiping the commitment table leaves the aggregator's in-memory branchCache
-	// referencing trie nodes that no longer exist on disk. A subsequent from-0
-	// re-exec then reads those stale nodes when computing block 0's commitment
-	// and produces a wrong trie root (parallel-exec failure mode of #21138).
-	// Drop the cache so it repopulates from the freshly-wiped table. A nil cache
-	// (caching disabled, or a non-Aggregator db) has nothing stale to clear.
+	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
 			aggTx := agg.BeginFilesRo()

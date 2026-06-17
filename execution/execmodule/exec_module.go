@@ -192,7 +192,11 @@ type ExecModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db               kv.TemporalRwDB // main database
+	db kv.TemporalRwDB // main database
+	// semaphore is the module's single mutual-exclusion domain: it guards the
+	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
+	// (retried by the CL) or block, and the background FCU commit/prune
+	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
@@ -301,6 +305,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
 }
 
 // ForkValidator returns the fork validator owned by this module.
@@ -506,18 +523,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain the validation SD to the canonical generation (currentContext) so
-	// the parent link is available for two cases:
-	//  1. Head-extending payloads read the canonical generation's
-	//     not-yet-committed domain state instead of stale MDBX.
-	//  2. Fork payloads: unwindToCommonCanonical builds an unwind set from the
-	//     unwound canonical blocks' diffsets, which live in the canonical
-	//     generation's pastChangesAccumulator — reachable only through this
-	//     parent (GetDiffset chains to it). Without it the unwind runs with no
-	//     unwind set, leaving the BranchCache unmasked and corrupting the root.
-	// The parent does not shadow the unwound base: after unwindToCommonCanonical,
-	// doms.mem.unwindChangeset holds every unwound key and getLatest resolves
-	// those before consulting the parent.
+	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}

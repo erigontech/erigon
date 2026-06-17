@@ -9,6 +9,7 @@ package kvmetrics
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -81,7 +82,17 @@ type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
+
+	// seenFileReads dedups prefixes for UpdateFileReadsUnique. Capped at
+	// maxSeenFileReads entries: past the cap, uniqueness counting stops so the
+	// set can't grow without bound under a long-lived dbg.KVReadLevelledMetrics run.
+	seenFileReads    sync.Map
+	seenFileReadsLen atomic.Int64
 }
+
+// maxSeenFileReads bounds the read-amplification dedup set; beyond it
+// UniqueFileReadCount saturates rather than tracking every prefix forever.
+const maxSeenFileReads = 1 << 20
 
 // NewDomainMetrics returns a fresh instance (used for the aggregate and for
 // per-worker instances).
@@ -100,6 +111,11 @@ func (dm *DomainMetrics) Reset() {
 	for k := range dm.Domains {
 		delete(dm.Domains, k)
 	}
+	dm.seenFileReads.Range(func(k, _ any) bool {
+		dm.seenFileReads.Delete(k)
+		return true
+	})
+	dm.seenFileReadsLen.Store(0)
 }
 
 // domainEntry returns the per-domain counters, creating them on first use.
@@ -169,12 +185,64 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	de.FileReadDuration += d
 }
 
-// UpdateFileReadsUnique records a file read. The distinct-prefix (read
-// amplification) tracking it used to do was removed: it had no consumer and
-// cost a string alloc + map insert on every file read. Thin alias so call sites
-// are unchanged.
+// lenBucket maps prefix byte-length to a UniqueLenBuckets index.
+func lenBucket(n int) int {
+	switch {
+	case n <= 1:
+		return 0
+	case n <= 4:
+		return 1
+	case n <= 8:
+		return 2
+	case n <= 16:
+		return 3
+	case n <= 32:
+		return 4
+	case n == 33:
+		return 5
+	case n <= 36:
+		return 6
+	case n <= 44:
+		return 7
+	case n <= 64:
+		return 8
+	default:
+		return 9
+	}
+}
+
+// UpdateFileReadsUnique is like UpdateFileReads but also tracks prefix
+// uniqueness for the read-amplification ratio (FileReadCount /
+// UniqueFileReadCount) and the prefix-length distribution. Lock-free on the
+// counters (single-owner per-worker instance); seenFileReads is a sync.Map so
+// the dedup set stays correct even when shared across workers.
 func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
-	dm.UpdateFileReads(domain, start)
+	if dm == nil {
+		return
+	}
+	// Composite key so two domains can hold the same prefix shape without colliding.
+	domainKey := domain.String() + ":" + string(key)
+	alreadySeen := true
+	if dm.seenFileReadsLen.Load() < maxSeenFileReads {
+		if _, loaded := dm.seenFileReads.LoadOrStore(domainKey, struct{}{}); !loaded {
+			dm.seenFileReadsLen.Add(1)
+			alreadySeen = false
+		}
+	}
+	bucket := lenBucket(len(key))
+
+	d := time.Since(start)
+	dm.FileReadCount++
+	dm.FileReadDuration += d
+	de := dm.domainEntry(domain)
+	de.FileReadCount++
+	de.FileReadDuration += d
+	if !alreadySeen {
+		dm.UniqueFileReadCount++
+		dm.UniqueLenBuckets[bucket]++
+		de.UniqueFileReadCount++
+		de.UniqueLenBuckets[bucket]++
+	}
 }
 
 // Merge folds a finished per-worker instance into this aggregate under the
@@ -214,6 +282,10 @@ func addIOMetrics(dst, src *DomainIOMetrics) {
 	dst.DbReadDuration += src.DbReadDuration
 	dst.FileReadCount += src.FileReadCount
 	dst.FileReadDuration += src.FileReadDuration
+	dst.UniqueFileReadCount += src.UniqueFileReadCount
+	for i := range dst.UniqueLenBuckets {
+		dst.UniqueLenBuckets[i] += src.UniqueLenBuckets[i]
+	}
 	dst.StateCacheHitCount += src.StateCacheHitCount
 	dst.StateCacheMissCount += src.StateCacheMissCount
 }

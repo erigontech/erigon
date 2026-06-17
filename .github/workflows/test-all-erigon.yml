@@ -58,6 +58,10 @@ jobs:
           cleanup-space: true
           ramdisk: true
           cache-namespace: test-all-erigon
+          # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
+          # init), so serial and parallel results only stay mode-pure if each
+          # exec mode keeps its own cache lineage.
+          build-cache-extra-key: ${{ matrix.exec_mode }}
 
       - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:

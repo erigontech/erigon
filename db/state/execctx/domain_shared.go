@@ -51,6 +51,10 @@ var (
 	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 )
 
+// CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
+// (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
+type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
+
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
 	Keys []string
@@ -203,7 +207,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
-	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg, branchCache)
+	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -882,11 +886,26 @@ type cacheUpdate struct {
 // exactly the entries above it, not the whole step (#21752). All caches honor the
 // same (txNum, epoch) model. tx MUST be a flush-specific transaction: it is
 // committed here.
-func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
+func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+
+	runValidate := func() error {
+		for _, v := range validate {
+			if v == nil {
+				continue
+			}
+			if err := v(tx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	if sd.branchCache == nil && sd.stateCache == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
+			return err
+		}
+		if err := runValidate(); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -915,6 +934,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx) error {
 		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain), stash(kv.CodeDomain))
 	}
 	if err := sd.flushMem(ctx, tx, opts...); err != nil {
+		return err
+	}
+	if err := runValidate(); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1122,21 +1144,18 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 	}
 
-	// CodeDomain codeHashToCode transparent bypass: many addresses share one codeHash
-	// (proxies, factory-deployed clones, ERC-20 holder set, OpenZeppelin
-	// templates). Today's addr-keyed cache misses on every fresh address
-	// even when the bytecode is already in the codeHashToCode layer. Resolve the
-	// codeHash from the account record (warm in AccountsDomain cache for
-	// any account the EVM has already loaded) and probe codeHashToCode before paying
-	// the code-file accessor stack cost.
-	if domain == kv.CodeDomain && sd.stateCache != nil {
-		if h := sd.codeHashForAddr(tx, k); len(h) > 0 {
-			if cv, ok := sd.stateCache.GetCodeByHash(h); ok {
-				return cv, 0, nil
-			}
-		}
-	}
-
+	// No codeHash-keyed bypass for CodeDomain here. Answering GetLatest(CodeDomain,
+	// addr) from the account's codeHash is unsound: the account record (resolved
+	// from sd.mem or the addr→codeHash LRU) can be ahead of the authoritative
+	// per-address CodeDomain value — e.g. the account commits with codeHash H while
+	// the code write for this addr has not landed in the queried layer. The bypass
+	// then returned H's bytes as this addr's value, diverging from the file read
+	// (observed: 618-byte bypass vs 0-byte CodeDomain). That phantom value, taken as
+	// the prevVal of the deploy's code write, equals the identical bytecode being
+	// written, so the DomainPut diff elides the write and the code is never
+	// persisted (surfacing later as ErrNoCode). Code dedup by hash already happens
+	// soundly in the addr-keyed cache above (addrToHash→hashToCode); the
+	// authoritative addr-keyed file read below is the only correct fallthrough.
 	var readTxN uint64
 	var txNKnown bool
 	switch aggTx := tx.AggTx().(type) {

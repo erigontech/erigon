@@ -99,12 +99,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// branchCache is the BranchCache instance attached via SetBranchCache.
-	// Production wires the aggregator-scope instance through
-	// InitializeTrieAndUpdates; tests/benchmarks may pass a per-init
-	// fallback. See branch_cache.go's concurrency contract.
-	branchCache *BranchCache
-
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
 	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
 	// applies deferred updates inline.
@@ -232,9 +226,9 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 }
 
 // Release clears all mutable state and returns this HexPatriciaHashed to the pool for reuse.
-// This ensures no stale database cursor references (PatriciaContext, WarmupCache) survive
-// in the pool and releases large transient data (maps, buffers) for GC promptly.
-// After calling Release, the caller must not use the struct.
+// This ensures no stale database cursor references survive in the pool and releases large
+// transient data (maps, buffers) for GC promptly. After calling Release, the caller must
+// not use the struct.
 func (hph *HexPatriciaHashed) Release() {
 	hph.resetForReuse()
 	hphPool.Put(hph)
@@ -1837,11 +1831,11 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
+		if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to collect deferred branch update: %w", err)
 		}
 	} else {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData); err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &cellData, !hph.branchBefore[row]); err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
 	}
@@ -2109,7 +2103,7 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 // If evictCache is true, it also evicts the branch from the cache.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evictCache bool) error {
 	if hph.branchBefore[row] {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil); err != nil {
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
 			return fmt.Errorf("failed to encode leaf node update: %w", err)
 		}
 	}
@@ -2391,13 +2385,6 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 // far enough that the cell at hashedKey can be updated — i.e. until
 // needUnfolding returns 0. This is the per-key traversal primitive
 // that follows the fold step in followAndUpdate.
-//
-// Extracted as a primitive so future orchestrators can drive
-// unfold-only traversals (e.g. cache populators that walk a touched-key
-// path to fill cell state without doing a fold/update). HashSort's
-// per-key followAndUpdate is the sequential orchestrator over this
-// primitive today; future concurrent / parallel orchestrators (each
-// with their own HexPatriciaHashed instance) can reuse it.
 //
 // plainKey is used only for per-key metrics labelling (StartUnfolding).
 // Pass an empty/nil slice if no metric attribution is needed.
@@ -2826,20 +2813,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
 
-// SetBranchCache attaches a BranchCache for branch read-through and
-// write-through. Also propagates to the trie's BranchEncoder so encoder
-// writes update the cache via mark-dirty-then-Put (see CollectUpdate).
-//
-// nil disables — both this trie's branchFromCacheOrDB Level-2 and the
-// encoder's cache write-back become no-ops.
-func (hph *HexPatriciaHashed) SetBranchCache(c *BranchCache) {
-	hph.branchCache = c
-	hph.branchEncoder.branchCache = c
-}
-
-// BranchCache returns the attached BranchCache, or nil if none is set.
-func (hph *HexPatriciaHashed) BranchCache() *BranchCache { return hph.branchCache }
-
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {
@@ -2903,23 +2876,18 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
-// branchFromCacheOrDB reads branch data via ctx.Branch, which goes
-// through sd.mem -> sd.parent.mem -> aggregator-scope BranchCache -> MDBX.
-// BranchCache is the only branch cache.
+// Reads via ctx.Branch (sd.mem → parent.mem → BranchCache → MDBX).
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	data, _, err := hph.ctx.Branch(key)
 	return data, err
 }
 
-// accountFromCacheOrDB reads account data via ctx.Account. There is no Go-side
-// caching layer; accounts go straight to the BTree-backed AccountsDomain via
-// SD, with the OS page cache as the only caching layer.
+// No Go-side cache; reads straight from the AccountsDomain.
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Account(plainKey)
 }
 
-// storageFromCacheOrDB reads storage data via ctx.Storage. No Go-side
-// caching layer (see accountFromCacheOrDB).
+// No Go-side cache; reads straight from the StorageDomain.
 func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Storage(plainKey)
 }

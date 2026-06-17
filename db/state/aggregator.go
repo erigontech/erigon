@@ -105,12 +105,6 @@ type Aggregator struct {
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
-	// metricsCollector is the process-level KV-read metrics aggregator. Every
-	// read path (exec, commitment, warmup, RPC, engine) sends its finished
-	// per-worker metrics here; a single goroutine folds them, grouped by source.
-	// Lives at aggregator scope (process lifetime) like the BranchCache/StateCache.
-	metricsCollector *kvmetrics.Collector
-
 	onFilesChange kv.OnFilesChange
 	onFilesDelete kv.OnFilesChange
 
@@ -147,10 +141,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 
 		produce: true,
 	}
-	a.metricsCollector = kvmetrics.NewCollector()
-	a.metricsCollector.Start(&a.wg)
-	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
-	// nil pointer — recalcVisibleFiles will overwrite it during ConfigureDomains.
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
 	a.oldestVisible = empty
@@ -352,14 +342,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	}
 	a.configured = true
 
-	// Attach the long-lived commitment branch cache to the commitment
-	// domain. Lifetime = aggregator lifetime; shared by every
-	// SharedDomains derived from this aggregator. Idempotent across
-	// repeated ConfigureDomains calls (early return above). The BranchCache
-	// is a state cache, so it rides the same USE_STATE_CACHE switch as the
-	// account/storage StateCache: one operator switch turns all caching off
-	// (e.g. when bisecting a state-root mismatch), and a nil cache is the
-	// documented "disabled" path that every consumer already tolerates.
+	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated by USE_STATE_CACHE, nil = disabled.
 	if dbg.UseStateCache {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
@@ -562,7 +545,6 @@ func (a *Aggregator) Close() {
 	}
 	a.ctxCancel()
 	a.ctxCancel = nil
-	a.metricsCollector.Stop() // drain buffered samples, then let wg.Wait join the goroutine
 	a.wg.Wait()
 
 	a.dirtyFilesLock.Lock()
@@ -2378,24 +2360,12 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
-// BranchCache returns the long-lived commitment branch cache attached to
-// this aggregator's commitment domain. Implements
-// commitment.BranchCacheProvider so the SharedDomains construction path
-// can fetch the cache via a tx.AggTx() type assertion without forcing
-// db/state/execctx to import db/state (which would create a cycle).
+// BranchCache attached to the commitment domain (implements commitment.BranchCacheProvider).
 func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 	if at.d[kv.CommitmentDomain] == nil {
 		return nil
 	}
 	return at.d[kv.CommitmentDomain].d.branchCache
-}
-
-// MetricsCollector exposes the aggregator-scope KV-read metrics collector.
-// Fetched by SharedDomains through the duck-typed kvmetrics.MetricsCollectorProvider
-// interface (same pattern as BranchCache), so every read path can send its
-// finished per-worker metrics to one process-level aggregate.
-func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
-	return at.a.metricsCollector
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }

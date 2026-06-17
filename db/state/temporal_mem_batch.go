@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
@@ -789,21 +790,10 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 }
 
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
-// registered callback is invoked for every (key, value, step) tuple of its
-// domain AFTER the MDBX write succeeds, so a downstream cache (e.g. the
-// commitment BranchCache) can never be left ahead of MDBX: if the write
-// fails (and is not retried — e.g. a background post-forkchoice flush that
-// logs and continues) the cache is simply not updated for this batch.
-//
-// The ordering is safe because flushLocked flushes the domain *writers*, not
-// sd.domains (the in-memory history map). The mem batch therefore still holds
-// this batch's values during the write→callback window, so a reader going
-// (sd write buffer → cache → MDBX) finds them in mem or MDBX — never missing
-// from all sources. The MDBX commit provides db-side atomicity independently.
-//
-// The callback runs under latestStateLock (held throughout) so the snapshot
-// it sees matches the in-memory state at flush time and no concurrent
-// DomainPut interleaves with the flush/cache-update sequence.
+// registered per-domain callback is invoked for every (key, value, step, txNum)
+// tuple after the MDBX write succeeds, so a downstream cache can never be left
+// ahead of MDBX. Runs under latestStateLock so the callback's snapshot matches
+// flush-time state.
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
@@ -817,16 +807,10 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 		for _, opt := range opts {
 			opt(&cfg)
 		}
-		// dir is unset on entries written via DomainPut/DomainDel (always
-		// default zero); the latest history entry per key is authoritative.
-		// data may be nil/empty for deletes — the callback is expected to
-		// distinguish (see SharedDomains.Flush, which Invalidate's on
-		// len(v)==0 and Put's otherwise).
 		for domain, cb := range cfg.DomainCallbacks {
 			// StorageDomain values live in the separate sd.storage btree, not
-			// sd.domains[StorageDomain] (see getLatest/DomainPut). Iterating
-			// sd.domains here would find an empty map for storage, so its cache
-			// would never be flush-updated and would serve stale slots on hit.
+			// sd.domains[StorageDomain]; iterate it directly so the storage
+			// cache is flush-updated and never serves stale slots.
 			if domain == kv.StorageDomain {
 				sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
 					if len(history) == 0 {
@@ -845,6 +829,29 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 				latest := history[len(history)-1]
 				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 			}
+		}
+	}
+
+	return nil
+}
+
+// FlushWithCommitmentCallback flushes the batch then invokes cb per
+// commitment-domain tuple under the lock.
+func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
+
+	if cb != nil {
+		for keyStr, history := range sd.domains[kv.CommitmentDomain] {
+			if len(history) == 0 {
+				continue
+			}
+			latest := history[len(history)-1]
+			cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 		}
 	}
 

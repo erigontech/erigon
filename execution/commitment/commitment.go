@@ -100,10 +100,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// SetBranchCache attaches the shared cache used by trie + branchEncoder.
-	// ConcurrentPatriciaHashed propagates the same instance to all mounts —
-	// see branch_cache.go for the concurrency contract.
-	SetBranchCache(*BranchCache)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -146,15 +142,11 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
-	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
+	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg. The
-// aggregator-scope BranchCache is attached separately via Trie.SetBranchCache
-// by the caller (wired from SharedDomains via the BranchCacheProvider lookup).
+// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
@@ -163,12 +155,6 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
-	case VariantBinPatriciaTrie:
-		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
-		//fn := func(key []byte) []byte { return hexToBin(key) }
-		//tree := NewUpdateTree(mode, tmpdir, fn)
-		//return trie, tree
-		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -355,7 +341,6 @@ type BranchEncoder struct {
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	branchCache        *BranchCache                        // set via HexPatriciaHashed.SetBranchCache (cross-block, aggregator-scope)
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -567,13 +552,19 @@ func (be *BranchEncoder) CollectUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	var prev []byte
 	var err error
 
-	prev, _, err = ctx.Branch(prefix)
-	if err != nil {
-		return err
+	if !isNew {
+		prev, _, err = ctx.Branch(prefix)
+		if err != nil {
+			return err
+		}
+	}
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -596,9 +587,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	// No cache Put here: ctx.PutBranch writes to sd.mem which masks this
-	// prefix for the rest of the block; BranchCache is invalidated and
-	// repopulated at SD.Flush.
+	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -616,6 +605,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
 	limit := be.maxDeferredUpdates
@@ -634,9 +624,17 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	prev, _, err := ctx.Branch(prefix)
-	if err != nil {
-		return err
+	var prev []byte
+	var err error
+
+	if !isNew {
+		prev, _, err = ctx.Branch(prefix)
+		if err != nil {
+			return err
+		}
+	}
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	// Track this prefix as pending
@@ -1231,8 +1229,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "bin":
-		trieVariant = VariantBinPatriciaTrie
 	case "hex-parallel":
 		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
@@ -1364,8 +1360,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantBinPatriciaTrie:
-					stat.ExtSize += uint64(c.extLen)
 				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}

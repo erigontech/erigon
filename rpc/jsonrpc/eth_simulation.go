@@ -930,7 +930,9 @@ func txValidationError(err error) error {
 	case errors.Is(err, protocol.ErrTipAboveFeeCap):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
 	case errors.Is(err, protocol.ErrFeeCapTooLow):
-		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+		// "fee cap too low" means maxFeePerGas is below the current baseFee,
+		// which the RPC API reports as "base fee too low".
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeBaseFeeTooLow}
 	case errors.Is(err, protocol.ErrInsufficientFunds):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInsufficientFunds}
 	case errors.Is(err, protocol.ErrIntrinsicGas):

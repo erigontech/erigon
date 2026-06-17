@@ -358,7 +358,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 			val.SetLen(i + 1)
 		}
 		// decode into element
-		if err := elemdec(s, val.Index(i)); errors.Is(err, EOL) {
+		if err := elemdec(s, val.Index(i)); err == EOL {
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -377,7 +377,7 @@ func decodeListArray(s *Stream, val reflect.Value, elemdec decoder) error {
 	vlen := val.Len()
 	i := 0
 	for ; i < vlen; i++ {
-		if err := elemdec(s, val.Index(i)); errors.Is(err, EOL) {
+		if err := elemdec(s, val.Index(i)); err == EOL {
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -449,7 +449,7 @@ func makeStructDecoder(typ reflect.Type) (decoder, error) {
 		}
 		for i, f := range fields {
 			err := f.info.decoder(s, val.Field(f.index))
-			if errors.Is(err, EOL) {
+			if err == EOL {
 				if f.optional {
 					// The field is optional, so reaching the end of the list before
 					// reaching the last field is acceptable. All remaining undecoded
@@ -1091,6 +1091,12 @@ func (s *Stream) Kind() (kind Kind, size uint64, err error) {
 		// is done here because many decoders require allocating an input
 		// buffer matching the value size. Checking it here protects those
 		// decoders from inputs declaring very large value size.
+		//
+		// Re-read listLimit because readKind consumed header bytes via
+		// willRead, which decremented the enclosing list's remaining size.
+		if inList {
+			_, listLimit = s.listLimit()
+		}
 		if inList && s.size > listLimit {
 			s.kinderr = ErrElemTooLarge
 		} else if s.limited && s.size > s.remaining {

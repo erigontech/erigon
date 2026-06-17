@@ -212,36 +212,11 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
-	rawBlocks := blocksToRaw(blocks, bals)
-	for {
-		status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
-		if err != nil {
-			return err
-		}
-		if status != execmodule.ExecutionStatusBusy {
-			if status != execmodule.ExecutionStatusSuccess {
-				return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", status)
-			}
-			return nil
-		}
-		const retryDelay = 100 * time.Millisecond
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	rawBlocks := blocksToRaw(blocks, bals)
 	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
 	if err != nil {
 		return err
-	}
-	if status == execmodule.ExecutionStatusBusy {
-		return context.DeadlineExceeded
 	}
 	if status != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
@@ -249,8 +224,8 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *types.Block, bal []byte) error {
-	return c.InsertBlocksAndWait(ctx, []*types.Block{block}, [][]byte{bal})
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
+	return c.InsertBlocks(ctx, []*types.Block{block}, [][]byte{bal})
 }
 
 func blocksToRaw(blocks []*types.Block, bals [][]byte) []*types.RawBlock {

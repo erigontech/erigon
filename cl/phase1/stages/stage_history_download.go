@@ -61,6 +61,9 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
+const skippedEnvelopeRecoveryMaxAttempts = 3
+const skippedEnvelopeRecoveryRetryInterval = 10 * time.Second
+
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
@@ -365,18 +368,27 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}()
 
 	go func() {
+		defer close(finishCh)
+
 		for !cfg.downloader.Finished() {
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
 				log.Warn("closing backfilling routine", "err", err)
 				return
 			}
 		}
+
+		// Recover FULL blocks whose envelopes were skipped during backward download.
+		if skipped := cfg.downloader.SkippedFullBlocks(); len(skipped) > 0 {
+			if !recoverSkippedEnvelopesWithRetries(ctx, cfg, skipped) {
+				return
+			}
+		}
+
 		cfg.antiquary.NotifyBackfilled()
 		if cfg.caplinConfig.ArchiveBlocks {
 			cfg.logger.Info("Full backfilling finished")
 		}
 
-		close(finishCh)
 		if cfg.blobDownloader != nil {
 			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
 			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
@@ -398,4 +410,94 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
 	return nil
+}
+
+func recoverSkippedEnvelopesWithRetries(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) bool {
+	pending := skipped
+	for attempt := 1; attempt <= skippedEnvelopeRecoveryMaxAttempts; attempt++ {
+		pending = recoverSkippedEnvelopes(ctx, cfg, pending)
+		if len(pending) == 0 {
+			return true
+		}
+
+		if attempt == skippedEnvelopeRecoveryMaxAttempts {
+			log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete, proceeding with gap",
+				"recovered", len(skipped)-len(pending), "total", len(skipped), "remaining", len(pending))
+			return true
+		}
+
+		log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete, retrying",
+			"attempt", attempt, "maxAttempts", skippedEnvelopeRecoveryMaxAttempts,
+			"recovered", len(skipped)-len(pending), "total", len(skipped), "remaining", len(pending))
+
+		select {
+		case <-ctx.Done():
+			log.Warn("[BackwardBeaconDownloader] envelope recovery canceled", "remaining", len(pending), "err", ctx.Err())
+			return false
+		case <-time.After(skippedEnvelopeRecoveryRetryInterval):
+		}
+	}
+	return true
+}
+
+// recoverSkippedEnvelopes attempts to fetch execution payload envelopes for
+// GLOAS FULL blocks that were skipped during backward download.
+func recoverSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) []network.SkippedFullBlock {
+	log.Info("[BackwardBeaconDownloader] recovering skipped GLOAS envelopes", "count", len(skipped))
+
+	envelopes := cfg.downloader.RecoverSkippedEnvelopes(ctx)
+
+	recovered := 0
+	remaining := make([]network.SkippedFullBlock, 0, len(skipped))
+	for _, s := range skipped {
+		env := envelopes[common.Hash(s.Root)]
+		if env == nil {
+			log.Warn("[BackwardBeaconDownloader] envelope still missing after recovery",
+				"slot", s.Block.Block.Slot, "root", common.Hash(s.Root))
+			remaining = append(remaining, s)
+			continue
+		}
+		if env.Message == nil || env.Message.Payload == nil {
+			log.Warn("[BackwardBeaconDownloader] recovered envelope is malformed",
+				"slot", s.Block.Block.Slot, "root", common.Hash(s.Root))
+			remaining = append(remaining, s)
+			continue
+		}
+
+		if !recoverSkippedEnvelope(ctx, cfg, s, env) {
+			remaining = append(remaining, s)
+			continue
+		}
+		recovered++
+	}
+
+	log.Info("[BackwardBeaconDownloader] envelope recovery complete",
+		"recovered", recovered, "total", len(skipped))
+	return remaining
+}
+
+func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionCfg, s network.SkippedFullBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if cfg.executionBlocksCollector != nil {
+		if err := cfg.executionBlocksCollector.AddGloasBlock(s.Block.Block, env); err != nil {
+			log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)
+			return false
+		}
+	}
+
+	tx, err := cfg.indiciesDB.BeginRw(ctx)
+	if err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: begin tx failed", "err", err)
+		return false
+	}
+	defer tx.Rollback()
+
+	if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(s.Root), env.Message); err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: write indices failed", "err", err)
+		return false
+	}
+	if err := tx.Commit(); err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: commit failed", "err", err)
+		return false
+	}
+	return true
 }

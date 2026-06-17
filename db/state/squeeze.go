@@ -530,14 +530,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
 			"memBatchSize", common.ByteCount(domains.Size()), "root", hex.EncodeToString(rh))
 
-		if err := domains.Flush(ctx, rwTx); err != nil {
+		if err := domains.Commit(ctx, rwTx); err != nil {
 			return err
 		}
 		domains.Close()
-
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
@@ -697,9 +693,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						return err
 					}
 				}
-				// Set correct state reader before TouchKey calls begin. The previous
-				// ClearWarmupCache call here cleared the now-removed Go-side warmup
-				// cache; with no such cache, no clear is needed.
+				// Set correct state reader before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))

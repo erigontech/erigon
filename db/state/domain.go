@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -89,11 +90,7 @@ type Domain struct {
 
 	checker *DependencyIntegrityChecker
 
-	// branchCache is the long-lived commitment-trie branch cache pinned to
-	// the aggregator. Set in ConfigureDomains for the commitment domain
-	// only; nil for every other domain. Lifetime = aggregator lifetime,
-	// independent of any single tx, batch, or SharedDomains. See
-	// commitment.BranchCacheProvider for the SDs' access path.
+	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
 	branchCache *commitment.BranchCache
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
@@ -163,22 +160,42 @@ func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
-var domainExistenceForceInMem = dbg.EnvBool("DOMAIN_EXISTENCE_MEM", true)
-var domainExistenceForceWillNeed = dbg.EnvBool("DOMAIN_EXISTENCE_WILLNEED", false)
-var domainExistenceForceNormal = dbg.EnvBool("DOMAIN_EXISTENCE_NORMAL", false)
+var domainExistenceForceInMem = dbg.EnvStrings("DOMAIN_EXISTENCE_MEM", ",", nil)
+var domainExistenceForceWillNeed = dbg.EnvStrings("DOMAIN_EXISTENCE_WILLNEED", ",", nil)
+var domainExistenceForceNormal = dbg.EnvStrings("DOMAIN_EXISTENCE_NORMAL", ",", nil)
+var domainExistenceForceRandom = dbg.EnvStrings("DOMAIN_EXISTENCE_RANDOM", ",", nil)
+
+func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
+	name := d.Name.String()
+	switch {
+	case slices.Contains(domainExistenceForceInMem, name):
+		return statecfg.ExistenceFilterInMem
+	case slices.Contains(domainExistenceForceNormal, name):
+		return statecfg.ExistenceFilterNormal
+	case slices.Contains(domainExistenceForceWillNeed, name):
+		return statecfg.ExistenceFilterWillNeed
+	case slices.Contains(domainExistenceForceRandom, name):
+		return statecfg.ExistenceFilterRandom
+	default:
+		return d.ExistenceFilter
+	}
+}
 
 func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case domainExistenceForceWillNeed:
-		accessor.ForceExistenceFilterWillNeed()
-	case domainExistenceForceNormal:
-		accessor.ForceExistenceFilterNormal()
-	case domainExistenceForceInMem:
+	mode := d.existenceFilterMode()
+	switch mode {
+	case statecfg.ExistenceFilterInMem:
 		accessor.ForceExistenceFilterInRAM()
+	case statecfg.ExistenceFilterNormal:
+		accessor.ForceExistenceFilterNormal()
+	case statecfg.ExistenceFilterWillNeed:
+		accessor.ForceExistenceFilterWillNeed()
+	case statecfg.ExistenceFilterRandom:
+		accessor.ForceExistenceFilterRandom()
 	}
 	return accessor, nil
 }
@@ -188,13 +205,16 @@ func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case domainExistenceForceWillNeed:
-		filter.MadvWillNeed()
-	case domainExistenceForceNormal:
-		filter.MadvNormal()
-	case domainExistenceForceInMem:
+	mode := d.existenceFilterMode()
+	switch mode {
+	case statecfg.ExistenceFilterInMem:
 		filter.ForceInMem()
+	case statecfg.ExistenceFilterNormal:
+		filter.MadvNormal()
+	case statecfg.ExistenceFilterWillNeed:
+		filter.MadvWillNeed()
+	case statecfg.ExistenceFilterRandom:
+		filter.MadvRandom()
 	}
 	return filter, nil
 }
@@ -907,7 +927,8 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(stepFrom, stepTo)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		kveiPath := d.kvExistenceIdxNewFilePath(stepFrom, stepTo)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1009,7 +1030,8 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1113,7 +1135,8 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 
 		g.Go(func() error {
 			idxPath := d.kvBtAccessorNewFilePath(item.StepRange(d.stepSize))
-			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			kveiPath := d.kvExistenceIdxNewFilePath(item.StepRange(d.stepSize))
+			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, kveiPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil

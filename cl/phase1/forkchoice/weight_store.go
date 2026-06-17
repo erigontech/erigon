@@ -27,7 +27,7 @@ import (
 // [New in Gloas:EIP7732]
 type WeightStore interface {
 	// GetWeight returns the weight (in Gwei) for a ForkChoiceNode.
-	// Takes payload status into account via is_supporting_vote.
+	// Takes payload status into account via node ancestor checks.
 	GetWeight(node ForkChoiceNode) uint64
 
 	// GetAttestationScore returns the attestation score for a ForkChoiceNode.
@@ -70,18 +70,7 @@ func NewWeightStore(f *ForkChoiceStore) WeightStore {
 // So: PENDING OR not-previous-slot → calculate weight
 // NOT PENDING AND is-previous-slot → return 0
 func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
-	// Get the block for this node
-	block, has := w.f.forkGraph.GetBlock(node.Root)
-	if !has || block == nil {
-		return 0
-	}
-
-	currentSlot := w.f.Slot()
-	isPreviousSlot := block.Block.Slot+1 == currentSlot
-	isPending := node.PayloadStatus == cltypes.PayloadStatusPending
-
-	// If NOT PENDING AND is previous slot → return 0
-	if !isPending && isPreviousSlot {
+	if w.f.isPreviousSlotPayloadDecision(node) {
 		return 0
 	}
 
@@ -98,16 +87,11 @@ func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
 		return attestationScore
 	}
 
-	// Create a LatestMessage for the proposer boost root
-	// Treat proposer boost as a current-slot vote with payload_present=false
-	proposerMessage := LatestMessage{
-		Root:           proposerBoostRoot,
-		Slot:           currentSlot,
-		PayloadPresent: false,
+	proposerBoostNode := ForkChoiceNode{
+		Root:          proposerBoostRoot,
+		PayloadStatus: cltypes.PayloadStatusPending,
 	}
-
-	// Check if proposer's vote supports the node
-	if w.f.isSupportingVote(node, proposerMessage) {
+	if w.f.isAncestor(proposerBoostNode, node) {
 		return attestationScore + w.GetProposerScore()
 	}
 
@@ -116,7 +100,7 @@ func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
 
 // GetAttestationScore returns the attestation score for a ForkChoiceNode.
 // [New in Gloas:EIP7732]
-// Uses is_supporting_vote to check if a validator's vote supports the node.
+// Uses node ancestor checks to decide if a validator's vote supports the node.
 func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 	checkpointState := w.checkpointState
 	if checkpointState == nil {
@@ -142,8 +126,7 @@ func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 			continue
 		}
 
-		// Use is_supporting_vote for GLOAS
-		if w.f.isSupportingVote(node, message) {
+		if w.f.isAncestor(w.f.getSupportedNode(message), node) {
 			score += checkpointState.balances[validatorIndex]
 		}
 	}

@@ -190,10 +190,7 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
-// NewSharedDomainsCommitmentContext: cfg carries the trie variant + warmup
-// settings; branchCache is the aggregator-scope cross-block branch cache,
-// attached to the trie via SetBranchCache (nil = no cross-block caching).
-func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig, branchCache *commitment.BranchCache) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
@@ -203,7 +200,6 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		},
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
-	ctx.patriciaTrie.SetBranchCache(branchCache)
 	return ctx
 }
 
@@ -798,7 +794,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		hext = phext.RootTrie()
 	}
-	if tv == commitment.VariantBinPatriciaTrie || hext == nil {
+	if hext == nil {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
 
