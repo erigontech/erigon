@@ -629,7 +629,15 @@ func (br *BlockRetire) MergeBlocks(
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
-		mergedFiles = append(mergedFiles, mergedFileNames...)
+		// merger.Merge passes FULL PATHS via newDirtySegment.FilePath().
+		// NotifyOnFilesChange consumers (Provider.onChange → inv.AddFile)
+		// expect basenames so straddleBlockFileForType can later
+		// filepath.Join(snapDir, e.Name) without doubling the path.
+		// Convert here rather than at the notify call so seeder.Seed
+		// keeps the full-path contract it was built against.
+		for _, p := range mergedFileNames {
+			mergedFiles = append(mergedFiles, filepath.Base(p))
+		}
 		return seeder.Seed(ctx, mergedFileNames)
 	}
 	// Capture every deleted sub-chunk so we can fire NotifyOnFilesDelete
@@ -640,7 +648,14 @@ func (br *BlockRetire) MergeBlocks(
 	// 2026-06-15 soak iter 1 mode_a2).
 	var deletedSubChunks []string
 	captureDelete := func(ctx context.Context, names []string) error {
-		deletedSubChunks = append(deletedSubChunks, names...)
+		// Convert to basenames so the eventual NotifyOnFilesDelete →
+		// Provider.onDelete → inv.RemoveFile lookup matches the entry
+		// keys (Inventory stores basenames). merger.Merge passes the
+		// merger.FilePaths(snapDir) form; RemoveOverlaps passes
+		// snapshots.toRelativePaths form. Normalise both to basename.
+		for _, p := range names {
+			deletedSubChunks = append(deletedSubChunks, filepath.Base(p))
+		}
 		return seeder.Delete(ctx, names)
 	}
 	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, captureDelete); err != nil {
@@ -649,7 +664,9 @@ func (br *BlockRetire) MergeBlocks(
 
 	// remove old garbage files
 	if err = snapshots.RemoveOverlaps(func(l []string) error {
-		deletedSubChunks = append(deletedSubChunks, l...)
+		for _, p := range l {
+			deletedSubChunks = append(deletedSubChunks, filepath.Base(p))
+		}
 		return seeder.Delete(ctx, l)
 	}); err != nil {
 		return false, err

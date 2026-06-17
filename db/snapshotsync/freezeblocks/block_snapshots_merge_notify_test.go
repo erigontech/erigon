@@ -174,6 +174,38 @@ func TestBlockRetire_NotifyMergedSnapshotFiles_DrivesInventoryAdd(t *testing.T) 
 	require.Contains(t, inventory, "v1.1-003020-003030-transactions.seg")
 }
 
+// TestBlockRetire_MergeNotifyConvertsFullPathsToBasenames pins the
+// path-normalisation contract: MergeBlocks captures names from
+// merger.Merge's onMerge / onDelete callbacks (which use full paths
+// via newDirtySegment.FilePath() / FilePaths) and from
+// RemoveOverlaps (which uses relative paths). Both must be reduced
+// to basenames before flowing through NotifyOnFilesChange /
+// NotifyOnFilesDelete — otherwise the Provider's inv.AddFile /
+// RemoveFile entries get keyed on a non-basename and later
+// straddleBlockFileForType's filepath.Join(snapDir, e.Name) produces
+// a doubled path (live-caught 2026-06-17 soak v13 iter 2 mode_b:
+// `open old /erigon/tmp/.../snapshots/erigon/tmp/.../snapshots/v1.1-003020-003030-headers.seg`).
+//
+// The notification helpers themselves don't transform — they just
+// forward. The transformation lives at the capture site in
+// MergeBlocks (verified end-to-end by the soak; this test pins the
+// helper contract that whatever the caller hands in, it is forwarded
+// unchanged so callers know they own normalisation).
+func TestBlockRetire_NotifyMergedSnapshotFiles_ForwardsNamesUnchanged(t *testing.T) {
+	t.Parallel()
+	notifier := &recordingNotifier{}
+	br := &BlockRetire{filesNotifier: notifier}
+
+	// Mix of basenames and full paths. The helper should forward
+	// verbatim — caller is responsible for normalisation.
+	in := []string{
+		"v1.1-003020-003030-headers.seg",
+		"/somewhere/absolute/v1.1-003020-003030-bodies.seg",
+	}
+	br.NotifyMergedSnapshotFiles(in)
+	require.Equal(t, in, notifier.snapshotChanged())
+}
+
 func TestBlockRetire_NotifyDeletedSnapshotFiles_FiresOnFilesDelete(t *testing.T) {
 	t.Parallel()
 	notifier := &recordingNotifier{}
