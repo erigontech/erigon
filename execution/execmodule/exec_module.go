@@ -307,6 +307,11 @@ type retireCanceller interface {
 	Working() bool
 	MaxScheduledBlock() uint64
 	CancelInFlight(timeout time.Duration) error
+	// CleanOrphanSegsPastTarget removes v1.1-*.seg files past target
+	// that have no .torrent companion — the post-cancel retire
+	// residue. Called after CancelInFlight to unblock Mode-B's
+	// preflight findInventoryOrphansPastBlock check.
+	CleanOrphanSegsPastTarget(target uint64) ([]string, error)
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check

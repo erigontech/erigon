@@ -47,6 +47,10 @@ type fakeRetireCanceller struct {
 	cancelCalls       atomic.Int32
 	cancelTimeout     time.Duration
 	cancelErr         error
+	cleanCalls        atomic.Int32
+	cleanTarget       atomic.Uint64
+	cleanRemoved      []string
+	cleanErr          error
 
 	mu         sync.Mutex
 	onCancel   func()
@@ -55,6 +59,11 @@ type fakeRetireCanceller struct {
 
 func (f *fakeRetireCanceller) Working() bool             { return f.working.Load() }
 func (f *fakeRetireCanceller) MaxScheduledBlock() uint64 { return f.maxScheduledBlock }
+func (f *fakeRetireCanceller) CleanOrphanSegsPastTarget(target uint64) ([]string, error) {
+	f.cleanCalls.Add(1)
+	f.cleanTarget.Store(target)
+	return f.cleanRemoved, f.cleanErr
+}
 func (f *fakeRetireCanceller) CancelInFlight(timeout time.Duration) error {
 	f.cancelCalls.Add(1)
 	f.mu.Lock()
@@ -123,6 +132,46 @@ func TestQuiesceRetire_RetirePastTarget_Cancelled(t *testing.T) {
 		"retire producing files past targetBlock is wasted work — must be cancelled exactly once")
 	require.False(t, fr.Working(),
 		"after CancelInFlight returns, retire goroutine must be drained")
+}
+
+func TestQuiesceRetire_RetirePastTarget_CleanupRunsAfterCancel(t *testing.T) {
+	t.Parallel()
+	fr := &fakeRetireCanceller{maxScheduledBlock: 3_035_234}
+	fr.working.Store(true)
+	fr.cancelDone = make(chan struct{})
+	fr.onCancel = func() {
+		fr.working.Store(false)
+		close(fr.cancelDone)
+	}
+	fr.cleanRemoved = []string{
+		"v1.1-003034-003035-headers.seg",
+		"v1.1-003034-003035-bodies.seg",
+		"v1.1-003034-003035-transactions.seg",
+	}
+
+	e := &ExecModule{blockRetire: fr}
+	require.NoError(t, e.quiesceRetireIfPastTarget(3_030_235))
+
+	require.Equal(t, int32(1), fr.cancelCalls.Load(),
+		"cancel must fire when retire range crosses target")
+	require.Equal(t, int32(1), fr.cleanCalls.Load(),
+		"cleanup must fire after cancel returns — retire-cancel leaves orphan .seg files that the next preflight check refuses on; cleanup unblocks the unwind")
+	require.Equal(t, uint64(3_030_235), fr.cleanTarget.Load(),
+		"cleanup must be scoped to the SetHead target — pre-target orphans are out of scope")
+}
+
+func TestQuiesceRetire_CleanupNotCalledWhenCancelSkipped(t *testing.T) {
+	t.Parallel()
+	// Retire idle (no cancel) → no cleanup either. The cleanup only
+	// makes sense as a paired follow-up to CancelInFlight.
+	fr := &fakeRetireCanceller{maxScheduledBlock: 3_035_234}
+	// working stays false
+	e := &ExecModule{blockRetire: fr}
+
+	require.NoError(t, e.quiesceRetireIfPastTarget(3_030_235))
+	require.Equal(t, int32(0), fr.cancelCalls.Load())
+	require.Equal(t, int32(0), fr.cleanCalls.Load(),
+		"cleanup must not fire when retire was never cancelled — would race with a separately-running retire goroutine")
 }
 
 func TestQuiesceRetire_CancelTimeoutSurfacesError(t *testing.T) {

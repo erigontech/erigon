@@ -22,9 +22,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -257,6 +260,98 @@ func NewBlockRetire(
 
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
+
+// CleanOrphanSegsPastTarget removes v1.1-*.seg block-snapshot files
+// past targetBlock that have no .torrent companion — the post-cancel
+// retire residue. Companion .idx files (if any) are removed with the
+// .seg. Returns the sorted list of removed .seg basenames.
+//
+// Called from SetHead Mode-B's quiesceRetireIfPastTarget after
+// CancelInFlight returns: when retire was cancelled mid-build (.seg
+// written, .torrent not yet built), the .seg files persist as
+// orphans the next step's findInventoryOrphansPastBlock would
+// refuse on. Cleaning them up here unblocks Mode-B's preflight
+// without weakening the orphan-detection check elsewhere.
+//
+// Scope: only orphan .seg files PAST targetBlock are removed. Below
+// target is out of scope (cleaned via general FS reconciliation, not
+// this per-SetHead path). Complete .seg + .torrent pairs are left
+// alone (they're handled via the standard snapshot-trim path which
+// knows about Inventory).
+//
+// nil-safe when dirs.Snap is empty (CLI / harness path).
+func (br *BlockRetire) CleanOrphanSegsPastTarget(targetBlock uint64) ([]string, error) {
+	if br == nil || br.dirs.Snap == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(br.dirs.Snap)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read snapDir %s: %w", br.dirs.Snap, err)
+	}
+	// First pass: index .torrent companions so we can quickly tell
+	// whether a .seg has its pair.
+	hasTorrent := make(map[string]struct{}, len(entries))
+	for _, de := range entries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if !strings.HasPrefix(name, "v1.1-") {
+			continue
+		}
+		if !strings.HasSuffix(name, ".seg.torrent") {
+			continue
+		}
+		hasTorrent[strings.TrimSuffix(name, ".torrent")] = struct{}{}
+	}
+	// Second pass: find orphan .seg files past target.
+	var removed []string
+	for _, de := range entries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if !strings.HasPrefix(name, "v1.1-") {
+			continue
+		}
+		if !strings.HasSuffix(name, ".seg") {
+			continue
+		}
+		if _, ok := hasTorrent[name]; ok {
+			continue // complete pair — leave alone
+		}
+		info, _, ok := snaptype.ParseFileName(br.dirs.Snap, name)
+		if !ok {
+			continue
+		}
+		if info.From <= targetBlock {
+			continue // below target — out of scope
+		}
+		segPath := filepath.Join(br.dirs.Snap, name)
+		if err := dir2.RemoveFile(segPath); err != nil {
+			return removed, fmt.Errorf("remove orphan .seg %s: %w", segPath, err)
+		}
+		// Remove companion .idx if present. Index naming varies by
+		// type; the simplest correct check is to walk the dir entries
+		// matching the same range prefix.
+		idxPrefix := strings.TrimSuffix(name, ".seg")
+		for _, ide := range entries {
+			if ide.IsDir() {
+				continue
+			}
+			n := ide.Name()
+			if strings.HasPrefix(n, idxPrefix) && strings.HasSuffix(n, ".idx") {
+				_ = dir2.RemoveFile(filepath.Join(br.dirs.Snap, n))
+			}
+		}
+		removed = append(removed, name)
+	}
+	sort.Strings(removed)
+	return removed, nil
+}
 
 // NotifyMergedSnapshotFiles fires the registered NotifyOnFilesChange
 // callback for the given block-snapshot file names. MergeBlocks

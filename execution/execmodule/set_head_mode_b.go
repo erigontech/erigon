@@ -148,6 +148,20 @@ func (e *ExecModule) quiesceRetireIfPastTarget(targetBlock uint64) error {
 	if err := e.blockRetire.CancelInFlight(modeBRetireCancelTimeout); err != nil {
 		return fmt.Errorf("cancel in-flight BlockRetire: %w", err)
 	}
+	// CancelInFlight succeeded — retire goroutine drained. Any .seg
+	// files retire wrote before its .torrent build step was
+	// interrupted now sit orphaned on disk (no .torrent, never
+	// reached Inventory). Clean them up before Provider.Unwind's
+	// preflight check sees them; otherwise findInventoryOrphansPastBlock
+	// refuses on the residue we just produced.
+	removed, err := e.blockRetire.CleanOrphanSegsPastTarget(targetBlock)
+	if err != nil {
+		return fmt.Errorf("clean orphan retire output past target: %w", err)
+	}
+	if len(removed) > 0 && e.logger != nil {
+		e.logger.Info("[setHead] cleaned post-cancel retire orphans past target",
+			"targetBlock", targetBlock, "removed", len(removed), "files", removed)
+	}
 	return nil
 }
 

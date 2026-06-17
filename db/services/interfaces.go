@@ -135,6 +135,10 @@ type BlockRetire interface {
 	Working() bool
 	MaxScheduledBlock() uint64
 	CancelInFlight(timeout time.Duration) error
+	// CleanOrphanSegsPastTarget removes orphan .seg files past
+	// target left behind when CancelInFlight interrupted retire
+	// mid-build (.seg written, .torrent not yet produced).
+	CleanOrphanSegsPastTarget(target uint64) ([]string, error)
 }
 
 type DBEventNotifier interface {
