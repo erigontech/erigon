@@ -147,9 +147,8 @@ func (rs *ShardedRecSplit) AddKey(key []byte, offset uint64) error {
 		return err
 	}
 
-	// enums=true: the shard records the global arrival ordinal; the raw offset goes
-	// into the global stream that becomes the OrdinalLookup EF. enums=false: the shard
-	// records the raw offset directly.
+	// enums stores the global arrival ordinal per shard plus the raw offset in the global EF
+	// stream; non-enums stores the raw offset directly in the shard.
 	val := offset
 	if rs.enums {
 		if rs.keysAdded > 0 && offset < rs.prevOffset {
