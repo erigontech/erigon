@@ -82,6 +82,98 @@ func (n *recordingNotifier) snapshotDeleted() []string {
 	return out
 }
 
+func (n *recordingNotifier) snapshotChanged() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]string, len(n.changed))
+	copy(out, n.changed)
+	return out
+}
+
+// NotifyMergedSnapshotFiles mirrors NotifyDeletedSnapshotFiles on the
+// add direction. After a block-snapshot merge produces a wider .seg
+// (e.g. v1.1-003020-003030 from 10 sub-chunks), the merged name must
+// flow through NotifyOnFilesChange so the Provider's onChange hook
+// runs inv.AddFile and Inventory ends up with the merged entry.
+// Without this, Inventory loses sight of the file entirely (the
+// sub-chunk entries are removed by NotifyDeletedSnapshotFiles but the
+// merged entry is never added), straddleBlockFileForType returns nil
+// at unwind time, the rebuild loop has no work, and the stale 10k
+// chunk stays on disk past the new EL head — the wedge live-caught
+// 2026-06-17 5-iter soak v11 iter 1 mode_b: EL head=3,027,899,
+// snapshot file v1.1-003020-003030 on disk, Caplin's historical-
+// download skipped blocks 3,027,900..3,029,999 because the EL's
+// FrozenBlocks view picked up the stale file, gap-bridging failed.
+
+func TestBlockRetire_NotifyMergedSnapshotFiles_FiresOnFilesChange(t *testing.T) {
+	t.Parallel()
+	notifier := &recordingNotifier{}
+	br := &BlockRetire{filesNotifier: notifier}
+
+	merged := []string{
+		"v1.1-003020-003030-headers.seg",
+		"v1.1-003020-003030-bodies.seg",
+		"v1.1-003020-003030-transactions.seg",
+	}
+	br.NotifyMergedSnapshotFiles(merged)
+
+	require.Equal(t, merged, notifier.snapshotChanged(),
+		"NotifyMergedSnapshotFiles must propagate names through NotifyOnFilesChange so the Provider's onChange hook can run inv.AddFile — without this Inventory has no entry for the merged file and straddleBlockFileForType returns nil at unwind time")
+}
+
+func TestBlockRetire_NotifyMergedSnapshotFiles_NilNotifier(t *testing.T) {
+	t.Parallel()
+	br := &BlockRetire{}
+	br.NotifyMergedSnapshotFiles([]string{"v1.1-003020-003030-headers.seg"})
+}
+
+func TestBlockRetire_NotifyMergedSnapshotFiles_EmptyList(t *testing.T) {
+	t.Parallel()
+	notifier := &recordingNotifier{}
+	br := &BlockRetire{filesNotifier: notifier}
+
+	br.NotifyMergedSnapshotFiles(nil)
+	br.NotifyMergedSnapshotFiles([]string{})
+
+	require.Empty(t, notifier.snapshotChanged())
+}
+
+// TestBlockRetire_NotifyMergedSnapshotFiles_DrivesInventoryAdd
+// mirrors the delete-side end-to-end test: a recording notifier
+// dispatches NotifyOnFilesChange to the onChange callback the way
+// the production temporal DB does. We register a callback that adds
+// to a tiny in-test inventory map, fire the change via BlockRetire,
+// and assert the merged entry appears.
+func TestBlockRetire_NotifyMergedSnapshotFiles_DrivesInventoryAdd(t *testing.T) {
+	t.Parallel()
+	inventory := map[string]bool{}
+	var invMu sync.Mutex
+	addToInventory := func(names []string) {
+		invMu.Lock()
+		defer invMu.Unlock()
+		for _, name := range names {
+			inventory[name] = true
+		}
+	}
+
+	notifier := &recordingNotifier{}
+	notifier.OnFilesChange(addToInventory, nil)
+	br := &BlockRetire{filesNotifier: notifier}
+
+	br.NotifyMergedSnapshotFiles([]string{
+		"v1.1-003020-003030-headers.seg",
+		"v1.1-003020-003030-bodies.seg",
+		"v1.1-003020-003030-transactions.seg",
+	})
+
+	invMu.Lock()
+	defer invMu.Unlock()
+	require.Contains(t, inventory, "v1.1-003020-003030-headers.seg",
+		"merged file must land in inventory")
+	require.Contains(t, inventory, "v1.1-003020-003030-bodies.seg")
+	require.Contains(t, inventory, "v1.1-003020-003030-transactions.seg")
+}
+
 func TestBlockRetire_NotifyDeletedSnapshotFiles_FiresOnFilesDelete(t *testing.T) {
 	t.Parallel()
 	notifier := &recordingNotifier{}

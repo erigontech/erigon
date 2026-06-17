@@ -258,6 +258,26 @@ func NewBlockRetire(
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
 
+// NotifyMergedSnapshotFiles fires the registered NotifyOnFilesChange
+// callback for the given block-snapshot file names. MergeBlocks
+// calls this after a merge produces a wider .seg (e.g.
+// v1.1-003020-003030 from 10 sub-chunks), so the Provider's onChange
+// hook can run inv.AddFile and Inventory ends up with the merged
+// entry. Without this, the merged file lives on disk and in
+// chain.toml but never reaches Inventory — straddleBlockFileForType
+// then returns nil at unwind time, the rebuild loop has no work,
+// and the stale 10k chunk stays past the new EL head (live-caught
+// 2026-06-17 5-iter soak v11 iter 1 mode_b).
+//
+// nil-safe on three axes: nil notifier, nil/empty names list,
+// nil-registered callback inside the notifier.
+func (br *BlockRetire) NotifyMergedSnapshotFiles(names []string) {
+	if br == nil || br.filesNotifier == nil || len(names) == 0 {
+		return
+	}
+	br.filesNotifier.NotifyOnFilesChange(names)
+}
+
 // NotifyDeletedSnapshotFiles fires the registered NotifyOnFilesDelete
 // callback for the given block-snapshot file names. MergeBlocks calls
 // this after a merge has consolidated sub-chunks into a wider file,
@@ -502,11 +522,19 @@ func (br *BlockRetire) MergeBlocks(
 		return false, nil
 	}
 	merged = true
+	// Capture every merged-file name so we can fire
+	// NotifyOnFilesChange after the merge — drives the Provider's
+	// onChange hook (inv.AddFile). Without it the merged entry never
+	// lands in Inventory, straddleBlockFileForType returns nil at
+	// unwind time, the rebuild loop is empty, and the stale wider
+	// .seg stays on disk past the new EL head (live-caught 2026-06-17
+	// soak v11 iter 1 mode_b).
+	var mergedFiles []string
 	onMerge := func(mergedFileNames []string) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
-
+		mergedFiles = append(mergedFiles, mergedFileNames...)
 		return seeder.Seed(ctx, mergedFileNames)
 	}
 	// Capture every deleted sub-chunk so we can fire NotifyOnFilesDelete
@@ -532,6 +560,7 @@ func (br *BlockRetire) MergeBlocks(
 		return false, err
 	}
 
+	br.NotifyMergedSnapshotFiles(mergedFiles)
 	br.NotifyDeletedSnapshotFiles(deletedSubChunks)
 	return
 }
