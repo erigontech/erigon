@@ -1091,12 +1091,6 @@ func (s *Stream) Kind() (kind Kind, size uint64, err error) {
 		// is done here because many decoders require allocating an input
 		// buffer matching the value size. Checking it here protects those
 		// decoders from inputs declaring very large value size.
-		//
-		// Re-read listLimit because readKind consumed header bytes via
-		// willRead, which decremented the enclosing list's remaining size.
-		if inList {
-			_, listLimit = s.listLimit()
-		}
 		if inList && s.size > listLimit {
 			s.kinderr = ErrElemTooLarge
 		} else if s.limited && s.size > s.remaining {
