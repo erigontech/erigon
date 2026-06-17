@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -171,6 +173,10 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		return err
 	}
 
+	if offset > rs.maxOffset {
+		rs.maxOffset = offset
+	}
+
 	// enums stores the global arrival ordinal per shard plus the raw offset in the global EF
 	// stream; non-enums stores the raw offset directly in the shard.
 	val := offset
@@ -185,9 +191,6 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 		val = rs.keysAdded
 		rs.prevOffset = offset
-		if offset > rs.maxOffset {
-			rs.maxOffset = offset
-		}
 	}
 
 	var buf [shardRecordSize]byte
@@ -247,6 +250,30 @@ func (rs *RecSplit) ResetNextSalt() {
 	}
 }
 
+// shuffledArrayBytes returns the size of the records ("shuffled-numbers") array for the
+// monolithic layout vs the sharded layout, so the dbg log can show the per-shard shrink.
+// For non-enums the records hold global-range offsets, so sharding does not shrink them.
+func (rs *RecSplit) shuffledArrayBytes() (mono, sharded uint64) {
+	var monoBpr int
+	if rs.enums {
+		monoBpr = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		monoBpr = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
+	mono = rs.keysAdded * uint64(monoBpr)
+	if !rs.enums {
+		return mono, mono
+	}
+	for shard := 0; shard < RecSplitShards; shard++ {
+		n := rs.shardCounts[shard]
+		if n == 0 {
+			continue
+		}
+		sharded += n * uint64(common.BitLenToByteLen(bits.Len64(n+1)))
+	}
+	return mono, sharded
+}
+
 func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
 		return errors.New("already built")
@@ -258,6 +285,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
+	}
+
+	if mono, sharded := rs.shuffledArrayBytes(); mono > 10*datasize.MB.Bytes() {
+		log.Warn("[dbg] recsplit shuffled-array encoding", "file", rs.fileName, "sharded", true,
+			"enums", rs.enums, "keys", rs.keysAdded,
+			"monolithicBytes", datasize.ByteSize(mono).HR(), "shardedBytes", datasize.ByteSize(sharded).HR())
 	}
 
 	f, err := dir.CreateTemp(rs.filePath)
