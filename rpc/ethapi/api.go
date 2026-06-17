@@ -502,8 +502,7 @@ type SignTransactionResult struct {
 	Tx  *RPCTransaction `json:"tx"`
 }
 
-// MarshalJSON omits block-placement and sender fields that are meaningless for
-// an unsigned, unsubmitted transaction.
+// MarshalJSON strips block-placement/sender fields and normalises fee and signature fields to match Geth.
 func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	type plain struct {
 		Raw hexutil.Bytes   `json:"raw"`
@@ -519,6 +518,18 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	}
 	for _, k := range []string{"blockHash", "blockNumber", "blockTimestamp", "transactionIndex", "from"} {
 		delete(m, k)
+	}
+	nullJSON := json.RawMessage("null")
+	for _, k := range []string{"gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"} {
+		if _, ok := m[k]; !ok {
+			m[k] = nullJSON
+		}
+	}
+	zeroHex := json.RawMessage(`"0x0"`)
+	for _, k := range []string{"v", "r", "s"} {
+		if v, ok := m[k]; !ok || string(v) == "null" {
+			m[k] = zeroHex
+		}
 	}
 	stripped, err := json.Marshal(m)
 	if err != nil {

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -86,10 +87,23 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
 	}
 
+	if args.BlobVersionedHashes != nil && len(args.BlobVersionedHashes) == 0 {
+		return nil, errors.New("need at least 1 blob for a blob transaction")
+	}
+	if len(args.BlobVersionedHashes) > params.MaxBlobsPerTxn {
+		return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", len(args.BlobVersionedHashes), params.MaxBlobsPerTxn)
+	}
+
 	if args.To == nil {
+		if args.BlobVersionedHashes != nil {
+			return nil, errors.New(`missing "to" in blob transaction`)
+		}
 		hasData := (args.Input != nil && len(*args.Input) > 0) || (args.Data != nil && len(*args.Data) > 0)
 		if !hasData {
 			return nil, errors.New(`contract creation without any data provided`)
+		}
+		if args.AuthorizationList != nil {
+			return nil, errors.New(`authorizationList provided for contract creation, but "to" field is missing`)
 		}
 	}
 
@@ -170,6 +184,9 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 
 	// GasPrice is already set: the caller wants a legacy transaction.
 	if args.GasPrice != nil {
+		if args.GasPrice.ToInt().Sign() == 0 {
+			return errors.New("gasPrice must be non-zero after london fork")
+		}
 		return nil
 	}
 
