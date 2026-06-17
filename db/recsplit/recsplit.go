@@ -947,6 +947,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.indexW = getBufioWriter(rs.indexF)
 	defer putBufioWriter(rs.indexW)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
+	if rs.dataStructureVersion >= shardedRSVersion {
+		return fmt.Errorf("dataStructureVersion %d is reserved for the sharded format", rs.dataStructureVersion)
+	}
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {

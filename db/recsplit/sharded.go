@@ -43,8 +43,11 @@ import (
 // shards uniform). For enums each shard stores the global arrival ordinal, and one monotonic
 // arrival-order offset-EF appended after the shards backs OrdinalLookup.
 const (
-	RecSplitShards         = 256
-	shardedRSVersion uint8 = 1
+	RecSplitShards = 256
+
+	// shardedRSVersion is byte 0 of a sharded file: the next DataStructureVersion after the
+	// monolithic range (0..2), so OpenIndex dispatches versions >= this to the sharded reader.
+	shardedRSVersion version.DataStructureVersion = 3
 
 	// shardInnerVersion is the existence-filter version of each shard: monolithic
 	// (non-sharded) FuseFilter.
@@ -291,7 +294,7 @@ func (rs *ShardedRecSplit) Build(ctx context.Context) error {
 
 func (rs *ShardedRecSplit) writeHeader(w *bufio.Writer) error {
 	var header [shardedHeaderSize]byte
-	header[0] = shardedRSVersion
+	header[0] = byte(shardedRSVersion)
 	binary.BigEndian.PutUint32(header[4:], rs.salt)
 	binary.BigEndian.PutUint64(header[8:], rs.baseDataID)
 	binary.BigEndian.PutUint64(header[16:], rs.keysAdded)
@@ -474,7 +477,7 @@ func (idx *ShardedIndex) init() error {
 	if len(idx.data) < shardedHeaderSize {
 		return fmt.Errorf("sharded index %s: too small for header (%d < %d)", idx.fileName, len(idx.data), shardedHeaderSize)
 	}
-	if v := idx.data[0]; v != shardedRSVersion {
+	if v := version.DataStructureVersion(idx.data[0]); v < shardedRSVersion {
 		return fmt.Errorf("%w. sharded index %s: unsupported version %d", IncompatibleErr, idx.fileName, v)
 	}
 	idx.salt = binary.BigEndian.Uint32(idx.data[4:])
