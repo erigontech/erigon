@@ -132,7 +132,7 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 func (c *countingWriter) Flush() error { return c.w.Flush() }
 
 func (c *countingWriter) padTo(align int) error {
-	pad := alignUp(c.written, uint64(align)) - c.written
+	pad := int(alignUp(c.written, uint64(align)) - c.written)
 	if pad == 0 {
 		return nil
 	}
