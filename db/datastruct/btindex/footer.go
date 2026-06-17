@@ -113,26 +113,26 @@ func ReadFooter(data []byte) (f Footer, footerStart int, err error) {
 	}, footerStart, nil
 }
 
-func alignUp(n, a int) int { return (n + a - 1) &^ (a - 1) }
+func alignUp[T ~int | ~uint64](n, a T) T { return (n + a - 1) &^ (a - 1) }
 
 var alignPad [btEFAlign]byte
 
 // countingWriter tracks the byte offset so sections can be padded to alignment.
 type countingWriter struct {
 	w       *bufio.Writer
-	written int
+	written uint64
 }
 
 func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
-	c.written += n
+	c.written += uint64(n)
 	return n, err
 }
 
 func (c *countingWriter) Flush() error { return c.w.Flush() }
 
 func (c *countingWriter) padTo(align int) error {
-	pad := alignUp(c.written, align) - c.written
+	pad := alignUp(c.written, uint64(align)) - c.written
 	if pad == 0 {
 		return nil
 	}

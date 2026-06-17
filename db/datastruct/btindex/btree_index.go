@@ -290,7 +290,7 @@ func (btw *BtIndexWriter) Build() error {
 		if err = btw.writer.padTo(btEFAlign); err != nil {
 			return fmt.Errorf("[index] pad before ef: %w", err)
 		}
-		efOffset := uint64(btw.writer.written)
+		efOffset := btw.writer.written
 
 		btw.ef.Build()
 		if err = btw.ef.Write(btw.writer); err != nil {
@@ -475,6 +475,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Reader) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
+		indexM:   M,
 	}
 
 	var validationPassed bool
