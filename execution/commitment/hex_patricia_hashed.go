@@ -1494,7 +1494,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 	return fullNode, nil
 }
 
-func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
+func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (*trie.Trie, error) {
 	var rootNode trie.Node = &trie.FullNode{}
 	var currentNode trie.Node = rootNode
 	keyPos := int16(0) // current position in hashedKey (usually same as row, but could be different due to extension nodes)
@@ -1551,7 +1551,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// sparse-trie verifier needs the branch behind the extension
 				// materialized, not a bare HashNode. The branch hashes
 				// to the same value, so the witness root is unchanged.
-				if (len(hashedKey) == 64 || len(hashedKey) == 128) && cellToExpand.hashLen > 0 {
+				if produceExclusionProofs && (len(hashedKey) == 64 || len(hashedKey) == 128) && cellToExpand.hashLen > 0 {
 					branchPrefix := make([]byte, 0, int(keyPos)+1+len(hashedExtKey))
 					branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
 					branchPrefix = append(branchPrefix, hashedExtKey...)
@@ -2681,7 +2681,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 // but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `triedeprecated.Trie`.
 // All the individual tries are combined to create the final witness trie.
 // Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
-func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2788,7 +2788,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 
 		// convert grid to trie.Trie
-		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
+		tr, err = hph.toWitnessTrie(hashedKey, codeReads, produceExclusionProofs) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}

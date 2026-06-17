@@ -2291,7 +2291,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			toWitness.TouchHashedKey(hk)
 		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "", false)
 		require.NoError(t, err)
 		_ = witnessTrie
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
@@ -2360,7 +2360,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			}
 		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "", false)
 		require.NoError(t, err)
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
 		require.NotNil(t, rootWitness, "root witness should not be nil")
@@ -3480,7 +3480,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toWitness.TouchPlainKey(string(acctPlain), nil, toWitness.TouchAccount)
 		toWitness.TouchPlainKey(string(storagePlainKey), nil, toWitness.TouchStorage)
 
-		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "", true)
 		require.NoError(t, err)
 		require.Equal(t, root, rootW, "witness root must equal commitment root")
 
@@ -3527,7 +3527,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		defer toWitness.Close()
 		toWitness.TouchPlainKey(string(absentAcct), nil, toWitness.TouchAccount)
 
-		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "", true)
 		require.NoError(t, err)
 		require.Equal(t, root, rootW, "witness root must equal commitment root")
 

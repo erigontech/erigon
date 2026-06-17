@@ -30,7 +30,9 @@ func witnessResolvesAbsence(n trie.Node, key []byte, pos int) bool {
 	case nil:
 		return true
 	case trie.ValueNode:
-		return true
+		// reaching a value means the key is present; only a value short of the full key
+		// length (a divergent leaf) proves absence
+		return pos < len(key)
 	case *trie.AccountNode:
 		return witnessResolvesAbsence(x.Storage, key, pos)
 	case *trie.ShortNode:
