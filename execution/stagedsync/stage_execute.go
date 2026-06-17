@@ -469,11 +469,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint < s.BlockNumber {
-		// Execution committed past the unwind point, so roll the committed blocks
-		// (u.UnwindPoint, s.BlockNumber] back on disk. unwindExec3 also prunes the
-		// in-RAM SharedDomains/TemporalMemBatch overlay (down to u.UnwindPoint, via
-		// TemporalMemBatch.Unwind — #20625), and u.Done lowers the stage progress so
-		// re-execution resumes from u.UnwindPoint+1.
+		// Execution committed past the unwind point: roll the committed blocks back
+		// on disk (unwindExec3 also prunes the in-RAM overlay), and u.Done lowers the
+		// stage progress so re-execution resumes from u.UnwindPoint+1.
 		logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 		unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
@@ -517,30 +515,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 			return err
 		}
 	} else {
-		// Nothing above the unwind point was ever committed (s.BlockNumber <=
-		// u.UnwindPoint), so there is nothing to roll back on disk and we must NOT
-		// call u.Done — lowering the stage progress to u.UnwindPoint would falsely
-		// mark the never-flushed blocks (s.BlockNumber, u.UnwindPoint] as executed.
-		//
-		// But the in-RAM SharedDomains/TemporalMemBatch overlay can still hold
-		// uncommitted writes from those blocks — in particular from a block that
-		// failed its post-execution gas check mid-batch (the overlay is reused
-		// across the unwind→retry loop within a single sync.Run). Re-execution
-		// resumes from the committed progress (SeekCommitment below, == s.BlockNumber+1),
-		// NOT from u.UnwindPoint+1, so prune the overlay to that committed boundary.
-		// Pruning only to u.UnwindPoint+1 would keep the (s.BlockNumber, u.UnwindPoint]
-		// writes, which are then re-executed and re-read their own stale overlay —
-		// the same bug class, just deferred. (Hoodi 3004265: ca5daf64 slot0 kept
-		// tx19's first-write, the contract took the "already initialised" branch,
-		// skipped an SSTORE_SET, came up 21045 gas short, and the node spun in an
-		// unwind/retry loop; there s.BlockNumber == u.UnwindPoint so the two
-		// boundaries coincided.) The on-disk overlay prune in TemporalMemBatch.Unwind
-		// (#20625) only runs via unwindExec3 above, hence this branch.
-		//
-		// NB: the state cache (if any) is not reverted here. Today both executors
-		// clear it per-block via ValidateAndPrepare and the snapshotter attaches no
-		// cache, so this is safe; a caller enabling a cache on this chokepoint must
-		// ensure it is invalidated on retry.
+		// Nothing above the unwind point was committed, so there's no disk rollback
+		// and u.Done must NOT run — it would raise stage progress to u.UnwindPoint and
+		// mark uncommitted blocks executed. Re-execution resumes from the committed
+		// block, so prune the in-RAM overlay to that boundary (Min(s.BlockNumber+1)),
+		// not u.UnwindPoint+1.
 		committedTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
 		if err != nil {
 			return err
@@ -548,7 +527,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		doms.Unwind(committedTxNum, nil)
 	}
 
-	_, _, _ = doms.SeekCommitment(ctx, rwTx) // re-establish doms' position at the post-unwind committed state
+	// Re-establish doms' position at the committed state for re-execution.
+	_, _, err = doms.SeekCommitment(ctx, rwTx)
+	if err != nil {
+		return err
+	}
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }

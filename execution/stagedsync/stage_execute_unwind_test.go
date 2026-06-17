@@ -174,12 +174,13 @@ func makeHeader(num uint64, parentMarker common.Hash) *types.Header {
 //     "already initialised" branch, skipped an SSTORE_SET (20000 gas), the block
 //     came up exactly 21045 gas short, and the node spun in an unwind/retry loop.
 //
-// Re-execution resumes from the committed progress (SeekCommitment ==
-// s.BlockNumber+1), so the overlay must be pruned to that committed boundary —
-// NOT to unwindPoint+1. This test asserts every uncommitted write above the
-// committed progress is dropped (the failed block's, AND a block in
-// (committedBlock, unwindPoint] that is itself re-executed), while a write
-// at/below the committed progress survives (no over-pruning).
+// Re-execution resumes from the committed block (SeekCommitment returns
+// s.BlockNumber; re-execution resumes at s.BlockNumber+1), so the overlay must
+// be pruned to that committed boundary (Min(s.BlockNumber+1)) — NOT to
+// unwindPoint+1. This test asserts every uncommitted write above the committed
+// progress is dropped (the failed block's, AND a block in (committedBlock,
+// unwindPoint] that is itself re-executed), while a write at/below the committed
+// progress survives (no over-pruning).
 func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	t.Parallel()
 
