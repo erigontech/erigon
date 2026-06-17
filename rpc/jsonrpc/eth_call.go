@@ -496,11 +496,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
-		//domains.SetTrace(true)
 		if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
-		domains.SetTrace(false, false)
 	}
 
 	// touch account

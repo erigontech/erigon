@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -39,8 +40,6 @@ type sd interface {
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	StepSize() uint64
-	Trace() bool
-	CommitmentCapture() bool
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -48,7 +47,7 @@ type SharedDomainsCommitmentContext struct {
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace         bool
+	traceW        io.Writer
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
@@ -148,14 +147,8 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 	sdc.SetStateReader(stateReader)
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
-	sdc.trace = trace
-	sdc.patriciaTrie.SetTrace(trace)
-}
-
-// SetCapture enables/disables trie operation capture for diagnosis.
-func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
-	sdc.patriciaTrie.SetCapture(capture)
+func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
+	sdc.traceW = w
 }
 
 // GetUpdates returns the current updates buffer. Used by the commitment
@@ -213,10 +206,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
-	return sdc.patriciaTrie.GetCapture(truncate)
 }
 
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
@@ -319,20 +308,16 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 	}()
+	// Re-apply the trace writer before any trie operations (including the early-return
+	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-
-	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
-	if sdc.sharedDomains.CommitmentCapture() {
-		if sdc.patriciaTrie.GetCapture(false) == nil {
-			sdc.patriciaTrie.SetCapture([]string{})
-		}
-	}
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum)
 
@@ -759,7 +744,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
-	if sdc.trace {
+	if sdc.traceW != nil {
 		rootHash, err := hext.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)

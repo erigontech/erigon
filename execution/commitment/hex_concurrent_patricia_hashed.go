@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -118,8 +119,8 @@ func (p *ConcurrentPatriciaHashed) foldNibble(ctx context.Context, nib int) erro
 }
 
 func (p *ConcurrentPatriciaHashed) unfoldRoot(ctx context.Context, ctxFactory TrieContextFactory) error {
-	if p.root.trace {
-		fmt.Printf("=============ROOT unfold============\n")
+	if p.root.traceW != nil {
+		fmt.Fprintf(p.root.traceW, "=============ROOT unfold============\n")
 	}
 	// if p.root.rootPresent && p.root.root.hashedExtLen == 0 { // if root has no extension, we have to unfold
 	zero := []byte{0}
@@ -133,8 +134,8 @@ func (p *ConcurrentPatriciaHashed) unfoldRoot(ctx context.Context, ctxFactory Tr
 	}
 	// }
 
-	if p.root.trace {
-		fmt.Printf("=========END=ROOT unfold============\n")
+	if p.root.traceW != nil {
+		fmt.Fprintf(p.root.traceW, "=========END=ROOT unfold============\n")
 	}
 
 	for i := range p.mounts {
@@ -159,36 +160,35 @@ func (p *ConcurrentPatriciaHashed) Close() {
 	}
 }
 
-func (p *ConcurrentPatriciaHashed) SetTrace(b bool) {
-	p.root.SetTrace(b)
-	for i := range p.mounts {
-		p.mounts[i].SetTrace(b)
-	}
-}
-func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
-	p.root.SetTraceDomain(b)
-	for i := range p.mounts {
-		p.mounts[i].SetTraceDomain(b)
-	}
+// syncWriter wraps an io.Writer with a mutex for goroutine-safe writes.
+// Used by ConcurrentPatriciaHashed to protect concurrent fmt.Fprintf calls
+// from root and mount goroutines writing to the same underlying writer.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
 }
 
-func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
-	capture := p.root.GetCapture(truncate)
-	if truncate {
+func (sw *syncWriter) Write(p []byte) (n int, err error) {
+	sw.mu.Lock()
+	n, err = sw.w.Write(p)
+	sw.mu.Unlock()
+	return
+}
+
+func (p *ConcurrentPatriciaHashed) SetTraceWriter(w io.Writer) {
+	if w != nil {
+		sw := &syncWriter{w: w}
+		p.root.SetTraceWriter(sw)
 		for i := range p.mounts {
-			p.mounts[i].SetCapture(nil)
+			p.mounts[i].SetTraceWriter(sw)
+		}
+	} else {
+		p.root.SetTraceWriter(nil)
+		for i := range p.mounts {
+			p.mounts[i].SetTraceWriter(nil)
 		}
 	}
-	return capture
 }
-
-func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
-	p.root.SetCapture(capture)
-	for i := range p.mounts {
-		p.mounts[i].SetCapture(capture)
-	}
-}
-
 func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	p.root.EnableCsvMetrics(filePathPrefix)
 	for i := range p.mounts {
@@ -199,10 +199,18 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 }
 
 // pass -1 to enable trace just for root trie
-func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
-	p.root.SetTrace(b)
-	if n < len(p.mounts) && n >= 0 {
-		p.mounts[n].SetTrace(b)
+func (p *ConcurrentPatriciaHashed) SetParticularTrace(w io.Writer, n int) {
+	if w != nil {
+		sw := &syncWriter{w: w}
+		p.root.SetTraceWriter(sw)
+		if n < len(p.mounts) && n >= 0 {
+			p.mounts[n].SetTraceWriter(sw)
+		}
+	} else {
+		p.root.SetTraceWriter(nil)
+		if n < len(p.mounts) && n >= 0 {
+			p.mounts[n].SetTraceWriter(nil)
+		}
 	}
 }
 
@@ -245,8 +253,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
-				if phnib.trace {
-					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+				if phnib.traceW != nil {
+					fmt.Fprintf(phnib.traceW, "\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
 				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
@@ -259,8 +267,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if cnt == 0 {
 				return nil
 			}
-			if pph.mounts[ni].trace {
-				fmt.Printf("ConcurrentTrie: folding [%2x] keys %d maxDepth %d\n", ni, cnt, phnib.depths[0])
+			if pph.mounts[ni].traceW != nil {
+				fmt.Fprintf(pph.mounts[ni].traceW, "ConcurrentTrie: folding [%2x] keys %d maxDepth %d\n", ni, cnt, phnib.depths[0])
 			}
 			return pph.foldNibble(gctx, ni)
 		})
@@ -269,8 +277,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		return nil, err
 	}
 
-	if pph.root.trace {
-		fmt.Printf("======= folding ROOT trie =========\n")
+	if pph.root.traceW != nil {
+		fmt.Fprintf(pph.root.traceW, "======= folding ROOT trie =========\n")
 	}
 	// TODO zero active rows could be a clue to some invalid cases
 	if pph.root.activeRows == 0 {
@@ -289,8 +297,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	if err != nil {
 		return nil, err
 	}
-	if pph.root.trace {
-		fmt.Printf("======= folding root done =========\n")
+	if pph.root.traceW != nil {
+		fmt.Fprintf(pph.root.traceW, "======= folding root done =========\n")
 	}
 	// have to reset trie since we do not do any unfolding
 	return rootHash, nil

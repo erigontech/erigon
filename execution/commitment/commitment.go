@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"slices"
 	"strconv"
@@ -93,12 +94,8 @@ type Trie interface {
 	// RootHash produces root hash of the trie
 	RootHash() (hash []byte, err error)
 
-	// Makes trie more verbose
-	SetTrace(bool)
-	// Trace domain writes only (no filding etc)
-	SetTraceDomain(bool)
-	SetCapture(capture []string)
-	GetCapture(truncate bool) []string
+	// SetTraceWriter sets the trace writer; nil disables tracing
+	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
 
 	// Variant returns commitment trie variant
