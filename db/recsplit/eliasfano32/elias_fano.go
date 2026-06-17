@@ -515,6 +515,11 @@ func (ef *EliasFano) Count() uint64 {
 	return ef.count + 1
 }
 
+// AddedCount is the number of AddOffset calls so far (build-time position).
+func (ef *EliasFano) AddedCount() uint64 {
+	return ef.i
+}
+
 func (ef *EliasFano) Iterator() *EliasFanoIter {
 	it := &EliasFanoIter{
 		ef:            ef,
