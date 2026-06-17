@@ -964,6 +964,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	} else {
 		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
+	if recordsBytes := rs.keysAdded * uint64(rs.scratch.bytesPerRec); recordsBytes > 10*datasize.MB.Bytes() {
+		log.Warn("[dbg] recsplit shuffled-array encoding", "file", rs.fileName, "enums", rs.enums,
+			"keys", rs.keysAdded, "bytesPerKey", rs.scratch.bytesPerRec,
+			"recordsBytes", datasize.ByteSize(recordsBytes).HR())
+	}
 	if err = rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
