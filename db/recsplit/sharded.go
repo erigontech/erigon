@@ -156,9 +156,8 @@ func (rs *ShardedRecSplit) shardWriter(shard byte) (*bufio.Writer, error) {
 	return rs.shardWriters[shard], nil
 }
 
-// ResetNextSalt bumps the routing salt and clears buffered keys so the caller can
-// re-add every key after a collision. The salt is shared by all shards (routing
-// depends on it), so a collision in any shard rebuilds the whole structure.
+// ResetNextSalt bumps the shared routing salt and clears buffered keys, so a
+// collision in any shard forces the caller to re-add and rebuild all shards.
 func (rs *ShardedRecSplit) ResetNextSalt() {
 	rs.salt++
 	rs.built = false
@@ -350,11 +349,10 @@ type ShardedIndex struct {
 	size               int64
 	modTime            time.Time
 
-	salt               uint32
-	baseDataID         uint64
-	keyCount           uint64
-	enums              bool
-	lessFalsePositives bool
+	salt       uint32
+	baseDataID uint64
+	keyCount   uint64
+	enums      bool
 
 	shards       [RecSplitShards]*Index
 	sharedReader *ShardedIndexReader
@@ -387,7 +385,7 @@ func OpenShardedIndex(indexFilePath string) (*ShardedIndex, error) {
 	if err = idx.init(); err != nil {
 		return nil, err
 	}
-	idx.sharedReader = &ShardedIndexReader{index: idx, salt: idx.salt}
+	idx.sharedReader = NewShardedIndexReader(idx)
 	return idx, nil
 }
 
@@ -402,7 +400,6 @@ func (idx *ShardedIndex) init() error {
 	idx.baseDataID = binary.BigEndian.Uint64(idx.data[8:])
 	idx.keyCount = binary.BigEndian.Uint64(idx.data[16:])
 	idx.enums = idx.data[24] != 0
-	idx.lessFalsePositives = idx.data[25] != 0
 
 	offset := shardedHeaderSize
 	for i := 0; i < RecSplitShards; i++ {

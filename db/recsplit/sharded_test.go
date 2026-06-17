@@ -127,6 +127,33 @@ func TestShardedIndexAbsentKeysFiltered(t *testing.T) {
 	require.Lessf(t, falsePositives, probes/20, "too many false positives: %d/%d", falsePositives, probes)
 }
 
+func TestShardedIndexSmallNonEnum(t *testing.T) {
+	// Small key count → many shards end up with exactly one key, exercising the
+	// Index.Lookup keyCount==1 path which must still return the real offset.
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	const n = 300
+	offsetOf := func(i int) uint64 { return uint64(i*31 + 7) }
+	idx := buildSharded(t, RecSplitArgs{
+		KeyCount:           n,
+		BucketSize:         10,
+		LeafSize:           8,
+		Salt:               &salt,
+		TmpDir:             tmpDir,
+		IndexFile:          filepath.Join(tmpDir, "index"),
+		Enums:              false,
+		LessFalsePositives: true,
+	}, n, offsetOf)
+	defer idx.Close()
+
+	r := idx.Reader()
+	for i := 0; i < n; i++ {
+		offset, ok := r.Lookup(fmt.Appendf(nil, "key %d", i))
+		require.Truef(t, ok, "key %d not found", i)
+		require.Equalf(t, offsetOf(i), offset, "key %d", i)
+	}
+}
+
 func TestShardedIndexSingleKey(t *testing.T) {
 	tmpDir := t.TempDir()
 	salt := uint32(1)
