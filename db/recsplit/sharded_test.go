@@ -99,6 +99,35 @@ func TestShardedIndexTwoLayerLookupEnums(t *testing.T) {
 	}
 }
 
+func TestShardedIndexOrdinalLookup(t *testing.T) {
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	const n = 20000
+	offsetOf := func(i int) uint64 { return uint64(i*17 + 3) } // monotonic
+	idx := buildSharded(t, RecSplitArgs{
+		KeyCount:           n,
+		BucketSize:         10,
+		LeafSize:           8,
+		Salt:               &salt,
+		TmpDir:             tmpDir,
+		IndexFile:          filepath.Join(tmpDir, "index"),
+		Enums:              true,
+		LessFalsePositives: true,
+	}, n, offsetOf)
+	defer idx.Close()
+
+	r := idx.Reader()
+	prev := uint64(0)
+	for i := 0; i < n; i++ {
+		got := r.OrdinalLookup(uint64(i))
+		require.Equalf(t, offsetOf(i), got, "OrdinalLookup(%d)", i)
+		if i > 0 {
+			require.GreaterOrEqualf(t, got, prev, "OrdinalLookup must be monotone at %d", i)
+		}
+		prev = got
+	}
+}
+
 func TestShardedIndexAbsentKeysFiltered(t *testing.T) {
 	tmpDir := t.TempDir()
 	salt := uint32(1)

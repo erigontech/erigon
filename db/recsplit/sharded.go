@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -41,6 +42,12 @@ import (
 // each with its own non-sharded FuseFilter. Sharding uses the low byte of the bucket
 // hash, not the top byte, because the per-shard remap bucketing needs hashes that
 // stay uniform over the full 64-bit range within a shard.
+//
+// For enums=true the per-shard key→ordinal map shrinks from ~5 to ~3 bytes/key
+// (per-shard ordinals span 0..N/256 instead of 0..N). Each shard's inner EF stores
+// the global arrival ordinal rather than the raw offset, and a single global
+// arrival-order offset-EF (appended after all shards) provides OrdinalLookup. That
+// global EF is monotonically increasing, which BinarySearch in history relies on.
 const (
 	RecSplitShards         = 256
 	shardedRSVersion uint8 = 1
@@ -76,6 +83,12 @@ type ShardedRecSplit struct {
 	shardFiles   [RecSplitShards]*os.File
 	shardWriters [RecSplitShards]*bufio.Writer
 	shardCounts  [RecSplitShards]uint64
+
+	// global arrival-order offset stream, used to build the OrdinalLookup EF (enums only)
+	globalOffsetFile   *os.File
+	globalOffsetWriter *bufio.Writer
+	maxOffset          uint64
+	prevOffset         uint64
 
 	keyExpectedCount uint64
 	keysAdded        uint64
@@ -113,6 +126,14 @@ func NewShardedRecSplit(args RecSplitArgs, logger log.Logger) (*ShardedRecSplit,
 	} else {
 		rs.salt = *args.Salt
 	}
+	if rs.enums {
+		f, err := os.CreateTemp(rs.tmpDir, fmt.Sprintf("%s.goffsets.", fileName))
+		if err != nil {
+			return nil, err
+		}
+		rs.globalOffsetFile = f
+		rs.globalOffsetWriter = bufio.NewWriter(f)
+	}
 	return rs, nil
 }
 
@@ -131,10 +152,31 @@ func (rs *ShardedRecSplit) AddKey(key []byte, offset uint64) error {
 	if err != nil {
 		return err
 	}
+
+	// enums=true: the shard records the global arrival ordinal; the raw offset goes
+	// into the global stream that becomes the OrdinalLookup EF. enums=false: the shard
+	// records the raw offset directly.
+	val := offset
+	if rs.enums {
+		if rs.keysAdded > 0 && offset < rs.prevOffset {
+			return fmt.Errorf("sharded recsplit %s: offsets must be monotonically increasing: prev=%d cur=%d", rs.fileName, rs.prevOffset, offset)
+		}
+		var ob [8]byte
+		binary.BigEndian.PutUint64(ob[:], offset)
+		if _, err := rs.globalOffsetWriter.Write(ob[:]); err != nil {
+			return err
+		}
+		val = rs.keysAdded
+		rs.prevOffset = offset
+		if offset > rs.maxOffset {
+			rs.maxOffset = offset
+		}
+	}
+
 	var buf [shardRecordSize]byte
 	binary.BigEndian.PutUint64(buf[0:], hi)
 	binary.BigEndian.PutUint64(buf[8:], lo)
-	binary.BigEndian.PutUint64(buf[16:], offset)
+	binary.BigEndian.PutUint64(buf[16:], val)
 	if _, err := w.Write(buf[:]); err != nil {
 		return err
 	}
@@ -163,6 +205,8 @@ func (rs *ShardedRecSplit) ResetNextSalt() {
 	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
+	rs.maxOffset = 0
+	rs.prevOffset = 0
 	for i := range rs.shardFiles {
 		rs.shardCounts[i] = 0
 		f := rs.shardFiles[i]
@@ -172,6 +216,11 @@ func (rs *ShardedRecSplit) ResetNextSalt() {
 		_ = f.Truncate(0)
 		_, _ = f.Seek(0, io.SeekStart)
 		rs.shardWriters[i].Reset(f)
+	}
+	if rs.globalOffsetFile != nil {
+		_ = rs.globalOffsetFile.Truncate(0)
+		_, _ = rs.globalOffsetFile.Seek(0, io.SeekStart)
+		rs.globalOffsetWriter.Reset(rs.globalOffsetFile)
 	}
 }
 
@@ -220,6 +269,12 @@ func (rs *ShardedRecSplit) Build(ctx context.Context) error {
 			return err
 		}
 		_ = dir.RemoveFile(shardIdxPath)
+	}
+
+	if rs.enums && rs.keysAdded > 0 {
+		if err := rs.appendGlobalEF(w); err != nil {
+			return err
+		}
 	}
 
 	if err := w.Flush(); err != nil {
@@ -324,6 +379,32 @@ func appendShardBlob(w *bufio.Writer, shardIdxPath string, sizeBuf []byte) error
 	return nil
 }
 
+// appendGlobalEF builds the arrival-order offset EF from the buffered global offset
+// stream and writes it after all shard blobs. It backs OrdinalLookup.
+func (rs *ShardedRecSplit) appendGlobalEF(w *bufio.Writer) error {
+	if err := rs.globalOffsetWriter.Flush(); err != nil {
+		return err
+	}
+	if _, err := rs.globalOffsetFile.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	ef, err := eliasfano32.NewEliasFanoOffHeap(rs.keysAdded, rs.maxOffset, filepath.Join(rs.tmpDir, rs.fileName))
+	if err != nil {
+		return err
+	}
+	defer ef.Close()
+	r := bufio.NewReader(rs.globalOffsetFile)
+	var buf [8]byte
+	for i := uint64(0); i < rs.keysAdded; i++ {
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return fmt.Errorf("read global offset %d: %w", i, err)
+		}
+		ef.AddOffset(binary.BigEndian.Uint64(buf[:]))
+	}
+	ef.Build()
+	return ef.Write(w)
+}
+
 func (rs *ShardedRecSplit) Close() {
 	for i := range rs.shardFiles {
 		f := rs.shardFiles[i]
@@ -334,6 +415,12 @@ func (rs *ShardedRecSplit) Close() {
 		_ = dir.RemoveFile(f.Name())
 		rs.shardFiles[i] = nil
 		rs.shardWriters[i] = nil
+	}
+	if rs.globalOffsetFile != nil {
+		_ = rs.globalOffsetFile.Close()
+		_ = dir.RemoveFile(rs.globalOffsetFile.Name())
+		rs.globalOffsetFile = nil
+		rs.globalOffsetWriter = nil
 	}
 }
 
@@ -355,6 +442,7 @@ type ShardedIndex struct {
 	enums      bool
 
 	shards       [RecSplitShards]*Index
+	globalEf     *eliasfano32.EliasFano // arrival-order offsets, backs OrdinalLookup (enums only)
 	sharedReader *ShardedIndexReader
 }
 
@@ -422,6 +510,13 @@ func (idx *ShardedIndex) init() error {
 		idx.shards[i] = shard
 		offset += sz
 	}
+
+	if idx.enums && idx.keyCount > 0 {
+		if offset >= len(idx.data) {
+			return fmt.Errorf("sharded index %s: missing global offset EF", idx.fileName)
+		}
+		idx.globalEf, _ = eliasfano32.ReadEliasFano(idx.data[offset:])
+	}
 	return nil
 }
 
@@ -485,7 +580,16 @@ func (idx *ShardedIndex) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return shard.OrdinalLookup(id), true
+	return idx.globalEf.Get(shard.OrdinalLookup(id)), true
+}
+
+// OrdinalLookup returns the offset of the i-th key in arrival order. The result is
+// monotonically increasing in i (required by BinarySearch). Only valid for enums=true.
+func (idx *ShardedIndex) OrdinalLookup(i uint64) uint64 {
+	if !idx.enums {
+		panic("OrdinalLookup should not be used for indices without enums: " + idx.fileName)
+	}
+	return idx.globalEf.Get(i)
 }
 
 // ShardedIndexReader is the concurrency-safe lookup front-end for ShardedIndex.
@@ -515,6 +619,8 @@ func (r *ShardedIndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
 func (r *ShardedIndexReader) Empty() bool { return r.index.Empty() }
 
 func (r *ShardedIndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
+
+func (r *ShardedIndexReader) OrdinalLookup(i uint64) uint64 { return r.index.OrdinalLookup(i) }
 
 func (r *ShardedIndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	if r.index.Empty() {
