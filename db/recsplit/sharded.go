@@ -512,10 +512,13 @@ func (idx *ShardedIndex) init() error {
 	}
 
 	if idx.enums && idx.keyCount > 0 {
-		if offset >= len(idx.data) {
-			return fmt.Errorf("sharded index %s: missing global offset EF", idx.fileName)
+		if offset+16 > len(idx.data) {
+			return fmt.Errorf("%w. sharded index %s: missing/truncated global offset EF", IncompatibleErr, idx.fileName)
 		}
 		idx.globalEf, _ = eliasfano32.ReadEliasFano(idx.data[offset:])
+		if idx.globalEf.Count() != idx.keyCount {
+			return fmt.Errorf("%w. sharded index %s: global EF count %d != keyCount %d", IncompatibleErr, idx.fileName, idx.globalEf.Count(), idx.keyCount)
+		}
 	}
 	return nil
 }
