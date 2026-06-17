@@ -118,6 +118,22 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
+// newIndexFromMemory builds an Index over an in-memory blob (e.g. a shard of a
+// ShardedIndex). The blob is not owned: it is a sub-slice of a larger mmap whose
+// lifetime the caller manages, so Close is a no-op (idx.f stays nil).
+func newIndexFromMemory(data []byte, fileName string) (*Index, error) {
+	idx := &Index{
+		data:     data,
+		size:     int64(len(data)),
+		fileName: fileName,
+	}
+	if err := idx.init(); err != nil {
+		return nil, err
+	}
+	idx.sharedReader = NewIndexReader(idx)
+	return idx, nil
+}
+
 func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	_, fName := filepath.Split(indexFilePath)
 	idx := &Index{

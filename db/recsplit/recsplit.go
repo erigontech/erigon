@@ -515,10 +515,16 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // spills data onto disk to accommodate that. The key gets copied by the collector, therefore
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
+	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
+	return rs.addHashedKey(hi, lo, offset)
+}
+
+// addHashedKey adds a key already reduced to its murmur3 hash halves. hi must be
+// produced with rs.salt, since Lookup recomputes it that way.
+func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
 	if rs.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
 	bucketIdx := uint32(remap(hi, rs.bucketCount))
 	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], bucketIdx)
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[4:], lo)
