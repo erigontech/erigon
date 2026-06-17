@@ -141,6 +141,7 @@ type BpsTreeIterator struct {
 type Node struct {
 	key []byte
 	di  uint64 // key ordinal number in kv
+	off uint64 // runtime-only cache of ef.Get(di); not encoded (PrefixIndex)
 }
 
 // Encode writes the node key length-prefixed (reusing headerBuf, len >= 2, to
