@@ -163,8 +163,10 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	}
 
 	referenced, metricI := aggTx.commitmentFileReferencedByRange(fStartTxNum, fEndTxNum)
-	if !referenced {
-		return branch, nil // input file was sampled as plain (no shortened keys)
+	if !referenced && !branchHasShortenedKey(branch) {
+		// Per-branch guard against a sampled-plain false negative: the file sampled plain, but if this
+		// branch carries a shortened key, deref it anyway. Truly-plain branches keep the fast path.
+		return branch, nil
 	}
 
 	sto := aggTx.d[kv.StorageDomain]
