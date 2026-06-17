@@ -503,7 +503,7 @@ func (idx *ShardedIndex) init() error {
 			return fmt.Errorf("sharded index %s: shard %d blob overflows (offset=%d sz=%d total=%d)", idx.fileName, i, offset, sz64, len(idx.data))
 		}
 		sz := int(sz64)
-		shard, err := newIndexFromMemory(idx.data[offset:offset+sz], idx.fileName)
+		shard, err := newIndexFromMemory(idx.data[offset:offset+sz:offset+sz], idx.fileName)
 		if err != nil {
 			return fmt.Errorf("shard %d of %s: %w", i, idx.fileName, err)
 		}
