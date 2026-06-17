@@ -200,7 +200,7 @@ type BtIndexWriterArgs struct {
 	TmpDir    string
 	M         uint64
 	KeyCount  uint64
-	MaxOffset uint64 // any upper bound on key offsets is fine (e.g. data file size)
+	MaxOffset uint64 // must be >= the largest offset passed to AddKey; an over-estimate (e.g. data file size) is fine
 	Lvl       log.Lvl
 }
 
