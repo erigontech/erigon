@@ -527,6 +527,9 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		var footer Footer
 		var footerStart int
 		if footer, footerStart, err = ReadFooter(idx.data); err != nil {
+			if errors.Is(err, errNotFooterFormat) {
+				return nil, fmt.Errorf("btindex: %s: truncated or corrupt footer (missing trailing magic)", indexPath)
+			}
 			return nil, fmt.Errorf("btindex: %s: %w", indexPath, err)
 		}
 		if footer.FormatVersion != btVersion {
