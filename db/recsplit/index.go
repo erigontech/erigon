@@ -72,8 +72,8 @@ const (
 var SupportedFeatures = []Features{Enums, LessFalsePositives}
 var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
 
-// Index implements index lookup from the file created by the RecSplit
-type Index struct {
+// IndexShard implements index lookup from the file created by the RecSplitShard
+type IndexShard struct {
 	offsetEf           *eliasfano32.EliasFano
 	f                  *os.File
 	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
@@ -90,7 +90,7 @@ type Index struct {
 	bucketSize           int
 	size                 int64
 	modTime              time.Time
-	baseDataID           uint64 // Index internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
+	baseDataID           uint64 // IndexShard internally organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
 	bucketCount          uint64 // Number of buckets
 	keyCount             uint64
 	recMask              uint64
@@ -106,23 +106,23 @@ type Index struct {
 	existenceV1        *fusefilter.Reader
 	existenceV2        *fusefilter.ReaderSharded
 
-	sharedReader    *IndexReader // IndexReader is stateless, so one instance serves all goroutines
-	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+	sharedReader    *IndexShardReader // IndexShardReader is stateless, so one instance serves all goroutines
+	readAheadRefcnt atomic.Int32      // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
-func MustOpen(indexFile string) *Index {
-	idx, err := OpenIndex(indexFile)
+func MustOpenShard(indexFile string) *IndexShard {
+	idx, err := OpenIndexShard(indexFile)
 	if err != nil {
 		panic(err)
 	}
 	return idx
 }
 
-// newIndexFromMemory builds an Index over an in-memory blob (e.g. a shard of a
-// ShardedIndex). The blob is not owned: it is a sub-slice of a larger mmap whose
+// newIndexFromMemory builds an IndexShard over an in-memory blob (e.g. a shard of a
+// Index). The blob is not owned: it is a sub-slice of a larger mmap whose
 // lifetime the caller manages, so Close is a no-op (idx.f stays nil).
-func newIndexFromMemory(data []byte, fileName string) (*Index, error) {
-	idx := &Index{
+func newIndexFromMemory(data []byte, fileName string) (*IndexShard, error) {
+	idx := &IndexShard{
 		data:     data,
 		size:     int64(len(data)),
 		fileName: fileName,
@@ -130,13 +130,13 @@ func newIndexFromMemory(data []byte, fileName string) (*Index, error) {
 	if err := idx.init(); err != nil {
 		return nil, err
 	}
-	idx.sharedReader = NewIndexReader(idx)
+	idx.sharedReader = NewIndexShardReader(idx)
 	return idx, nil
 }
 
-func OpenIndex(indexFilePath string) (_ *Index, err error) {
+func OpenIndexShard(indexFilePath string) (_ *IndexShard, err error) {
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx := &IndexShard{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
@@ -178,11 +178,11 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	//	//}
 	//}
 
-	idx.sharedReader = NewIndexReader(idx)
+	idx.sharedReader = NewIndexShardReader(idx)
 	return idx, nil
 }
 
-func (idx *Index) init() (err error) {
+func (idx *IndexShard) init() (err error) {
 	var validationPassed = false
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
@@ -317,7 +317,7 @@ func (idx *Index) init() (err error) {
 	validationPassed = true
 	return nil
 }
-func (idx *Index) ForceExistenceFilterWillNeed() {
+func (idx *IndexShard) ForceExistenceFilterWillNeed() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
 		return
@@ -331,7 +331,7 @@ func (idx *Index) ForceExistenceFilterWillNeed() {
 	}
 }
 
-func (idx *Index) ForceExistenceFilterNormal() {
+func (idx *IndexShard) ForceExistenceFilterNormal() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
 		return
@@ -344,7 +344,7 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
-func (idx *Index) ForceExistenceFilterRandom() {
+func (idx *IndexShard) ForceExistenceFilterRandom() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
 		return
@@ -357,7 +357,7 @@ func (idx *Index) ForceExistenceFilterRandom() {
 		idx.existenceV2.MadvRandom()
 	}
 }
-func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
+func (idx *IndexShard) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
 		return 0
@@ -381,13 +381,13 @@ func onlyKnownFeatures(features Features) error {
 	return nil
 }
 
-func (idx *Index) DataHandle() unsafe.Pointer {
+func (idx *IndexShard) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&idx.data[0])
 }
 
-func (idx *Index) Size() int64 { return idx.size }
-func (idx *Index) Enums() bool { return idx.enums }
-func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 datasize.ByteSize) {
+func (idx *IndexShard) Size() int64 { return idx.size }
+func (idx *IndexShard) Enums() bool { return idx.enums }
+func (idx *IndexShard) Sizes() (total, offsets, ef, golombRice, existence, layer1 datasize.ByteSize) {
 	total = datasize.ByteSize(idx.size)
 	if idx.offsetEf != nil {
 		offsets = idx.offsetEf.Size()
@@ -398,13 +398,13 @@ func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 dat
 	layer1 = total - offsets - golombRice - existence
 	return
 }
-func (idx *Index) ModTime() time.Time { return idx.modTime }
-func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
-func (idx *Index) FilePath() string   { return idx.filePath }
-func (idx *Index) FileName() string   { return idx.fileName }
-func (idx *Index) IsOpen() bool       { return idx != nil && idx.f != nil }
+func (idx *IndexShard) ModTime() time.Time { return idx.modTime }
+func (idx *IndexShard) BaseDataID() uint64 { return idx.baseDataID }
+func (idx *IndexShard) FilePath() string   { return idx.filePath }
+func (idx *IndexShard) FileName() string   { return idx.fileName }
+func (idx *IndexShard) IsOpen() bool       { return idx != nil && idx.f != nil }
 
-func (idx *Index) Close() {
+func (idx *IndexShard) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
@@ -417,31 +417,31 @@ func (idx *Index) Close() {
 	idx.f = nil
 }
 
-func (idx *Index) skipBits(m uint16) int {
+func (idx *IndexShard) skipBits(m uint16) int {
 	return int(idx.golombRice[m] & 0xffff)
 }
 
-func (idx *Index) skipNodes(m uint16) int {
+func (idx *IndexShard) skipNodes(m uint16) int {
 	return int(idx.golombRice[m]>>16) & 0x7FF
 }
 
 // golombParam returns the optimal Golomb parameter to use for encoding
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
-func (idx *Index) golombParam(m uint16) int {
+func (idx *IndexShard) golombParam(m uint16) int {
 	return int(idx.golombRice[m] >> 27)
 }
 
-func (idx *Index) Empty() bool {
+func (idx *IndexShard) Empty() bool {
 	return idx.keyCount == 0
 }
 
-func (idx *Index) KeyCount() uint64 { return idx.keyCount }
-func (idx *Index) LeafSize() uint16 { return idx.leafSize }
-func (idx *Index) BucketSize() int  { return idx.bucketSize }
+func (idx *IndexShard) KeyCount() uint64 { return idx.keyCount }
+func (idx *IndexShard) LeafSize() uint16 { return idx.leafSize }
+func (idx *IndexShard) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is safe for concurrent use: it only reads the index's immutable state
-func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
+func (idx *IndexShard) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
@@ -529,21 +529,21 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 // OrdinalLookup returns the offset of i-th element in the index
 // Perfect hash table lookup is not performed, only access to the
 // Elias-Fano structure containing all offsets.
-func (idx *Index) OrdinalLookup(i uint64) uint64 {
+func (idx *IndexShard) OrdinalLookup(i uint64) uint64 {
 	if !idx.enums {
 		panic("OrdinalLookup should not be used for indices without enums: " + idx.fileName)
 	}
 	return idx.offsetEf.Get(i)
 }
 
-func (idx *Index) Has(bucketHash, i uint64) bool {
+func (idx *IndexShard) Has(bucketHash, i uint64) bool {
 	if idx.lessFalsePositives {
 		return idx.existenceV0[i] == byte(bucketHash)
 	}
 	return true
 }
 
-func (idx *Index) ExtractOffsets() map[uint64]uint64 {
+func (idx *IndexShard) ExtractOffsets() map[uint64]uint64 {
 	m := map[uint64]uint64{}
 	pos := 1 + 8 + idx.bytesPerRec
 	for rec := uint64(0); rec < idx.keyCount; rec++ {
@@ -554,7 +554,7 @@ func (idx *Index) ExtractOffsets() map[uint64]uint64 {
 	return m
 }
 
-func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error {
+func (idx *IndexShard) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error {
 	// New max offset
 	var maxOffset uint64
 	for _, offset := range m {
@@ -596,7 +596,7 @@ func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (idx *Index) DisableReadAhead() {
+func (idx *IndexShard) DisableReadAhead() {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return
 	}
@@ -607,7 +607,7 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
-func (idx *Index) MadvSequential() *Index {
+func (idx *IndexShard) MadvSequential() *IndexShard {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
 	}
@@ -615,7 +615,7 @@ func (idx *Index) MadvSequential() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
-func (idx *Index) MadvNormal() *Index {
+func (idx *IndexShard) MadvNormal() *IndexShard {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
 	}
@@ -623,7 +623,7 @@ func (idx *Index) MadvNormal() *Index {
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
 	return idx
 }
-func (idx *Index) MadvWillNeed() *Index {
+func (idx *IndexShard) MadvWillNeed() *IndexShard {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
 	}
@@ -631,6 +631,6 @@ func (idx *Index) MadvWillNeed() *Index {
 	return idx
 }
 
-func (idx *Index) Reader() *IndexReader {
+func (idx *IndexShard) Reader() *IndexShardReader {
 	return idx.sharedReader
 }

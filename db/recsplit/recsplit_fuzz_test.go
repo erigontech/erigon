@@ -51,7 +51,7 @@ func FuzzRecSplit(f *testing.F) {
 		tmpDir := t.TempDir()
 		indexFile := filepath.Join(tmpDir, "index")
 		salt := uint32(1)
-		rs, err := NewRecSplit(RecSplitArgs{
+		rs, err := NewRecSplitShard(RecSplitArgs{
 			KeyCount:   count,
 			Enums:      true,
 			BucketSize: 10,
@@ -78,11 +78,11 @@ func FuzzRecSplit(f *testing.F) {
 			t.Fatal(err)
 		}
 		// Check that there is a bijection
-		idx := MustOpen(indexFile)
+		idx := MustOpenShard(indexFile)
 		defer idx.Close()
 		bitCount := (count + 63) / 64
 		bits := make([]uint64, bitCount)
-		reader := NewIndexReader(idx)
+		reader := NewIndexShardReader(idx)
 		for i = 0; i < len(in)-l; i += l {
 			off, _ = reader.Lookup(in[i : i+l])
 			if int(off) >= count {

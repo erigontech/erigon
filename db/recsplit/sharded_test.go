@@ -26,17 +26,17 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func buildSharded(t *testing.T, cfg RecSplitArgs, n int, offsetOf func(i int) uint64) *ShardedIndex {
+func buildSharded(t *testing.T, cfg RecSplitArgs, n int, offsetOf func(i int) uint64) *Index {
 	t.Helper()
 	logger := log.New()
-	rs, err := NewShardedRecSplit(cfg, logger)
+	rs, err := NewRecSplit(cfg, logger)
 	require.NoError(t, err)
 	defer rs.Close()
 	for i := 0; i < n; i++ {
 		require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), offsetOf(i)))
 	}
 	require.NoError(t, rs.Build(t.Context()))
-	idx, err := OpenShardedIndex(cfg.IndexFile)
+	idx, err := OpenIndex(cfg.IndexFile)
 	require.NoError(t, err)
 	return idx
 }
@@ -158,7 +158,7 @@ func TestShardedIndexAbsentKeysFiltered(t *testing.T) {
 
 func TestShardedIndexSmallNonEnum(t *testing.T) {
 	// Small key count → many shards end up with exactly one key, exercising the
-	// Index.Lookup keyCount==1 path which must still return the real offset.
+	// IndexShard.Lookup keyCount==1 path which must still return the real offset.
 	tmpDir := t.TempDir()
 	salt := uint32(1)
 	const n = 300
@@ -207,7 +207,7 @@ func TestShardedIndexSingleKey(t *testing.T) {
 func TestShardedRecSplitKeyCountMismatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	salt := uint32(1)
-	rs, err := NewShardedRecSplit(RecSplitArgs{
+	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
 		LeafSize:   8,
@@ -226,7 +226,7 @@ func TestShardedRecSplitResetNextSalt(t *testing.T) {
 	salt := uint32(1)
 	indexFile := filepath.Join(tmpDir, "index")
 	const n = 5000
-	rs, err := NewShardedRecSplit(RecSplitArgs{
+	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:           n,
 		BucketSize:         10,
 		LeafSize:           8,
@@ -250,7 +250,7 @@ func TestShardedRecSplitResetNextSalt(t *testing.T) {
 	add() // re-add after reset, as the collision-retry loop would
 	require.NoError(t, rs.Build(t.Context()))
 
-	idx, err := OpenShardedIndex(indexFile)
+	idx, err := OpenIndex(indexFile)
 	require.NoError(t, err)
 	defer idx.Close()
 	require.Equal(t, rs.Salt(), idx.Salt())
@@ -287,7 +287,7 @@ func FuzzShardedRecSplit(f *testing.F) {
 		tmpDir := t.TempDir()
 		indexFile := filepath.Join(tmpDir, "index")
 		salt := uint32(1)
-		rs, err := NewShardedRecSplit(RecSplitArgs{
+		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           count,
 			Enums:              true,
 			LessFalsePositives: true,
@@ -310,7 +310,7 @@ func FuzzShardedRecSplit(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		idx, err := OpenShardedIndex(indexFile)
+		idx, err := OpenIndex(indexFile)
 		if err != nil {
 			t.Fatal(err)
 		}

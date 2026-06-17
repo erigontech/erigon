@@ -26,13 +26,13 @@ import (
 
 // buildLookup2BenchIndex builds an enums index over 20-byte random keys,
 // looked up as the txnKey(8)||key(12) split that production Lookup2 callers use.
-func buildLookup2BenchIndex(b *testing.B, keys [][]byte) *Index {
+func buildLookup2BenchIndex(b *testing.B, keys [][]byte) *IndexShard {
 	b.Helper()
 	logger := log.New()
 	tmpDir := b.TempDir()
 	salt := uint32(1)
 	indexFile := filepath.Join(tmpDir, "index")
-	rs, err := NewRecSplit(RecSplitArgs{
+	rs, err := NewRecSplitShard(RecSplitArgs{
 		KeyCount:   len(keys),
 		BucketSize: DefaultBucketSize,
 		Salt:       &salt,
@@ -54,7 +54,7 @@ func buildLookup2BenchIndex(b *testing.B, keys [][]byte) *Index {
 	if err := rs.Build(b.Context()); err != nil {
 		b.Fatal(err)
 	}
-	idx := MustOpen(indexFile)
+	idx := MustOpenShard(indexFile)
 	b.Cleanup(idx.Close)
 	return idx
 }
@@ -73,7 +73,7 @@ func lookup2BenchKeys(b *testing.B) [][]byte {
 
 func BenchmarkLookup2(b *testing.B) {
 	keys := lookup2BenchKeys(b)
-	reader := NewIndexReader(buildLookup2BenchIndex(b, keys))
+	reader := NewIndexShardReader(buildLookup2BenchIndex(b, keys))
 	b.ResetTimer()
 	for i := uint64(0); b.Loop(); i++ {
 		key := keys[int((i*0xDEECE66D)%uint64(len(keys)))]
@@ -85,7 +85,7 @@ func BenchmarkLookup2(b *testing.B) {
 
 func BenchmarkLookup2Parallel(b *testing.B) {
 	keys := lookup2BenchKeys(b)
-	reader := NewIndexReader(buildLookup2BenchIndex(b, keys)) // one shared reader, like a shared pool entry under load
+	reader := NewIndexShardReader(buildLookup2BenchIndex(b, keys)) // one shared reader, like a shared pool entry under load
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := uint64(0)

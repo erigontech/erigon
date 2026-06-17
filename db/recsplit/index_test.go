@@ -34,7 +34,7 @@ func TestReWriteIndex(t *testing.T) {
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
-	rs, err := NewRecSplit(RecSplitArgs{
+	rs, err := NewRecSplitShard(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
 		Salt:       &salt,
@@ -54,7 +54,7 @@ func TestReWriteIndex(t *testing.T) {
 	if err := rs.Build(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	idx := MustOpen(indexFile)
+	idx := MustOpenShard(indexFile)
 	defer idx.Close()
 	offsets := idx.ExtractOffsets()
 	for i := 0; i < 100; i++ {
@@ -71,10 +71,10 @@ func TestReWriteIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Flush())
 	require.NoError(t, f.Close())
-	reidx := MustOpen(reindexFile)
+	reidx := MustOpenShard(reindexFile)
 	defer reidx.Close()
 	for i := 0; i < 100; i++ {
-		reader := NewIndexReader(reidx)
+		reader := NewIndexShardReader(reidx)
 		offset, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 		if offset != uint64(i*3965) {
 			t.Errorf("expected offset: %d, looked up: %d", i*3965, offset)

@@ -133,11 +133,11 @@ func (br *bucketResult) Reset() {
 	br.err = nil
 }
 
-// RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
+// RecSplitShard is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
 // https://arxiv.org/pdf/1910.06416.pdf Emmanuel Esposito, Thomas Mueller Graf, and Sebastiano Vigna.
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
-type RecSplit struct {
+type RecSplitShard struct {
 	// v=0 falsePositeves=true - as array of hashedKeys[0]. Requires `enum=true`. Problem: requires key number - which recsplit has but expensive to encode (~5bytes/key)
 	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
 	dataStructureVersion version.DataStructureVersion
@@ -168,7 +168,7 @@ type RecSplit struct {
 	gr                GolombRice       // Helper object to encode the tree of hash function salts using Golomb-Rice code.
 	bucketPosAcc      []uint64         // Accumulator for position of every bucket in the encoding of the hash function
 	currentBucket     []uint64         // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
-	currentBucketOffs []uint64         // Index offsets for the current bucket
+	currentBucketOffs []uint64         // IndexShard offsets for the current bucket
 	bucketSizeAcc     []uint64         // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
@@ -234,11 +234,11 @@ type Timings struct {
 const DefaultLeafSize = 8
 const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
 
-// NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
+// NewRecSplitShard creates a new RecSplitShard instance with given number of keys and given bucket size
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
-func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
+func NewRecSplitShard(args RecSplitArgs, logger log.Logger) (*RecSplitShard, error) {
 	if args.BaseDataID >= math.MaxUint64/2 {
 		return nil, fmt.Errorf("baseDataID %d is too large, must be less than %d", args.BaseDataID, math.MaxUint64/2)
 	}
@@ -252,7 +252,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if bucketCount > math.MaxUint32 {
 		return nil, fmt.Errorf("recsplit: bucketCount %d exceeds uint32 max (too many keys for bucketSize=%d)", bucketCount, args.BucketSize)
 	}
-	rs := &RecSplit{
+	rs := &RecSplitShard{
 		dataStructureVersion: version.DataStructureVersion(args.Version),
 		bucketSize:           args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
 		tmpDir: args.TmpDir, filePath: args.IndexFile,
@@ -336,9 +336,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
-func (rs *RecSplit) FileName() string                           { return rs.fileName }
-func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
-func (rs *RecSplit) Salt() uint32                               { return rs.salt }
+func (rs *RecSplitShard) FileName() string                           { return rs.fileName }
+func (rs *RecSplitShard) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
+func (rs *RecSplitShard) Salt() uint32                               { return rs.salt }
 
 // preAlloc ensures buffer and offsetBuffer are at least n elements long.
 func (sc *recsplitScratch) preAlloc(n int) {
@@ -370,7 +370,7 @@ func (sc *recsplitScratch) golombParam(m uint16) int {
 	}
 	return int(sc.golombRice[m] >> 27)
 }
-func (rs *RecSplit) Close() {
+func (rs *RecSplitShard) Close() {
 	if rs.indexF != nil {
 		_ = rs.indexF.Close()
 		_ = dir.RemoveFile(rs.indexF.Name())
@@ -411,9 +411,9 @@ func (rs *RecSplit) Close() {
 	}
 }
 
-func (rs *RecSplit) LogLvl(lvl log.Lvl) { rs.lvl = lvl }
+func (rs *RecSplitShard) LogLvl(lvl log.Lvl) { rs.lvl = lvl }
 
-func (rs *RecSplit) SetTrace(trace bool) {
+func (rs *RecSplitShard) SetTrace(trace bool) {
 	rs.scratch.trace = trace
 }
 
@@ -432,9 +432,9 @@ func remap16(x uint64, n uint16) uint16 {
 	return uint16(((x & mask48) * uint64(n)) >> 48)
 }
 
-// ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
+// ResetNextSalt resets the RecSplitShard and uses the next salt value to try to avoid collisions
 // when mapping keys to 64-bit values
-func (rs *RecSplit) ResetNextSalt() {
+func (rs *RecSplitShard) ResetNextSalt() {
 	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
@@ -511,17 +511,17 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 	table[m] |= nodes << 16
 }
 
-// Add key to the RecSplit. There can be many more keys than what fits in RAM, and RecSplit
+// Add key to the RecSplitShard. There can be many more keys than what fits in RAM, and RecSplitShard
 // spills data onto disk to accommodate that. The key gets copied by the collector, therefore
-// the slice underlying key is not getting accessed by RecSplit after this invocation.
-func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
+// the slice underlying key is not getting accessed by RecSplitShard after this invocation.
+func (rs *RecSplitShard) AddKey(key []byte, offset uint64) error {
 	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
 	return rs.addHashedKey(hi, lo, offset)
 }
 
 // addHashedKey adds a key already reduced to its murmur3 hash halves. hi must be
 // produced with rs.salt, since Lookup recomputes it that way.
-func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
+func (rs *RecSplitShard) addHashedKey(hi, lo, offset uint64) error {
 	if rs.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
@@ -585,7 +585,7 @@ func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
 	return nil
 }
 
-func (rs *RecSplit) AddOffset(offset uint64) error {
+func (rs *RecSplitShard) AddOffset(offset uint64) error {
 	if rs.enums {
 		if rs.keysAdded > 0 && offset < rs.prevOffset {
 			panic(fmt.Sprintf("recsplit: AddOffset offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
@@ -598,7 +598,7 @@ func (rs *RecSplit) AddOffset(offset uint64) error {
 	return nil
 }
 
-func (rs *RecSplit) recsplitCurrentBucket() error {
+func (rs *RecSplitShard) recsplitCurrentBucket() error {
 	// Extend rs.bucketSizeAcc to accommodate the current bucket index + 1
 	for len(rs.bucketSizeAcc) <= int(rs.currentBucketIdx)+1 {
 		rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
@@ -776,7 +776,7 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 }
 
 // recsplit applies recSplit algorithm to the given bucket and accumulates into result.
-// Pure function - stateless and independent of RecSplit class.
+// Pure function - stateless and independent of RecSplitShard class.
 func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *recsplitScratch, result *bucketResult) ([]uint64, error) {
 	if rs.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
@@ -844,7 +844,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 }
 
 // loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
-func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+func (rs *RecSplitShard) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 	// k is the BigEndian encoding of the bucket number (4 bytes) + fingerprint (8 bytes),
 	// and v is the offset/enum value assigned into that bucket
 	bucketIdx := uint64(binary.BigEndian.Uint32(k))
@@ -867,7 +867,7 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 
 // buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
 // Uses off-heap EF to keep multi-GB backing buffers out of the Go heap.
-func (rs *RecSplit) buildOffsetEf() (retErr error) {
+func (rs *RecSplitShard) buildOffsetEf() (retErr error) {
 	var err error
 	rs.offsetEf, err = eliasfano32.NewEliasFanoOffHeap(rs.keysAdded, rs.maxOffset, filepath.Join(rs.tmpDir, rs.fileName))
 	if err != nil {
@@ -898,17 +898,17 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 	return nil
 }
 
-// KeyCount returns the number of keys added to the RecSplit.
-func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
+// KeyCount returns the number of keys added to the RecSplitShard.
+func (rs *RecSplitShard) KeyCount() uint64 { return rs.keysAdded }
 
 // BucketCount returns the number of buckets.
-func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
+func (rs *RecSplitShard) BucketCount() uint64 { return rs.bucketCount }
 
 // SetProgress wires a single progress tracker covering the full build lifecycle.
 // Total = 2*keyExpectedCount; AddKey fills 0→keyExpectedCount (0–50%) and
 // the bucket-building phase fills keyExpectedCount→2*keyExpectedCount (50–100%).
 // Progress is automatically reset on ResetNextSalt (collision retry).
-func (rs *RecSplit) SetProgress(p *background.Progress) {
+func (rs *RecSplitShard) SetProgress(p *background.Progress) {
 	if p == nil {
 		return
 	}
@@ -920,7 +920,7 @@ func (rs *RecSplit) SetProgress(p *background.Progress) {
 
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
-func (rs *RecSplit) Build(ctx context.Context) error {
+func (rs *RecSplitShard) Build(ctx context.Context) error {
 	if rs.built {
 		return errors.New("already built")
 	}
@@ -1108,7 +1108,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	return nil
 }
 
-func (rs *RecSplit) flushExistenceFilter() error {
+func (rs *RecSplitShard) flushExistenceFilter() error {
 	if rs.dataStructureVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
 		defer rs.existenceFV0.Close()
 
@@ -1148,17 +1148,17 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	return nil
 }
 
-func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
-func (rs *RecSplit) Timings() Timings { return rs.timings }
+func (rs *RecSplitShard) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplitShard) Timings() Timings { return rs.timings }
 
-func (rs *RecSplit) CollectTimings() {
+func (rs *RecSplitShard) CollectTimings() {
 	rs.timings.Enabled, rs.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
 }
 
 // Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
 // Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (rs *RecSplit) fsync() error {
+func (rs *RecSplitShard) fsync() error {
 	if rs.noFsync {
 		return nil
 	}
@@ -1170,20 +1170,20 @@ func (rs *RecSplit) fsync() error {
 }
 
 // Stats returns the size of golomb rice encoding and ellias fano encoding
-func (rs *RecSplit) Stats() (int, int) {
+func (rs *RecSplitShard) Stats() (int, int) {
 	return len(rs.gr.Data()), len(rs.ef.Data())
 }
 
 // Collision returns true if there was a collision detected during mapping of keys
 // into 64-bit values
-// RecSplit needs to be reset, re-populated with keys, and rebuilt
-func (rs *RecSplit) Collision() bool {
+// RecSplitShard needs to be reset, re-populated with keys, and rebuilt
+func (rs *RecSplitShard) Collision() bool {
 	return rs.collision
 }
 
 // ForceCollisionOnce makes the next Build() fail with a collision error.
 // Test-only: used to exercise collision retry paths.
-func (rs *RecSplit) ForceCollisionOnce() {
+func (rs *RecSplitShard) ForceCollisionOnce() {
 	rs.forceCollisionOnce = true
 }
 
@@ -1225,7 +1225,7 @@ func (h *bucketResultHeap) Pop() any {
 
 // newWorkerScratch creates a per-worker recsplitScratch with the same configuration
 // as the main scratch but independent mutable state (golombRice[], buffer, etc.).
-func newWorkerScratch(rs *RecSplit) *recsplitScratch {
+func newWorkerScratch(rs *RecSplitShard) *recsplitScratch {
 	return &recsplitScratch{
 		count:              make([]uint16, rs.scratch.secondaryAggrBound),
 		startSeed:          rs.scratch.startSeed, // read-only, shared safely
@@ -1313,7 +1313,7 @@ func recsplitBucketWorker(ctx context.Context, tasks <-chan *recsplitScratch, re
 
 // writeResult writes a single bucket result to the index structures.
 // Must be called with results in ascending bucketIdx order.
-func (rs *RecSplit) writeResult(r *bucketResult) error {
+func (rs *RecSplitShard) writeResult(r *bucketResult) error {
 	for len(rs.bucketSizeAcc) <= int(r.bucketIdx)+1 {
 		rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
 	}
@@ -1345,7 +1345,7 @@ func (rs *RecSplit) writeResult(r *bucketResult) error {
 // buildWithWorkers runs the parallel bucket-processing phase of Build.
 // It reads from rs.bucketCollector, dispatches bucket tasks to rs.workers goroutines,
 // collects their results in a min-heap, and writes them to rs.indexW / rs.gr in order.
-func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
+func (rs *RecSplitShard) buildWithWorkers(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// ShardedRecSplit partitions keys into RecSplitShards inner RecSplit indexes by the low
+// RecSplit partitions keys into RecSplitShards inner RecSplitShard indexes by the low
 // byte of the bucket hash (the high bits drive each shard's remap, so low-byte routing keeps
 // shards uniform). For enums each shard stores the global arrival ordinal, and one monotonic
 // arrival-order offset-EF appended after the shards backs OrdinalLookup.
@@ -46,7 +46,7 @@ const (
 	RecSplitShards = 256
 
 	// shardedRSVersion is byte 0 of a sharded file: the next DataStructureVersion after the
-	// monolithic range (0..2), so OpenIndex dispatches versions >= this to the sharded reader.
+	// monolithic range (0..2), so OpenIndexShard dispatches versions >= this to the sharded reader.
 	shardedRSVersion version.DataStructureVersion = 3
 
 	// shardInnerVersion is the existence-filter version of each shard: monolithic
@@ -61,9 +61,9 @@ const (
 	shardedHeaderSize = 32
 )
 
-// ShardedRecSplit builds a sharded RecSplit index. Its API mirrors RecSplit so it
+// RecSplit builds a sharded RecSplitShard index. Its API mirrors RecSplitShard so it
 // can be driven by the same add-then-build-with-collision-retry loop.
-type ShardedRecSplit struct {
+type RecSplit struct {
 	salt               uint32
 	enums              bool
 	lessFalsePositives bool
@@ -93,7 +93,7 @@ type ShardedRecSplit struct {
 	built            bool
 }
 
-func NewShardedRecSplit(args RecSplitArgs, logger log.Logger) (*ShardedRecSplit, error) {
+func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.BaseDataID >= math.MaxUint64/2 {
 		return nil, fmt.Errorf("baseDataID %d is too large, must be less than %d", args.BaseDataID, math.MaxUint64/2)
 	}
@@ -101,7 +101,7 @@ func NewShardedRecSplit(args RecSplitArgs, logger log.Logger) (*ShardedRecSplit,
 		return nil, fmt.Errorf("exceeded max leaf size %d: %d", MaxLeafSize, args.LeafSize)
 	}
 	_, fileName := filepath.Split(args.IndexFile)
-	rs := &ShardedRecSplit{
+	rs := &RecSplit{
 		enums:              args.Enums,
 		lessFalsePositives: args.LessFalsePositives,
 		bucketSize:         args.BucketSize,
@@ -134,12 +134,12 @@ func NewShardedRecSplit(args RecSplitArgs, logger log.Logger) (*ShardedRecSplit,
 	return rs, nil
 }
 
-func (rs *ShardedRecSplit) FileName() string { return rs.fileName }
-func (rs *ShardedRecSplit) Salt() uint32     { return rs.salt }
-func (rs *ShardedRecSplit) Collision() bool  { return rs.collision }
-func (rs *ShardedRecSplit) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplit) FileName() string { return rs.fileName }
+func (rs *RecSplit) Salt() uint32     { return rs.salt }
+func (rs *RecSplit) Collision() bool  { return rs.collision }
+func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
 
-func (rs *ShardedRecSplit) AddKey(key []byte, offset uint64) error {
+func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
@@ -181,7 +181,7 @@ func (rs *ShardedRecSplit) AddKey(key []byte, offset uint64) error {
 	return nil
 }
 
-func (rs *ShardedRecSplit) shardWriter(shard byte) (*bufio.Writer, error) {
+func (rs *RecSplit) shardWriter(shard byte) (*bufio.Writer, error) {
 	if rs.shardWriters[shard] != nil {
 		return rs.shardWriters[shard], nil
 	}
@@ -196,7 +196,7 @@ func (rs *ShardedRecSplit) shardWriter(shard byte) (*bufio.Writer, error) {
 
 // ResetNextSalt bumps the shared routing salt and clears buffered keys, so a
 // collision in any shard forces the caller to re-add and rebuild all shards.
-func (rs *ShardedRecSplit) ResetNextSalt() {
+func (rs *RecSplit) ResetNextSalt() {
 	rs.salt++
 	rs.built = false
 	rs.collision = false
@@ -220,7 +220,7 @@ func (rs *ShardedRecSplit) ResetNextSalt() {
 	}
 }
 
-func (rs *ShardedRecSplit) Build(ctx context.Context) error {
+func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
 		return errors.New("already built")
 	}
@@ -292,7 +292,7 @@ func (rs *ShardedRecSplit) Build(ctx context.Context) error {
 	return nil
 }
 
-func (rs *ShardedRecSplit) writeHeader(w *bufio.Writer) error {
+func (rs *RecSplit) writeHeader(w *bufio.Writer) error {
 	var header [shardedHeaderSize]byte
 	header[0] = byte(shardedRSVersion)
 	binary.BigEndian.PutUint32(header[4:], rs.salt)
@@ -308,7 +308,7 @@ func (rs *ShardedRecSplit) writeHeader(w *bufio.Writer) error {
 	return err
 }
 
-func (rs *ShardedRecSplit) buildShard(ctx context.Context, shard int, n uint64) (string, error) {
+func (rs *RecSplit) buildShard(ctx context.Context, shard int, n uint64) (string, error) {
 	if err := rs.shardWriters[shard].Flush(); err != nil {
 		return "", err
 	}
@@ -317,7 +317,7 @@ func (rs *ShardedRecSplit) buildShard(ctx context.Context, shard int, n uint64) 
 	}
 
 	shardIdxPath := filepath.Join(rs.tmpDir, fmt.Sprintf("%s.shard.%03d", rs.fileName, shard))
-	inner, err := NewRecSplit(RecSplitArgs{
+	inner, err := NewRecSplitShard(RecSplitArgs{
 		KeyCount:           int(n),
 		Enums:              rs.enums,
 		LessFalsePositives: rs.lessFalsePositives,
@@ -377,7 +377,7 @@ func appendShardBlob(w *bufio.Writer, shardIdxPath string, sizeBuf []byte) error
 
 // appendGlobalEF builds the arrival-order offset EF from the buffered global offset
 // stream and writes it after all shard blobs. It backs OrdinalLookup.
-func (rs *ShardedRecSplit) appendGlobalEF(w *bufio.Writer) error {
+func (rs *RecSplit) appendGlobalEF(w *bufio.Writer) error {
 	if err := rs.globalOffsetWriter.Flush(); err != nil {
 		return err
 	}
@@ -401,7 +401,7 @@ func (rs *ShardedRecSplit) appendGlobalEF(w *bufio.Writer) error {
 	return ef.Write(w)
 }
 
-func (rs *ShardedRecSplit) Close() {
+func (rs *RecSplit) Close() {
 	for i := range rs.shardFiles {
 		f := rs.shardFiles[i]
 		if f == nil {
@@ -420,9 +420,9 @@ func (rs *ShardedRecSplit) Close() {
 	}
 }
 
-// ShardedIndex reads a file produced by ShardedRecSplit. The shards are backed by
-// sub-slices of one mmap, so their Index.Close is a no-op and Munmap frees them all.
-type ShardedIndex struct {
+// Index reads a file produced by RecSplit. The shards are backed by
+// sub-slices of one mmap, so their IndexShard.Close is a no-op and Munmap frees them all.
+type Index struct {
 	f           *os.File
 	mmapHandle1 []byte
 	mmapHandle2 *[mmap.MaxMapSize]byte
@@ -437,14 +437,26 @@ type ShardedIndex struct {
 	keyCount   uint64
 	enums      bool
 
-	shards       [RecSplitShards]*Index
+	shards       [RecSplitShards]*IndexShard
 	globalEf     *eliasfano32.EliasFano // arrival-order offsets, backs OrdinalLookup (enums only)
-	sharedReader *ShardedIndexReader
+	sharedReader *IndexReader
+
+	// mono is non-nil for legacy monolithic files (version < shardedRSVersion): the whole
+	// file is one IndexShard and all lookups delegate to it without shard routing.
+	mono *IndexShard
 }
 
-func OpenShardedIndex(indexFilePath string) (*ShardedIndex, error) {
+func MustOpen(indexFile string) *Index {
+	idx, err := OpenIndex(indexFile)
+	if err != nil {
+		panic(err)
+	}
+	return idx
+}
+
+func OpenIndex(indexFilePath string) (*Index, error) {
 	_, fName := filepath.Split(indexFilePath)
-	idx := &ShardedIndex{filePath: indexFilePath, fileName: fName}
+	idx := &Index{filePath: indexFilePath, fileName: fName}
 
 	var err error
 	idx.f, err = os.Open(indexFilePath)
@@ -469,16 +481,29 @@ func OpenShardedIndex(indexFilePath string) (*ShardedIndex, error) {
 	if err = idx.init(); err != nil {
 		return nil, err
 	}
-	idx.sharedReader = NewShardedIndexReader(idx)
+	idx.sharedReader = NewIndexReader(idx)
 	return idx, nil
 }
 
-func (idx *ShardedIndex) init() error {
+func (idx *Index) init() error {
+	if len(idx.data) == 0 {
+		return fmt.Errorf("index %s: empty file", idx.fileName)
+	}
+	if version.DataStructureVersion(idx.data[0]) < shardedRSVersion {
+		// legacy monolithic file: parse the whole file as one shard and delegate to it.
+		mono, err := newIndexFromMemory(idx.data, idx.fileName)
+		if err != nil {
+			return err
+		}
+		idx.mono = mono
+		idx.salt = mono.salt
+		idx.baseDataID = mono.baseDataID
+		idx.keyCount = mono.keyCount
+		idx.enums = mono.enums
+		return nil
+	}
 	if len(idx.data) < shardedHeaderSize {
 		return fmt.Errorf("sharded index %s: too small for header (%d < %d)", idx.fileName, len(idx.data), shardedHeaderSize)
-	}
-	if v := version.DataStructureVersion(idx.data[0]); v < shardedRSVersion {
-		return fmt.Errorf("%w. sharded index %s: unsupported version %d", IncompatibleErr, idx.fileName, v)
 	}
 	idx.salt = binary.BigEndian.Uint32(idx.data[4:])
 	idx.baseDataID = binary.BigEndian.Uint64(idx.data[8:])
@@ -519,7 +544,7 @@ func (idx *ShardedIndex) init() error {
 	return nil
 }
 
-func (idx *ShardedIndex) Close() {
+func (idx *Index) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
@@ -532,18 +557,18 @@ func (idx *ShardedIndex) Close() {
 	idx.f = nil
 }
 
-func (idx *ShardedIndex) Empty() bool                 { return idx.keyCount == 0 }
-func (idx *ShardedIndex) KeyCount() uint64            { return idx.keyCount }
-func (idx *ShardedIndex) BaseDataID() uint64          { return idx.baseDataID }
-func (idx *ShardedIndex) Enums() bool                 { return idx.enums }
-func (idx *ShardedIndex) Salt() uint32                { return idx.salt }
-func (idx *ShardedIndex) Size() int64                 { return idx.size }
-func (idx *ShardedIndex) ModTime() time.Time          { return idx.modTime }
-func (idx *ShardedIndex) FilePath() string            { return idx.filePath }
-func (idx *ShardedIndex) FileName() string            { return idx.fileName }
-func (idx *ShardedIndex) Reader() *ShardedIndexReader { return idx.sharedReader }
+func (idx *Index) Empty() bool          { return idx.keyCount == 0 }
+func (idx *Index) KeyCount() uint64     { return idx.keyCount }
+func (idx *Index) BaseDataID() uint64   { return idx.baseDataID }
+func (idx *Index) Enums() bool          { return idx.enums }
+func (idx *Index) Salt() uint32         { return idx.salt }
+func (idx *Index) Size() int64          { return idx.size }
+func (idx *Index) ModTime() time.Time   { return idx.modTime }
+func (idx *Index) FilePath() string     { return idx.filePath }
+func (idx *Index) FileName() string     { return idx.fileName }
+func (idx *Index) Reader() *IndexReader { return idx.sharedReader }
 
-func (idx *ShardedIndex) MadvNormal() *ShardedIndex {
+func (idx *Index) MadvNormal() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
 	}
@@ -551,7 +576,7 @@ func (idx *ShardedIndex) MadvNormal() *ShardedIndex {
 	return idx
 }
 
-func (idx *ShardedIndex) MadvWillNeed() *ShardedIndex {
+func (idx *Index) MadvWillNeed() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
 	}
@@ -559,7 +584,10 @@ func (idx *ShardedIndex) MadvWillNeed() *ShardedIndex {
 	return idx
 }
 
-func (idx *ShardedIndex) lookup(hi, lo uint64) (uint64, bool) {
+func (idx *Index) lookup(hi, lo uint64) (uint64, bool) {
+	if idx.mono != nil {
+		return idx.mono.Lookup(hi, lo)
+	}
 	shard := idx.shards[byte(hi)]
 	if shard == nil {
 		return 0, false
@@ -567,7 +595,14 @@ func (idx *ShardedIndex) lookup(hi, lo uint64) (uint64, bool) {
 	return shard.Lookup(hi, lo)
 }
 
-func (idx *ShardedIndex) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+func (idx *Index) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+	if idx.mono != nil {
+		id, ok := idx.mono.Lookup(hi, lo)
+		if !ok || !idx.enums {
+			return id, ok
+		}
+		return idx.mono.OrdinalLookup(id), true
+	}
 	shard := idx.shards[byte(hi)]
 	if shard == nil {
 		return 0, false
@@ -584,44 +619,47 @@ func (idx *ShardedIndex) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 
 // OrdinalLookup returns the offset of the i-th key in arrival order. The result is
 // monotonically increasing in i (required by BinarySearch). Only valid for enums=true.
-func (idx *ShardedIndex) OrdinalLookup(i uint64) uint64 {
+func (idx *Index) OrdinalLookup(i uint64) uint64 {
+	if idx.mono != nil {
+		return idx.mono.OrdinalLookup(i)
+	}
 	if !idx.enums {
 		panic("OrdinalLookup should not be used for indices without enums: " + idx.fileName)
 	}
 	return idx.globalEf.Get(i)
 }
 
-// ShardedIndexReader is the concurrency-safe lookup front-end for ShardedIndex.
-type ShardedIndexReader struct {
-	index *ShardedIndex
+// IndexReader is the concurrency-safe lookup front-end for Index.
+type IndexReader struct {
+	index *Index
 	salt  uint32
 }
 
-func NewShardedIndexReader(index *ShardedIndex) *ShardedIndexReader {
-	return &ShardedIndexReader{index: index, salt: index.salt}
+func NewIndexReader(index *Index) *IndexReader {
+	return &IndexReader{index: index, salt: index.salt}
 }
 
-func (r *ShardedIndexReader) Sum(key []byte) (uint64, uint64) {
+func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
 	return murmur3.Sum128WithSeed(key, r.salt)
 }
 
-func (r *ShardedIndexReader) Lookup(key []byte) (uint64, bool) {
+func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 	hi, lo := r.Sum(key)
 	return r.index.lookup(hi, lo)
 }
 
-func (r *ShardedIndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
+func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
 	hi, lo := murmur3.Sum128PairWithSeed(key1, key2, r.salt)
 	return r.index.lookup(hi, lo)
 }
 
-func (r *ShardedIndexReader) Empty() bool { return r.index.Empty() }
+func (r *IndexReader) Empty() bool { return r.index.Empty() }
 
-func (r *ShardedIndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
+func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
 
-func (r *ShardedIndexReader) OrdinalLookup(i uint64) uint64 { return r.index.OrdinalLookup(i) }
+func (r *IndexReader) OrdinalLookup(i uint64) uint64 { return r.index.OrdinalLookup(i) }
 
-func (r *ShardedIndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
+func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	if r.index.Empty() {
 		return 0, false
 	}
@@ -629,7 +667,7 @@ func (r *ShardedIndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	return r.index.twoLayerLookupByHash(hi, lo)
 }
 
-func (r *ShardedIndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	if r.index.Empty() {
 		return 0, false
 	}

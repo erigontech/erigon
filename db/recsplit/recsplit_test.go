@@ -35,7 +35,7 @@ func TestRecSplit2(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	salt := uint32(1)
-	rs, err := NewRecSplit(RecSplitArgs{
+	rs, err := NewRecSplitShard(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
 		Salt:       &salt,
@@ -71,7 +71,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	salt := uint32(1)
-	rs, err := NewRecSplit(RecSplitArgs{
+	rs, err := NewRecSplitShard(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
 		Salt:       &salt,
@@ -98,7 +98,7 @@ func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	salt := uint32(1)
-	_, err := NewRecSplit(RecSplitArgs{
+	_, err := NewRecSplitShard(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
 		Salt:       &salt,
@@ -118,7 +118,7 @@ func TestIndexLookup(t *testing.T) {
 	salt := uint32(1)
 	test := func(t *testing.T, cfg RecSplitArgs) {
 		t.Helper()
-		rs, err := NewRecSplit(cfg, logger)
+		rs, err := NewRecSplitShard(cfg, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,10 +131,10 @@ func TestIndexLookup(t *testing.T) {
 		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		idx := MustOpen(indexFile)
+		idx := MustOpenShard(indexFile)
 		defer idx.Close()
 		for i := 0; i < 100; i++ {
-			reader := NewIndexReader(idx)
+			reader := NewIndexShardReader(idx)
 			offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			assert.True(t, ok)
 			if offset != uint64(i*17) {
@@ -355,7 +355,7 @@ func BenchmarkBuild(b *testing.B) {
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
-		rs, err := NewRecSplit(RecSplitArgs{
+		rs, err := NewRecSplitShard(RecSplitArgs{
 			KeyCount:   KeysN,
 			BucketSize: 2000,
 			Salt:       &salt,
@@ -402,7 +402,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 			for i := 0; b.Loop(); i++ {
 				b.StopTimer()
 				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
-				rs, err := NewRecSplit(RecSplitArgs{
+				rs, err := NewRecSplitShard(RecSplitArgs{
 					KeyCount:   KeysN,
 					BucketSize: 2000,
 					Salt:       &salt,
@@ -440,7 +440,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	N := 2571
 	test := func(t *testing.T, cfg RecSplitArgs) {
 		t.Helper()
-		rs, err := NewRecSplit(cfg, logger)
+		rs, err := NewRecSplitShard(cfg, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -454,10 +454,10 @@ func TestTwoLayerIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		idx := MustOpen(indexFile)
+		idx := MustOpenShard(indexFile)
 		defer idx.Close()
 		for i := 0; i < N; i++ {
-			reader := NewIndexReader(idx)
+			reader := NewIndexShardReader(idx)
 			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			if e != uint64(i) {
 				t.Errorf("expected enumeration: %d, lookup up: %d", i, e)
@@ -502,7 +502,7 @@ func TestIndexLookupParallel(t *testing.T) {
 	for _, workers := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
 			indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_w%d", workers))
-			rs, err := NewRecSplit(RecSplitArgs{
+			rs, err := NewRecSplitShard(RecSplitArgs{
 				KeyCount:   N,
 				BucketSize: 10,
 				Salt:       &salt,
@@ -524,10 +524,10 @@ func TestIndexLookupParallel(t *testing.T) {
 			if err := rs.Build(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			idx := MustOpen(indexFile)
+			idx := MustOpenShard(indexFile)
 			defer idx.Close()
 			for i := 0; i < N; i++ {
-				reader := NewIndexReader(idx)
+				reader := NewIndexShardReader(idx)
 				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 				assert.True(t, ok)
 				if offset != uint64(i*17) {
@@ -564,7 +564,7 @@ func TestParallelMatchesSequential(t *testing.T) {
 
 	build := func(workers int, indexFile string) {
 		t.Helper()
-		rs, err := NewRecSplit(RecSplitArgs{
+		rs, err := NewRecSplitShard(RecSplitArgs{
 			KeyCount:   N,
 			BucketSize: 100,
 			Salt:       &salt,
@@ -614,7 +614,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 			for i := 0; b.Loop(); i++ {
 				b.StopTimer()
 				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_par_%d_w%d", i, workers))
-				rs, err := NewRecSplit(RecSplitArgs{
+				rs, err := NewRecSplitShard(RecSplitArgs{
 					KeyCount:   KeysN,
 					BucketSize: 2000,
 					Salt:       &salt,
