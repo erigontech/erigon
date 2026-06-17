@@ -84,7 +84,27 @@ versions.yaml • no changes • Ctrl+S=Save&Exit
 **P.S**
 If you don't want to use the tool, you could edit `versions.yaml` after it exec `go run ./cmd/bumper bump` and press `q`
 #### CLI
-in development
+For scripted/non-interactive bumps, pass `--major` or `--minor` (the TUI only opens when no
+selection flags are given). The bump applies to every entry matching `--domain` and `--ext`
+(both default to "all"), then `versions.yaml` is rewritten and `version_schema_gen.go` is
+regenerated in one step. Because each file extension is unique to one part of the schema, an
+extension alone selects unambiguously (e.g. `--ext ef` covers every domain's inverted index).
+
+```
+go run ./cmd/bumper bump --domain commitment --ext kv --minor   # one entry, minor
+go run ./cmd/bumper bump --ext ef --major                        # every .ef across all domains, major
+go run ./cmd/bumper bump --ext ef --major --dry-run              # preview, write nothing
+```
+
+Flags:
+1. `-d, --domain strings`  domains to bump (default: all), e.g. `commitment,receipt`
+2. `-e, --ext strings`     extensions to bump (default: all), e.g. `kv,ef`
+3. `--major` / `--minor`   bump kind (exactly one required); `--major` resets minor to 0
+4. `--dry-run`             print the changes without writing
+5. `--file` / `--out`      override the versions.yaml / generated-Go paths
+
+Unknown domains/extensions and selections that match nothing are rejected, and `min` is never
+changed by a bump (raise it by editing `versions.yaml` only when dropping support for an old major).
 
 ## Rename
 Tool for rename existing snapshots to align them with existing version schema. 
