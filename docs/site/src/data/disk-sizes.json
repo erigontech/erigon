@@ -15,10 +15,10 @@
         "source": "ci"
       },
       "minimal": {
-        "bytes": null,
-        "display": "360 GB",
-        "measured_at": "2026-06-02",
-        "source": "manual"
+        "bytes": 407000117199,
+        "display": "407.00 GB",
+        "measured_at": "2026-06-17",
+        "source": "ci"
       }
     },
     "gnosis": {
@@ -35,10 +35,10 @@
         "source": "ci"
       },
       "minimal": {
-        "bytes": null,
-        "display": "186 GB",
-        "measured_at": "2026-06-02",
-        "source": "manual"
+        "bytes": 209497097146,
+        "display": "209.50 GB",
+        "measured_at": "2026-06-17",
+        "source": "ci"
       }
     }
   }
