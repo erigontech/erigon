@@ -936,7 +936,9 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 		require.Equalf(t, seqRoot, root, "multi-depth streaming(workers=%d) root != ModeDirect", w)
 		require.Equalf(t, parRoot, root, "multi-depth streaming(workers=%d) root != ModeParallel", w)
 		requireBranchParity(t, seqMs, ms)
-		require.NotZerof(t, sc.DeepLocalFolds(), "account@64 must fold through foldStorageRoot (workers=%d)", w)
+		if deepStorageFold {
+			require.NotZerof(t, sc.DeepLocalFolds(), "account@64 must fold through foldStorageRoot (workers=%d)", w)
+		}
 		sc.Release()
 	}
 }
@@ -1001,7 +1003,9 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 
 		require.Equalf(t, seqRoot, root, "whale storage-interior split(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, ms)
-		require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through foldStorageRoot (workers=%d)", w)
+		if deepStorageFold {
+			require.NotZerof(t, sc.DeepLocalFolds(), "account must fold through foldStorageRoot (workers=%d)", w)
+		}
 		sc.Release()
 	}
 }

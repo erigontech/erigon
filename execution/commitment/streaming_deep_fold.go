@@ -129,6 +129,13 @@ func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKe
 	return w.grid[0][col], nil
 }
 
+// deepStorageFold gates the concurrent per-storage-nibble fold of one whale
+// account's storage subtree (foldStorageRoot). Disabled: it produced a wrong
+// trie root and a concurrent-read SIGSEGV on mainnet block 25142734. The
+// top-level per-account-nibble mount fold stays parallel; only the second-tier
+// storage split is off until its correctness + file-view pinning is fixed.
+var deepStorageFold = false
+
 // isDeepStorageAccount reports whether node is an account leaf whose touched storage
 // is large and forked enough to fold concurrently.
 func isDeepStorageAccount(node *prefixNode, depth int) bool {
@@ -150,7 +157,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 		return errors.New("commitment: trie leaf without a plainKey")
 	}
 
-	if isDeepStorageAccount(node, len(path)) {
+	if deepStorageFold && isDeepStorageAccount(node, len(path)) {
 		sr, err := storageRoot(node, path)
 		if err != nil {
 			return fmt.Errorf("storageRoot: %w", err)
