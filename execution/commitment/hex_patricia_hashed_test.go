@@ -3488,6 +3488,53 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.True(t, witnessResolvesAbsence(witnessTrie.RootNode, hashedAbsent, 0),
 			"witness must materialize the branch behind the diverging extension to prove the absent slot")
 	})
+
+	t.Run("AbsentAccountDivergingAtFoldedExtension", func(t *testing.T) {
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hph.SetTrace(false)
+
+		// accounts sharing a 5-nibble hashed prefix -> state-trie extension over a branch
+		extAccts, extHashed := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 5, 2)
+
+		builder := NewUpdateBuilder()
+		n := 0
+		for _, a := range extAccts {
+			builder.Balance(common.Bytes2Hex(a), uint64(n+1))
+			n++
+		}
+		// random filler accounts so the extension sits below a populated root branch
+		for i := 0; i < 8; i++ {
+			a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+			builder.Balance(common.Bytes2Hex(a), uint64(n+1))
+			n++
+		}
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// absent account sharing the first three nibbles of the extension prefix then diverging
+		shared := extHashed[0]
+		absentPrefix := []byte{shared[0], shared[1], shared[2], (shared[3] + 1) & 0xf}
+		absentAcct, _ := generateKeyWithHashedPrefix(absentPrefix, length.Addr)
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(absentAcct), nil, toWitness.TouchAccount)
+
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		require.NoError(t, err)
+		require.Equal(t, root, rootW, "witness root must equal commitment root")
+
+		hashedAbsent := KeyToHexNibbleHash(absentAcct)
+		require.True(t, witnessResolvesAbsence(witnessTrie.RootNode, hashedAbsent, 0),
+			"witness must materialize the branch behind the diverging extension to prove the absent account")
+	})
 }
 
 // Test_ModeUpdate_SiblingConsistency verifies that ModeUpdate produces

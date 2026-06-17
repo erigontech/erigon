@@ -1547,11 +1547,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// the traversal can be stopped at this level
 				pathDivergenceFound = true
 				short := &trie.ShortNode{Key: common.Copy(hashedExtKey)}
-				// For an absent storage slot diverging at a folded extension, a strict
+				// For an absent account or storage key diverging at a folded extension, a strict
 				// sparse-trie verifier needs the branch behind the extension
 				// materialized, not a bare HashNode. The branch hashes
 				// to the same value, so the witness root is unchanged.
-				if len(hashedKey) == 128 && cellToExpand.hashLen > 0 {
+				if (len(hashedKey) == 64 || len(hashedKey) == 128) && cellToExpand.hashLen > 0 {
 					branchPrefix := make([]byte, 0, int(keyPos)+1+len(hashedExtKey))
 					branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
 					branchPrefix = append(branchPrefix, hashedExtKey...)
