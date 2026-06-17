@@ -47,9 +47,10 @@ import (
 // the in-RAM SharedDomains/TemporalMemBatch overlay but were never committed, so
 // the committed execution-stage progress (s.BlockNumber) is <= u.UnwindPoint and
 // UnwindExecutionStage takes the no-disk-rollback branch. That branch does not
-// call u.Done, so re-execution resumes from the committed progress
-// (SeekCommitment == s.BlockNumber+1) — NOT from u.UnwindPoint+1. The overlay
-// must therefore be pruned to the committed boundary: every uncommitted write
+// call u.Done, so re-execution resumes from the committed block (SeekCommitment
+// returns s.BlockNumber; re-execution resumes at s.BlockNumber+1) — NOT from
+// u.UnwindPoint+1. The overlay must therefore be pruned to that committed
+// boundary (Min(s.BlockNumber+1)): every uncommitted write
 // above s.BlockNumber is dropped (the failed block's, AND a block in
 // (s.BlockNumber, u.UnwindPoint] that is itself re-executed), while a write
 // at/below the committed progress survives (no over-pruning). Otherwise the
