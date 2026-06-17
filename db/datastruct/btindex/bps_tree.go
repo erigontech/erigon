@@ -19,9 +19,9 @@ package btindex
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 	"unsafe"
 
@@ -143,50 +143,68 @@ type Node struct {
 	di  uint64 // key ordinal number in kv
 }
 
-func encodeListNodes(nodes []Node, w io.Writer) error {
-	var header [10]byte
-	binary.BigEndian.PutUint64(header[:8], uint64(len(nodes)))
-	if _, err := w.Write(header[:8]); err != nil {
+// Encode writes the node key length-prefixed (reusing headerBuf, len >= 2, to
+// avoid a per-node alloc). di is not stored: node i is the i-th kept key, di=i*M.
+func (n Node) Encode(w io.Writer, headerBuf []byte) error {
+	if len(n.key) > math.MaxUint16 {
+		return fmt.Errorf("node key too long: %d bytes", len(n.key))
+	}
+	binary.BigEndian.PutUint16(headerBuf, uint16(len(n.key)))
+	if _, err := w.Write(headerBuf[:2]); err != nil {
 		return err
 	}
-	for i := range nodes {
-		binary.BigEndian.PutUint64(header[:8], nodes[i].di)
-		binary.BigEndian.PutUint16(header[8:], uint16(len(nodes[i].key)))
-		if _, err := w.Write(header[:]); err != nil {
-			return err
-		}
-		if _, err := w.Write(nodes[i].key); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := w.Write(n.key)
+	return err
 }
 
-func decodeListNodes(data []byte) ([]Node, error) {
+// decodeNodes reads count length-prefixed keys (no count prefix on disk — the
+// caller derives count). di is not stored; node i has di = i*m.
+func decodeNodes(data []byte, count, m uint64) ([]Node, int, error) {
+	if count > uint64(len(data))/2 { // each node is at least 2 bytes (keyLen)
+		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
+	}
+	nodes := make([]Node, count)
+	pos := 0
+	for ni := range int(count) {
+		if len(data)-pos < 2 {
+			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
+		}
+		l := int(binary.BigEndian.Uint16(data[pos : pos+2]))
+		pos += 2
+		if len(data)-pos < l {
+			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
+		}
+		nodes[ni] = Node{key: data[pos : pos+l], di: uint64(ni) * m}
+		pos += l
+	}
+	return nodes, pos, nil
+}
+
+// decodeListNodesV0 reads the legacy node list where each node stores its di.
+func decodeListNodesV0(data []byte) ([]Node, int, error) {
+	if len(data) < 8 {
+		return nil, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
+	}
 	count := binary.BigEndian.Uint64(data[:8])
+	if count > uint64(len(data)-8)/10 { // each node is at least 10 bytes (di+keyLen)
+		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
+	}
 	nodes := make([]Node, count)
 	pos := 8
 	for ni := range int(count) {
-		dp, err := nodes[ni].Decode(data[pos:])
-		if err != nil {
-			return nil, fmt.Errorf("decode node %d: %w", ni, err)
+		if len(data)-pos < 10 {
+			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
-		pos += int(dp)
+		nodes[ni].di = binary.BigEndian.Uint64(data[pos : pos+8])
+		l := int(binary.BigEndian.Uint16(data[pos+8 : pos+10]))
+		pos += 10
+		if len(data)-pos < l {
+			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
+		}
+		nodes[ni].key = data[pos : pos+l]
+		pos += l
 	}
-	return nodes, nil
-}
-
-func (n *Node) Decode(buf []byte) (uint64, error) {
-	if len(buf) < 10 {
-		return 0, errors.New("short buffer (less than 10b)")
-	}
-	n.di = binary.BigEndian.Uint64(buf[:8])
-	l := int(binary.BigEndian.Uint16(buf[8:10]))
-	if len(buf) < 10+l {
-		return 0, errors.New("short buffer")
-	}
-	n.key = buf[10 : 10+l]
-	return uint64(10 + l), nil
+	return nodes, pos, nil
 }
 
 func (b *BpsTree) WarmUp(kv *seg.Reader) error {
