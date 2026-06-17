@@ -27,8 +27,12 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -76,6 +80,8 @@ type RecSplit struct {
 	tmpDir   string
 	noFsync  bool
 	logger   log.Logger
+	lvl      log.Lvl
+	progress *background.Progress
 
 	shardFiles   [RecSplitShards]*os.File
 	shardWriters [RecSplitShards]*bufio.Writer
@@ -87,10 +93,11 @@ type RecSplit struct {
 	maxOffset          uint64
 	prevOffset         uint64
 
-	keyExpectedCount uint64
-	keysAdded        uint64
-	collision        bool
-	built            bool
+	keyExpectedCount   uint64
+	keysAdded          uint64
+	collision          bool
+	built              bool
+	forceCollisionOnce bool // test-only: force one collision on the next Build
 }
 
 func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
@@ -134,10 +141,24 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
-func (rs *RecSplit) FileName() string { return rs.fileName }
-func (rs *RecSplit) Salt() uint32     { return rs.salt }
-func (rs *RecSplit) Collision() bool  { return rs.collision }
-func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplit) FileName() string    { return rs.fileName }
+func (rs *RecSplit) Salt() uint32        { return rs.salt }
+func (rs *RecSplit) Collision() bool     { return rs.collision }
+func (rs *RecSplit) DisableFsync()       { rs.noFsync = true }
+func (rs *RecSplit) LogLvl(lvl log.Lvl)  { rs.lvl = lvl }
+func (rs *RecSplit) ForceCollisionOnce() { rs.forceCollisionOnce = true }
+
+// SetProgress wires a tracker covering the full lifecycle: AddKey fills 0..keyExpectedCount
+// and the shard-build phase fills keyExpectedCount..2*keyExpectedCount.
+func (rs *RecSplit) SetProgress(p *background.Progress) {
+	if p == nil {
+		return
+	}
+	p.Name.Store(&rs.fileName)
+	p.Processed.Store(0)
+	p.Total.Store(2 * rs.keyExpectedCount)
+	rs.progress = p
+}
 
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
@@ -178,6 +199,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	}
 	rs.shardCounts[shard]++
 	rs.keysAdded++
+	if rs.progress != nil && rs.keysAdded%1024 == 0 {
+		rs.progress.Processed.Add(1024)
+	}
 	return nil
 }
 
@@ -203,6 +227,9 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.keysAdded = 0
 	rs.maxOffset = 0
 	rs.prevOffset = 0
+	if rs.progress != nil {
+		rs.progress.Processed.Store(0)
+	}
 	for i := range rs.shardFiles {
 		rs.shardCounts[i] = 0
 		f := rs.shardFiles[i]
@@ -223,6 +250,11 @@ func (rs *RecSplit) ResetNextSalt() {
 func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
 		return errors.New("already built")
+	}
+	if rs.forceCollisionOnce {
+		rs.forceCollisionOnce = false
+		rs.collision = true
+		return fmt.Errorf("%w: forced for testing", ErrCollision)
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
@@ -265,6 +297,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return err
 		}
 		_ = dir.RemoveFile(shardIdxPath)
+		if rs.progress != nil {
+			rs.progress.Processed.Add(n)
+		}
 	}
 
 	if rs.enums && rs.keysAdded > 0 {
@@ -334,7 +369,7 @@ func (rs *RecSplit) buildShard(ctx context.Context, shard int, n uint64) (string
 		return "", err
 	}
 	defer inner.Close()
-	inner.LogLvl(log.LvlTrace)
+	inner.LogLvl(log.LvlTrace) // keep the 256 inner shard builds quiet; the sharded RecSplit logs once
 
 	r := bufio.NewReader(rs.shardFiles[shard])
 	var buf [shardRecordSize]byte
@@ -437,9 +472,10 @@ type Index struct {
 	keyCount   uint64
 	enums      bool
 
-	shards       [RecSplitShards]*IndexShard
-	globalEf     *eliasfano32.EliasFano // arrival-order offsets, backs OrdinalLookup (enums only)
-	sharedReader *IndexReader
+	shards          [RecSplitShards]*IndexShard
+	readAheadRefcnt atomic.Int32
+	globalEf        *eliasfano32.EliasFano // arrival-order offsets, backs OrdinalLookup (enums only)
+	sharedReader    *IndexReader
 
 	// mono is non-nil for legacy monolithic files (version < shardedRSVersion): the whole
 	// file is one IndexShard and all lookups delegate to it without shard routing.
@@ -568,11 +604,83 @@ func (idx *Index) FilePath() string     { return idx.filePath }
 func (idx *Index) FileName() string     { return idx.fileName }
 func (idx *Index) Reader() *IndexReader { return idx.sharedReader }
 
+func (idx *Index) LeafSize() uint16 {
+	if idx.mono != nil {
+		return idx.mono.LeafSize()
+	}
+	for _, sh := range &idx.shards {
+		if sh != nil {
+			return sh.LeafSize()
+		}
+	}
+	return 0
+}
+
+func (idx *Index) BucketSize() int {
+	if idx.mono != nil {
+		return idx.mono.BucketSize()
+	}
+	for _, sh := range &idx.shards {
+		if sh != nil {
+			return sh.BucketSize()
+		}
+	}
+	return 0
+}
+
+func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 datasize.ByteSize) {
+	if idx.mono != nil {
+		return idx.mono.Sizes()
+	}
+	total = datasize.ByteSize(idx.size)
+	if idx.globalEf != nil {
+		offsets = idx.globalEf.Size()
+	}
+	for _, sh := range &idx.shards {
+		if sh == nil {
+			continue
+		}
+		_, so, sef, sgr, sex, _ := sh.Sizes()
+		offsets += so
+		ef += sef
+		golombRice += sgr
+		existence += sex
+	}
+	layer1 = total - offsets - golombRice - existence
+	return
+}
+
+func (idx *Index) ExtractOffsets() map[uint64]uint64 {
+	if idx.mono != nil {
+		return idx.mono.ExtractOffsets()
+	}
+	m := map[uint64]uint64{}
+	for _, sh := range &idx.shards {
+		if sh == nil {
+			continue
+		}
+		for k, v := range sh.ExtractOffsets() {
+			m[k] = v
+		}
+	}
+	return m
+}
+
 func (idx *Index) MadvNormal() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
 	}
+	idx.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
+	return idx
+}
+
+func (idx *Index) MadvSequential() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
+	idx.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
 
@@ -582,6 +690,67 @@ func (idx *Index) MadvWillNeed() *Index {
 	}
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
+}
+
+func (idx *Index) DisableReadAhead() {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return
+	}
+	leftReaders := idx.readAheadRefcnt.Add(-1)
+	if leftReaders == 0 {
+		_ = mmap.MadviseRandom(idx.mmapHandle1)
+	} else if leftReaders < 0 {
+		log.Warn("read-ahead negative counter", "file", idx.FileName())
+	}
+}
+
+func (idx *Index) ForceExistenceFilterWillNeed() {
+	if idx.mono != nil {
+		idx.mono.ForceExistenceFilterWillNeed()
+		return
+	}
+	for _, s := range &idx.shards {
+		if s != nil {
+			s.ForceExistenceFilterWillNeed()
+		}
+	}
+}
+
+func (idx *Index) ForceExistenceFilterNormal() {
+	if idx.mono != nil {
+		idx.mono.ForceExistenceFilterNormal()
+		return
+	}
+	for _, s := range &idx.shards {
+		if s != nil {
+			s.ForceExistenceFilterNormal()
+		}
+	}
+}
+
+func (idx *Index) ForceExistenceFilterRandom() {
+	if idx.mono != nil {
+		idx.mono.ForceExistenceFilterRandom()
+		return
+	}
+	for _, s := range &idx.shards {
+		if s != nil {
+			s.ForceExistenceFilterRandom()
+		}
+	}
+}
+
+func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
+	if idx.mono != nil {
+		return idx.mono.ForceExistenceFilterInRAM()
+	}
+	var total datasize.ByteSize
+	for _, s := range &idx.shards {
+		if s != nil {
+			total += s.ForceExistenceFilterInRAM()
+		}
+	}
+	return total
 }
 
 func (idx *Index) lookup(hi, lo uint64) (uint64, bool) {
@@ -654,6 +823,9 @@ func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
 }
 
 func (r *IndexReader) Empty() bool { return r.index.Empty() }
+
+// Close is a no-op kept for API parity: readers are stateless and shared.
+func (r *IndexReader) Close() {}
 
 func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
 

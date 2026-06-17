@@ -327,3 +327,55 @@ func FuzzShardedRecSplit(f *testing.F) {
 		}
 	})
 }
+
+// TestOpenIndexReadsLegacyMonolithic verifies the back-compat dispatch: a file written by
+// the old monolithic builder (version < shardedRSVersion) opens via the new OpenIndex and
+// all lookups delegate to the embedded mono shard.
+func TestOpenIndexReadsLegacyMonolithic(t *testing.T) {
+	for _, enums := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enums=%v", enums), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			salt := uint32(1)
+			const n = 1000
+			path := filepath.Join(tmpDir, "mono.idx")
+			offsetOf := func(i int) uint64 { return uint64(i*13 + 5) }
+
+			rs, err := NewRecSplitShard(RecSplitArgs{
+				KeyCount:           n,
+				BucketSize:         10,
+				LeafSize:           8,
+				Salt:               &salt,
+				TmpDir:             tmpDir,
+				IndexFile:          path,
+				Enums:              enums,
+				LessFalsePositives: true,
+				Version:            1,
+			}, log.New())
+			require.NoError(t, err)
+			defer rs.Close()
+			for i := 0; i < n; i++ {
+				require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), offsetOf(i)))
+			}
+			require.NoError(t, rs.Build(t.Context()))
+
+			idx, err := OpenIndex(path)
+			require.NoError(t, err)
+			defer idx.Close()
+			require.NotNil(t, idx.mono, "legacy file must take the mono path")
+			require.EqualValues(t, n, idx.KeyCount())
+			require.Equal(t, enums, idx.Enums())
+
+			r := idx.Reader()
+			for i := 0; i < n; i++ {
+				off, ok := r.TwoLayerLookup(fmt.Appendf(nil, "key %d", i))
+				require.Truef(t, ok, "key %d not found", i)
+				require.Equalf(t, offsetOf(i), off, "key %d", i)
+			}
+			if enums {
+				for i := 0; i < n; i++ {
+					require.Equalf(t, offsetOf(i), r.OrdinalLookup(uint64(i)), "OrdinalLookup(%d)", i)
+				}
+			}
+		})
+	}
+}
