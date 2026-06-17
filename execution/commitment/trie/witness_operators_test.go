@@ -105,7 +105,7 @@ func checkAccountOpFlags(t *testing.T, acc *OperatorLeafAccount, expectedFlags b
 	t.Helper()
 	b, compactLen := mustWriteAccountOp(t, acc)
 	if len(b) <= compactLen {
-		t.Errorf("unexpected serialization expected to be bigger than %d (fields seralized), got %d (raw: %v)", compactLen, len(b), b)
+		t.Errorf("unexpected serialization expected to be bigger than %d (fields serialized), got %d (raw: %v)", compactLen, len(b), b)
 	}
 	if flags := b[2+len(acc.Key)]; flags != expectedFlags {
 		t.Errorf("unexpected flags value (expected %b, got %b)", expectedFlags, flags)
