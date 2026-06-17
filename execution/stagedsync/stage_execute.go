@@ -501,6 +501,13 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 
 	stagePruneStartTime := time.Now()
 	remainingPruneTimeout := func() time.Duration {
+		// Initial-cycle pruning is aggressive: there is no FCU to leave time for, so
+		// each prune step gets the full long budget instead of sharing it. Sharing
+		// here would let earlier steps eat into the budget and drop PruneSmallBatches
+		// below the furious-prune threshold (>5h) or skip it entirely.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return stagePruneTimeout
+		}
 		remaining := stagePruneTimeout - time.Since(stagePruneStartTime)
 		if remaining <= 0 {
 			return 0
@@ -530,10 +537,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			); err != nil {
 				return err
 			}
-			if duration := time.Since(pruneChangeSetsStartTime); duration > stagePruneTimeout {
+			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
 				logger.Debug(
 					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
 					"duration", duration,
+					"timeout", pruneChangeSetsTimeout,
 					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 				)
 			}
