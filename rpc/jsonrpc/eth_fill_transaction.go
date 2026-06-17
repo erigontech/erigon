@@ -154,14 +154,12 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 }
 
 func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, head *types.Header, dbTx kv.TemporalTx) error {
-	isPostLondon := head.BaseFee != nil
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
-
-	if !isPostLondon {
+	if head.BaseFee == nil {
 		if args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil {
 			return errors.New("maxFeePerGas and maxPriorityFeePerGas are not valid before London is active")
 		}
 		if args.GasPrice == nil {
+			oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
 			price, err := oracle.SuggestTipCap(ctx)
 			if err != nil {
 				return err
@@ -171,7 +169,6 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		return nil
 	}
 
-	// Post-London: if both EIP-1559 fields already set, just sanity-check them.
 	if args.GasPrice == nil && args.MaxFeePerGas != nil && args.MaxPriorityFeePerGas != nil {
 		if args.MaxFeePerGas.ToInt().Sign() == 0 {
 			return errors.New("maxFeePerGas must be non-zero")
@@ -182,7 +179,6 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		return nil
 	}
 
-	// GasPrice is already set: the caller wants a legacy transaction.
 	if args.GasPrice != nil {
 		if args.GasPrice.ToInt().Sign() == 0 {
 			return errors.New("gasPrice must be non-zero after london fork")
@@ -190,6 +186,7 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		return nil
 	}
 
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
 	tip, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return err
