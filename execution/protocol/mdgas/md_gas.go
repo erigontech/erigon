@@ -58,9 +58,13 @@ type FullMdGas struct {
 // a callee that matches a charge an ancestor made (sharing storage via
 // CALLCODE/DELEGATECALL, or against a tx-level intrinsic state charge).
 type MdGasUsage struct {
-	Regular             uint64
-	State               int64
-	StateGasFromGasLeft uint64
+	Regular uint64 // gross regular gas consumed in this frame
+	State   int64  // signed net state-gas consumed in this frame
+
+	// Spilled tracks how much of this frame's regular gas (gas_left)
+	// has been borrowed to cover state-gas charges that exceeded the
+	// reservoir.
+	Spilled uint64
 }
 
 // PlusIntrinsic folds an intrinsic-gas MdGas into the frame-usage report,
@@ -68,9 +72,9 @@ type MdGasUsage struct {
 // negative in the combined value.
 func (u MdGasUsage) PlusIntrinsic(igas MdGas) MdGasUsage {
 	return MdGasUsage{
-		Regular:             u.Regular + igas.Regular,
-		State:               u.State + int64(igas.State),
-		StateGasFromGasLeft: u.StateGasFromGasLeft,
+		Regular: u.Regular + igas.Regular,
+		State:   u.State + int64(igas.State),
+		Spilled: u.Spilled,
 	}
 }
 

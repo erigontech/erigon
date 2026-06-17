@@ -57,9 +57,9 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // CallContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type CallContext struct {
-	gas                 uint64
-	stateGas            uint64
-	stateGasFromGasLeft uint64
+	gas      uint64
+	stateGas uint64
+	Spilled  uint64
 	// EIP-8037 per-frame net state-gas tracker (signed). Increments on every
 	// state-gas charge (including reservoir→regular spill), decrements on
 	// inline refund (SSTORE clear, CREATE collision/revert) regardless of
@@ -130,7 +130,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	ctx.gas = gas.Regular
 	ctx.stateGas = gas.State
 	ctx.frameStateUsed = 0
-	ctx.stateGasFromGasLeft = 0
+	ctx.Spilled = 0
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -141,7 +141,7 @@ func (c *CallContext) put() {
 	c.Stack.Reset()
 	c.cacheGen = 0
 	c.frameStateUsed = 0
-	c.stateGasFromGasLeft = 0
+	c.Spilled = 0
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	c.cachedKeyGen = ^uint64(0)
@@ -171,7 +171,7 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 			// spill over and cut from the regular gas. We are tracking this extra cut
 			// here so that we can refund it to regular gas pool later.
 			if gas > c.stateGas {
-				c.stateGasFromGasLeft += gas - c.stateGas
+				c.Spilled += gas - c.stateGas
 			}
 			c.frameStateUsed += int64(gas)
 		}
@@ -196,10 +196,10 @@ func (c *CallContext) creditStateGasRefund(amount uint64) {
 		// we should first refund the regular gas pool. This ensures the transaction
 		// does not run out of regular gas incorrectly. Any leftover refund will then
 		// go back to the state gas reservoir.
-		if c.stateGasFromGasLeft > 0 {
-			toGasLeft := min(amount, c.stateGasFromGasLeft)
+		if c.Spilled > 0 {
+			toGasLeft := min(amount, c.Spilled)
 			c.gas += toGasLeft
-			c.stateGasFromGasLeft -= toGasLeft
+			c.Spilled -= toGasLeft
 			amount -= toGasLeft
 		}
 		c.stateGas += amount
@@ -315,7 +315,7 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 // balance) preserve gasRemaining.State so the reservoir is returned intact.
 func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, childUsed mdgas.MdGasUsage, tracer *tracing.Hooks) {
 	ctx.stateGas = returnGas.State
-	ctx.stateGasFromGasLeft += childUsed.StateGasFromGasLeft
+	ctx.Spilled += childUsed.Spilled
 	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
 }
 
@@ -445,12 +445,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			}
 		}
 		// EIP-8037: snapshot the frame's net state-gas usage (charges minus
-		// inline refunds, signed) and stateGasFromGasLeft before callContext.put() clears it.
+		// inline refunds, signed) and Spilled before callContext.put() clears it.
 		// gasUsed.Regular is derived uniformly by evm.call/evm.create's defer
 		// from the final gasRemaining (covers precompile/no-code paths and
 		// handleFrameRevert gas burn).
 		gasUsed.State = callContext.frameStateUsed
-		gasUsed.StateGasFromGasLeft = callContext.stateGasFromGasLeft
+		gasUsed.Spilled = callContext.Spilled
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
 		if restoreReadonly {

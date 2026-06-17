@@ -186,17 +186,17 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 	// refund flows through gasUsed.State (see func doc).
 	//
 	if evm.chainRules.IsAmsterdam && depth > 0 {
-		reservoir := int64(gasRemaining.State) + gasUsed.State - int64(gasUsed.StateGasFromGasLeft)
+		reservoir := int64(gasRemaining.State) + gasUsed.State - int64(gasUsed.Spilled)
 		if reservoir < 0 {
 			log.Error("EIP-8037 invariant violated; clamping parent reservoir to 0",
-				"gasRemainingState", gasRemaining.State, "stateGasUsed", gasUsed.State, "spillover", gasUsed.StateGasFromGasLeft, "depth", depth)
+				"gasRemainingState", gasRemaining.State, "stateGasUsed", gasUsed.State, "spillover", gasUsed.Spilled, "depth", depth)
 			reservoir = 0
 		}
 		if err == ErrExecutionReverted {
-			gasRemaining.Regular += gasUsed.StateGasFromGasLeft
+			gasRemaining.Regular += gasUsed.Spilled
 		}
 		gasRemaining.State = uint64(reservoir)
-		gasUsed.StateGasFromGasLeft = 0
+		gasUsed.Spilled = 0
 	}
 }
 
