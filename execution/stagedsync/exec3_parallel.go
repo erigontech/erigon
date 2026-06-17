@@ -3143,11 +3143,10 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
-			origin := vm.Read(h.Address, state.StoragePath, h.Key, txIndex)
-			originValid := origin.Status() == state.MVReadResultDone && origin.Value() != nil &&
+			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+			originValid := originOK && origin.Status() == state.MVReadResultDone &&
 				!(sdOk && sdTxIdx > origin.Version().TxIndex)
 			if originValid {
-				originVal := origin.Value().(uint256.Int)
 				if writeVal.Eq(&originVal) {
 					continue // write-back same as prior TX's value — no-op
 				}
@@ -3447,14 +3446,14 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 		case state.StoragePath:
 			// Check versionMap for this TX's write at this address+slot.
 			// Use the resolved value from the versionMap (post-validation correct).
-			rr := vm.Read(h.Address, state.StoragePath, h.Key, txIndex+1)
+			rrVal, rr, rrOK := vm.ReadStorage(h.Address, h.Key, txIndex+1)
 			var resolved uint256.Int
 			if rr.Status() == state.MVReadResultDone && rr.Version().TxIndex == txIndex {
 				if rr.Incarnation() != incarnation {
 					continue // stale incarnation entry
 				}
-				if rr.Value() != nil {
-					resolved = rr.Value().(uint256.Int)
+				if rrOK {
+					resolved = rrVal
 				} else {
 					resolved, _ = state.Val[uint256.Int](w)
 				}
@@ -3467,9 +3466,8 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 			// Origin = versionMap floor at txIndex (prior TX's write), or
 			// pre-block value from snapshots if no prior TX wrote this key.
 			{
-				origin := vm.Read(h.Address, state.StoragePath, h.Key, txIndex)
-				if origin.Status() == state.MVReadResultDone && origin.Value() != nil {
-					originVal := origin.Value().(uint256.Int)
+				originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+				if originOK && origin.Status() == state.MVReadResultDone {
 					if resolved.Eq(&originVal) {
 						continue // write-back same as origin — no-op
 					}

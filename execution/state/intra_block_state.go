@@ -187,9 +187,9 @@ type IntraBlockState struct {
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
-	// at the block level.  Per-path typed maps (Commit E) — single-level
-	// lookups for non-storage paths; AccountKey{Path,Key} struct
-	// allocation gone from the probe hot path.
+	// at the block level.  Per-path typed maps give single-level lookups for
+	// non-storage paths; the AccountKey{Path,Key} struct allocation is gone
+	// from the probe hot path.
 	versionMap          *VersionMap
 	versionedWrites     WriteSet
 	versionedReads      ReadSet
@@ -2433,33 +2433,6 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
 	return out
-}
-
-// SnapshotVersionedReadKeys returns the current set of read keys for addr.
-// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
-// preserving pre-existing legitimate reads.
-func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
-	var snapshot map[AccountKey]struct{}
-	sdb.versionedReads.ScanAddr(addr, func(path AccountPath, key accounts.StorageKey, _ *ReadHeader) {
-		if snapshot == nil {
-			snapshot = map[AccountKey]struct{}{}
-		}
-		snapshot[AccountKey{Path: path, Key: key}] = struct{}{}
-	})
-	return snapshot
-}
-
-// MarkNewReadsInternal marks as internal only the reads for addr that were
-// added after the given snapshot. Use this when gas-calculation-only reads
-// were recorded on top of earlier legitimate reads — the legitimate ones
-// must remain non-internal so they appear in the block access list.
-func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
-	sdb.versionedReads.ScanAddr(addr, func(path AccountPath, key accounts.StorageKey, hdr *ReadHeader) {
-		if _, existed := before[AccountKey{Path: path, Key: key}]; existed {
-			return
-		}
-		hdr.internal = true
-	})
 }
 
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {

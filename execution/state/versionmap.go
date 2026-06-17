@@ -222,8 +222,8 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 // Caller must hold vm.mu.Lock(). The `data any` argument is asserted to
 // the AccountPath's contracted value type before storage; a wrong-type
 // `data` panics here rather than masquerading as a wrong typed cell on a
-// later read. Commit 2b introduces typed Write primitives so call sites
-// can avoid this runtime assertion entirely.
+// later read. The typed Write primitives (WriteBalance/WriteNonce/etc.) let
+// call sites avoid this runtime assertion entirely.
 func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	e, ok := vm.s[addr]
 	if !ok {
@@ -709,8 +709,9 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	// extra heap alloc per Read (Go generic functions are dictionary-passed
 	// rather than fully inlined, so the closure capture escapes once per
 	// instantiation). Inlining the descend keeps reads at one alloc (the
-	// any-box of fv.Value into res.value at the API boundary). Commit 2b
-	// drops that any-box too via typed Read primitives.
+	// any-box of fv.Value into res.value at the API boundary). The typed Read
+	// primitives (ReadBalance/etc.) drop that any-box; this generic Read remains
+	// only for the few any-shaped callers (the validator value-tiebreaker, tests).
 	maxIdx := txIdx - 1
 	switch path {
 	case AddressPath:
@@ -886,6 +887,39 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 		}
 	}
 	return
+}
+
+// ReadStatus returns a path's read outcome (Status/Version/DepIdx/Incarnation)
+// without the value: it dispatches to the typed ReadX and discards the value, so
+// unlike Read it never boxes into ReadResult.value any. For callers that need
+// only version/status (the validator's common path, revival checks).
+func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
+	var res ReadResult
+	switch path {
+	case AddressPath:
+		_, res, _ = vm.ReadAddress(addr, txIdx)
+	case BalancePath:
+		_, res, _ = vm.ReadBalance(addr, txIdx)
+	case NoncePath:
+		_, res, _ = vm.ReadNonce(addr, txIdx)
+	case IncarnationPath:
+		_, res, _ = vm.ReadIncarnation(addr, txIdx)
+	case CodePath:
+		_, res, _ = vm.ReadCode(addr, txIdx)
+	case CodeHashPath:
+		_, res, _ = vm.ReadCodeHash(addr, txIdx)
+	case CodeSizePath:
+		_, res, _ = vm.ReadCodeSize(addr, txIdx)
+	case SelfDestructPath:
+		_, res, _ = vm.ReadSelfDestruct(addr, txIdx)
+	case CreateContractPath:
+		_, res, _ = vm.ReadCreateContract(addr, txIdx)
+	case StoragePath:
+		_, res, _ = vm.ReadStorage(addr, key, txIdx)
+	default:
+		res = vm.Read(addr, path, key, txIdx)
+	}
+	return res
 }
 
 // LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) at which a write
@@ -1288,7 +1322,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 
 	valid := VersionValid
 
-	rr := vm.Read(addr, path, key, txIndex)
+	// Status-only read (no value box); the value is needed only in the rare
+	// value-tiebreaker below, where liveValueEquals does a boxed Read.
+	rr := vm.ReadStatus(addr, path, key, txIndex)
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
@@ -1312,7 +1348,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					// own) — the outer entry's validation covers it. Without this
 					// guard a recursive AddressPath/SelfDestructPath probe that
 					// lands on a Done cell would over-invalidate.
-				} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+				} else if readVal != nil && liveValueEquals(vm, addr, path, key, txIndex, readVal) {
 					// Value tiebreaker: a Done entry now exists where the read
 					// saw storage, but it holds the same value — read stays valid.
 				} else {
@@ -1496,6 +1532,14 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 // valuesEqual compares a read value with a versionMap write value for the
 // same path. Used as a tiebreaker: when the version/source check would
 // invalidate but the actual values match, the read is still valid.
+// liveValueEquals compares the live versionMap value for (addr,path,key) against
+// readVal. Confines the value-boxing Read to the one validator branch that needs
+// the materialised value; the common path uses the alloc-free ReadStatus.
+func liveValueEquals(vm *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, readVal any) bool {
+	cur := vm.Read(addr, path, key, txIdx)
+	return cur.Value() != nil && valuesEqual(path, readVal, cur.Value())
+}
+
 func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 	if readVal == nil || writeVal == nil {
 		return readVal == nil && writeVal == nil
@@ -1540,11 +1584,7 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 // the wrong T to a cell is a compile-time error, not a runtime panic.
 //
 // Typed Read primitives (ReadBalance / ReadStorage / etc.) consume Value
-// directly without crossing the any boundary. The legacy any-shaped Read
-// API still exists for the consumers that have not yet migrated; for those
-// the boxed field caches the any form of Value populated once at write
-// time, so the legacy Read doesn't re-box on every call. Once every
-// consumer of Read is migrated to a typed primitive, boxed is dropped.
+// directly without crossing the any boundary.
 type WriteCell[T any] struct {
 	flag        statusFlag
 	incarnation int

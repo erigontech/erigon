@@ -90,7 +90,7 @@ const (
 
 	outcomeLegacyStorage // versionMap == nil: typed wrapper does direct storage read on r.so
 	outcomeWriteSetHit   // r.vw is set; typed wrapper returns its Val*
-	outcomeMapDone       // r.mapRes.Value() carries the typed value; wrapper type-asserts
+	outcomeMapDone       // versionMap hit; the path's typed map*Val field carries the value
 	outcomeReadSetHit    // a prior read matched; typed wrapper re-fetches it via GetX
 	outcomeStorageRead   // r.so resolved; wrapper does typed storage read + records r.hdr
 	outcomeReturnZero    // typed wrapper returns the path-typed zero value
@@ -119,17 +119,22 @@ type readPathResult struct {
 	vwCodeSize       *VersionedWrite[int]
 	vwStorage        *VersionedWrite[uint256.Int]
 
-	mapRes ReadResult   // outcomeMapDone — generic fallback (value via .Value() any)
-	so     *stateObject // outcomeStorageRead / outcomeLegacyStorage
+	so *stateObject // outcomeStorageRead / outcomeLegacyStorage
 
-	// mapStorageVal is the typed StoragePath value captured under the
-	// versionmap read lock when versionedReadCore took the StoragePath
-	// fast-path (vm.ReadStorageCell). When mapStorageValOK is true on
-	// outcomeMapDone, wrappers prefer it over the any-typed mapRes.Value().
-	// Storing a value (not a *WriteCell pointer) keeps readers race-free
-	// against a concurrent FlushVersionedWrites that mutates cell.Value.
-	mapStorageVal   uint256.Int
-	mapStorageValOK bool
+	// Typed map-read values: the wrapper reads its path's field directly,
+	// avoiding the any-box (a heap alloc per non-storage read) the generic
+	// ReadResult.value would impose. Value, not *WriteCell, so reads are
+	// race-free against a concurrent FlushVersionedWrites mutating cell.Value.
+	mapAddressVal        *accounts.Account
+	mapBalanceVal        uint256.Int
+	mapNonceVal          uint64
+	mapIncarnationVal    uint64
+	mapSelfDestructVal   bool
+	mapCreateContractVal bool
+	mapCodeVal           []byte
+	mapCodeHashVal       accounts.CodeHash
+	mapCodeSizeVal       int
+	mapStorageVal        uint256.Int
 
 	// hdr is the skeleton header for the wrapper to record (with its typed
 	// value) via the typed recordX path when recordVR is true.
@@ -138,12 +143,6 @@ type readPathResult struct {
 
 	source  ReadSource
 	version Version
-
-	// destructedVersion: set when the SD short-circuit was bypassed by
-	// the writeSet's SelfDestructPath=false case (C.7) so that the
-	// later D.1 dependency check can compare against it.  Not consumed
-	// by the wrapper.
-	destructedVersion Version //nolint:unused // documents the bridge; consumed inside core only
 
 	err error
 }
@@ -237,7 +236,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// surfaces a stale pre-SD nonce/codeHash for an account revived only via
 		// BalancePath.
 		revived := false
-		if pathRevival := s.versionMap.Read(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
+		if pathRevival := s.versionMap.ReadStatus(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
 			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
 			revived = true
 		}
@@ -277,22 +276,33 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 	}
 
-	// Stage-3 probe: for StoragePath, take the typed cell path that
-	// avoids re-boxing via ReadResult.Value() any.  Other paths use the
-	// generic Read whose ReadResult.value is already the typed value
-	// captured at write time (legacy boxing tolerated for now).
+	// Dispatch to the path's typed ReadX: returns T directly plus a ReadResult
+	// (Status/DepIdx/Incarnation), never an any-boxed value — the box the
+	// generic Read does is a heap alloc per non-storage read. On a miss ReadX
+	// returns a pre-seeded (UnknownDep, -1) result, so res is always valid.
 	var res ReadResult
-	if path == StoragePath {
-		val, r2, ok := s.versionMap.ReadStorageCell(addr, key, s.txIndex)
-		if ok {
-			res = r2
-			r.mapStorageVal = val
-			r.mapStorageValOK = true
-		} else {
-			res.depIdx = UnknownDep
-			res.incarnation = -1
-		}
-	} else {
+	switch path {
+	case AddressPath:
+		r.mapAddressVal, res, _ = s.versionMap.ReadAddress(addr, s.txIndex)
+	case BalancePath:
+		r.mapBalanceVal, res, _ = s.versionMap.ReadBalance(addr, s.txIndex)
+	case NoncePath:
+		r.mapNonceVal, res, _ = s.versionMap.ReadNonce(addr, s.txIndex)
+	case IncarnationPath:
+		r.mapIncarnationVal, res, _ = s.versionMap.ReadIncarnation(addr, s.txIndex)
+	case CodePath:
+		r.mapCodeVal, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
+	case CodeHashPath:
+		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
+	case CodeSizePath:
+		r.mapCodeSizeVal, res, _ = s.versionMap.ReadCodeSize(addr, s.txIndex)
+	case SelfDestructPath:
+		r.mapSelfDestructVal, res, _ = s.versionMap.ReadSelfDestruct(addr, s.txIndex)
+	case CreateContractPath:
+		r.mapCreateContractVal, res, _ = s.versionMap.ReadCreateContract(addr, s.txIndex)
+	case StoragePath:
+		r.mapStorageVal, res, _ = s.versionMap.ReadStorageCell(addr, key, s.txIndex)
+	default:
 		res = s.versionMap.Read(addr, path, key, s.txIndex)
 	}
 
@@ -368,7 +378,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			}
 		}
 		r.outcome = outcomeMapDone
-		r.mapRes = res
 		r.hdr = hdr
 		r.recordVR = true
 		r.source = MapRead
@@ -551,10 +560,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 		return nil, r.source, r.version, nil
 	case outcomeMapDone:
-		acc, ok := r.mapRes.Value().(*accounts.Account)
-		if !ok {
-			return nil, UnknownSource, r.version, fmt.Errorf("versionedRead AddressPath: unexpected value type %T", r.mapRes.Value())
-		}
+		acc := r.mapAddressVal
 		if r.recordVR {
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
 		}
@@ -584,10 +590,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 		tr, _ := s.versionedReads.GetBalance(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint256.Int)
-		if !ok {
-			return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead BalancePath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapBalanceVal
 		if r.recordVR {
 			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, v})
 		}
@@ -629,11 +632,7 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 		tr, _ := s.versionedReads.GetBalance(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint256.Int)
-		if !ok {
-			return currentBalance, UnknownSource, r.version, fmt.Errorf("versionedRead BalancePath: unexpected value type %T", r.mapRes.Value())
-		}
-		return v, r.source, r.version, nil
+		return r.mapBalanceVal, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, currentBalance})
@@ -655,10 +654,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 		tr, _ := s.versionedReads.GetNonce(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint64)
-		if !ok {
-			return 0, UnknownSource, r.version, fmt.Errorf("versionedRead NoncePath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapNonceVal
 		if r.recordVR {
 			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, v})
 		}
@@ -694,11 +690,7 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 		tr, _ := s.versionedReads.GetNonce(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint64)
-		if !ok {
-			return currentNonce, UnknownSource, r.version, fmt.Errorf("versionedRead NoncePath: unexpected value type %T", r.mapRes.Value())
-		}
-		return v, r.source, r.version, nil
+		return r.mapNonceVal, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, currentNonce})
@@ -720,10 +712,7 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 		tr, _ := s.versionedReads.GetIncarnation(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint64)
-		if !ok {
-			return 0, UnknownSource, r.version, fmt.Errorf("versionedRead IncarnationPath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapIncarnationVal
 		if r.recordVR {
 			s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, v})
 		}
@@ -759,11 +748,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 		tr, _ := s.versionedReads.GetIncarnation(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint64)
-		if !ok {
-			return currentIncarnation, UnknownSource, r.version, fmt.Errorf("versionedRead IncarnationPath: unexpected value type %T", r.mapRes.Value())
-		}
-		return v, r.source, r.version, nil
+		return r.mapIncarnationVal, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, currentIncarnation})
@@ -786,10 +771,7 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 		tr, _ := s.versionedReads.GetCode(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := mapResCodeBytes(r.mapRes.Value())
-		if !ok {
-			return nil, UnknownSource, r.version, fmt.Errorf("versionedRead CodePath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapCodeVal
 		if r.recordVR {
 			s.versionedReads.SetCode(addr, VersionedRead[[]byte]{r.hdr, v})
 		}
@@ -821,19 +803,6 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 	return nil, r.source, r.version, nil
 }
 
-// mapResCodeBytes extracts the bytes from a versionMap CodePath read result.
-// CodePath WriteCells still carry []byte (versionmap.go internal type), but
-// VersionedWrite-derived values now carry accounts.Code; accept either.
-func mapResCodeBytes(v any) ([]byte, bool) {
-	switch x := v.(type) {
-	case []byte:
-		return x, true
-	case accounts.Code:
-		return x.Bytes, true
-	}
-	return nil, false
-}
-
 // refreshCode is the in-memory-only variant for CodePath.
 // CodePath is never recorded via the skipStorage branch in legacy
 // (the `path != CodePath` guard), so no recording on the default case.
@@ -850,11 +819,7 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) ([]byte, ReadSource,
 		tr, _ := s.versionedReads.GetCode(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := mapResCodeBytes(r.mapRes.Value())
-		if !ok {
-			return nil, UnknownSource, r.version, fmt.Errorf("versionedRead CodePath: unexpected value type %T", r.mapRes.Value())
-		}
-		return v, r.source, r.version, nil
+		return r.mapCodeVal, r.source, r.version, nil
 	}
 	return nil, r.source, r.version, nil
 }
@@ -873,10 +838,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 		tr, _ := s.versionedReads.GetCodeSize(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(int)
-		if !ok {
-			return 0, UnknownSource, r.version, fmt.Errorf("versionedRead CodeSizePath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapCodeSizeVal
 		if r.recordVR {
 			s.versionedReads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
 		}
@@ -911,10 +873,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 		tr, _ := s.versionedReads.GetCodeHash(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(accounts.CodeHash)
-		if !ok {
-			return accounts.NilCodeHash, UnknownSource, r.version, fmt.Errorf("versionedRead CodeHashPath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapCodeHashVal
 		if r.recordVR {
 			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, v})
 		}
@@ -953,11 +912,7 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 		tr, _ := s.versionedReads.GetCodeHash(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(accounts.CodeHash)
-		if !ok {
-			return currentHash, UnknownSource, r.version, fmt.Errorf("versionedRead CodeHashPath: unexpected value type %T", r.mapRes.Value())
-		}
-		return v, r.source, r.version, nil
+		return r.mapCodeHashVal, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, currentHash})
@@ -979,16 +934,7 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 		tr, _ := s.versionedReads.GetStorage(addr, key)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		var v uint256.Int
-		if r.mapStorageValOK {
-			v = r.mapStorageVal
-		} else {
-			vAny, ok := r.mapRes.Value().(uint256.Int)
-			if !ok {
-				return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
-			}
-			v = vAny
-		}
+		v := r.mapStorageVal
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
@@ -1029,16 +975,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		tr, _ := s.versionedReads.GetStorage(addr, key)
 		return tr.Val, r.source, r.version, false, nil
 	case outcomeMapDone:
-		var v uint256.Int
-		if r.mapStorageValOK {
-			v = r.mapStorageVal
-		} else {
-			vAny, ok := r.mapRes.Value().(uint256.Int)
-			if !ok {
-				return uint256.Int{}, UnknownSource, r.version, false, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
-			}
-			v = vAny
-		}
+		v := r.mapStorageVal
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
@@ -1077,16 +1014,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		tr, _ := s.versionedReads.GetStorage(addr, key)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		var v uint256.Int
-		if r.mapStorageValOK {
-			v = r.mapStorageVal
-		} else {
-			vAny, ok := r.mapRes.Value().(uint256.Int)
-			if !ok {
-				return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
-			}
-			v = vAny
-		}
+		v := r.mapStorageVal
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
@@ -1128,10 +1056,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 		tr, _ := s.versionedReads.GetSelfDestruct(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(bool)
-		if !ok {
-			return false, UnknownSource, r.version, fmt.Errorf("versionedRead SelfDestructPath: unexpected value type %T", r.mapRes.Value())
-		}
+		v := r.mapSelfDestructVal
 		if r.recordVR {
 			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
 		}
@@ -1177,11 +1102,7 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 		tr, _ := s.versionedReads.GetSelfDestruct(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(bool)
-		if !ok {
-			return false, UnknownSource, r.version, fmt.Errorf("versionedRead SelfDestructPath: unexpected value type %T", r.mapRes.Value())
-		}
-		return v, r.source, r.version, nil
+		return r.mapSelfDestructVal, r.source, r.version, nil
 	}
 	if r.recordVR {
 		// SelfDestructPath defaultV is false — the zero value.
@@ -1212,11 +1133,7 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 		}
 		return nil, r.source, r.version, nil
 	case outcomeMapDone:
-		acc, ok := r.mapRes.Value().(*accounts.Account)
-		if !ok {
-			return nil, UnknownSource, r.version, fmt.Errorf("versionedRead AddressPath: unexpected value type %T", r.mapRes.Value())
-		}
-		return acc, r.source, r.version, nil
+		return r.mapAddressVal, r.source, r.version, nil
 	}
 	if r.recordVR {
 		// AddressPath defaultV is nil.

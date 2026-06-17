@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -517,4 +518,127 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDependency, res2.Status(),
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
+}
+
+func validateEqualVersion(readVersion, writeVersion Version) VersionValidity {
+	if readVersion == writeVersion {
+		return VersionValid
+	}
+	return VersionInvalid
+}
+
+// TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath covers the
+// validateReadImpl AddressPath→IncarnationPath cross-check (versionmap.go): a
+// prior tx created the account (writing IncarnationPath, which the BAL does not
+// pre-populate), so a speculative storage-fallback AddressPath read is stale and
+// must invalidate. Restored after the typed-vio rework removed the original.
+func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(99)
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+	// Post-flush state after tx 0 creates the account: BAL pre-populated
+	// Balance/Nonce/CodeHash; the worker additionally flushed Incarnation
+	// (CreateAccount writes it, BAL does not). AddressPath was BAL-filtered out.
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, NoncePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, uint64(0), true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, uint64(1), true)
+
+	// Tx 1 speculatively read AddressPath from storage (no map entry at exec).
+	io := NewVersionedIO(2)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+	})
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, rs)
+
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, false, ""),
+		"a prior IncarnationPath write (account created) must invalidate the stale AddressPath storage read")
+}
+
+// TestValidateRead_SDStaleness_InvalidatesPreDestructRead covers the
+// validateReadImpl SD-staleness branch: a later tx self-destructed the account
+// with no revival, so a version-consistent pre-destruct BalancePath read is
+// stale and must invalidate. Restored after the typed-vio rework.
+func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(77)
+
+	vm := NewVersionMap(nil)
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2, Incarnation: 0}, true, true)
+
+	// Tx 5 read BalancePath as a MapRead at (0,0) — consistent on Balance alone,
+	// but stale because tx 2's destruct came after.
+	io := NewVersionedIO(5)
+	rs := ReadSet{}
+	rs.SetBalance(addr, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0, Incarnation: 0}},
+		Val:        *uint256.NewInt(1_000),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
+		"a later self-destruct with no revival must invalidate the pre-destruct BalancePath read")
+}
+
+// TestValidateRead_SDStaleness_RevivalKeepsReadValid is the converse: a revival
+// write (NoncePath) after the destruct re-creates the account, so the
+// pre-destruct read stays valid. Guards the revivalLimit branch.
+func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(78)
+
+	vm := NewVersionMap(nil)
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	vm.Write(addr, NoncePath, accounts.NilKey, Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
+
+	io := NewVersionedIO(5)
+	rs := ReadSet{}
+	rs.SetBalance(addr, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0, Incarnation: 0}},
+		Val:        *uint256.NewInt(1_000),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	require.Equal(t, VersionValid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
+		"a revival write after the destruct re-creates the account — the read stays valid")
+}
+
+// TestVersionedWritePoolReuse_NoStaleFields guards the *VersionedWrite[T] pool
+// invariant: getVW* returns a recycled cell that may still hold a prior write's
+// contents, so the record path MUST wholesale-overwrite it. recordWrite* does
+// `vw.WriteHeader = WriteHeader{...}` (a full struct literal, which zeroes every
+// field it omits) plus `vw.Val = …`. This test poisons every field of a recycled
+// cell and applies that exact assignment, asserting nothing from the prior write
+// survives — including Key/Reason, which a balance write omits and which a
+// field-by-field assignment would leak.
+func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
+	t.Parallel()
+
+	recycled := &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{
+			Address: getAddress(1),
+			Path:    NoncePath,
+			Key:     accounts.InternKey([32]byte{0xff}),
+			Version: Version{TxIndex: 999, Incarnation: 7},
+			Reason:  tracing.BalanceChangeReason(0xab),
+		},
+		Val: *uint256.NewInt(0xdead),
+	}
+
+	addr := getAddress(2)
+	want := *uint256.NewInt(42)
+	ver := Version{TxIndex: 3, Incarnation: 1}
+	recycled.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ver}
+	recycled.Val = want
+
+	require.Equal(t, addr, recycled.Address, "Address must not retain the recycled value")
+	require.Equal(t, BalancePath, recycled.Path, "Path must not retain the recycled value")
+	require.Equal(t, accounts.StorageKey{}, recycled.Key, "Key must reset to zero (BalancePath has no key)")
+	require.Equal(t, ver, recycled.Version, "Version must not retain the recycled value")
+	require.Equal(t, tracing.BalanceChangeReason(0), recycled.Reason, "Reason must reset to zero")
+	require.True(t, recycled.Val.Eq(&want), "Val must not retain the recycled value")
 }
