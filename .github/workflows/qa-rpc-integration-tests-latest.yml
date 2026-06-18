@@ -215,7 +215,7 @@ jobs:
             echo ""
             echo "## Failed Tests"
             echo '```'
-            grep -E "Attempt [0-9]|Latest batch|failed:" "$LOG_FILE" || echo "(none)"
+            grep -E "Attempt [0-9]|Latest batch|failed:|sync on latest block" "$LOG_FILE" || echo "(none)"
             echo '```'
             echo ""
             echo "## Final Statistics"
