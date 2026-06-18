@@ -45,7 +45,6 @@ func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
 	assert.Equal(t, VariantConcurrentHexPatricia, ParseTrieVariant("hex-parallel"))
-	assert.Equal(t, VariantBinPatriciaTrie, ParseTrieVariant("bin"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("nonsense"))
 }
 
@@ -114,15 +113,6 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		assert.False(t, p.template.traceDomain)
 	})
 
-	t.Run("EnableWarmupCache", func(t *testing.T) {
-		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-
-		p.EnableWarmupCache(true)
-		assert.True(t, p.template.enableWarmupCache)
-		p.EnableWarmupCache(false)
-		assert.False(t, p.template.enableWarmupCache)
-	})
-
 	t.Run("CaptureRoundTrip", func(t *testing.T) {
 		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
@@ -162,7 +152,6 @@ func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 	require.NotPanics(t, func() {
 		p.SetTrace(true)
 		p.SetTraceDomain(true)
-		p.EnableWarmupCache(true)
 		p.SetCapture(nil)
 		_ = p.GetCapture(false)
 		p.EnableCsvMetrics("")

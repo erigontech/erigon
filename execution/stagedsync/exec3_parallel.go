@@ -237,14 +237,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Trie warmup left enabled for the parallel path. Original disable was
-	// based on a calculator/warmer interaction concern that turned out to be
-	// overly conservative — the Warmuper's reads are independent of the
-	// calculator's SetUpdates call. Removing the disable produced an 8×
-	// throughput improvement on the perf-devnet-3 SSTORE-bloated benchmark
-	// (block 24358306) by letting the Warmuper pre-fetch branch data while
-	// EVM execution runs. See #20920 for the canonical perf measurement.
-
 	// Skip step-boundary commitment — the calculator handles this.
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
 	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
@@ -1205,6 +1197,16 @@ func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
 	return valid && cntInvalid == 0
 }
 
+// wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
+// preserving the real origErr as OriginError instead of the zero-value an
+// inline type-assertion would substitute on the failure branch.
+func wrapAsExecAbort(origErr error, depTxIndex int) error {
+	if _, ok := origErr.(protocol.ErrExecAbortError); ok {
+		return origErr
+	}
+	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
+}
+
 // execLoopExitDecision is the result of evaluating the exec-loop's
 // per-blockResult exit conditions. Values are ordered by precedence:
 // later conditions only matter if no earlier one fired.
@@ -1944,9 +1946,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
-		if err, ok := result.Err.(protocol.ErrExecAbortError); !ok {
-			result.Err = protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
-		}
+		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
 	}
 
 	if result.Err != nil {

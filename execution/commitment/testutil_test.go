@@ -20,12 +20,9 @@
 package commitment
 
 import (
-	"bytes"
 	"context"
 	"math/bits"
 	"math/rand"
-	"sort"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -114,73 +111,6 @@ func fixtureBaseWithCode() *UpdateBuilder {
 	return fixtureBaseAccounts().
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1237).
 		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
-}
-
-var keyGenCounter atomic.Int64
-
-// generateKeyWithHashedPrefix brute-forces a random keyLen-byte plain key whose nibblized
-// keccak hash starts with constHashedPrefixNibbles.
-func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
-	plainKey = make([]byte, keyLen)
-	rnd := rand.New(rand.NewSource(keyGenCounter.Add(1)))
-	for {
-		rnd.Read(plainKey[:keyLen])
-		hashedKey := KeyToNibblizedHash(plainKey)
-		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
-			return plainKey, hashedKey
-		}
-	}
-}
-
-// generatePlainKeysWithSameHashPrefix generates keyCount plain keys whose nibblized keccak
-// hashes share the first prefixLen nibbles (and optionally start with constPrefixNibbles).
-// Longer prefixLen makes the brute-force search exponentially slower; keep it <= ~5 nibbles.
-func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
-	tb.Helper()
-	plainKeys = make([][]byte, 0, keyCount)
-	hashedKeys = make([][]byte, 0, keyCount)
-	for {
-		key, hashed := generateKeyWithHashedPrefix(constPrefixNibbles, keyLen)
-		if len(plainKeys) == 0 {
-			plainKeys = append(plainKeys, key)
-			hashedKeys = append(hashedKeys, hashed)
-			if keyCount == 1 {
-				break
-			}
-			continue
-		}
-		if bytes.Equal(hashed[:prefixLen], hashedKeys[0][:prefixLen]) {
-			plainKeys = append(plainKeys, key)
-			hashedKeys = append(hashedKeys, hashed)
-		}
-		if len(plainKeys) == keyCount {
-			break
-		}
-	}
-	return plainKeys, hashedKeys
-}
-
-// sortUpdatesByHashIncrease reorders plainKeys/updates by increasing hashed key, the order in
-// which Process visits them.
-func sortUpdatesByHashIncrease(t *testing.T, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
-	t.Helper()
-
-	ku := make([]*KeyUpdate, len(plainKeys))
-	for i, pk := range plainKeys {
-		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
-	}
-
-	sort.Slice(ku, func(i, j int) bool {
-		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
-	})
-
-	pks := make([][]byte, len(ku))
-	upds := make([]Update, len(ku))
-	for i, u := range ku {
-		pks[i] = []byte(u.plainKey)
-		upds[i] = *u.update
-	}
-	return pks, upds
 }
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {

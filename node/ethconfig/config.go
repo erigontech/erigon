@@ -63,7 +63,7 @@ func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
-	Default:          uint256.NewInt(0),
+	Default:          uint256.NewInt(common.GWei / 1000),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,

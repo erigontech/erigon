@@ -804,6 +804,78 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// recordingCtx captures Branch call count and PutBranch arguments for assertions.
+type recordingCtx struct {
+	branchCalls int
+	puts        []struct{ prefix, data, prev []byte }
+}
+
+func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) {
+	r.branchCalls++
+	return nil, 0, nil
+}
+func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
+	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
+		common.Copy(prefix), common.Copy(data), common.Copy(prev),
+	})
+	return nil
+}
+func (r *recordingCtx) Account(_ []byte) (*Update, error) { return nil, nil }
+func (r *recordingCtx) Storage(_ []byte) (*Update, error) { return nil, nil }
+func (r *recordingCtx) TxNum() uint64                     { return 0 }
+
+func TestCollectUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
+	t.Parallel()
+	prefix := []byte{0xab, 0xcd}
+	row, bm := generateCellRow(t, 4)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	// isNew=false: Branch is probed but returns nil (key doesn't exist yet)
+	ctxA := &recordingCtx{}
+	beA := NewBranchEncoder(1024)
+	require.NoError(t, beA.CollectUpdate(ctxA, prefix, bm, bm, bm, &cells, false))
+	require.Equal(t, 1, ctxA.branchCalls, "isNew=false must probe Branch")
+	require.Len(t, ctxA.puts, 1)
+
+	// isNew=true: Branch must not be called, but PutBranch output must be identical
+	ctxB := &recordingCtx{}
+	beB := NewBranchEncoder(1024)
+	require.NoError(t, beB.CollectUpdate(ctxB, prefix, bm, bm, bm, &cells, true))
+	require.Equal(t, 0, ctxB.branchCalls, "isNew=true must not probe Branch")
+	require.Len(t, ctxB.puts, 1)
+
+	require.Equal(t, ctxA.puts[0].data, ctxB.puts[0].data)
+	require.Equal(t, ctxA.puts[0].prev, ctxB.puts[0].prev)
+}
+
+func TestCollectDeferredUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
+	t.Parallel()
+	prefix := []byte{0x11, 0x22}
+	row, bm := generateCellRow(t, 4)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	// isNew=false: Branch is probed but returns nil
+	ctxA := &recordingCtx{}
+	beA := NewBranchEncoder(1024)
+	beA.setDeferUpdates(true)
+	require.NoError(t, beA.CollectDeferredUpdate(ctxA, prefix, bm, bm, bm, &cells, false))
+	require.NoError(t, beA.ApplyDeferredUpdates(1, ctxA.PutBranch))
+	require.Equal(t, 1, ctxA.branchCalls, "isNew=false must probe Branch")
+	require.Len(t, ctxA.puts, 1)
+
+	// isNew=true: Branch must not be called, deferred output must match
+	ctxB := &recordingCtx{}
+	beB := NewBranchEncoder(1024)
+	beB.setDeferUpdates(true)
+	require.NoError(t, beB.CollectDeferredUpdate(ctxB, prefix, bm, bm, bm, &cells, true))
+	require.NoError(t, beB.ApplyDeferredUpdates(1, ctxB.PutBranch))
+	require.Equal(t, 0, ctxB.branchCalls, "isNew=true must not probe Branch")
+	require.Len(t, ctxB.puts, 1)
+
+	require.Equal(t, ctxA.puts[0].data, ctxB.puts[0].data)
+	require.Equal(t, ctxA.puts[0].prev, ctxB.puts[0].prev)
+}
+
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 

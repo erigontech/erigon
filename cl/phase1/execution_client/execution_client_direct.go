@@ -82,14 +82,14 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
-	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil); err != nil {
+	startInsertBlock := time.Now()
+	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
 		return PayloadStatusNone, err
 	}
-	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlockAndWait)
+	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlock)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
@@ -158,15 +158,12 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte, wait bool) error {
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks, bals)
-	}
+func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
 }
 
 func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block, bal []byte) error {
-	return cc.chainRW.InsertBlockAndWait(ctx, blk, bal)
+	return cc.chainRW.InsertBlock(ctx, blk, bal)
 }
 
 func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Header, error) {

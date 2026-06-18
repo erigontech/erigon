@@ -169,12 +169,6 @@ func (p *ParallelPatriciaHashed) SetTraceDomain(b bool) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) EnableWarmupCache(b bool) {
-	if p.template != nil {
-		p.template.EnableWarmupCache(b)
-	}
-}
-
 func (p *ParallelPatriciaHashed) GetCapture(truncate bool) []string {
 	if p.template == nil {
 		return nil
@@ -265,20 +259,14 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
-	// The warmup cache must be exposed on the template so workers inherit it; otherwise its prefetches are wasted.
 	var warmuper *Warmuper
 	if warmup.Enabled && dbg.EnvWarmupParallelProcess {
 		if warmup.CtxFactory == nil {
 			warmup.CtxFactory = p.trieCtxFactory
 		}
-		warmup.EnableWarmupCache = p.template.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
-		if warmup.EnableWarmupCache {
-			p.template.cache = warmuper.Cache()
-			defer func() { p.template.cache = nil }()
-		}
 	}
 
 	rh, mErr := p.processMounted(ctx, updates)
