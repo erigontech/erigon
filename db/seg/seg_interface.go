@@ -16,6 +16,8 @@
 
 package seg
 
+import "fmt"
+
 type FileCompression uint8
 
 const (
@@ -49,8 +51,18 @@ func (m *FeatureFlagBitmask) Set(flag FeatureFlag) {
 }
 
 func ParseFileCompression(s string) (FileCompression, error) {
-	// Implementation would be here
-	return CompressNone, nil
+	switch s {
+	case "", "none":
+		return CompressNone, nil
+	case "k", "keys":
+		return CompressKeys, nil
+	case "v", "vals":
+		return CompressVals, nil
+	case "kv", "keys+vals":
+		return CompressKeys | CompressVals, nil
+	default:
+		return CompressNone, fmt.Errorf("unknown file compression %q (want: none, k, v, kv)", s)
+	}
 }
 
 func (c FileCompression) Has(flag FileCompression) bool {

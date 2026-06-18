@@ -17,23 +17,24 @@
 package migrations
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 )
 
-// UpgradeSegHeadersV2 patches all V1 snapshot files (both E3 state files and
-// block/caplin .seg files) to V2 in-place.  It is the manual equivalent of the
-// SegHeaderV2 + SegHeaderV2Seg migrations.  Run it once after upgrading:
+// segFormatExts are the extensions written by the seg Compressor that carry the
+// version/feature-flag header.
+var segFormatExts = map[string]bool{".kv": true, ".v": true, ".ef": true, ".seg": true}
+
+// UpgradeSegHeadersV2 patches every V1 seg-format snapshot file (.kv/.v/.ef/.seg)
+// to a V2 header in-place, recording the word-level key/val compression detected
+// from the file's contents. Run once after upgrading:
 //
 //	erigon snapshots upgrade-seg-headers --datadir=<path>
 func UpgradeSegHeadersV2(dirs datadir.Dirs, logger log.Logger) error {
@@ -45,65 +46,16 @@ func UpgradeSegHeadersV2(dirs datadir.Dirs, logger log.Logger) error {
 		dirs.SnapAccessors,
 		dirs.SnapCaplin,
 	} {
-		if err := upgradeAndSmokeTestSegFilesInDir(d, logger); err != nil {
-			return err
-		}
-	}
-	if err := upgradeAndSmokeTestDotSegFilesInDir(dirs.Snap, false, logger); err != nil {
-		return err
-	}
-	return upgradeAndSmokeTestDotSegFilesInDir(dirs.SnapCaplin, true, logger)
-}
-
-// SegHeaderV2 patches V1 .kv/.v/.ef snapshot headers to V2 in-place, recording
-// word-level key/val compression flags taken from the frozen segCompressionAtV2 table.
-var SegHeaderV2 = Migration{
-	Name: "seg_header_v2",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error {
-		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		snapDirs := []string{
-			dirs.Snap,
-			dirs.SnapDomain,
-			dirs.SnapHistory,
-			dirs.SnapIdx,
-			dirs.SnapAccessors,
-			dirs.SnapCaplin,
-		}
-		for _, dir := range snapDirs {
-			if err := upgradeAndSmokeTestSegFilesInDir(dir, logger); err != nil {
-				return err
+		if err := walkSegDir(d, func(path string) error {
+			if !segFormatExts[filepath.Ext(path)] {
+				return nil
 			}
-		}
-
-		if err := BeforeCommit(tx, nil, true); err != nil {
+			return upgradeSegFileToV2(path, logger)
+		}); err != nil {
 			return err
 		}
-		return tx.Commit()
-	},
-}
-
-// segDataExts are the file extensions written by the seg Compressor that
-// carry the version/featureFlag header.
-var segDataExts = map[string]bool{".kv": true, ".v": true, ".ef": true}
-
-// upgradeAndSmokeTestSegFilesInDir upgrades each eligible file in dir and
-// immediately smoke-tests it in a single directory walk.
-func upgradeAndSmokeTestSegFilesInDir(dir string, logger log.Logger) error {
-	return walkSegDir(dir, func(path string) error {
-		ext := filepath.Ext(path)
-		if !segDataExts[ext] {
-			return nil
-		}
-		if err := upgradeSegHeaderV1toV2(path, ext, logger); err != nil {
-			return err
-		}
-		return smokeTestSegFile(path, logger)
-	})
+	}
+	return nil
 }
 
 // walkSegDir invokes fn for each file under dir, treating a missing dir and
@@ -126,18 +78,12 @@ func walkSegDir(dir string, fn func(path string) error) error {
 	})
 }
 
-// removeStaleTorrents removes the .torrent and any partial torrent artifacts
-// (.torrent<suffix>) of a snapshot file whose bytes were just patched, so the
-// downloader regenerates correct ones.
-func removeStaleTorrents(path string) {
-	_ = dir.RemoveFilesByMask(path + ".torrent*")
-}
-
-// upgradeSegHeaderV1toV2 patches a single seg-format file to V2.
-// It is a no-op for V0 files (no version header). V1 and V2 files are both
-// patched so that a previously interrupted migration with a wrong bitmask is
-// corrected on re-run.
-func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
+// upgradeSegFileToV2 patches a single seg-format file to a V2 header. Compression
+// is detected from the file's contents because filename/range is unreliable: the
+// merger writes 10k-step files compressed while dumpRange writes sub-100k files
+// uncompressed. A read with the detected compression is validated before writing,
+// so a wrong guess aborts with the file untouched rather than half-patched.
+func upgradeSegFileToV2(path string, logger log.Logger) error {
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
 		return err
@@ -146,31 +92,45 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 		d.Close() // V0: no header to patch
 		return nil
 	}
-
 	pageCnt := d.CompressedPageValuesCount()
-	d.Close() // release mmap before writing
-
-	base := filepath.Base(path)
-	tag := segTag(base, ext)
-	fc, known := segCompressionAtV2[tag+ext]
-	if !known {
-		// Skip rather than patch a guessed header: an unknown tag's zero-value
-		// would claim CompressNone and make a compressed file unreadable.
-		logger.Warn("[seg_header_v2] skip (unknown tag)", "file", base)
-		return nil
+	fc := seg.DetectCompressType(d.MakeGetter())
+	if err := checkReadable(d, fc); err != nil {
+		d.Close()
+		return fmt.Errorf("[seg_header_v2] %s: %w", filepath.Base(path), err)
 	}
+	d.Close() // release mmap before writing
 
 	if err := setV2Header(path, v2Bitmask(pageCnt, fc)); err != nil {
 		return err
 	}
 	removeStaleTorrents(path)
-
-	logger.Debug("[seg_header_v2] upgraded", "file", base, "compression", fc)
+	logger.Debug("[seg_header_v2] upgraded", "file", filepath.Base(path), "compression", fc)
 	return nil
 }
 
-// v2Bitmask builds the V2 header bitmask from the page-value count and the
-// file's word-level key/val compression.
+// checkReadableMaxWords bounds the validation read so the migration stays fast on
+// large snapshot sets while still exercising the decompression path.
+const checkReadableMaxWords = 2_000
+
+// checkReadable reads a bounded prefix of d with the given compression, recovering
+// the decompressor's panic into an error if the words don't decode.
+func checkReadable(d *seg.Decompressor, fc seg.FileCompression) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("not readable as compression=%v: %v", fc, rec)
+		}
+	}()
+	r := seg.NewReader(d.MakeGetter(), fc)
+	r.Reset(0)
+	buf := make([]byte, 0, 4096)
+	for i := 0; i < checkReadableMaxWords && r.HasNext(); i++ {
+		_, _ = r.Next(buf[:0])
+	}
+	return nil
+}
+
+// v2Bitmask builds the V2 header bitmask from the page-value count and the file's
+// word-level key/val compression.
 func v2Bitmask(pageCnt int, fc seg.FileCompression) seg.FeatureFlagBitmask {
 	var b seg.FeatureFlagBitmask
 	if pageCnt > 0 {
@@ -185,9 +145,16 @@ func v2Bitmask(pageCnt int, fc seg.FileCompression) seg.FeatureFlagBitmask {
 	return b
 }
 
-// setV2Header writes the V2 version byte and bitmask at offset 0.
-// Snapshot files are read-only (0444), so it temporarily adds the owner-write
-// bit and restores the original permissions afterwards.
+// removeStaleTorrents removes the .torrent and any partial torrent artifacts
+// (.torrent<suffix>) of a snapshot file whose bytes were just patched, so the
+// downloader regenerates correct ones.
+func removeStaleTorrents(path string) {
+	_ = dir.RemoveFilesByMask(path + ".torrent*")
+}
+
+// setV2Header writes the V2 version byte and bitmask at offset 0. Snapshot files
+// are read-only (0444), so it temporarily adds the owner-write bit and restores
+// the original permissions afterwards.
 func setV2Header(path string, bitmask seg.FeatureFlagBitmask) error {
 	return withWritePerm(path, func(f *os.File) error {
 		_, err := f.WriteAt([]byte{seg.FileCompressionFormatV2, byte(bitmask)}, 0)
@@ -219,93 +186,4 @@ func withWritePerm(path string, fn func(*os.File) error) error {
 		return fnErr
 	}
 	return syncErr
-}
-
-// segTag extracts the filename base from an E3 snapshot name laid out as
-// "{version}-{name}.{from}-{to}.{ext}", e.g. "v2.0-accounts.0-128.kv" → "accounts".
-func segTag(base, ext string) string {
-	withoutExt := base[:len(base)-len(ext)]
-	dashIdx := strings.Index(withoutExt, "-")
-	if dashIdx < 0 {
-		return ""
-	}
-	nameAndRange := withoutExt[dashIdx+1:]
-	dotIdx := strings.Index(nameAndRange, ".")
-	if dotIdx < 0 {
-		return nameAndRange
-	}
-	return nameAndRange[:dotIdx]
-}
-
-// segCompressionAtV2 freezes the per-file compression in effect when this
-// migration was written, keyed by "{filenameBase}{ext}"; it deliberately does
-// not read statecfg.Schema so later schema changes cannot alter patched files.
-var segCompressionAtV2 = map[string]seg.FileCompression{
-	// --- accounts ---
-	"accounts.kv": seg.CompressNone,
-	"accounts.v":  seg.CompressNone,
-	"accounts.ef": seg.CompressNone,
-	// --- storage ---
-	"storage.kv": seg.CompressKeys,
-	"storage.v":  seg.CompressNone,
-	"storage.ef": seg.CompressNone,
-	// --- code ---
-	"code.kv": seg.CompressVals,
-	"code.v":  seg.CompressKeys | seg.CompressVals,
-	"code.ef": seg.CompressNone,
-	// --- commitment ---
-	"commitment.kv": seg.CompressKeys,
-	"commitment.v":  seg.CompressNone,
-	"commitment.ef": seg.CompressNone,
-	// --- receipt ---
-	"receipt.kv": seg.CompressNone,
-	"receipt.v":  seg.CompressNone,
-	"receipt.ef": seg.CompressNone,
-	// --- rcache ---
-	"rcache.kv": seg.CompressNone,
-	"rcache.v":  seg.CompressNone,
-	"rcache.ef": seg.CompressNone,
-	// --- standalone inverted indexes ---
-	"logaddrs.ef":   seg.CompressNone,
-	"logtopics.ef":  seg.CompressNone,
-	"tracesfrom.ef": seg.CompressNone,
-	"tracesto.ef":   seg.CompressNone,
-}
-
-// smokeTestSegFile reads a bounded prefix of a patched V2 file via NewReader; a
-// wrong bitmask makes decompression panic, which is recovered into an error.
-const smokeTestMaxWords = 2_000
-
-func smokeTestSegFile(path string, logger log.Logger) (retErr error) {
-	dec, err := seg.NewDecompressor(path)
-	if err != nil {
-		return fmt.Errorf("error creating decompressor: %v, %s", err, path)
-	}
-	defer dec.Close()
-
-	if dec.CompressionFormatVersion() < seg.FileCompressionFormatV2 {
-		return nil // not upgraded (V0), skip
-	}
-
-	fc, _ := dec.WordLevelCompression()
-	defer func() {
-		if rec := recover(); rec != nil {
-			retErr = fmt.Errorf("smoke-test panic (wrong bitmask?): %v, file=%s, compression=%v", rec, path, fc)
-		}
-	}()
-
-	logger.Debug("[seg_header_v2] smoke-test", "file", filepath.Base(path))
-	g := dec.MakeGetter()
-	r := seg.NewReader(g, seg.CompressNone) // NewReader reads WordLevelCompression from header
-	r.Reset(0)
-	// Keep the scratch buffer separate from the return value: for mixed-compression
-	// files Next returns an mmap-backed slice for uncompressed words, and feeding
-	// that back as the append buffer for the next compressed word writes into the
-	// read-only mmap (SIGBUS).
-	buf := make([]byte, 0, 4096)
-	for i := 0; i < smokeTestMaxWords && r.HasNext(); i++ {
-		_, _ = r.Next(buf[:0])
-	}
-	logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
-	return nil
 }
