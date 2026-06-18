@@ -87,9 +87,9 @@ func setupTriePair(t *testing.T) (*MockState, *MockState, *HexPatriciaHashed, *C
 	seqMs := NewMockState(t)
 	parMs := NewMockState(t)
 
-	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs)
+	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
 	parMs.SetConcurrentCommitment(true)
-	parTrieInner := NewHexPatriciaHashed(length.Addr, parMs)
+	parTrieInner := NewHexPatriciaHashed(length.Addr, parMs, DefaultTrieConfig())
 	parTrie := NewConcurrentPatriciaHashed(parTrieInner, parMs)
 
 	return seqMs, parMs, seqTrie, parTrie

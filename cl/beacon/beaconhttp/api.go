@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -127,7 +129,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		if slices.Contains(w.Header().Values("Content-Type"), "text/event-stream") {
 			return
 		}
-		if beaconResponse, ok := any(ans).(*BeaconResponse); ok {
+		if beaconResponse, ok := any(ans).(*BeaconResponse); ok && beaconResponse != nil {
 			for key, value := range beaconResponse.Headers() {
 				w.Header().Set(key, value)
 			}
@@ -137,8 +139,8 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
 			}
 		}
-		switch {
-		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
+		switch responseEncodingForAccept(contentType, supportsSSZ(ans)) {
+		case responseEncodingJSON:
 			if !isNil(ans) {
 				w.Header().Set("Content-Type", "application/json")
 				err := json.NewEncoder(w).Encode(ans)
@@ -149,7 +151,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			} else {
 				w.WriteHeader(200)
 			}
-		case strings.Contains(contentType, "application/octet-stream"):
+		case responseEncodingSSZ:
+			if !supportsSSZ(ans) {
+				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
+				return
+			}
 			sizeMarshaller, ok := any(ans).(ssz.Marshaler)
 			if !ok {
 				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
@@ -163,12 +169,102 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				return
 			}
 			w.Write(encoded)
-		case strings.Contains(contentType, "text/event-stream"):
+		case responseEncodingEventStream:
 			return
 		default:
 			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusBadRequest)
 		}
 	}
+}
+
+// WillEncodeSSZ reports whether the given Accept header will cause
+// HandleEndpoint to use SSZ encoding. Mirrors the switch priority above.
+func WillEncodeSSZ(accept string) bool {
+	return responseEncodingForAccept(accept, true) == responseEncodingSSZ
+}
+
+type responseEncoding int
+
+const (
+	responseEncodingUnsupported responseEncoding = iota
+	responseEncodingJSON
+	responseEncodingSSZ
+	responseEncodingEventStream
+)
+
+func responseEncodingForAccept(accept string, sszSupported bool) responseEncoding {
+	if accept == "" {
+		return responseEncodingJSON
+	}
+
+	jsonQ, jsonOK := acceptQuality(accept, "application/json")
+	htmlQ, htmlOK := acceptQuality(accept, "text/html")
+	anyQ, anyOK := acceptQuality(accept, "*/*")
+	sszQ, sszOK := acceptQuality(accept, "application/octet-stream")
+	eventQ, eventOK := acceptQuality(accept, "text/event-stream")
+
+	hasExplicitJSON := (jsonOK && jsonQ > 0) || (htmlOK && htmlQ > 0)
+	explicitJSONQ := max(jsonQ, htmlQ)
+
+	if sszSupported && sszOK && sszQ > 0 {
+		switch {
+		case !jsonOK && !htmlOK && !anyOK:
+			return responseEncodingSSZ
+		case hasExplicitJSON && sszQ > explicitJSONQ:
+			return responseEncodingSSZ
+		case !hasExplicitJSON && anyOK && sszQ >= anyQ:
+			// Exact type beats wildcard at equal quality (RFC 9110 §12.5.1).
+			return responseEncodingSSZ
+		}
+	}
+	hasJSONAlternative := hasExplicitJSON || (anyOK && anyQ > 0)
+	hasEventStreamAlternative := eventOK && eventQ > 0
+	if !sszSupported && sszOK && sszQ > 0 && !hasJSONAlternative && !hasEventStreamAlternative {
+		return responseEncodingSSZ
+	}
+	if hasJSONAlternative {
+		return responseEncodingJSON
+	}
+	if hasEventStreamAlternative {
+		return responseEncodingEventStream
+	}
+	return responseEncodingUnsupported
+}
+
+func supportsSSZ(ans any) bool {
+	if beaconResponse, ok := ans.(*BeaconResponse); ok {
+		if beaconResponse == nil {
+			return false
+		}
+		_, ok = beaconResponse.Data.(ssz.Marshaler)
+		return ok
+	}
+	_, ok := ans.(ssz.Marshaler)
+	return ok
+}
+
+func acceptQuality(accept, target string) (float64, bool) {
+	var best float64
+	var found bool
+	for _, part := range strings.Split(accept, ",") {
+		mediaType, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil || mediaType != target {
+			continue
+		}
+		q := 1.0
+		if qValue, ok := params["q"]; ok {
+			parsed, err := strconv.ParseFloat(qValue, 64)
+			if err != nil {
+				parsed = 0
+			}
+			q = max(0, min(1, parsed))
+		}
+		if !found || q > best {
+			best = q
+		}
+		found = true
+	}
+	return best, found
 }
 
 func isNil[T any](t T) bool {

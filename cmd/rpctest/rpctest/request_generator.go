@@ -17,7 +17,6 @@
 package rpctest
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strings"
@@ -127,6 +126,31 @@ func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, account
 	return sb.String()
 }
 
+// getLogsForTopics builds a positional topic filter; nil at a position means "match any".
+func (g *RequestGenerator) getLogsForTopics(prevBn uint64, bn uint64, topics [][]common.Hash) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "topics": [`, prevBn, bn)
+	for i, posTopics := range topics {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		if posTopics == nil {
+			sb.WriteString("null")
+		} else {
+			sb.WriteByte('[')
+			for j, t := range posTopics {
+				if j > 0 {
+					sb.WriteByte(',')
+				}
+				fmt.Fprintf(&sb, `"0x%x"`, t)
+			}
+			sb.WriteByte(']')
+		}
+	}
+	fmt.Fprintf(&sb, `]}],"id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
+
 func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account common.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
@@ -154,8 +178,7 @@ func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account com
 
 func (g *RequestGenerator) accountRange(bn uint64, page []byte, num int) string { //nolint
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false], "id":%d}`
-	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, num, g.reqID.Add(1))
+	return fmt.Sprintf(template, bn, hexutil.Encode(page), num, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getProof(bn uint64, account common.Address, storageList []common.Hash) string {

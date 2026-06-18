@@ -389,6 +389,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		CoinbaseKey:          args.CoinbaseKey,
 		ChainConfig:          genesis.Config,
 		EngineApiClient:      engineApiClient,
+		JsonRpcUrl:           "http://" + rpcDaemonHttpUrl,
+		EngineApiUrl:         engineApiUrl,
+		JwtSecret:            jwtSecret,
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
@@ -419,6 +422,9 @@ type EngineApiTester struct {
 	CoinbaseKey          *ecdsa.PrivateKey
 	ChainConfig          *chain.Config
 	EngineApiClient      *engineapi.JsonRpcClient
+	JsonRpcUrl           string
+	EngineApiUrl         string
+	JwtSecret            []byte
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl

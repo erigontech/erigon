@@ -33,8 +33,13 @@ jobs:
       # runner.workspace is suppressed: it was dropped from the official context
       # spec but is still available on self-hosted runners; QA workflows rely on
       # it until they are migrated to github.workspace / runner.temp.
+      # The "queue" concurrency key (GitHub, 2026-05) is newer than any released
+      # actionlint schema; drop that ignore once actionlint learns the key.
       - name: actionlint
-        run: actionlint -shellcheck '' --ignore '"workspace" is not defined in object type'
+        run: |
+          actionlint -shellcheck '' \
+            --ignore '"workspace" is not defined in object type' \
+            --ignore 'unexpected key "queue" for "concurrency" section'
 
       - name: Actions security audit (zizmor)
         run: |
@@ -51,6 +56,8 @@ jobs:
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: lint
 
       # golangci-lint internally trims cache entries unused for 5 days,
       # so the cache is self-cleaning even as we save new versions.
@@ -68,8 +75,10 @@ jobs:
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
+      # Skip in merge-queue runs: a cache saved on the ephemeral merge-queue
+      # ref can't be restored by any later run (matches cleanup-erigon).
       - name: Save golangci-lint cache
-        if: always()
+        if: ${{ always() && github.event_name != 'merge_group' }}
         uses: actions/cache/save@v5
         with:
           path: ~/.cache/golangci-lint

@@ -63,7 +63,7 @@ func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
-	Default:          uint256.NewInt(0),
+	Default:          uint256.NewInt(common.GWei / 1000),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,
@@ -155,6 +155,10 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
+	// the preverified chain.toml with a direct HTTP GET to this URL. Local
+	// preverified.toml in the datadir still takes precedence.
+	ChainTomlURL string
 	// ManifestReady is closed when P2P manifest discovery completes.
 	// Set by the backend when P2PManifest is enabled. Nil otherwise.
 	ManifestReady <-chan struct{}

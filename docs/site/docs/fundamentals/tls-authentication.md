@@ -1,7 +1,7 @@
 ---
 title: "TLS Authentication"
 description: "Mutual TLS setup for securing gRPC and RPC daemon endpoints."
-sidebar_position: 13
+sidebar_position: 18
 ---
 
 
@@ -18,9 +18,9 @@ At a high level, the process consists of:
 3. [Generate a key pair](#3-generating-a-key-pair)
 4. [Create the certificate file for each public key](#4-creating-the-certificate-file-for-each-public-key)
 5. [Deploy the files to each instance](#5-deploy-the-files-on-each-instance)
-6. [Run Erigon and RPCdaemon with the correct tags](#6-run-erigon-and-rpcdaemon-with-the-correct-tags)
+6. [Run Erigon and RPC Daemon with the correct tags](#6-run-erigon-and-rpc-daemon-with-the-correct-tags)
 
-The following is a detailed description of how to use the **OpenSSL** suite of tools to secure the connection between a remote Erigon node and a remote or local RPCdaemon. The same procedure applies to any Erigon component you wish to run separately; it is recommended to name the files accordingly.
+The following is a detailed description of how to use the **OpenSSL** suite of tools to secure the connection between a remote Erigon node and a remote or local RPC Daemon. The same procedure applies to any Erigon component you wish to run separately; it is recommended to name the files accordingly.
 
 :::warning
 **Warning**: To maintain a high level of security, it is recommended to create all the keys locally and then copy the 3 required files remotely to the remote node.
@@ -32,7 +32,7 @@ Make sure you have [openssl](https://openssl-library.org/source/) installed.
 
 ### Notes
 
-Normally, the "client side" (in our case, the RPCdaemon) will check that the server's host name matches the "Common Name" attribute of the "server" certificate. At this time, this check is disabled and will be re-enabled when the instructions above on how to correctly generate Common Name certificates are updated. For example, if you are running the Erigon instance in the Google Cloud, you will need to specify the internal IP in the `-private.api.addr` option. You will also need to open the firewall on the port you use to connect to the Erigon instances.
+Normally, the "client side" (in our case, the RPC Daemon) will check that the server's host name matches the "Common Name" attribute of the "server" certificate. At this time, this check is disabled and will be re-enabled when the instructions above on how to correctly generate Common Name certificates are updated. For example, if you are running the Erigon instance in the Google Cloud, you will need to specify the internal IP in the `-private.api.addr` option. You will also need to open the firewall on the port you use to connect to the Erigon instances.
 
 ## 1. Generating the key pair for the Certificate Authority (CA)
 
@@ -62,7 +62,7 @@ Generate a key pair for the Erigon node:
 openssl ecparam -name prime256v1 -genkey -noout -out erigon-key.pem
 ```
 
-Also generate a key pair for the RPC daemon:
+Also generate a key pair for the RPC Daemon:
 
 ```bash
 openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
@@ -76,7 +76,7 @@ Now create the Certificate Signing Request for the Erigon key pair, and from thi
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
 ```
 
-Then create the certificate signing request for the RPC daemon key pair:
+Then create the certificate signing request for the RPC Daemon key pair:
 
 ```bash
 openssl req -new -key RPC-key.pem -out RPC.csr
@@ -98,15 +98,15 @@ These three files must be placed in the /erigon folder on the machine running Er
 
 `erigon.crt`
 
-On the RPCdaemon machine, these three files must also be placed in the /erigon folder:
+On the RPC Daemon machine, these three files must also be placed in the /erigon folder:
 
 `CA-cert.pem`
 
-`RPC key.pem`
+`RPC-key.pem`
 
-`RPC.crtv`
+`RPC.crt`
 
-## 6. Run Erigon and RPCdaemon with the correct tags
+## 6. Run Erigon and RPC Daemon with the correct tags
 
 Once all the files have been moved, Erigon must be run with these additional options:
 
@@ -114,7 +114,7 @@ Once all the files have been moved, Erigon must be run with these additional opt
 --tls --tls.cacert CA-cert.pem --tls.key erigon-key.pem --tls.cert erigon.crt
 ```
 
-While the RPC daemon must be started with these additional options:
+While the RPC Daemon must be started with these additional options:
 
 ```bash
 --tls.key RPC-key.pem --tls.cacert CA-cert.pem --tls.cert RPC.crt

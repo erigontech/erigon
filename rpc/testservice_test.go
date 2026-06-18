@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func newTestServer(logger log.Logger) *Server {
@@ -79,6 +80,13 @@ func (s *testService) NoArgsRets() {}
 
 func (s *testService) Echo(str string, i int, args *echoArgs) echoResult {
 	return echoResult{str, i, args}
+}
+
+// StreamEcho is a streamable method (last arg jsonstream.Stream, returns only error): it writes its
+// result directly to the stream rather than returning a value.
+func (s *testService) StreamEcho(str string, stream jsonstream.Stream) error {
+	stream.WriteString(str)
+	return nil
 }
 
 func (s *testService) PeerInfo(ctx context.Context) PeerInfo {

@@ -166,8 +166,6 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 
 	targetGasLimit := cfg.builder.BuilderConfig.GasLimit
 	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.TargetGasLimit != nil {
-		// PayloadAttributesV4: CL-supplied target gas limit takes precedence over the
-		// static --miner.gaslimit so the EL follows engine_forkchoiceUpdatedV4.
 		targetGasLimit = cfg.blockBuilderParameters.TargetGasLimit
 	}
 	header := MakeEmptyHeader(parent, cfg.chainConfig, timestamp, targetGasLimit)

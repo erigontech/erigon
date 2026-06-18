@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -84,18 +85,17 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex)
 
-	// [IGNORE] preferences.proposal_slot is in the current or next epoch
-	// i.e. compute_epoch_at_slot(preferences.proposal_slot) in {get_current_epoch(state), get_current_epoch(state) + 1}
+	// [IGNORE] compute_epoch_at_slot(preferences.proposal_slot) in range(current_epoch, current_epoch + MIN_SEED_LOOKAHEAD + 1)
 	currentEpoch := s.ethClock.GetCurrentEpoch()
-	proposalEpoch := s.ethClock.GetEpochAtSlot(proposalSlot)
-	if proposalEpoch != currentEpoch && proposalEpoch != currentEpoch+1 {
-		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected current epoch %d or next epoch %d",
-			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+1)
+	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, proposalSlot)
+	if proposalEpoch < currentEpoch || proposalEpoch > currentEpoch+s.beaconCfg.MinSeedLookahead {
+		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected epoch in [%d, %d]",
+			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+s.beaconCfg.MinSeedLookahead)
 	}
 
-	// [IGNORE] The proposal slot has not already passed
+	// [IGNORE] The proposal slot has not already passed (proposal_slot > current_slot)
 	currentSlot := s.ethClock.GetCurrentSlot()
-	if proposalSlot < currentSlot {
+	if proposalSlot <= currentSlot {
 		return fmt.Errorf("%w: proposal slot %d has already passed (current slot %d)",
 			ErrIgnore, proposalSlot, currentSlot)
 	}
@@ -111,58 +111,15 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
 	}
 
-	// [IGNORE] The dependent_root block has been seen in forkchoice
-	if _, ok := s.forkchoiceStore.GetHeader(preferences.DependentRoot); !ok {
-		return fmt.Errorf("%w: dependent_root %v not seen in forkchoice",
-			ErrIgnore, preferences.DependentRoot)
+	depState, err := s.forkchoiceStore.GetStateAtBlockRoot(preferences.DependentRoot, false)
+	if err != nil || depState == nil {
+		return fmt.Errorf("%w: state for dependent_root %v not available", ErrIgnore, preferences.DependentRoot)
 	}
-
-	// [REJECT] is_valid_proposal_slot + [REJECT] BLS signature verification
-	// Both need head state access, so do them together inside a single ViewHeadState call.
-	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// is_valid_proposal_slot check:
-		// index = SLOTS_PER_EPOCH + preferences.proposal_slot % SLOTS_PER_EPOCH
-		// return state.proposer_lookahead[index] == preferences.validator_index
-		lookahead := headState.GetProposerLookahead()
-		if lookahead == nil {
-			return fmt.Errorf("proposer lookahead not available")
-		}
-		lookaheadIndex := s.beaconCfg.SlotsPerEpoch + proposalSlot%s.beaconCfg.SlotsPerEpoch
-		if int(lookaheadIndex) >= lookahead.Length() {
-			return fmt.Errorf("proposer lookahead index %d out of range (length: %d)", lookaheadIndex, lookahead.Length())
-		}
-		if lookahead.Get(int(lookaheadIndex)) != validatorIndex {
-			return fmt.Errorf("validator %d is not the proposer for slot %d (expected %d)",
-				validatorIndex, proposalSlot, lookahead.Get(int(lookaheadIndex)))
-		}
-
-		// Get validator public key
-		val, err := headState.ValidatorForValidatorIndex(int(validatorIndex))
-		if err != nil {
-			return fmt.Errorf("validator index %d not found: %w", validatorIndex, err)
-		}
-		pk := val.PublicKey()
-
-		// BLS signature verification
-		epoch := s.ethClock.GetEpochAtSlot(proposalSlot)
-		domain, err := headState.GetDomain(s.beaconCfg.DomainProposerPreferences, epoch)
-		if err != nil {
-			return fmt.Errorf("failed to get domain: %w", err)
-		}
-		signingRoot, err := computeSigningRoot(preferences, domain)
-		if err != nil {
-			return fmt.Errorf("failed to compute signing root: %w", err)
-		}
-		valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return fmt.Errorf("signature verification error: %w", err)
-		}
-		if !valid {
-			return fmt.Errorf("invalid proposer preferences signature")
-		}
-
-		return nil
-	}); err != nil {
+	validationState, err := s.proposerPreferencesValidationState(depState, proposalEpoch)
+	if err != nil {
+		return fmt.Errorf("%w: failed to prepare dependent state: %v", ErrIgnore, err)
+	}
+	if err := s.validateProposerPreferencesWithState(msg, validationState); err != nil {
 		return fmt.Errorf("proposer preferences validation failed: %w", err)
 	}
 
@@ -177,7 +134,71 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex,
 		"feeRecipient", preferences.FeeRecipient,
-		"gasLimit", preferences.GasLimit)
+		"targetGasLimit", preferences.TargetGasLimit)
 
+	return nil
+}
+
+func (s *proposerPreferencesService) proposerPreferencesValidationState(depState *state.CachingBeaconState, proposalEpoch uint64) (*state.CachingBeaconState, error) {
+	if proposalEpoch < s.beaconCfg.MinSeedLookahead {
+		return nil, fmt.Errorf("proposal epoch %d before min seed lookahead %d", proposalEpoch, s.beaconCfg.MinSeedLookahead)
+	}
+	dependentEpoch := proposalEpoch - s.beaconCfg.MinSeedLookahead
+	validationSlot := dependentEpoch * s.beaconCfg.SlotsPerEpoch
+	if depState.Slot() >= validationSlot {
+		return depState, nil
+	}
+	validationState, err := depState.Copy()
+	if err != nil {
+		return nil, err
+	}
+	if err := transition.DefaultMachine.ProcessSlots(validationState, validationSlot); err != nil {
+		return nil, err
+	}
+	return validationState, nil
+}
+
+func (s *proposerPreferencesService) validateProposerPreferencesWithState(msg *cltypes.SignedProposerPreferences, depState *state.CachingBeaconState) error {
+	preferences := msg.Message
+	proposalSlot := preferences.ProposalSlot
+	validatorIndex := preferences.ValidatorIndex
+	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, proposalSlot)
+	stateEpoch := state.GetEpochAtSlot(depState.BeaconConfig(), depState.Slot())
+	if proposalEpoch < stateEpoch || proposalEpoch > stateEpoch+s.beaconCfg.MinSeedLookahead {
+		return fmt.Errorf("proposal slot %d is outside dependent state lookahead", proposalSlot)
+	}
+	lookahead := depState.GetProposerLookahead()
+	if lookahead == nil {
+		return fmt.Errorf("proposer lookahead not available")
+	}
+	lookaheadIndex := (proposalEpoch-stateEpoch)*s.beaconCfg.SlotsPerEpoch + proposalSlot%s.beaconCfg.SlotsPerEpoch
+	if int(lookaheadIndex) >= lookahead.Length() {
+		return fmt.Errorf("proposer lookahead index %d out of range (length: %d)", lookaheadIndex, lookahead.Length())
+	}
+	if lookahead.Get(int(lookaheadIndex)) != validatorIndex {
+		return fmt.Errorf("validator %d is not the proposer for slot %d (expected %d)",
+			validatorIndex, proposalSlot, lookahead.Get(int(lookaheadIndex)))
+	}
+
+	val, err := depState.ValidatorForValidatorIndex(int(validatorIndex))
+	if err != nil {
+		return fmt.Errorf("validator index %d not found: %w", validatorIndex, err)
+	}
+	pk := val.PublicKey()
+	domain, err := depState.GetDomain(s.beaconCfg.DomainProposerPreferences, proposalEpoch)
+	if err != nil {
+		return fmt.Errorf("failed to get domain: %w", err)
+	}
+	signingRoot, err := computeSigningRoot(preferences, domain)
+	if err != nil {
+		return fmt.Errorf("failed to compute signing root: %w", err)
+	}
+	valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:])
+	if err != nil {
+		return fmt.Errorf("signature verification error: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("invalid proposer preferences signature")
+	}
 	return nil
 }
