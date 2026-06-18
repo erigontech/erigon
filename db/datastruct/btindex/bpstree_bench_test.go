@@ -220,9 +220,14 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 			}
 			slices.SortFunc(allKeys, bytes.Compare)
 
-			nodes := make([]Node, nodeCount)
+			var blob []byte
+			nodeOfft := make([]uint64, nodeCount)
+			var hdr [2]byte
 			for i, k := range allKeys {
-				nodes[i] = Node{key: k, di: uint64(i) * uint64(cfg.M)}
+				nodeOfft[i] = uint64(len(blob))
+				binary.BigEndian.PutUint16(hdr[:], uint16(len(k)))
+				blob = append(blob, hdr[:]...)
+				blob = append(blob, k...)
 			}
 
 			totalCount := uint64(cfg.N)
@@ -232,7 +237,7 @@ func BenchmarkBpsTree_bs(b *testing.B) {
 			}
 			ef.Build()
 
-			bt := &BpsTree{M: uint64(cfg.M), offt: ef, mx: nodes}
+			bt := &BpsTree{M: uint64(cfg.M), offt: ef, keysBlob: blob, nodeOfft: nodeOfft, nodeStride: uint64(cfg.M)}
 
 			lookupKeys := make([][]byte, 10000)
 			for i := range lookupKeys {

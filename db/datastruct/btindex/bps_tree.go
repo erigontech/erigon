@@ -23,7 +23,6 @@ import (
 	"io"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -63,33 +62,45 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, nodes []Node) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, mx: nodes}
-
-	nsz := uint64(unsafe.Sizeof(Node{}))
-	var cachedBytes uint64
-	for i := range len(nodes) {
-		if envAssertBTKeys {
-			if cmp := bt.compareKey(kv, nodes[i].key, nodes[i].di); cmp != 0 {
-				panic(fmt.Errorf("key mismatch at di=%d i=%d cmp=%d", nodes[i].di, i, cmp))
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfft []uint64) *BpsTree {
+	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfft: nodeOfft, nodeStride: M}
+	if envAssertBTKeys {
+		for i := range nodeOfft {
+			if cmp := bt.compareKey(kv, bt.nodeKey(i), bt.nodeDi(i)); cmp != 0 {
+				panic(fmt.Errorf("key mismatch at di=%d i=%d cmp=%d", bt.nodeDi(i), i, cmp))
 			}
 			kv.Skip() // skip value
 		}
-		cachedBytes += nsz + uint64(len(nodes[i].key))
 	}
-
 	return bt
 }
 
 type BpsTree struct {
-	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	mx    []Node
+	offt *eliasfano32.EliasFano // ef with offsets to key/vals
+
+	// pivot cache: keysBlob holds [keyLen:u16][key] records (mmap-backed on-disk,
+	// heap for WarmUp); nodeOfft[i] is record i's offset and di is derived as i*nodeStride.
+	keysBlob   []byte
+	nodeOfft   []uint64
+	nodeStride uint64
+
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
 	dataLookupFunc dataLookupFunc
 	cursorGetter   cursorGetter
 }
+
+func (b *BpsTree) numNodes() int { return len(b.nodeOfft) }
+
+// nodeKey returns pivot i's key without copying (points into keysBlob).
+func (b *BpsTree) nodeKey(i int) []byte {
+	off := b.nodeOfft[i]
+	l := uint64(binary.BigEndian.Uint16(b.keysBlob[off:]))
+	return b.keysBlob[off+2 : off+2+l]
+}
+
+func (b *BpsTree) nodeDi(i int) uint64 { return uint64(i) * b.nodeStride }
 
 // compareKey resets g to the offset of item di and compares key against the file key.
 // Returns Compare(key, fileKey): 0 on match, <0 if key < fileKey, >0 if key > fileKey.
@@ -140,7 +151,6 @@ type BpsTreeIterator struct {
 
 type Node struct {
 	key []byte
-	di  uint64 // key ordinal number in kv
 }
 
 // Encode writes the node key length-prefixed (reusing headerBuf, len >= 2, to
@@ -160,31 +170,34 @@ func (n Node) Encode(w io.Writer, headerBuf []byte) error {
 	return err
 }
 
-// decodeNodes reads count length-prefixed keys (no count prefix on disk — the
-// caller derives count). di is not stored; node i has di = i*m.
-func decodeNodes(data []byte, count, m uint64) ([]Node, int, error) {
+// decodeNodes indexes count length-prefixed keys (no count prefix on disk — the
+// caller derives count), returning each record's byte offset within data. di is
+// not stored; node i has di = i*M, recomputed on read.
+func decodeNodes(data []byte, count uint64) (nodeOfft []uint64, end int, err error) {
 	if count > uint64(len(data))/2 { // each node is at least 2 bytes (keyLen)
 		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
 	}
-	nodes := make([]Node, count)
+	nodeOfft = make([]uint64, count)
 	pos := 0
 	for ni := range int(count) {
 		if len(data)-pos < 2 {
 			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
+		nodeOfft[ni] = uint64(pos)
 		l := int(binary.BigEndian.Uint16(data[pos : pos+2]))
 		pos += 2
 		if len(data)-pos < l {
 			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
-		nodes[ni] = Node{key: data[pos : pos+l], di: uint64(ni) * m}
 		pos += l
 	}
-	return nodes, pos, nil
+	return nodeOfft, pos, nil
 }
 
-// decodeListNodesV0 reads the legacy node list where each node stores its di.
-func decodeListNodesV0(data []byte) ([]Node, int, error) {
+// decodeListNodesV0 indexes the legacy node list ([di:u64][keyLen:u16][key] per
+// node), returning each key record's offset past the on-disk di (which is ignored
+// since di is recomputed as i*M).
+func decodeListNodesV0(data []byte) (nodeOfft []uint64, end int, err error) {
 	if len(data) < 8 {
 		return nil, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
 	}
@@ -192,22 +205,21 @@ func decodeListNodesV0(data []byte) ([]Node, int, error) {
 	if count > uint64(len(data)-8)/10 { // each node is at least 10 bytes (di+keyLen)
 		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
 	}
-	nodes := make([]Node, count)
+	nodeOfft = make([]uint64, count)
 	pos := 8
 	for ni := range int(count) {
 		if len(data)-pos < 10 {
 			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
-		nodes[ni].di = binary.BigEndian.Uint64(data[pos : pos+8])
 		l := int(binary.BigEndian.Uint16(data[pos+8 : pos+10]))
+		nodeOfft[ni] = uint64(pos + 8) // skip on-disk di; offset points at the keyLen prefix
 		pos += 10
 		if len(data)-pos < l {
 			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
-		nodes[ni].key = data[pos : pos+l]
 		pos += l
 	}
-	return nodes, pos, nil
+	return nodeOfft, pos, nil
 }
 
 func (b *BpsTree) WarmUp(kv *seg.Reader) error {
@@ -216,67 +228,75 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 	if N == 0 {
 		return nil
 	}
-	b.mx = make([]Node, 0, N/b.M)
-	if b.trace {
-		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
-	}
 
 	step := b.M
 	if N < b.M { // cache all keys if less than M
 		step = 1
 	}
+	b.nodeStride = step
 
-	// extremely stupid picking of needed nodes:
-	cachedBytes := uint64(0)
-	nsz := uint64(unsafe.Sizeof(Node{}))
+	nodeCount := (N-1)/step + 1 // ceil(N/step), N>=1 here
+	b.nodeOfft = make([]uint64, 0, nodeCount)
+	blob := make([]byte, 0, nodeCount*(2+32)) // 32: rough avg key length
+	if b.trace {
+		fmt.Printf("WarmUp nodes %d N=%d M=%d\n", nodeCount, N, b.M)
+	}
+
 	var key []byte
-	for i := step; i < N; i += step {
-		di := i - 1
-		off := b.offt.Get(di)
+	var hdr [2]byte
+	for i := uint64(0); i < N; i += step {
+		off := b.offt.Get(i)
 		kv.Reset(off)
 		key, _ = kv.Next(key[:0]) // read key only; reuse buffer to avoid allocs
 		kv.Skip()                 // skip value — WarmUp only needs the key
-		b.mx = append(b.mx, Node{key: common.Copy(key), di: di})
-		cachedBytes += nsz + uint64(len(key))
+		if len(key) > math.MaxUint16 {
+			return fmt.Errorf("WarmUp: key at di=%d too long: %d bytes", i, len(key))
+		}
+		b.nodeOfft = append(b.nodeOfft, uint64(len(blob)))
+		binary.BigEndian.PutUint16(hdr[:], uint16(len(key)))
+		blob = append(blob, hdr[:]...)
+		blob = append(blob, key...)
 	}
+	b.keysBlob = blob
 
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
-		"cached", fmt.Sprintf("%d %.2f%%", len(b.mx), 100*(float64(len(b.mx))/float64(N))),
-		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
+		"cached", fmt.Sprintf("%d %.2f%%", b.numNodes(), 100*(float64(b.numNodes())/float64(N))),
+		"cacheSize", datasize.ByteSize(len(b.keysBlob)+len(b.nodeOfft)*8).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
 		"took", time.Since(t))
 	return nil
 }
 
 // bs binary-searches the warmed-up pivot list for the [dl,dr) data-index window
 // of key, plus klo/khi: the pivot keys bounding it, used by interpolation search.
-func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64, klo, khi []byte) {
+func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 	dr = b.offt.Count()
-	m, l, r := 0, 0, len(b.mx) //nolint
+	l, r := 0, b.numNodes() //nolint
 
 	for l < r {
-		m = (l + r) >> 1
-		n = &b.mx[m]
+		m := (l + r) >> 1
+		k := b.nodeKey(m)
 
 		if b.trace {
-			fmt.Printf("bs di:%d k:%x\n", n.di, n.key)
+			fmt.Printf("bs di:%d k:%x\n", b.nodeDi(m), k)
 		}
-		switch bytes.Compare(n.key, x) {
+		switch bytes.Compare(k, x) {
 		case 0:
-			return n, n.di, n.di, n.key, n.key
+			di := b.nodeDi(m)
+			return di, di, k, k
 		case 1:
 			r = m
-			dr = n.di
-			khi = n.key
+			dr = b.nodeDi(m)
+			khi = k
 		case -1:
 			l = m + 1
-			dl = n.di
+			dl = b.nodeDi(m)
 			if dl < dr {
 				dl++
 			}
-			klo = n.key
+			klo = k
 		}
 	}
-	return n, dl, dr, klo, khi
+	return dl, dr, klo, khi
 }
 
 // Seek returns cursor pointing at first key which is >= seekKey.
@@ -295,9 +315,9 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	}
 
 	// check cached nodes and narrow roi
-	n, l, r, _, _ := b.bs(seekKey) // l===r when key is found
+	l, r, _, _ := b.bs(seekKey) // l===r when key is found
 	if l == r {
-		cur.Reset(n.di, g)
+		cur.Reset(l, g)
 		return cur, nil
 	}
 
@@ -369,9 +389,9 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		return v0, true, 0, nil
 	}
 
-	n, l, r, klo, khi := b.bs(key) // l===r when key is found
+	l, r, klo, khi := b.bs(key) // l===r when key is found
 	if b.trace {
-		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+		fmt.Printf("pivot di(LR): [%d %d] k: %x found: %t\n", l, r, key, l == r)
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
@@ -525,6 +545,7 @@ func (b *BpsTree) Distances() (map[int]int, error) {
 }
 
 func (b *BpsTree) Close() {
-	b.mx = nil
+	b.keysBlob = nil
+	b.nodeOfft = nil
 	b.offt = nil
 }

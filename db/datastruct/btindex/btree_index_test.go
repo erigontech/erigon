@@ -210,14 +210,18 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 
 	if count > 0 {
 		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))
-		var nodes []Node
+		type v0node struct {
+			key []byte
+			di  uint64
+		}
+		var nodes []v0node
 		var key []byte
 		var pos, di uint64
 		for r.HasNext() {
 			key, _ = r.Next(key[:0])
 			ef.AddOffset(pos)
 			if di%m == 0 {
-				nodes = append(nodes, Node{key: common.Copy(key), di: di})
+				nodes = append(nodes, v0node{key: common.Copy(key), di: di})
 			}
 			di++
 			pos, _ = r.Skip()
@@ -372,7 +376,7 @@ func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
 
 	// ...and equal the position the reader would otherwise derive from the nodes section (which starts after the leading byte).
 	nodesCount := (footer.Meta.KeysCount + footer.Meta.M - 1) / footer.Meta.M
-	_, nodesEnd, err := decodeNodes(data[1:], nodesCount, footer.Meta.M)
+	_, nodesEnd, err := decodeNodes(data[1:], nodesCount)
 	require.NoError(t, err)
 	require.EqualValues(t, alignUp(1+nodesEnd, btEFAlign), footer.Meta.EfOffset)
 }
@@ -590,12 +594,12 @@ func TestNewBtIndex(t *testing.T) {
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
 	bplus := bt.bplus
-	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
-	require.LessOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM)+2)
+	require.GreaterOrEqual(t, bplus.numNodes(), keyCount/int(DefaultBtreeM))
+	require.LessOrEqual(t, bplus.numNodes(), keyCount/int(DefaultBtreeM)+2)
 
-	for i := 1; i < len(bt.bplus.mx); i++ {
-		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotEmpty(t, bt.bplus.mx[i].key)
+	for i := 1; i < bplus.numNodes(); i++ {
+		require.NotZero(t, bplus.nodeDi(i))
+		require.NotEmpty(t, bplus.nodeKey(i))
 	}
 }
 
@@ -687,19 +691,20 @@ func TestDecodeNodes(t *testing.T) {
 			buf.Write(hdr[:])
 			buf.Write(k)
 		}
-		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)), M)
+		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)))
 		require.NoError(t, err)
 		require.Equal(t, buf.Len(), n)
 		require.Len(t, got, len(keys))
+		bp := &BpsTree{keysBlob: buf.Bytes(), nodeOfft: got, nodeStride: M}
 		for i := range keys {
-			require.Equal(t, uint64(i)*M, got[i].di) // di recomputed, not stored
-			require.True(t, bytes.Equal(keys[i], got[i].key))
+			require.Equal(t, uint64(i)*M, bp.nodeDi(i)) // di recomputed, not stored
+			require.True(t, bytes.Equal(keys[i], bp.nodeKey(i)))
 		}
 	}
 }
 
 func TestNodeEncode_NoAlloc(t *testing.T) {
-	node := Node{di: 42, key: []byte("some-key")}
+	node := Node{key: []byte("some-key")}
 	var headerBuf [10]byte
 	allocs := testing.AllocsPerRun(1000, func() {
 		if err := node.Encode(io.Discard, headerBuf[:]); err != nil {
