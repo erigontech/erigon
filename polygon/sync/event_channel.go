@@ -118,8 +118,11 @@ func (ec *EventChannel[TEvent]) waitForEvent(ctx context.Context) (TEvent, error
 	// wait for the waiting goroutine or the parent context to finish, whichever happens first
 	<-waitCtx.Done()
 
-	// if the parent context is done, force the waiting goroutine to exit
+	// Signal under the mutex to avoid a lost-wakeup: without the lock, Signal can
+	// fire between the inner goroutine's condition check and its Wait() call.
+	ec.queueMutex.Lock()
 	ec.queueCond.Signal()
+	ec.queueMutex.Unlock()
 	wg.Wait()
 
 	return e, ctx.Err()

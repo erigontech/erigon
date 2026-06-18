@@ -113,7 +113,8 @@ func TestSSZRESTNewPayloadEnvelopeRoundTrip(t *testing.T) {
 			if version >= clparams.GloasVersion {
 				slot := hexutil.Uint64(123)
 				payload.SlotNumber = &slot
-				payload.BlockAccessList = hexutil.Bytes{0x01, 0x02, 0x03}
+				bal := hexutil.Bytes{0x01, 0x02, 0x03}
+				payload.BlockAccessList = &bal
 			}
 			root := common.HexToHash("0xaa")
 			requests := []hexutil.Bytes{{0x00, 0x01}, {0x01, 0x02}}
@@ -145,7 +146,8 @@ func TestSSZRESTNewPayloadEnvelopeRoundTrip(t *testing.T) {
 			if version >= clparams.GloasVersion {
 				require.NotNil(t, outPayload.SlotNumber)
 				require.Equal(t, hexutil.Uint64(123), *outPayload.SlotNumber)
-				require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, outPayload.BlockAccessList)
+				require.NotNil(t, outPayload.BlockAccessList)
+				require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *outPayload.BlockAccessList)
 			}
 			require.Equal(t, payload.BlockHash, outPayload.BlockHash)
 		})
@@ -358,7 +360,8 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 			if tc.version >= clparams.GloasVersion {
 				slot := hexutil.Uint64(7)
 				payload.SlotNumber = &slot
-				payload.BlockAccessList = hexutil.Bytes{0x0a}
+				bal := hexutil.Bytes{0x0a}
+				payload.BlockAccessList = &bal
 			}
 			resp := &engine_types.GetPayloadResponse{
 				ExecutionPayload:      payload,
@@ -386,7 +389,8 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 				require.Equal(t, requests, out.ExecutionRequests)
 			}
 			if tc.version >= clparams.GloasVersion {
-				require.Equal(t, hexutil.Bytes{0x0a}, out.ExecutionPayload.BlockAccessList)
+				require.NotNil(t, out.ExecutionPayload.BlockAccessList)
+				require.Equal(t, hexutil.Bytes{0x0a}, *out.ExecutionPayload.BlockAccessList)
 			}
 		})
 	}
