@@ -206,23 +206,26 @@ jobs:
           SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
           LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
 
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} Report
+          {
+            echo "# ${{ github.workflow }} Report"
+            echo ""
+            echo "## Test Configuration"
+            echo "- **Chain:** ${{ env.CHAIN }}"
+            echo "- **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}"
+            echo ""
+            echo "## Failed Tests"
+            echo '```'
+            grep -E "Attempt [0-9]|Latest batch|failed:" "$LOG_FILE" || echo "(none)"
+            echo '```'
+            echo ""
+            echo "## Final Statistics"
+            echo '```'
+            grep "Number of" "$LOG_FILE" | tail -5
+            echo '```'
+          } > "$SUMMARY_FILE"
 
-          ## Test Configuration
-          - **Chain:** ${{ env.CHAIN }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
-
-          ## Test Output
-          ```
-          EOF
-
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          cat "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> $GITHUB_STEP_SUMMARY
 
       - name: Stop Erigon
         if: always()
