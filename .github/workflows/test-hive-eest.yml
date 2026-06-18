@@ -149,13 +149,13 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
-          # EXPERIMENT: pinned to erigontech/hive lystopad/eels-local-fixtures,
-          # which branches yperbasis/client-pool (upstream-PR-ready warm-daemon
-          # client pool, ethereum/hive#1449) and adds local-fixtures support to
-          # the eels consume-engine/consume-rlp simulators (erigontech/hive#2).
-          # Re-pin to the client-pool / upstream ref once those land.
+          # EXPERIMENT: pinned to erigontech/hive yperbasis/client-pool — the
+          # upstream-PR-ready warm-daemon client pool (ethereum/hive#1449), which
+          # now also carries local-fixtures support for the eels
+          # consume-engine/consume-rlp simulators (merged via erigontech/hive#2).
+          # Revert to ethereum/hive + steps.hive-version.outputs.ref once upstream.
           repository: erigontech/hive
-          ref: 4c575d5a0ea2332ac0338d0745f2f9426c2f26ea
+          ref: 9afe5f15a37136fa57f2b2055d1d6c69c681aa16
           path: hive
 
       - name: Conditional Docker Login
