@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/iotest"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -747,4 +748,15 @@ func TestSSZRESTExecutionRequestsBound(t *testing.T) {
 	require.NoError(t, err)
 	_, _, _, err = decodeNewPayloadEnvelope(enc, clparams.ElectraVersion)
 	require.Error(t, err)
+}
+
+func TestSSZRESTReadBodyNonSizeError(t *testing.T) {
+	// a non-size read error (truncated body / client disconnect) is 400, not 413
+	srv := newTestEngineServer(allForksConfig(), false)
+	req := httptest.NewRequest(http.MethodPost, "/engine/v2/cancun/forkchoice", iotest.ErrReader(errors.New("boom")))
+	req.Header.Set("Content-Type", sszRestContentType)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, problemInvalidRequest, problemType(t, rec))
 }

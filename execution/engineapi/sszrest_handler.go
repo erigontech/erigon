@@ -162,9 +162,14 @@ func checkSSZContentType(w http.ResponseWriter, r *http.Request) bool {
 
 func readSSZBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	defer r.Body.Close()
-	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, sszMaxRequestBody))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, sszMaxRequestBody))
 	if err != nil {
-		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, err.Error())
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, err.Error())
+		} else {
+			writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
+		}
 		return nil, false
 	}
 	return body, true
