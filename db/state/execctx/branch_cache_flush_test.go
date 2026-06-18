@@ -26,6 +26,58 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
+// TestBranchCacheFlushInvalidatesStaleEntries verifies that Flush invalidates
+// BranchCache entries for commitment keys it writes, so that subsequent reads
+// after ClearRam hit the DB instead of serving stale cached values.
+func TestBranchCacheFlushInvalidatesStaleEntries(t *testing.T) {
+	stepSize := uint64(100)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	logger := log.New()
+
+	key := []byte{0x0a, 0x0b}
+
+	// Batch 1: write v1, flush+commit (simulating integration-path from-0 loop).
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback() //nolint:gocritic
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	require.NoError(t, err)
+
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, key, []byte("v1"), 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTx))
+	sd.ClearRam(true)
+	require.NoError(t, rwTx.Commit())
+
+	// Batch 2: read v1 (populates BranchCache via read-through), write v2, flush+commit.
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback() //nolint:gocritic
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	require.NoError(t, err)
+
+	got, _, err := sd2.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, []byte("v1"), got)
+
+	require.NoError(t, sd2.DomainPut(kv.CommitmentDomain, rwTx, key, []byte("v2"), 2, []byte("v1")))
+	require.NoError(t, sd2.Flush(ctx, rwTx))
+	sd2.ClearRam(true)
+	require.NoError(t, rwTx.Commit())
+
+	// Batch 3: read must return v2, not v1 (stale cache).
+	rwTx, err = db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd3, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	require.NoError(t, err)
+	defer sd3.Close()
+
+	got, _, err = sd3.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, []byte("v2"), got, "Flush must invalidate BranchCache so reads return the latest value, not stale v1")
+}
+
 // Use Commit (not Flush) so the rebuilt branch refreshes the BranchCache entry.
 func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	stepSize := uint64(100)
