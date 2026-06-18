@@ -170,9 +170,8 @@ type syncWriter struct {
 
 func (sw *syncWriter) Write(p []byte) (n int, err error) {
 	sw.mu.Lock()
-	n, err = sw.w.Write(p)
-	sw.mu.Unlock()
-	return
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
 }
 
 func (p *ConcurrentPatriciaHashed) SetTraceWriter(w io.Writer) {

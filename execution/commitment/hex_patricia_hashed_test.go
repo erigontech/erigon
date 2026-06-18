@@ -3540,14 +3540,14 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 		"block 2 roots should match — sibling accounts must be encoded consistently")
 }
 
-func TestSetTraceWriter_NilDisablesTrace(t *testing.T) {
+func TestSetTraceWriter_NilWriterSafe(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
 
-	// Explicitly set traceW to nil — no output should be produced.
+	// nil writer disables tracing; this guards against a nil-deref on the trace path.
 	hph.SetTraceWriter(nil)
 
 	plainKeys, updates := NewUpdateBuilder().
