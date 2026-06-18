@@ -86,18 +86,7 @@ func upgradeSegHeaderV1toV2Seg(path string, isCaplinStateDir bool, logger log.Lo
 		return nil
 	}
 
-	var bitmask seg.FeatureFlagBitmask
-	if pageCnt > 0 {
-		bitmask.Set(seg.PageLevelCompressionEnabled)
-	}
-	if fc.Has(seg.CompressKeys) {
-		bitmask.Set(seg.WordLevelKeyCompressionEnabled)
-	}
-	if fc.Has(seg.CompressVals) {
-		bitmask.Set(seg.WordLevelValCompressionEnabled)
-	}
-
-	if err := setV2Header(path, bitmask); err != nil {
+	if err := setV2Header(path, v2Bitmask(pageCnt, fc)); err != nil {
 		return err
 	}
 	removeStaleTorrents(path)
@@ -106,11 +95,9 @@ func upgradeSegHeaderV1toV2Seg(path string, isCaplinStateDir bool, logger log.Lo
 	return nil
 }
 
-// dotSegCompression returns the compression a .seg file was written with, derived
-// from its location and type. dirs.SnapCaplin holds uncompressed Caplin state.
-// Header/body/transaction files (dumpRange) are compressed only once merged past
-// Erigon2MergeLimit-1; every other type (beacon, bor, and merged files, all via
-// ExtractRange/merger) is always fully compressed.
+// dotSegCompression returns the compression a .seg file was written with: caplin
+// state is uncompressed, header/body/transaction files are range-based (matching
+// dumpRange), and every other type is always fully compressed.
 func dotSegCompression(path string, isCaplinStateDir bool) (seg.FileCompression, bool) {
 	if isCaplinStateDir {
 		return seg.CompressNone, true

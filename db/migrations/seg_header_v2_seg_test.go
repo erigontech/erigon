@@ -146,3 +146,63 @@ func TestDotSegCompression(t *testing.T) {
 		})
 	}
 }
+
+// writeSegFile writes a file via the real seg.Writer (the canonical producer of
+// mixed keys-only/vals-only domain files, which a hand-rolled V1 writer cannot
+// reproduce). The migration re-patches V2 files, so this still exercises it.
+func writeSegFile(t *testing.T, path string, compress seg.FileCompression, pairs [][2]string) {
+	t.Helper()
+	cfg := seg.DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+	c, err := seg.NewCompressor(context.Background(), t.Name(), path, t.TempDir(), cfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	w := seg.NewWriter(c, compress)
+	for _, kv := range pairs {
+		_, err = w.Write([]byte(kv[0]))
+		require.NoError(t, err)
+		_, err = w.Write([]byte(kv[1]))
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Compressor.Compress())
+}
+
+// TestSegHeaderV2Migration patches a .kv/.v/.ef file per domain class, then reads
+// it back through the patched header, covering the keys-only and vals-only cases
+// that only the segCompressionAtV2 table produces.
+func TestSegHeaderV2Migration(t *testing.T) {
+	pairs := [][2]string{{"key1", "val1"}, {"key2", "val2"}, {"key3", "val3"}}
+
+	cases := []struct {
+		name string
+		file string
+		want seg.FileCompression
+	}{
+		{"accounts_kv_none", "v1.0-accounts.0-1024.kv", seg.CompressNone},
+		{"storage_kv_keys", "v1.0-storage.0-1024.kv", seg.CompressKeys},
+		{"code_kv_vals", "v1.0-code.0-1024.kv", seg.CompressVals},
+		{"code_v_keysvals", "v1.0-code.0-1024.v", seg.CompressKeys | seg.CompressVals},
+		{"logaddrs_ef_none", "v1.0-logaddrs.0-1024.ef", seg.CompressNone},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := t.TempDir()
+			path := filepath.Join(d, tc.file)
+			writeSegFile(t, path, tc.want, pairs)
+
+			require.NoError(t, upgradeAndSmokeTestSegFilesInDir(d, log.New()))
+
+			dec, err := seg.NewDecompressor(path)
+			require.NoError(t, err)
+			require.Equal(t, seg.FileCompressionFormatV2, dec.CompressionFormatVersion())
+			fc, ok := dec.WordLevelCompression()
+			dec.Close()
+			require.True(t, ok)
+			require.Equal(t, tc.want, fc, "patched header compression mismatch")
+
+			require.Equal(t, pairs, readBackPairs(t, path))
+		})
+	}
+}

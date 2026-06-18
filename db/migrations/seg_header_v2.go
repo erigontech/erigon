@@ -106,9 +106,8 @@ func upgradeAndSmokeTestSegFilesInDir(dir string, logger log.Logger) error {
 	})
 }
 
-// walkSegDir walks dir invoking fn for each file. A missing dir (fresh datadir
-// or disabled snapshot category) is a no-op, and transient not-exist errors
-// encountered mid-walk are ignored.
+// walkSegDir invokes fn for each file under dir, treating a missing dir and
+// transient not-exist errors as a no-op.
 func walkSegDir(dir string, fn func(path string) error) error {
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -155,24 +154,29 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 	tag := segTag(base, ext)
 	fc := segCompressionAtV2[tag+ext] // zero value if unknown; no key/value compression bits will be set
 
-	var bitmask seg.FeatureFlagBitmask
-	if pageCnt > 0 {
-		bitmask.Set(seg.PageLevelCompressionEnabled)
-	}
-	if fc.Has(seg.CompressKeys) {
-		bitmask.Set(seg.WordLevelKeyCompressionEnabled)
-	}
-	if fc.Has(seg.CompressVals) {
-		bitmask.Set(seg.WordLevelValCompressionEnabled)
-	}
-
-	if err := setV2Header(path, bitmask); err != nil {
+	if err := setV2Header(path, v2Bitmask(pageCnt, fc)); err != nil {
 		return err
 	}
 	removeStaleTorrents(path)
 
 	logger.Debug("[seg_header_v2] upgraded", "file", base)
 	return nil
+}
+
+// v2Bitmask builds the V2 header bitmask from the page-value count and the
+// file's word-level key/val compression.
+func v2Bitmask(pageCnt int, fc seg.FileCompression) seg.FeatureFlagBitmask {
+	var b seg.FeatureFlagBitmask
+	if pageCnt > 0 {
+		b.Set(seg.PageLevelCompressionEnabled)
+	}
+	if fc.Has(seg.CompressKeys) {
+		b.Set(seg.WordLevelKeyCompressionEnabled)
+	}
+	if fc.Has(seg.CompressVals) {
+		b.Set(seg.WordLevelValCompressionEnabled)
+	}
+	return b
 }
 
 // setV2Header writes the V2 version byte and bitmask at offset 0.
@@ -288,9 +292,13 @@ func smokeTestSegFile(path string, logger log.Logger) (retErr error) {
 	g := dec.MakeGetter()
 	r := seg.NewReader(g, seg.CompressNone) // NewReader reads WordLevelCompression from header
 	r.Reset(0)
-	var buf []byte
+	// Keep the scratch buffer separate from the return value: for mixed-compression
+	// files Next returns an mmap-backed slice for uncompressed words, and feeding
+	// that back as the append buffer for the next compressed word writes into the
+	// read-only mmap (SIGBUS).
+	buf := make([]byte, 0, 4096)
 	for i := 0; i < smokeTestMaxWords && r.HasNext(); i++ {
-		buf, _ = r.Next(buf[:0])
+		_, _ = r.Next(buf[:0])
 	}
 	logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
 	return nil
