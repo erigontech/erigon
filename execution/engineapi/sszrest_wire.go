@@ -487,11 +487,14 @@ func (e *sszBodyEntry) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *sszBodyEntry) EncodingSizeSSZ() int {
-	body, err := e.body()
-	if err != nil {
-		return 0
+	size := 1 + 4 + 4 + newTransactionsSSZ(e.Transactions).EncodingSizeSSZ()
+	if e.version >= clparams.CapellaVersion {
+		size += 4 + len(e.Withdrawals)*sszWithdrawalBytes
 	}
-	return 1 + 4 + body.EncodingSizeSSZ()
+	if e.version >= clparams.GloasVersion {
+		size += 4 + len(e.BlockAccessList)
+	}
+	return size
 }
 
 func (e *sszBodyEntry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
@@ -529,6 +532,12 @@ func decodeBodiesResponse(buf []byte, version clparams.StateVersion) ([]*sszBody
 	return out, nil
 }
 
+// Shared read-only zero buffers for unavailable blob entries; never mutated.
+var (
+	zeroSSZBlob  = make([]byte, sszBlobBytes)
+	zeroSSZProof = make([]byte, sszKZGBytes)
+)
+
 // sszBlobV1Entry is BlobEntry {available: boolean, contents: BlobAndProofV1}.
 type sszBlobV1Entry struct {
 	Available bool
@@ -543,7 +552,7 @@ func (*sszBlobV1Entry) EncodingSizeSSZ() int { return 1 + sszBlobBytes + sszKZGB
 func (e *sszBlobV1Entry) EncodeSSZ(dst []byte) ([]byte, error) {
 	blob, proof := []byte(e.Blob), []byte(e.Proof)
 	if !e.Available {
-		blob, proof = make([]byte, sszBlobBytes), make([]byte, sszKZGBytes)
+		blob, proof = zeroSSZBlob, zeroSSZProof
 	}
 	if len(blob) != sszBlobBytes || len(proof) != sszKZGBytes {
 		return nil, fmt.Errorf("bad blob/proof length %d/%d", len(blob), len(proof))
@@ -589,7 +598,13 @@ func (e *sszBlobV2Entry) DecodeSSZ(buf []byte, version int) error {
 	return nil
 }
 
-func (e *sszBlobV2Entry) EncodingSizeSSZ() int { out, _ := e.EncodeSSZ(nil); return len(out) }
+func (e *sszBlobV2Entry) EncodingSizeSSZ() int {
+	proofs := 0
+	if e.Contents != nil {
+		proofs = len(e.Contents.CellProofs)
+	}
+	return 1 + 4 + sszBlobBytes + 4 + proofs*sszKZGBytes
+}
 
 func (e *sszBlobV2Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
