@@ -21,13 +21,13 @@ import (
 )
 
 const (
-	sszMaxBlobHashes          = 4096
-	sszMaxBytesPerTransaction = 0x40000000
-	sszMaxValidationError     = 1024
-	sszBlobBytes              = 0x20000
-	sszKZGBytes               = 48
-	sszCellsPerExtBlob        = 128
-	sszMaxCellProofs          = sszMaxBlobHashes * sszCellsPerExtBlob // MAX_BLOBS_PER_PAYLOAD * CELLS_PER_EXT_BLOB
+	sszMaxBlobCommitmentsPerBlock = 4096
+	sszMaxBytesPerTransaction     = 0x40000000
+	sszMaxValidationError         = 1024
+	sszBlobBytes                  = 0x20000
+	sszKZGBytes                   = 48
+	sszCellsPerExtBlob            = 128
+	sszMaxCellProofs              = sszMaxBlobCommitmentsPerBlock * sszCellsPerExtBlob
 )
 
 var mainnetBeaconCfg = &clparams.MainnetBeaconConfig
@@ -439,13 +439,13 @@ func NewBlobsBundleSSZ(version clparams.StateVersion) *BlobsBundle {
 func (b *BlobsBundle) Static() bool { return false }
 
 func (b *BlobsBundle) EncodeSSZ(dst []byte) ([]byte, error) {
-	proofsLimit := sszMaxBlobHashes
+	proofsLimit := sszMaxBlobCommitmentsPerBlock
 	if b.blobsBundleSSZVersion() >= clparams.FuluVersion {
 		proofsLimit = sszMaxCellProofs
 	}
-	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](sszMaxBlobHashes, sszKZGBytes)
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](sszMaxBlobCommitmentsPerBlock, sszKZGBytes)
 	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](proofsLimit, sszKZGBytes)
-	blobs := solid.NewStaticListSSZ[*cltypes.Blob](sszMaxBlobHashes, sszBlobBytes)
+	blobs := solid.NewStaticListSSZ[*cltypes.Blob](sszMaxBlobCommitmentsPerBlock, sszBlobBytes)
 	for _, commitment := range b.Commitments {
 		commitments.Append(newKZGCommitment(commitment))
 	}
@@ -460,13 +460,13 @@ func (b *BlobsBundle) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (b *BlobsBundle) DecodeSSZ(buf []byte, version int) error {
 	b.SSZVersion = clparams.StateVersion(version)
-	proofsLimit := sszMaxBlobHashes
+	proofsLimit := sszMaxBlobCommitmentsPerBlock
 	if b.SSZVersion >= clparams.FuluVersion {
 		proofsLimit = sszMaxCellProofs
 	}
-	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](sszMaxBlobHashes, sszKZGBytes)
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](sszMaxBlobCommitmentsPerBlock, sszKZGBytes)
 	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](proofsLimit, sszKZGBytes)
-	blobs := solid.NewStaticListSSZ[*cltypes.Blob](sszMaxBlobHashes, sszBlobBytes)
+	blobs := solid.NewStaticListSSZ[*cltypes.Blob](sszMaxBlobCommitmentsPerBlock, sszBlobBytes)
 	if err := ssz2.UnmarshalSSZ(buf, version, commitments, proofs, blobs); err != nil {
 		return err
 	}
