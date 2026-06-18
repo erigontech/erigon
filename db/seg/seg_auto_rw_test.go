@@ -40,6 +40,7 @@ func makeTestFileCompressed(t *testing.T, compress FileCompression) string {
 	require.NoError(t, err)
 
 	w := NewWriter(c, compress)
+	defer w.Close()
 	pairs := [][2]string{
 		{"key1", "val1"},
 		{"key2", "val2"},
@@ -52,7 +53,6 @@ func makeTestFileCompressed(t *testing.T, compress FileCompression) string {
 		require.NoError(t, err)
 	}
 	require.NoError(t, w.Compressor.Compress())
-	w.Close()
 	return file
 }
 

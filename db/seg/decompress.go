@@ -266,6 +266,13 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		// reliable for V2+; V1 files may have those bits unset even when keys/vals are compressed.
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
+	} else if d.version != FileCompressionFormatV0 {
+		// A real headerless V0 file starts with the zero MSB of wordsCount, so any
+		// other non-zero version byte is a future/unsupported format, not V0.
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason:   fmt.Sprintf("unsupported compression format version %d", d.version),
+		}
 	}
 
 	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
