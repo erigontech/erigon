@@ -195,9 +195,10 @@ func decodeNodes(data []byte, count uint64) (nodeOfft []uint64, end int, err err
 }
 
 // decodeListNodesV0 indexes the legacy node list ([di:u64][keyLen:u16][key] per
-// node), returning each key record's offset past the on-disk di. di itself is
-// derived as i*stride; stride is recovered from the second node's stored di so a
-// legacy file opened with a different M than it was written with stays correct.
+// node), returning each key record's offset past the on-disk di. di is derived
+// as i*stride; stride comes from the stored di, validated to be the arithmetic
+// progression 0,stride,2*stride,... so a wrong open-time M or a corrupt file is
+// rejected rather than silently mis-derived.
 func decodeListNodesV0(data []byte) (nodeOfft []uint64, stride uint64, end int, err error) {
 	if len(data) < 8 {
 		return nil, 0, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
@@ -208,16 +209,25 @@ func decodeListNodesV0(data []byte) (nodeOfft []uint64, stride uint64, end int, 
 	}
 	nodeOfft = make([]uint64, count)
 	pos := 8
-	var di0, di1 uint64
 	for ni := range int(count) {
 		if len(data)-pos < 10 {
 			return nil, 0, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
+		di := binary.BigEndian.Uint64(data[pos : pos+8])
 		switch ni {
 		case 0:
-			di0 = binary.BigEndian.Uint64(data[pos : pos+8])
+			if di != 0 {
+				return nil, 0, 0, fmt.Errorf("corrupt v0 index: first node di=%d, want 0", di)
+			}
 		case 1:
-			di1 = binary.BigEndian.Uint64(data[pos : pos+8])
+			if di == 0 {
+				return nil, 0, 0, fmt.Errorf("corrupt v0 index: second node has zero di (stride must be > 0)")
+			}
+			stride = di
+		default:
+			if di != uint64(ni)*stride { // di must follow the 0,stride,2*stride,... progression
+				return nil, 0, 0, fmt.Errorf("corrupt v0 index: node %d di=%d, want %d", ni, di, uint64(ni)*stride)
+			}
 		}
 		l := int(binary.BigEndian.Uint16(data[pos+8 : pos+10]))
 		nodeOfft[ni] = uint64(pos + 8) // skip on-disk di; offset points at the keyLen prefix
@@ -226,9 +236,6 @@ func decodeListNodesV0(data []byte) (nodeOfft []uint64, stride uint64, end int, 
 			return nil, 0, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
 		pos += l
-	}
-	if count >= 2 {
-		stride = di1 - di0
 	}
 	return nodeOfft, stride, pos, nil
 }
