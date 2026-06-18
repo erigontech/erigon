@@ -263,6 +263,9 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	if envelope.ExecutionRequests != nil {
 		executionRequestsList = cltypes.GetExecutionRequestsList(f.beaconCfg, envelope.ExecutionRequests)
 	}
+	if executionRequestsList == nil {
+		executionRequestsList = []hexutil.Bytes{}
+	}
 
 	// Call NewPayload to validate execution payload with EL
 	timeStartExec := time.Now()
