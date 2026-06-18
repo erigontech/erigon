@@ -145,6 +145,7 @@ retries=0
 attempt=0
 while true; do
    attempt=$((attempt + 1))
+   echo "" | tee -a "$LOG_FILE"
    echo "Attempt $attempt" | tee -a "$LOG_FILE"
    ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee -a "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
