@@ -560,6 +560,9 @@ func (d *Decompressor) WordLevelCompression() (c FileCompression, ok bool) {
 	if d.featureFlagBitmask.Has(WordLevelValCompressionEnabled) {
 		c |= CompressVals
 	}
+	if c == 0 {
+		c = CompressNone
+	}
 	return c, true
 }
 

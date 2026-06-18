@@ -19,24 +19,19 @@ package migrations
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 )
 
-// SegHeaderV2Seg upgrades all V1 .seg snapshot files (block and caplin) to V2
-// by patching the two-byte file header in-place.
-//
-// Compression is determined from the filename, not file content:
-//   - caplin files (dirs.SnapCaplin): always CompressKeys|CompressVals
-//   - block files with range >= MergeSteps[last] (10 000): merger-produced, CompressKeys|CompressVals
-//   - block files with range < MergeSteps[last]: dumpRange-produced, CompressNone
+// SegHeaderV2Seg patches V1 .seg snapshot headers to V2 in-place. Compression is
+// inferred from the file's directory and name rather than its content, because
+// content detection (SkipUncompressed on a compressed word) can silently misread.
 var SegHeaderV2Seg = Migration{
 	Name: "seg_header_v2_seg",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error {
@@ -60,34 +55,19 @@ var SegHeaderV2Seg = Migration{
 	},
 }
 
-func upgradeAndSmokeTestDotSegFilesInDir(d string, isCaplinDir bool, logger log.Logger) error {
-	return filepath.WalkDir(d, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
+func upgradeAndSmokeTestDotSegFilesInDir(d string, isCaplinStateDir bool, logger log.Logger) error {
+	return walkSegDir(d, func(path string) error {
 		if filepath.Ext(path) != ".seg" {
 			return nil
 		}
-		if err := upgradeSegHeaderV1toV2Seg(path, isCaplinDir, logger); err != nil {
+		if err := upgradeSegHeaderV1toV2Seg(path, isCaplinStateDir, logger); err != nil {
 			return err
 		}
 		return smokeTestSegFile(path, logger)
 	})
 }
 
-// upgradeSegHeaderV1toV2Seg patches a single .seg file from V1 to V2.
-//
-// Compression is determined from the filename, not content.  Content-based
-// detection (DetectCompressType) is unreliable: SkipUncompressed on a
-// compressed word may silently misread the length field without panicking,
-// leading to a false "CompressNone" result and a wrong bitmask.
-//
-// Rules (derived from how files are created):
-//   - caplin directory: BeaconBlocks / BlobSidecars are always fully compressed.
-//   - block directory: merger produces files whose range is a multiple of
-//     MergeSteps[last] (10 000) and always uses CompressKeys|CompressVals;
-//     dumpRange produces 1 000-block files and uses CompressNone.
-func upgradeSegHeaderV1toV2Seg(path string, isCaplinDir bool, logger log.Logger) error {
+func upgradeSegHeaderV1toV2Seg(path string, isCaplinStateDir bool, logger log.Logger) error {
 	base := filepath.Base(path)
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
@@ -100,22 +80,10 @@ func upgradeSegHeaderV1toV2Seg(path string, isCaplinDir bool, logger log.Logger)
 		return nil // V0: no header to patch
 	}
 
-	var fc seg.FileCompression
-	if isCaplinDir {
-		// Caplin files are always fully compressed regardless of range.
-		fc = seg.CompressKeys | seg.CompressVals
-	} else {
-		// Block files: merger-produced files (range >= MergeSteps[last]) are compressed;
-		// initial dumpRange files (range < MergeSteps[last]) are not.
-		info, _, ok := snaptype.ParseFileName(filepath.Dir(path), base)
-		if !ok {
-			logger.Warn("[seg_header_v2_seg] skip (unparseable filename)", "file", base)
-			return nil
-		}
-		mergeStep := snaptype.MergeSteps[len(snaptype.MergeSteps)-1]
-		if info.To-info.From >= mergeStep {
-			fc = seg.CompressKeys | seg.CompressVals
-		}
+	fc, ok := dotSegCompression(path, isCaplinStateDir)
+	if !ok {
+		logger.Warn("[seg_header_v2_seg] skip (unparseable filename)", "file", base)
+		return nil
 	}
 
 	var bitmask seg.FeatureFlagBitmask
@@ -132,8 +100,32 @@ func upgradeSegHeaderV1toV2Seg(path string, isCaplinDir bool, logger log.Logger)
 	if err := setV2Header(path, bitmask); err != nil {
 		return err
 	}
-	_ = dir.RemoveFile(path + ".torrent")
+	removeStaleTorrents(path)
 
 	logger.Debug("[seg_header_v2_seg] upgraded", "file", base, "compression", fc)
 	return nil
+}
+
+// dotSegCompression returns the compression a .seg file was written with, derived
+// from its location and type. dirs.SnapCaplin holds uncompressed Caplin state.
+// Header/body/transaction files (dumpRange) are compressed only once merged past
+// Erigon2MergeLimit-1; every other type (beacon, bor, and merged files, all via
+// ExtractRange/merger) is always fully compressed.
+func dotSegCompression(path string, isCaplinStateDir bool) (seg.FileCompression, bool) {
+	if isCaplinStateDir {
+		return seg.CompressNone, true
+	}
+	info, _, ok := snaptype.ParseFileName(filepath.Dir(path), filepath.Base(path))
+	if !ok || info.Type == nil {
+		return 0, false
+	}
+	switch info.Type.Enum() {
+	case snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions:
+		if info.To-info.From >= snaptype.Erigon2MergeLimit-1 {
+			return seg.CompressKeys | seg.CompressVals, true
+		}
+		return seg.CompressNone, true
+	default:
+		return seg.CompressKeys | seg.CompressVals, true
+	}
 }

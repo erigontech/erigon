@@ -18,6 +18,7 @@ package migrations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,14 +55,8 @@ func UpgradeSegHeadersV2(dirs datadir.Dirs, logger log.Logger) error {
 	return upgradeAndSmokeTestDotSegFilesInDir(dirs.SnapCaplin, true, logger)
 }
 
-// SegHeaderV2 upgrades all V1 .kv/.v/.ef snapshot files to V2 by patching
-// the two-byte file header in-place.  V2 is identical to V1 except that the
-// featureFlagBitmask byte now reliably encodes WordLevelKeyCompressionEnabled /
-// WordLevelValCompressionEnabled in addition to PageLevelCompressionEnabled.
-//
-// The correct compression flags are read from segCompressionAtV2, a frozen table
-// captured at migration time, so future schema changes cannot alter what flags
-// are written into existing files.
+// SegHeaderV2 patches V1 .kv/.v/.ef snapshot headers to V2 in-place, recording
+// word-level key/val compression flags taken from the frozen segCompressionAtV2 table.
 var SegHeaderV2 = Migration{
 	Name: "seg_header_v2",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error {
@@ -99,10 +94,7 @@ var segDataExts = map[string]bool{".kv": true, ".v": true, ".ef": true}
 // upgradeAndSmokeTestSegFilesInDir upgrades each eligible file in dir and
 // immediately smoke-tests it in a single directory walk.
 func upgradeAndSmokeTestSegFilesInDir(dir string, logger log.Logger) error {
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
+	return walkSegDir(dir, func(path string) error {
 		ext := filepath.Ext(path)
 		if !segDataExts[ext] {
 			return nil
@@ -112,6 +104,34 @@ func upgradeAndSmokeTestSegFilesInDir(dir string, logger log.Logger) error {
 		}
 		return smokeTestSegFile(path, logger)
 	})
+}
+
+// walkSegDir walks dir invoking fn for each file. A missing dir (fresh datadir
+// or disabled snapshot category) is a no-op, and transient not-exist errors
+// encountered mid-walk are ignored.
+func walkSegDir(dir string, fn func(path string) error) error {
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		return fn(path)
+	})
+}
+
+// removeStaleTorrents removes the .torrent and any partial torrent artifacts
+// (.torrent<suffix>) of a snapshot file whose bytes were just patched, so the
+// downloader regenerates correct ones.
+func removeStaleTorrents(path string) {
+	_ = dir.RemoveFilesByMask(path + ".torrent*")
 }
 
 // upgradeSegHeaderV1toV2 patches a single seg-format file to V2.
@@ -149,11 +169,7 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 	if err := setV2Header(path, bitmask); err != nil {
 		return err
 	}
-
-	// The header patch changes the file content, so any existing .torrent (which
-	// is a hash of the file bytes) is now stale.  Remove it so the downloader
-	// regenerates a correct one.
-	_ = dir.RemoveFile(path + ".torrent")
+	removeStaleTorrents(path)
 
 	logger.Debug("[seg_header_v2] upgraded", "file", base)
 	return nil
@@ -195,44 +211,25 @@ func withWritePerm(path string, fn func(*os.File) error) error {
 	return syncErr
 }
 
-// segTag extracts the FilenameBase from an E3 snapshot file name.
-// E3 format: "{version}-{name}.{from}-{to}.{ext}"
-// e.g. "v2.0-accounts.0-128.kv" → "accounts"
-//
-//	"v3.0-logaddrs.0-128.ef"  → "logaddrs"
+// segTag extracts the filename base from an E3 snapshot name laid out as
+// "{version}-{name}.{from}-{to}.{ext}", e.g. "v2.0-accounts.0-128.kv" → "accounts".
 func segTag(base, ext string) string {
 	withoutExt := base[:len(base)-len(ext)]
-	// Split off the version prefix (everything before the first "-").
 	dashIdx := strings.Index(withoutExt, "-")
 	if dashIdx < 0 {
 		return ""
 	}
-	nameAndRange := withoutExt[dashIdx+1:] // "accounts.0-128"
-	// The name ends at the first ".".
+	nameAndRange := withoutExt[dashIdx+1:]
 	dotIdx := strings.Index(nameAndRange, ".")
 	if dotIdx < 0 {
 		return nameAndRange
 	}
-	return nameAndRange[:dotIdx] // "accounts"
+	return nameAndRange[:dotIdx]
 }
 
-// segCompressionAtV2 is a frozen snapshot of the compression settings that were in
-// effect when the seg_header_v2 migration was written.  It intentionally does NOT
-// read from statecfg.Schema so that future schema changes cannot alter what flags
-// are patched into existing files.
-//
-// Layout: map["{filenameBase}{ext}"] = FileCompression
-//
-// Domains   (.kv = domain data, .v = history values, .ef = inverted-index keys)
-// accounts  : kv=none,  v=none,      ef=none
-// storage   : kv=keys,  v=none,      ef=none
-// code      : kv=vals,  v=keys|vals, ef=none
-// commitment: kv=keys,  v=none,      ef=none   (compression may be removed in the future)
-// receipt   : kv=none,  v=none,      ef=none
-// rcache    : kv=none,  v=none,      ef=none   (rcache disabled; included for completeness)
-//
-// Standalone inverted indexes
-// logaddrs / logtopics / tracesfrom / tracesto : ef=none
+// segCompressionAtV2 freezes the per-file compression in effect when this
+// migration was written, keyed by "{filenameBase}{ext}"; it deliberately does
+// not read statecfg.Schema so later schema changes cannot alter patched files.
 var segCompressionAtV2 = map[string]seg.FileCompression{
 	// --- accounts ---
 	"accounts.kv": seg.CompressNone,
@@ -265,13 +262,8 @@ var segCompressionAtV2 = map[string]seg.FileCompression{
 	"tracesto.ef":   seg.CompressNone,
 }
 
-// smokeTestSegFile reads a small prefix of a V2 file via NewReader, which
-// routes each word to Next() (huffman) or NextUncompressed() based on the
-// bitmask we just patched.  A wrong bitmask causes a word-boundary mismatch
-// and a panic, catching header corruption early.
-//
-// Reading only the first smokeTestMaxWords words keeps the migration fast even
-// on large snapshot sets, while still exercising the decompression path.
+// smokeTestSegFile reads a bounded prefix of a patched V2 file via NewReader; a
+// wrong bitmask makes decompression panic, which is recovered into an error.
 const smokeTestMaxWords = 2_000
 
 func smokeTestSegFile(path string, logger log.Logger) (retErr error) {

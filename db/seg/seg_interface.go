@@ -58,7 +58,16 @@ func (c FileCompression) Has(flag FileCompression) bool {
 }
 
 func (c FileCompression) String() string {
-	return "none" // Simplified implementation
+	if c.Has(CompressKeys) && c.Has(CompressVals) {
+		return "keys+vals"
+	}
+	if c.Has(CompressKeys) {
+		return "keys"
+	}
+	if c.Has(CompressVals) {
+		return "vals"
+	}
+	return "none"
 }
 
 type ReaderI interface {
