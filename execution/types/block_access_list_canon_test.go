@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -17,8 +18,8 @@ func TestStorageChangeRejectsNonCanonicalValue(t *testing.T) {
 	t.Parallel()
 	input := common.FromHex("0xc20100") // list[Index=1, Value=0x00]
 	var sc StorageChange
-	if err := rlp.DecodeBytes(input, &sc); err == nil {
-		t.Fatalf("expected error for non-canonical Value, got nil (Value=%s)", sc.Value.String())
+	if err := rlp.DecodeBytes(input, &sc); !errors.Is(err, rlp.ErrCanonInt) {
+		t.Fatalf("expected ErrCanonInt for non-canonical Value, got %v (Value=%s)", err, sc.Value.String())
 	}
 }
 
@@ -26,8 +27,8 @@ func TestBalanceChangeRejectsNonCanonicalValue(t *testing.T) {
 	t.Parallel()
 	input := common.FromHex("0xc20100") // list[Index=1, Value=0x00]
 	var bc BalanceChange
-	if err := rlp.DecodeBytes(input, &bc); err == nil {
-		t.Fatalf("expected error for non-canonical Value, got nil (Value=%s)", bc.Value.String())
+	if err := rlp.DecodeBytes(input, &bc); !errors.Is(err, rlp.ErrCanonInt) {
+		t.Fatalf("expected ErrCanonInt for non-canonical Value, got %v (Value=%s)", err, bc.Value.String())
 	}
 }
 
@@ -40,8 +41,8 @@ func TestSlotChangesRejectsNonCanonicalSlot(t *testing.T) {
 	// SlotChanges = [Slot, [ [Index=1, Value=1] ]]; slot 0x0001 has a leading zero.
 	nonCanonical := common.FromHex("0xc7820001c3c20101")
 	var sc SlotChanges
-	if err := rlp.DecodeBytes(nonCanonical, &sc); err == nil {
-		t.Fatalf("expected error for non-canonical slot, got nil (slot=%x)", sc.Slot.Value())
+	if err := rlp.DecodeBytes(nonCanonical, &sc); !errors.Is(err, rlp.ErrCanonInt) {
+		t.Fatalf("expected ErrCanonInt for non-canonical slot, got %v (slot=%x)", err, sc.Slot.Value())
 	}
 	// The minimal form 0x01 of the same slot must still decode.
 	canonical := common.FromHex("0xc501c3c20101")
@@ -55,8 +56,8 @@ func TestDecodeMinimalHashRejectsNonCanonical(t *testing.T) {
 	t.Parallel()
 	for _, nonCanonical := range []string{"0x00", "0x820001"} {
 		s := rlp.NewStream(bytes.NewReader(common.FromHex(nonCanonical)), 0)
-		if _, err := decodeMinimalHash(s); err == nil {
-			t.Fatalf("input %s: expected error for non-canonical key, got nil", nonCanonical)
+		if _, err := decodeMinimalHash(s); !errors.Is(err, rlp.ErrCanonInt) {
+			t.Fatalf("input %s: expected ErrCanonInt, got %v", nonCanonical, err)
 		}
 	}
 	for _, c := range []struct {
