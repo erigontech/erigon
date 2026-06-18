@@ -186,11 +186,16 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
-			if dbg.TraceBlock(blockNum) {
+			traceBlk := dbg.TraceBlock(blockNum)
+			if traceBlk {
 				fmt.Println(blockNum, "Commitment")
+				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
+			if traceBlk {
+				se.doms.GetCommitmentCtx().SetTraceWriter(nil)
+			}
 
 			if err != nil {
 				return nil, rwTx, err

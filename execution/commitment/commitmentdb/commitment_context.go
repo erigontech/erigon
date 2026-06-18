@@ -149,6 +149,7 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 
 func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
 	sdc.traceW = w
+	sdc.patriciaTrie.SetTraceWriter(w)
 }
 
 // GetUpdates returns the current updates buffer. Used by the commitment
