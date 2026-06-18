@@ -289,6 +289,38 @@ func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
 	}
 }
 
+// A v0 file stores di on disk; the reader recovers the node stride from it, so
+// opening with a different M than it was written with (e.g. a changed BT_M) must
+// still resolve every key.
+func Test_BtreeIndex_V0_M_Mismatch(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	const writeM, openM = uint64(32), uint64(256)
+	keyCount := 500
+	compressFlags := seg.CompressKeys | seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+
+	v0Path := filepath.Join(tmp, "v0.bt")
+	writeV0Index(t, dataPath, v0Path, compressFlags, writeM)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(v0Path, dataPath, openM, compressFlags, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+	for i := range keys {
+		cur, err := bt.Seek(getter, keys[i])
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Equalf(t, keys[i], cur.Key(), "seek i=%d", i)
+		cur.Close()
+	}
+}
+
 func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
 	f := Footer{
 		Meta:          Metadata{KeysCount: 12345, M: 256, EfOffset: 1 << 33}, // EfOffset > 4GiB: must be uint64

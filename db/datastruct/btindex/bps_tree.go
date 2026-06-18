@@ -62,8 +62,8 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfft []uint64) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfft: nodeOfft, nodeStride: M}
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfft []uint64, nodeStride uint64) *BpsTree {
+	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfft: nodeOfft, nodeStride: nodeStride}
 	if envAssertBTKeys {
 		for i := range nodeOfft {
 			if cmp := bt.compareKey(kv, bt.nodeKey(i), bt.nodeDi(i)); cmp != 0 {
@@ -195,31 +195,42 @@ func decodeNodes(data []byte, count uint64) (nodeOfft []uint64, end int, err err
 }
 
 // decodeListNodesV0 indexes the legacy node list ([di:u64][keyLen:u16][key] per
-// node), returning each key record's offset past the on-disk di (which is ignored
-// since di is recomputed as i*M).
-func decodeListNodesV0(data []byte) (nodeOfft []uint64, end int, err error) {
+// node), returning each key record's offset past the on-disk di. di itself is
+// derived as i*stride; stride is recovered from the second node's stored di so a
+// legacy file opened with a different M than it was written with stays correct.
+func decodeListNodesV0(data []byte) (nodeOfft []uint64, stride uint64, end int, err error) {
 	if len(data) < 8 {
-		return nil, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
+		return nil, 0, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
 	}
 	count := binary.BigEndian.Uint64(data[:8])
 	if count > uint64(len(data)-8)/10 { // each node is at least 10 bytes (di+keyLen)
-		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
+		return nil, 0, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
 	}
 	nodeOfft = make([]uint64, count)
 	pos := 8
+	var di0, di1 uint64
 	for ni := range int(count) {
 		if len(data)-pos < 10 {
-			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
+			return nil, 0, 0, fmt.Errorf("decode node %d: short buffer", ni)
+		}
+		switch ni {
+		case 0:
+			di0 = binary.BigEndian.Uint64(data[pos : pos+8])
+		case 1:
+			di1 = binary.BigEndian.Uint64(data[pos : pos+8])
 		}
 		l := int(binary.BigEndian.Uint16(data[pos+8 : pos+10]))
 		nodeOfft[ni] = uint64(pos + 8) // skip on-disk di; offset points at the keyLen prefix
 		pos += 10
 		if len(data)-pos < l {
-			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
+			return nil, 0, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
 		pos += l
 	}
-	return nodeOfft, pos, nil
+	if count >= 2 {
+		stride = di1 - di0
+	}
+	return nodeOfft, stride, pos, nil
 }
 
 func (b *BpsTree) WarmUp(kv *seg.Reader) error {
