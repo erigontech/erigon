@@ -318,8 +318,8 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 
 // BuiltPayload is the response of GET /{fork}/payloads/{payloadId}:
 // {payload, block_value, blobs_bundle, execution_requests, should_override_builder},
-// with should_override_builder existing since Shanghai, blobs_bundle since Cancun
-// and execution_requests since Prague.
+// with blobs_bundle and should_override_builder since Cancun and
+// execution_requests since Prague.
 func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
 	payload := resp.ExecutionPayload
 	payload.SSZVersion = version
@@ -327,10 +327,8 @@ func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
 	requests := newTransactionsSSZ(resp.ExecutionRequests)
 	switch {
-	case version < clparams.CapellaVersion:
-		return ssz2.MarshalSSZ(nil, payload, blockValue[:])
 	case version < clparams.DenebVersion:
-		return ssz2.MarshalSSZ(nil, payload, blockValue[:], resp.ShouldOverrideBuilder)
+		return ssz2.MarshalSSZ(nil, payload, blockValue[:])
 	case version < clparams.ElectraVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder)
 	default:
@@ -346,10 +344,8 @@ func decodeBuiltPayload(buf []byte, version clparams.StateVersion) (*engine_type
 	shouldOverride := false
 	var err error
 	switch {
-	case version < clparams.CapellaVersion:
-		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:])
 	case version < clparams.DenebVersion:
-		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:], &shouldOverride)
+		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:])
 	case version < clparams.ElectraVersion:
 		err = ssz2.UnmarshalSSZ(buf, int(version), payload, blockValue[:], blobsBundle, &shouldOverride)
 	default:

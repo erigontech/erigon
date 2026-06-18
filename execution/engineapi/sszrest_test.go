@@ -347,7 +347,7 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 		wantRequests bool
 	}{
 		{clparams.BellatrixVersion, false, false, false},
-		{clparams.CapellaVersion, true, false, false},
+		{clparams.CapellaVersion, false, false, false},
 		{clparams.DenebVersion, true, true, false},
 		{clparams.ElectraVersion, true, true, true},
 		{clparams.FuluVersion, true, true, true},
