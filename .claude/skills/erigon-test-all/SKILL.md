@@ -39,14 +39,13 @@ The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-sp
 
 **Pitfall: stale `evm` / `evm.race` binary.** Always invoke shards via `make eest-spec-<shard>` — the Makefile lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt automatically. Calling `bash tools/run-eest-spec-test.sh <shard>` directly **bypasses** the rebuild and silently exercises whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures, inflating failures or hiding regressions. After pulling code, switching branches, or any time you suspect the binary is older than HEAD: `rm -f build/bin/evm build/bin/evm.race && make evm evm.race` before re-running.
 
-Two side prerequisites still apply for tests `make test-all` does run:
+One side prerequisite still applies for tests `make test-all` does run:
 
 ```bash
 git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
-git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
 ```
 
-The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
+The CI workflow handles this in `setup-erigon`; locally you must do it yourself.
 
 ## Prerequisite: Create RAM Disk
 
@@ -107,7 +106,7 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
+- Full gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 

@@ -271,18 +271,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 				return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
 			}
 
-			// [New in GLOAS] When index=1 (payload-present attestation), the execution
-			// payload envelope for the block must have been received and validated.
-			// Spec conditions:
-			//   [IGNORE] The signed execution payload envelope has been seen.
-			//   [REJECT] The signed execution payload envelope has been validated (processed by forkchoice).
-			// In our implementation, HasEnvelope returns true only after OnExecutionPayload
-			// has successfully processed and persisted the envelope, so it implies both
-			// "seen" and "validated". We use IGNORE disposition here because the envelope
-			// may simply not have arrived yet (timing issue, not a protocol violation).
 			if aggregate.Data.CommitteeIndex == 1 {
-				if !a.forkchoiceStore.HasEnvelope(aggregateData.BeaconBlockRoot) {
-					return fmt.Errorf("%w: execution payload envelope not seen/validated for block %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+				if !a.forkchoiceStore.IsPayloadVerified(aggregateData.BeaconBlockRoot) {
+					return unverifiedGloasPayloadError(a.forkchoiceStore, aggregateData.BeaconBlockRoot)
 				}
 			}
 		}
@@ -432,7 +423,8 @@ func AggregateAndProofSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot := utils.Sha256(merkle_tree.Uint64Root(slot).Bytes(), domain)
+	slotRoot := merkle_tree.Uint64Root(slot)
+	signingRoot := utils.Sha256(slotRoot[:], domain)
 	return aggregate.SelectionProof[:], signingRoot[:], publicKey[:], nil
 }
 

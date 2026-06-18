@@ -375,7 +375,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 
 	// --- Record original sizes and generation root ---
 	require.NotEmpty(t, lastRoot, "generation root must be non-empty")
-	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "generation root must differ from empty trie root")
+	require.NotEqual(t, empty.RootHash[:], lastRoot, "generation root must differ from empty trie root")
 
 	originalSizes := collectCommitmentFiles(t, dirs)
 
@@ -421,7 +421,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 		fileSizes: seqSizes,
 	}
 	require.NotEmpty(t, sequentialResult.root, "sequential rebuild root must be non-empty")
-	require.NotEqual(t, empty.RootHash.Bytes(), sequentialResult.root, "sequential rebuild root must differ from empty trie root")
+	require.NotEqual(t, empty.RootHash[:], sequentialResult.root, "sequential rebuild root must differ from empty trie root")
 
 	t.Logf("Sequential rebuild: root=%x time=%s files=%d",
 		sequentialResult.root, sequentialResult.duration, len(sequentialResult.fileSizes))
@@ -592,7 +592,7 @@ func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
 	seqRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)
 	require.NotEmpty(t, seqRoot)
-	require.NotEqual(t, empty.RootHash.Bytes(), seqRoot)
+	require.NotEqual(t, empty.RootHash[:], seqRoot)
 	seqSizes := collectCommitmentFiles(t, dirs)
 	require.NotEmpty(t, seqSizes, "sequential rebuild must produce commitment files")
 	t.Logf("Sequential: root=%x files=%d", seqRoot, len(seqSizes))

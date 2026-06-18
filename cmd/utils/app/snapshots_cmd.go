@@ -339,7 +339,7 @@ var snapshotCommand = cli.Command{
 			Action:  doRmStateSnapshots,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "step"},
+				&cli.StringFlag{Name: "step", Usage: "step range to remove: 'from-to' (e.g. 5-10), or 'from+' (e.g. 5+) for everything from step N to the latest"},
 				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
@@ -610,6 +610,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "new-step-size", Required: true, DefaultText: strconv.FormatUint(config3.DefaultStepSize, 10)},
+				&cli.BoolFlag{Name: "keep-blocks", Usage: "keep chaindata and reset only execution state in it, so already-downloaded blocks can be re-executed, instead of deleting the whole DB"},
 			}),
 		},
 		{
@@ -704,7 +705,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		}
 		defer idx.Close()
 
-		rd := idx.GetReaderFromPool()
+		rd := idx.Reader()
 		defer rd.Close()
 		if rd.Empty() {
 			log.Warn("[dbg] allow files deletion because accessor broken", "accessor", idx.FileName())
@@ -733,7 +734,8 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		return true, false, "", nil
 	}
 	if !ok {
-		return false, false, "", fmt.Errorf("can't find accessor for %s", filePath)
+		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
+		return true, false, "", nil
 	}
 	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
@@ -764,6 +766,31 @@ type DeleteStateSnapshotsArgs struct {
 	OnlyDomain             bool
 	OnlyHistory            bool
 	DomainNames            []string
+}
+
+// parseStepRange parses a --step value of "from-to" (e.g. "5-10") or "from+"
+// (e.g. "5+"), where "+" means from the given step to maxAvailableStep.
+func parseStepRange(stepRange string, maxAvailableStep uint64) (from, to uint64, err error) {
+	if prefix, ok := strings.CutSuffix(stepRange, "+"); ok {
+		from, err = strconv.ParseUint(prefix, 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+		}
+		return from, maxAvailableStep, nil
+	}
+	fromS, toS, ok := strings.Cut(stepRange, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	from, err = strconv.ParseUint(fromS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	to, err = strconv.ParseUint(toS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	return from, to, nil
 }
 
 func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
@@ -895,15 +922,12 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	if stepRange != "" || removeLatest {
 		var minS, maxS uint64
 		if stepRange != "" {
-			parseStep := func(step string) (uint64, uint64, error) {
-				var from, to uint64
-				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
-					return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
-				}
-				return from, to, nil
+			var maxAvailableStep uint64
+			for _, res := range files {
+				maxAvailableStep = max(maxAvailableStep, res.To)
 			}
 			var err error
-			minS, maxS, err = parseStep(stepRange)
+			minS, maxS, err = parseStepRange(stepRange, maxAvailableStep)
 			if err != nil {
 				return err
 			}
@@ -2111,7 +2135,6 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	}
 
 	to := int64(-1)
-	somethingPresent, somethingEmpty := false, false
 	for table := range stateSnapTypes.KeyValueGetters {
 		uto, empty, err := CheckFilesForSchema(caplinSchema.GetState(table), CheckFilesParams{
 			checkLastFileTo: to,
@@ -2120,14 +2143,9 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 		if err != nil {
 			return err
 		}
-		somethingPresent = somethingPresent || !empty
-		somethingEmpty = somethingEmpty || empty
-
-		to = int64(uto)
-	}
-
-	if somethingEmpty && somethingPresent {
-		return fmt.Errorf("some state snapshot files are empty while others are present")
+		if !empty {
+			to = int64(uto)
+		}
 	}
 
 	return nil
@@ -3413,7 +3431,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	blockReader, _ := br.IO()
-	agg.SetFrozenBlocksProvider(blockReader)
 
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)

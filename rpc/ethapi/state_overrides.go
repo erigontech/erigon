@@ -66,7 +66,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		if account.State != nil {
 			intState := map[accounts.StorageKey]uint256.Int{}
 			for key, value := range *account.State {
-				intValue := *new(uint256.Int).SetBytes32(value.Bytes())
+				intValue := *new(uint256.Int).SetBytes32(value[:])
 				intState[accounts.InternKey(key)] = intValue
 			}
 			if err := ibs.SetStorage(addr, intState); err != nil {
@@ -76,7 +76,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
-				intValue := *new(uint256.Int).SetBytes32(value.Bytes())
+				intValue := *new(uint256.Int).SetBytes32(value[:])
 				if err := ibs.SetState(addr, accounts.InternKey(key), intValue); err != nil {
 					return err
 				}

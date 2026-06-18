@@ -303,6 +303,32 @@ func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, fun
 	return nil, nil, nil // sequential mode
 }
 
+// TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth verifies that on a chain
+// where all sampled blocks are empty, the oracle uses GWei/1000 as the
+// fallback price (matching Geth's miner.DefaultConfig.GasPrice) rather than
+// 0 from an uninitialized cache.
+func TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(25)
+
+	backend := &mockOracleBackend{head: head}
+	cfg := gaspricecfg.Config{
+		Blocks:      20,
+		Percentile:  60,
+		MaxPrice:    gaspricecfg.DefaultMaxPrice,
+		IgnorePrice: gaspricecfg.DefaultIgnorePrice,
+	}
+
+	cache := jsonrpc.NewGasPriceCache()
+	oracle := gasprice.NewOracle(backend, cfg, cache, nil, log.New())
+
+	got, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(common.GWei/1000), got.Uint64(),
+		"empty-block fallback must be GWei/1000 to match Geth's default start price")
+}
+
 // TestSuggestTipCap_ContextCancelled verifies that a cancelled caller context is
 // propagated as an error rather than silently returning partial/stale results.
 func TestSuggestTipCap_ContextCancelled(t *testing.T) {

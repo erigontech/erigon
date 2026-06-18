@@ -124,7 +124,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			needClose = true
 		}
 
-		reader := accessor.GetReaderFromPool()
+		reader := accessor.Reader()
 		offset, ok := reader.Lookup(k)
 		reader.Close()
 		if !ok {

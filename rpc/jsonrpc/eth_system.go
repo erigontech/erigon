@@ -53,8 +53,8 @@ const deleteStrategyWindow = "window"
 // The field is omitted when data is kept indefinitely (archive nodes, or
 // KeepPostMergeBlocksPruneMode which uses chain-specific history expiry).
 type DeleteStrategy struct {
-	Type            string `json:"type"`
-	RetentionBlocks uint64 `json:"retentionBlocks"`
+	Type            string         `json:"type"`
+	RetentionBlocks hexutil.Uint64 `json:"retentionBlocks"`
 }
 
 // CapabilityField describes availability of a data category: when Disabled is true the node
@@ -125,8 +125,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
 		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
-			rb := uint64(d)
-			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: rb}
+			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: hexutil.Uint64(d)}
 		}
 		return f
 	}
@@ -365,14 +364,14 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil || header.ExcessBlobGas == nil {
-		return (*hexutil.Big)(common.Big0), nil
+		return nil, nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	if config == nil {
-		return (*hexutil.Big)(common.Big0), nil
+		return nil, nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
 	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
@@ -392,17 +391,14 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil {
-		return (*hexutil.Big)(common.Big0), nil
+		return nil, nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if config == nil {
-		return (*hexutil.Big)(common.Big0), nil
-	}
-	if !config.IsLondon(header.Number.Uint64() + 1) {
-		return (*hexutil.Big)(common.Big0), nil
+	if config == nil || !config.IsLondon(header.Number.Uint64()+1) {
+		return nil, nil
 	}
 	baseFee := misc.CalcBaseFee(config, header)
 	return (*hexutil.Big)(baseFee.ToBig()), nil

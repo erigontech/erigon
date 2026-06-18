@@ -265,7 +265,7 @@ func TestGetProof(t *testing.T) {
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
 		result[31] = b
-		return result.Bytes()
+		return result[:]
 	}
 	_ = bankAddr
 
@@ -357,7 +357,7 @@ func TestGetProof(t *testing.T) {
 				context.Background(),
 				tt.addr,
 				tt.storageKeys,
-				rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tt.blockNum)),
+				bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tt.blockNum))),
 			)
 			if tt.expectedErr != "" {
 				require.EqualError(t, err, tt.expectedErr)

@@ -39,12 +39,13 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -598,7 +599,7 @@ type MockContractBackend struct {
 func (cb *MockContractBackend) PrepareMocks() {
 	cb.EXPECT().
 		SubscribeFilterLogs(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, q ethereum.FilterQuery, s chan<- types.Log) (ethereum.Subscription, error) {
+		DoAndReturn(func(_ context.Context, q bind.FilterQuery, s chan<- types.Log) (event.Subscription, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			addrStrs := make([]string, 0, len(q.Addresses))
@@ -613,7 +614,7 @@ func (cb *MockContractBackend) PrepareMocks() {
 
 	cb.EXPECT().
 		CallContract(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, msg ethereum.CallMsg, b *uint256.Int) ([]byte, error) {
+		DoAndReturn(func(ctx context.Context, msg bind.CallMsg, b *uint256.Int) ([]byte, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			results := cb.mockedCallResults[*msg.To]
@@ -630,7 +631,7 @@ func (cb *MockContractBackend) PrepareMocks() {
 
 	cb.EXPECT().
 		FilterLogs(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+		DoAndReturn(func(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			var res []types.Log
