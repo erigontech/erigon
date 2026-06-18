@@ -7,14 +7,13 @@ participants:
     cl_log_level: "debug"
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: sigp/lighthouse:v8.1.3
+    # Keep lighthouse v7.0.1 here: v8 submits attestations only as Electra
+    # SingleAttestation, which caplin's pre-Electra pool endpoint rejects on
+    # this Deneb network (the pinned ethereum-package can't do Electra genesis).
+    vc_image: sigp/lighthouse:v7.0.1
 network_params:
   preset: "minimal"
-  # Electra from genesis: lighthouse v8 VCs submit attestations only as
-  # SingleAttestation (POST eth/v2/beacon/pool/attestations), which caplin
-  # accepts only at Electra+; a Deneb network rejects every attestation.
   deneb_fork_epoch: 0
-  electra_fork_epoch: 0
 additional_services:
   - assertoor
 assertoor_params:
