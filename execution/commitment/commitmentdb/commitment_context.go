@@ -415,6 +415,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig = sdc.warmupBase
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
+		// Hold one file view across the whole parallel fold so a concurrent background
+		// merge cannot munmap a .kv that an in-flight worker's Branch read still aliases.
+		pinTx, pinErr := sdc.paraTrieDB.BeginTemporalRo(ctx) //nolint:gocritic
+		if pinErr != nil {
+			return nil, pinErr
+		}
+		defer pinTx.Rollback()
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.ConcurrentPatriciaHashed:
 			if sdc.updates.IsConcurrentCommitment() {
