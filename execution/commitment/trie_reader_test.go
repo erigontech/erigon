@@ -75,7 +75,7 @@ func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {
 	if err != nil {
 		panic(err)
 	}
-	key := nibbles.HexToCompact(nibblePrefix)
+	key := nibbles.EncodeKeyV2(nibblePrefix)
 	tc.branches[string(key)] = bytes.Clone(data)
 }
 
@@ -339,7 +339,7 @@ func TestTrieReader_BranchError(t *testing.T) {
 
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x5
-	secondPrefix := nibbles.HexToCompact(hashedKey[:1])
+	secondPrefix := nibbles.EncodeKeyV2(hashedKey[:1])
 
 	ctx := &errTrieReaderTestCtx{
 		trieReaderTestCtx: *inner,

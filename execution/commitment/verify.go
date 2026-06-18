@@ -50,7 +50,10 @@ func VerifyBranchHashes(
 	// The branch node identified by N nibbles was folded at depth = N + 1,
 	// because the branch stores children one level deeper than its prefix path.
 	// E.g., root branch (0 nibbles) → depth=1; branch at "3a" (2 nibbles) → depth=3.
-	nib := nibbles.CompactToHex(branchKey)
+	nib, err := nibbles.DecodeKeyV2(branchKey)
+	if err != nil {
+		return fmt.Errorf("decode branch key: %w", err)
+	}
 	if nibbles.HasTerm(nib) {
 		nib = nib[:len(nib)-1]
 	}

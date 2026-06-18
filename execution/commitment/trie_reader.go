@@ -121,7 +121,7 @@ func (tr *TrieReader) Lookup(hashedKey []byte) (c cell, found bool, err error) {
 			return c, false, fmt.Errorf("invalid nibble %d at depth %d", nibble, depth)
 		}
 
-		prefix := nibbles.HexToCompact(hashedKey[:depth])
+		prefix := nibbles.EncodeKeyV2(hashedKey[:depth])
 		branchData, _, err := tr.ctx.Branch(prefix)
 		if err != nil {
 			return c, false, fmt.Errorf("Branch at depth %d: %w", depth, err)
