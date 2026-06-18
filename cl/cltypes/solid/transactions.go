@@ -170,14 +170,6 @@ func NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransact
 	}
 }
 
-func NewTransactionsSSZFromTransactionsWithLimits(txs [][]byte, maxTransactionsPerPayload, maxBytesPerTransaction uint64) *TransactionsSSZ {
-	return &TransactionsSSZ{
-		underlying:                txs,
-		maxTransactionsPerPayload: maxTransactionsPerPayload,
-		maxBytesPerTransaction:    maxBytesPerTransaction,
-	}
-}
-
 func (t *TransactionsSSZ) maxTransactions() uint64 {
 	if t.maxTransactionsPerPayload != 0 {
 		return t.maxTransactionsPerPayload
