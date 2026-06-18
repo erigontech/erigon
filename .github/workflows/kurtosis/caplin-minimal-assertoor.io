@@ -10,7 +10,11 @@ participants:
     vc_image: sigp/lighthouse:v8.1.3
 network_params:
   preset: "minimal"
+  # Electra from genesis: lighthouse v8 VCs submit attestations only as
+  # SingleAttestation (POST eth/v2/beacon/pool/attestations), which caplin
+  # accepts only at Electra+; a Deneb network rejects every attestation.
   deneb_fork_epoch: 0
+  electra_fork_epoch: 0
 additional_services:
   - assertoor
 assertoor_params:
