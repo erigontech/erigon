@@ -19,6 +19,8 @@ package storage
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
 )
@@ -104,31 +106,73 @@ func (p *Provider) FinalizeUnwind() error {
 	// invalidates them).  Then a second OpenFolder picks up the new
 	// content's mmap. Finally .old is unlinked, freeing the old inode.
 	if hadRegen {
+		// Stage 1: rename every regen-touched file (the .kv primary AND
+		// its accessor variants .bt/.kvi/.kvei) to a .old sidecar. The
+		// accessor sidecar step is what makes the in-place .kv rewrite
+		// safe: fileItemsWithMissedAccessors (dirty_files.go:806)
+		// triggers a rebuild only when the accessor file is ABSENT under
+		// its canonical name. Without renaming them out of the way, the
+		// stale accessor still exists on disk → predicate skips
+		// rebuild → the new .kv (smaller, truncated at lastTxNum) is
+		// served via the OLD accessor's offsets → "index out of range"
+		// panic in decompress.go on the next read.
+		var accessorOlds []string
 		for _, pair := range regen.pairs {
 			oldSidecar := pair.finalPath + ".old"
 			if err := os.Rename(pair.finalPath, oldSidecar); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .kv → .old failed (continuing — regen will be retried on next mode-B)", "err", err, "path", pair.finalPath)
 			}
+			accessorOlds = append(accessorOlds, p.renameAccessorsToOld(pair.finalPath)...)
+		}
+		// Stage 2: refresh — Aggregator + AllSnapshots drop dirtyFiles
+		// entries + close mmaps for the renamed-out files. Without this,
+		// the running process keeps serving the OLD .kv content via its
+		// still-mapped segments and the rebuild in stage 4 races with
+		// live reads.
+		if p.Aggregator != nil {
+			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: pre-regen Aggregator.OpenFolder failed (continuing — restart will refresh)", "err", err)
+			}
 		}
 		if p.AllSnapshots != nil {
 			if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
-				p.logger.Warn("[storage] Provider.FinalizeUnwind: pre-regen OpenFolder failed (continuing — restart will refresh)", "err", err)
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: pre-regen AllSnapshots.OpenFolder failed (continuing — restart will refresh)", "err", err)
 			}
 		}
+		// Stage 3: swap in the regen output at the canonical name.
 		for _, pair := range regen.pairs {
 			if err := os.Rename(pair.regenPath, pair.finalPath); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .regen → .kv failed (continuing — restart will recover from .old)", "err", err, "regen", pair.regenPath, "final", pair.finalPath)
 			}
 		}
+		// Stage 4: register the new .kv with the Aggregator BEFORE
+		// BuildMissedAccessors. Without this OpenFolder the Aggregator's
+		// dirtyFiles snapshot taken by BuildMissedAccessors is stale
+		// (missing the renamed-in .kv) and the rebuild loop iterates
+		// the old set — accessors aren't rebuilt for the new content,
+		// and the trailing a.OpenFolder() inside BuildMissedAccessors
+		// then opens the new .kv against an empty (or absent) accessor.
+		if p.Aggregator != nil {
+			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: post-rename Aggregator.OpenFolder failed (continuing — accessor rebuild may be skipped)", "err", err)
+			}
+		}
+		// Stage 5: build the missing accessors against the new .kv.
 		if p.Aggregator != nil {
 			if err := p.Aggregator.BuildMissedAccessors(context.Background(), 1); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: BuildMissedAccessors failed (continuing — accessors will be built on next process start)", "err", err)
 			}
 		}
+		// Stage 6: cleanup .old sidecars (both .kv.old and accessor.old).
 		for _, pair := range regen.pairs {
 			oldSidecar := pair.finalPath + ".old"
 			if err := dir.RemoveFile(oldSidecar); err != nil && !os.IsNotExist(err) && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldSidecar)
+			}
+		}
+		for _, oldPath := range accessorOlds {
+			if err := dir.RemoveFile(oldPath); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove accessor .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldPath)
 			}
 		}
 	}
@@ -173,6 +217,50 @@ func (p *Provider) FinalizeUnwind() error {
 		p.logger.Info("[storage] Provider.FinalizeUnwind: deferred snapshot-trim ops executed", "deleted", fileCount, "rebuilt", rebuildCount, "regenerated", regenCount)
 	}
 	return nil
+}
+
+// renameAccessorsToOld renames every accessor file (.bt / .kvi /
+// .kvei) sharing the regenerated .kv's domain + step-range to a .old
+// sidecar in place, returning the resulting .old paths for the
+// caller to clean up after the rebuild lands.
+//
+// Each state-domain .kv has companion accessor files in the same
+// directory but with a potentially-different version prefix
+// (today: .kv is v2.0-… while its .bt/.kvei are v1.1-… for
+// non-commitment domains, and .kvi is v2.0-… for commitment). The
+// glob `v*-<domain>.<from>-<to>.<ext>` catches every version
+// variant. Returns nil/empty when finalPath is malformed or when no
+// accessors exist; either is benign — BuildMissedAccessors will then
+// see "no accessors present" and rebuild from the new .kv.
+func (p *Provider) renameAccessorsToOld(finalPath string) []string {
+	finalBase := filepath.Base(finalPath)
+	dashIdx := strings.IndexByte(finalBase, '-')
+	if dashIdx == -1 {
+		return nil
+	}
+	suffix := strings.TrimSuffix(finalBase[dashIdx+1:], ".kv")
+	if suffix == finalBase[dashIdx+1:] {
+		return nil
+	}
+	finalDir := filepath.Dir(finalPath)
+	var olds []string
+	for _, ext := range []string{".bt", ".kvi", ".kvei"} {
+		matches, err := filepath.Glob(filepath.Join(finalDir, "v*-"+suffix+ext))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			oldPath := m + ".old"
+			if err := os.Rename(m, oldPath); err != nil {
+				if !os.IsNotExist(err) && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: rename accessor → .old failed (continuing — fileItemsWithMissedAccessors will see stale accessor on disk and skip the rebuild; manual cleanup may be required)", "err", err, "path", m)
+				}
+				continue
+			}
+			olds = append(olds, oldPath)
+		}
+	}
+	return olds
 }
 
 // AbortUnwind drops the FS / inventory / downloader / republish ops
