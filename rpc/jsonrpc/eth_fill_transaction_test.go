@@ -96,3 +96,22 @@ func TestFillTransactionContractCreationNoData(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "contract creation")
 }
+
+func TestFillTransactionBlobPreCancun(t *testing.T) {
+	// TestChainBerlinConfig has no Cancun (ExcessBlobGas == nil on head).
+	// A blob tx request must return a clear error, not panic.
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		From:                &from,
+		To:                  &to,
+		BlobVersionedHashes: []common.Hash{blobHash},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Cancun")
+}

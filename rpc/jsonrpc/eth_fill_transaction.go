@@ -75,7 +75,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 				nonce = reply.Nonce + 1
 			} else {
 				latestBlock := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-				if count, err3 := api.GetTransactionCount(ctx, *args.From, &latestBlock); err3 == nil && count != nil {
+				count, err3 := api.GetTransactionCount(ctx, *args.From, &latestBlock)
+				if err3 != nil {
+					return nil, err3
+				}
+				if count != nil {
 					nonce = uint64(*count)
 				}
 			}
@@ -111,7 +115,10 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, err
 	}
 
-	if args.BlobVersionedHashes != nil && args.MaxFeePerBlobGas == nil && head.ExcessBlobGas != nil {
+	if args.BlobVersionedHashes != nil && args.MaxFeePerBlobGas == nil {
+		if head.ExcessBlobGas == nil {
+			return nil, errors.New("blob transactions not supported before Cancun")
+		}
 		nextBlockTime := head.Time + cc.SecondsPerSlot()
 		blobFee, err := misc.GetBlobGasPrice(cc, *head.ExcessBlobGas, nextBlockTime)
 		if err != nil {
