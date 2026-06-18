@@ -217,3 +217,88 @@ func TestCollectFilesPastBlock_StateDomainFilesPastStepBoundary(t *testing.T) {
 		got,
 		"state-domain files with ToStep > stepBoundary must be collected; files at the boundary step or below stay")
 }
+
+// TestCollectFilesPastBlock_StraddleStateFilePreserved pins the
+// fix to the soak v14 iter-3 wedge: when the aggregator has merged
+// step files into wider chunks, the file STRADDLING stepBoundary
+// (FromStep < stepBoundary AND ToStep > stepBoundary) must NOT be
+// collected for removal. It is needed for boundaryStepFileForDomain
+// to regenerate in place — destroying it would leave the unwind with
+// no commitment anchor → Caplin's catchup wedges on `behind
+// commitment`.
+//
+// Pre-fix predicate `e.ToStep > stepBoundary` swept the straddle
+// file alongside entirely-past files. Post-fix predicate `e.FromStep
+// >= stepBoundary` only collects files whose entire range lies past
+// the boundary, leaving the straddle for regen to truncate in place.
+func TestCollectFilesPastBlock_StraddleStateFilePreserved(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	// Match the v14 iter-3 layout: stepBoundary=275 falls inside
+	// the merged 272-276 chunk. The 272-276 file MUST stay (regen
+	// will truncate it in place at lastTxNum); the 276-280 file is
+	// entirely past the boundary and MUST be removed.
+	files := []*snapshot.FileEntry{
+		{Name: "domain/v2.0-commitment.264-272.kv", Domain: snapshot.DomainCommitment, FromStep: 264, ToStep: 272, Local: true},
+		{Name: "domain/v2.0-commitment.272-276.kv", Domain: snapshot.DomainCommitment, FromStep: 272, ToStep: 276, Local: true}, // STRADDLE
+		{Name: "domain/v2.0-commitment.276-280.kv", Domain: snapshot.DomainCommitment, FromStep: 276, ToStep: 280, Local: true}, // PAST
+		{Name: "domain/v2.0-accounts.272-276.kv", Domain: snapshot.DomainAccounts, FromStep: 272, ToStep: 276, Local: true},     // STRADDLE
+		{Name: "domain/v2.0-accounts.276-280.kv", Domain: snapshot.DomainAccounts, FromStep: 276, ToStep: 280, Local: true},     // PAST
+	}
+	for _, e := range files {
+		require.NoError(t, inv.AddFile(e))
+	}
+
+	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
+	out := p.collectFilesPastBlock(3_006_443, 275)
+
+	got := make([]string, len(out))
+	for i, e := range out {
+		got[i] = e.Name
+	}
+	sort.Strings(got)
+
+	require.Equal(t,
+		[]string{
+			"domain/v2.0-accounts.276-280.kv",
+			"domain/v2.0-commitment.276-280.kv",
+		},
+		got,
+		"straddle files (FromStep < stepBoundary ≤ ToStep) MUST be preserved for regen; "+
+			"only entirely-past files (FromStep >= stepBoundary) are trimmed")
+}
+
+// TestCollectFilesPastBlock_StateFileEntirelyPastStillTrimmed is the
+// regression-safety twin of the straddle test: a file whose entire
+// step range is past stepBoundary (FromStep >= stepBoundary) MUST
+// still be collected. This pins that the broadened "leave the
+// straddle" predicate doesn't accidentally exempt non-straddle past
+// files.
+func TestCollectFilesPastBlock_StateFileEntirelyPastStillTrimmed(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	files := []*snapshot.FileEntry{
+		{Name: "domain/v2.0-commitment.275-280.kv", Domain: snapshot.DomainCommitment, FromStep: 275, ToStep: 280, Local: true}, // FromStep == stepBoundary → strictly past
+		{Name: "domain/v2.0-commitment.280-288.kv", Domain: snapshot.DomainCommitment, FromStep: 280, ToStep: 288, Local: true}, // FromStep > stepBoundary
+	}
+	for _, e := range files {
+		require.NoError(t, inv.AddFile(e))
+	}
+
+	p := &Provider{Inventory: inv, Aggregator: stubAggregator{}}
+	out := p.collectFilesPastBlock(3_006_443, 275)
+
+	got := make([]string, len(out))
+	for i, e := range out {
+		got[i] = e.Name
+	}
+	sort.Strings(got)
+
+	require.Equal(t,
+		[]string{
+			"domain/v2.0-commitment.275-280.kv",
+			"domain/v2.0-commitment.280-288.kv",
+		},
+		got,
+		"files with FromStep >= stepBoundary lie entirely past the boundary and must be trimmed")
+}

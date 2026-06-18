@@ -53,10 +53,13 @@ import (
 //     second mode B targeting a block inside the removed straddle
 //     file's range failed with "no header for block N".
 //   - domain / history / idx files (all step-indexed) where
-//     ToStep > stepBoundary, where stepBoundary == (lastTxNum/stepSize)+1
-//     — that is, files extending strictly past the boundary step (the
-//     step containing lastTxNum). The boundary step's own file stays
-//     and contributes its in-range entries to reads.
+//     FromStep >= stepBoundary, where stepBoundary ==
+//     (lastTxNum/stepSize)+1 — that is, files whose entire content
+//     lies strictly past the step containing lastTxNum. The straddle
+//     file (FromStep < stepBoundary ≤ ToStep) stays and is regen-
+//     truncated in place by regenerateBoundaryStepFiles; without
+//     that, the commitment-domain anchor is never planted at the new
+//     tip and Caplin's catchup wedges on `behind commitment`.
 //
 // Caplin / meta / salt files are intentionally out of scope here:
 // caplin lives on a slot axis (separate aligned-mode workstream);
@@ -178,14 +181,14 @@ func (p *Provider) computeStepBoundaryForBlock(ctx context.Context, tx kv.Tempor
 }
 
 // collectFilesPastBlock walks the inventory and returns every file
-// whose content is strictly past toBlock. Block files use FromBlock
-// (the straddle file FromBlock ≤ toBlock < ToBlock stays because it
-// still holds blocks ≤ toBlock); state files use ToStep against
-// stepBoundary by the same principle (the boundary step's file stays
-// and the boundary-step diff-replay handles in-step pruning at read
-// time). State files are only collected when p.Aggregator != nil —
-// without an aggregator the stepBoundary input is 0 and would
-// over-trim everything.
+// whose content lies entirely past toBlock. Block files use
+// FromBlock > toBlock (the straddle file FromBlock ≤ toBlock <
+// ToBlock stays because it still holds blocks ≤ toBlock); state
+// files use FromStep >= stepBoundary (the straddle file FromStep <
+// stepBoundary ≤ ToStep stays and is regen-truncated in place by
+// regenerateBoundaryStepFiles). State files are only collected when
+// p.Aggregator != nil — without an aggregator the stepBoundary input
+// is 0 and would over-trim everything.
 func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapshot.FileEntry {
 	var out []*snapshot.FileEntry
 	var blockHits, stateHits, stateScanned int
@@ -203,7 +206,7 @@ func (p *Provider) collectFilesPastBlock(toBlock, stepBoundary uint64) []*snapsh
 			domainsScanned++
 			for _, e := range p.Inventory.AllDomainFiles(domain) {
 				stateScanned++
-				if e.ToStep > stepBoundary {
+				if e.FromStep >= stepBoundary {
 					out = append(out, e)
 					stateHits++
 				}

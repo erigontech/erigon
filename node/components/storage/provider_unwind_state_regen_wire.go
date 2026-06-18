@@ -147,24 +147,23 @@ func (p *Provider) regenerateBoundaryStepFiles(
 }
 
 // boundaryStepFileForDomain returns the FileEntry for the .kv file
-// whose step coverage is [FromStep, stepBoundary) — the file
-// containing the txNum range that straddles the unwind target.
-// Returns nil if no such file is in the inventory (e.g. domain has no
-// files at this step yet).
-//
-// The boundary-step file is the unique entry per domain whose
-// ToStep == stepBoundary AND Kind == KindKV (the .kv primary, not the
-// accessor variants .kvi/.bt/.kvei — those get rebuilt against the
-// regenerated .kv by FinalizeUnwind via Aggregator.BuildMissedAccessors).
+// whose [FromStep, ToStep) range contains stepBoundary — the file
+// covering the txNum range that straddles the unwind target. When
+// the aggregator has merged step files into wider chunks, the
+// boundary is reached strictly inside a merged file; the aligned
+// case (ToStep == stepBoundary) is the strict sub-case where the
+// boundary lands exactly on a file edge. Returns nil when no file
+// straddles stepBoundary (early history before the step has retired,
+// or stepBoundary is past every retired file).
 func (p *Provider) boundaryStepFileForDomain(domain snapshot.Domain, stepBoundary uint64) *snapshot.FileEntry {
 	for _, e := range p.Inventory.AllDomainFiles(domain) {
 		if e.Kind != snapshot.KindKV {
 			continue
 		}
-		if e.ToStep != stepBoundary {
+		if e.FromStep >= stepBoundary {
 			continue
 		}
-		if e.FromStep >= stepBoundary {
+		if e.ToStep < stepBoundary {
 			continue
 		}
 		return e
