@@ -1,13 +1,19 @@
-participants_matrix:
-  el:
-    - el_type: erigon
-      el_image: test/erigon:current
-      el_log_level: "debug"
-  cl:
-    - cl_type: teku
-      cl_image: consensys/teku:26.4.0
-    - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v8.1.3
+# 4 nodes (2 teku + 2 lighthouse), not 2: with a single peer per node gossipsub
+# can't sustain the block-propagation mesh, so blocks fail to publish ("No peers
+# for message topics") and the clients diverge (assertoor "too many forks").
+participants:
+  - el_type: erigon
+    el_image: test/erigon:current
+    el_log_level: "debug"
+    cl_type: teku
+    cl_image: consensys/teku:26.4.0
+    count: 2
+  - el_type: erigon
+    el_image: test/erigon:current
+    el_log_level: "debug"
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:v8.1.3
+    count: 2
 
 network_params:
   electra_fork_epoch: 1
