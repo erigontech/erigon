@@ -321,6 +321,54 @@ func Test_BtreeIndex_V0_M_Mismatch(t *testing.T) {
 	}
 }
 
+// Seeking a key greater than the last must return (nil, nil) even when the last
+// cached pivot is the last key (KeysCount % M == 1), where bs() returns an
+// insertion point == KeysCount.
+func TestBtIndex_SeekBeyondLast(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	const M = uint64(8)
+	const keyCount = 17 // 17 % 8 == 1 -> last pivot di == last key
+	compress := seg.CompressNone
+
+	kvPath := generateKV(t, tmp, 20, 10, keyCount, logger, compress)
+	keys, err := pivotKeysFromKV(kvPath)
+	require.NoError(t, err)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
+	func() {
+		decomp, err := seg.NewDecompressor(kvPath)
+		require.NoError(t, err)
+		defer decomp.Close()
+		iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: M, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
+		require.NoError(t, err)
+		defer iw.Close()
+		r := seg.NewReader(decomp.MakeGetter(), compress)
+		r.Reset(0)
+		var pos uint64
+		for r.HasNext() {
+			key, _ := r.Next(nil)
+			require.NoError(t, iw.AddKey(key, pos))
+			pos, _ = r.Skip()
+		}
+		iw.DisableFsync()
+		require.NoError(t, iw.Build())
+	}()
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, M, compress, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.EqualValues(t, keyCount, bt.KeyCount())
+
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+	beyond := append(append([]byte{}, keys[len(keys)-1]...), 0xff)
+	cur, err := bt.Seek(getter, beyond)
+	require.NoError(t, err)
+	require.Nil(t, cur, "seek beyond last key must return (nil, nil)")
+}
+
 func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
 	f := Footer{
 		Meta:          Metadata{KeysCount: 12345, M: 256, EfOffset: 1 << 33}, // EfOffset > 4GiB: must be uint64
