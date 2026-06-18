@@ -262,7 +262,7 @@ jobs:
 
       - name: Download EEST fixtures on cache miss
         if: steps.eest-cache.outputs.cache-hit != 'true'
-        run: bash erigon-full/tools/test-fixtures.sh erigon-full/test-fixtures.json test-fixtures-cache ${{ matrix.fixtures-tarball }}
+        run: bash erigon-full/tools/test-fixtures.sh --download-only erigon-full/test-fixtures.json test-fixtures-cache ${{ matrix.fixtures-tarball }}
 
       - name: Stage fixtures into hive eels sim build context
         run: cp "test-fixtures-cache/${{ matrix.fixtures-tarball }}.tar.gz" "hive/simulators/ethereum/eels/${{ matrix.sim }}/fixtures.tar.gz"
