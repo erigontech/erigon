@@ -297,14 +297,11 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
 	}
 	sc.Index = uint32(idx)
-	valBytes, err := s.Bytes()
-	if err != nil {
+	// ReadUint256 enforces canonical (minimal) integer encoding, matching the
+	// encoder and rejecting non-canonical values (leading zero bytes).
+	if err := s.ReadUint256(&sc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if len(valBytes) > 32 {
-		return fmt.Errorf("read Value: too large (%d bytes)", len(valBytes))
-	}
-	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
@@ -340,14 +337,11 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
 	}
 	bc.Index = uint32(idx)
-	valBytes, err := s.Bytes()
-	if err != nil {
+	// ReadUint256 enforces canonical (minimal) integer encoding, matching the
+	// encoder and rejecting non-canonical values (leading zero bytes).
+	if err := s.ReadUint256(&bc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if len(valBytes) > 32 {
-		return fmt.Errorf("read Value: integer too large (%d bytes)", len(valBytes))
-	}
-	bc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
