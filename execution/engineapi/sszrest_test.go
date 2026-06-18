@@ -724,3 +724,27 @@ func TestExchangeCapabilitiesDropsLegacySSZEndpoints(t *testing.T) {
 		require.NotContains(t, capability, "/engine/v")
 	}
 }
+
+func TestSSZRESTExecutionRequestsBound(t *testing.T) {
+	// execution_requests is bounded at MAX_EXECUTION_REQUESTS_PER_PAYLOAD (256);
+	// a longer list must be rejected on decode.
+	mkRequests := func(n int) []hexutil.Bytes {
+		reqs := make([]hexutil.Bytes, n)
+		for i := range reqs {
+			reqs[i] = hexutil.Bytes{byte(i)}
+		}
+		return reqs
+	}
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.ElectraVersion)
+
+	enc, err := encodeNewPayloadEnvelope(clparams.ElectraVersion, payload, common.Hash{}, mkRequests(256))
+	require.NoError(t, err)
+	_, _, out, err := decodeNewPayloadEnvelope(enc, clparams.ElectraVersion)
+	require.NoError(t, err)
+	require.Len(t, out, 256)
+
+	enc, err = encodeNewPayloadEnvelope(clparams.ElectraVersion, payload, common.Hash{}, mkRequests(257))
+	require.NoError(t, err)
+	_, _, _, err = decodeNewPayloadEnvelope(enc, clparams.ElectraVersion)
+	require.Error(t, err)
+}

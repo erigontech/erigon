@@ -162,6 +162,21 @@ func newTransactionsSSZ(txs []hexutil.Bytes) *solid.TransactionsSSZ {
 	return solid.NewTransactionsSSZFromTransactions(binaryTxs)
 }
 
+const (
+	sszMaxExecutionRequests        = 1 << 8  // MAX_EXECUTION_REQUESTS_PER_PAYLOAD
+	sszMaxBytesPerExecutionRequest = 1 << 30 // MAX_BYTES_PER_EXECUTION_REQUEST
+)
+
+// newExecutionRequestsSSZ bounds the list at MAX_EXECUTION_REQUESTS_PER_PAYLOAD,
+// unlike newTransactionsSSZ which uses the larger transaction-list bound.
+func newExecutionRequestsSSZ(requests []hexutil.Bytes) *solid.TransactionsSSZ {
+	binary := make([][]byte, len(requests))
+	for i, r := range requests {
+		binary[i] = r
+	}
+	return solid.NewTransactionsSSZFromTransactionsWithLimits(binary, sszMaxExecutionRequests, sszMaxBytesPerExecutionRequest)
+}
+
 // ExecutionPayloadEnvelope is the request body of POST /{fork}/payloads.
 // parent_beacon_block_root exists since Cancun, execution_requests since
 // Prague; expected blob versioned hashes are recomputed from the transactions.
@@ -179,7 +194,7 @@ func newPayloadEnvelopeSchema(version clparams.StateVersion, payload *engine_typ
 func decodeNewPayloadEnvelope(buf []byte, version clparams.StateVersion) (*engine_types.ExecutionPayload, common.Hash, []hexutil.Bytes, error) {
 	payload := engine_types.NewExecutionPayloadSSZ(version)
 	parentRoot := common.Hash{}
-	requests := &solid.TransactionsSSZ{}
+	requests := newExecutionRequestsSSZ(nil)
 	if err := ssz2.UnmarshalSSZ(buf, int(version), newPayloadEnvelopeSchema(version, payload, &parentRoot, requests)...); err != nil {
 		return nil, common.Hash{}, nil, err
 	}
@@ -187,7 +202,7 @@ func decodeNewPayloadEnvelope(buf []byte, version clparams.StateVersion) (*engin
 }
 
 func encodeNewPayloadEnvelope(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot common.Hash, requests []hexutil.Bytes) ([]byte, error) {
-	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newTransactionsSSZ(requests))...)
+	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newExecutionRequestsSSZ(requests))...)
 }
 
 // blobVersionedHashesFromTxs recomputes the versioned hashes the legacy API
@@ -325,7 +340,7 @@ func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.
 	payload.SSZVersion = version
 	blockValue := blockValueHash(resp.BlockValue)
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
-	requests := newTransactionsSSZ(resp.ExecutionRequests)
+	requests := newExecutionRequestsSSZ(resp.ExecutionRequests)
 	switch {
 	case version < clparams.DenebVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:])
@@ -340,7 +355,7 @@ func decodeBuiltPayload(buf []byte, version clparams.StateVersion) (*engine_type
 	payload := engine_types.NewExecutionPayloadSSZ(version)
 	blockValue := common.Hash{}
 	blobsBundle := engine_types.NewBlobsBundleSSZ(version)
-	requests := &solid.TransactionsSSZ{}
+	requests := newExecutionRequestsSSZ(nil)
 	shouldOverride := false
 	var err error
 	switch {
