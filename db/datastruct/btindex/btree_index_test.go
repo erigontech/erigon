@@ -735,6 +735,39 @@ func TestDecodeNodes(t *testing.T) {
 	}
 }
 
+func TestDecodeListNodesV0_Validation(t *testing.T) {
+	build := func(dis ...uint64) []byte {
+		var buf bytes.Buffer
+		var u8 [8]byte
+		var u2 [2]byte
+		binary.BigEndian.PutUint64(u8[:], uint64(len(dis)))
+		buf.Write(u8[:])
+		for _, di := range dis {
+			binary.BigEndian.PutUint64(u8[:], di)
+			buf.Write(u8[:])
+			binary.BigEndian.PutUint16(u2[:], 1)
+			buf.Write(u2[:])
+			buf.WriteByte('k')
+		}
+		return buf.Bytes()
+	}
+
+	off, stride, _, err := decodeListNodesV0(build(0, 32, 64, 96))
+	require.NoError(t, err)
+	require.Equal(t, uint64(32), stride)
+	require.Len(t, off, 4)
+
+	// di0==0 is required, so stride=di1 can't underflow; corrupt progressions are rejected
+	for name, dis := range map[string][]uint64{
+		"first di != 0":      {8, 40},
+		"zero stride":        {0, 0},
+		"broken progression": {0, 32, 999},
+	} {
+		_, _, _, err := decodeListNodesV0(build(dis...))
+		require.Errorf(t, err, "expected error for %q", name)
+	}
+}
+
 func TestNodeEncode_NoAlloc(t *testing.T) {
 	node := Node{key: []byte("some-key")}
 	var headerBuf [10]byte
