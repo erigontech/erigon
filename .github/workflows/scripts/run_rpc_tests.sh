@@ -82,6 +82,11 @@ if [ -d "$WORKSPACE/rpc-tests/.git" ]; then
 fi
 if $_rpc_tests_cached; then
   echo "Using cached rpc-tests at $RPC_VERSION"
+  # For branch references (not tags) pull the latest commits so the cache stays fresh.
+  if [ -z "$_exact_tag" ]; then
+    git -C "$WORKSPACE/rpc-tests" fetch --depth 1 origin "$RPC_VERSION" >/dev/null 2>&1 && \
+      git -C "$WORKSPACE/rpc-tests" reset --hard FETCH_HEAD >/dev/null 2>&1 || true
+  fi
   # Remove stale untracked test fixtures left by runs using a different branch/version,
   # but preserve .venv/ and build/ which are the expensive parts of the cache.
   git -C "$WORKSPACE/rpc-tests" clean -fd -e .venv -e build >/dev/null 2>&1
