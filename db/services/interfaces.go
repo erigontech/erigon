@@ -127,7 +127,7 @@ type BlockRetire interface {
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int
-	WaitForMerges()
+	WaitForMerges(ctx context.Context)
 }
 
 type DBEventNotifier interface {

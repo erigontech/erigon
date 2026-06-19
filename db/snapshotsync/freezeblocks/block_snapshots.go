@@ -497,13 +497,19 @@ func (br *BlockRetire) mergeBlocksInBackground(ctx context.Context, lvl log.Lvl,
 	}()
 }
 
-// WaitForMerges blocks until in-flight background block merges complete and
-// prevents new ones from starting, so callers can safely close the DB after.
-func (br *BlockRetire) WaitForMerges() {
+// WaitForMerges prevents new background merges from starting and waits for any
+// in-flight one to finish, or until ctx is done. Abandoning the wait is safe:
+// the merge touches neither chainDB nor the open snapshots.
+func (br *BlockRetire) WaitForMerges(ctx context.Context) {
 	br.mergeMu.Lock()
 	br.mergeClosing = true
 	br.mergeMu.Unlock()
-	br.mergeWg.Wait()
+	done := make(chan struct{})
+	go func() { br.mergeWg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 func (br *BlockRetire) RetireBlocks(

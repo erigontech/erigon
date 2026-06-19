@@ -43,11 +43,11 @@ func dumpTenSegments(t *testing.T, sema *semaphore.Weighted) (*freezeblocks.Bloc
 	return br, m.Dirs.Snap
 }
 
-// TestBlockMergeRunsWithoutSemaphore is the guard for the "merge off the
-// semaphore" change: a block merge must run to completion even when the shared
-// snapshot-build semaphore is fully held by another party (e.g. state
-// collation). If a future change makes the merge acquire the semaphore, this
-// deadlocks and the timeout fails the test.
+// TestBlockMergeRunsWithoutSemaphore is a forward-guard (not a regression test
+// for this PR — MergeBlocks never acquired the semaphore): it pins that a block
+// merge completes even when the shared snapshot-build semaphore is fully held by
+// another party (e.g. state collation). If a future change makes the merge
+// acquire the semaphore, this deadlocks and the timeout fails the test.
 func TestBlockMergeRunsWithoutSemaphore(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -110,7 +110,7 @@ func TestRetireBlocksInBackgroundReleasesSemaphore(t *testing.T) {
 	case <-time.After(120 * time.Second):
 		t.Fatal("background retire did not finish")
 	}
-	br.WaitForMerges()
+	br.WaitForMerges(ctx)
 
 	// Semaphore must be fully available again — nothing leaked it.
 	require.True(t, sema.TryAcquire(1), "shared build semaphore was not released")
