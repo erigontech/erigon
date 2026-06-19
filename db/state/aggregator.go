@@ -343,7 +343,9 @@ func (a *Aggregator) ConfigureDomains() error {
 	a.configured = true
 
 	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated by USE_STATE_CACHE, nil = disabled.
-	if dbg.UseStateCache {
+	// Disabled under parallel/streaming commitment: the cache is shared across the concurrent
+	// patriciaContexts and aliases freed .kv mmap there, faulting the mem-batch flush.
+	if dbg.UseStateCache && !statecfg.ExperimentalParallelCommitment && !statecfg.ExperimentalStreamingCommitment {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
 		}
