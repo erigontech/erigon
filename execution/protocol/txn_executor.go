@@ -281,8 +281,9 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 }
 
 // preCheck computes intrinsic gas and enforces the consensus rules that must
-// hold before the message is applied, debiting the gas fee only after they all
-// pass so a rejected tx leaves sender state untouched. The main rules, in order:
+// hold before the message is applied. The gas fee (buyGas) and block pool gas
+// (Execute) are charged only after they all pass, so a rejected tx leaves
+// sender state untouched and consumes no pool gas. The main rules, in order:
 //
 //  1. there is no overflow when calculating intrinsic gas
 //  2. the sender nonce is correct
