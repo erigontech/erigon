@@ -21,9 +21,12 @@ type ErigonDBSettings struct {
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
-// treating an absent (nil) field as the default true.
+// treating an absent (nil) field as config3.DefaultReferencesInCommitmentBranches.
 func (s *ErigonDBSettings) RefsInCommitmentBranches() bool {
-	return s.ReferencesInCommitmentBranches == nil || *s.ReferencesInCommitmentBranches
+	if s.ReferencesInCommitmentBranches == nil {
+		return config3.DefaultReferencesInCommitmentBranches
+	}
+	return *s.ReferencesInCommitmentBranches
 }
 
 func readErigonDBSettings(path string) (*ErigonDBSettings, error) {
@@ -67,11 +70,8 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 		if err != nil {
 			return nil, err
 		}
-		// Normalize an absent flag in memory only; the file is synced snapshot metadata and must not be rewritten.
-		if settings.ReferencesInCommitmentBranches == nil {
-			refs := config3.DefaultReferencesInCommitmentBranches
-			settings.ReferencesInCommitmentBranches = &refs
-		}
+		// An absent field is resolved through RefsInCommitmentBranches(); the file is synced
+		// snapshot metadata and must not be rewritten.
 		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
 			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
 		return settings, nil

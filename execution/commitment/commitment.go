@@ -786,6 +786,27 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
+// HasShortenedKeys reports whether the branch carries any shortened (referenced) key — a key
+// field whose length is not length.Addr (account) / length.Addr+length.Hash (storage), i.e. a
+// varint file offset. A malformed branch reports true: treat as referenced, never under-report.
+func (branchData BranchData) HasShortenedKeys() bool {
+	var found bool
+	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) != length.Addr+length.Hash {
+				found = true
+			}
+		} else if len(key) != length.Addr {
+			found = true
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return true
+	}
+	return found
+}
+
 // if fn returns nil, the original key will be kept from branchData.
 // Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
 // only when a key actually changes. When no keys change, returns branchData as-is

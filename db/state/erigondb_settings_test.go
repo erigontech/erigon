@@ -31,7 +31,7 @@ import (
 func TestRefsInCommitmentBranchesAccessor(t *testing.T) {
 	t.Parallel()
 	tr, fa := true, false
-	require.True(t, (&ErigonDBSettings{ReferencesInCommitmentBranches: nil}).RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, (&ErigonDBSettings{ReferencesInCommitmentBranches: nil}).RefsInCommitmentBranches())
 	require.True(t, (&ErigonDBSettings{ReferencesInCommitmentBranches: &tr}).RefsInCommitmentBranches())
 	require.False(t, (&ErigonDBSettings{ReferencesInCommitmentBranches: &fa}).RefsInCommitmentBranches())
 }
@@ -67,10 +67,10 @@ func TestErigonDBSettingsAbsentFieldUnmarshalsNil(t *testing.T) {
 	got, err := readErigonDBSettings(path)
 	require.NoError(t, err)
 	require.Nil(t, got.ReferencesInCommitmentBranches)
-	require.True(t, got.RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, got.RefsInCommitmentBranches())
 }
 
-func TestResolveErigonDBSettingsExistingFileAbsentFieldNormalizesToDefault(t *testing.T) {
+func TestResolveErigonDBSettingsExistingFileAbsentFieldResolvesToDefault(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
@@ -79,7 +79,6 @@ func TestResolveErigonDBSettingsExistingFileAbsentFieldNormalizesToDefault(t *te
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
-	require.NotNil(t, settings.ReferencesInCommitmentBranches)
 	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
 
 	// Existing erigondb.toml is synced snapshot metadata and must NOT be rewritten.

@@ -444,7 +444,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
-	wantsReferencesInBranches := a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+	wantsReferencesInBranches := a.referencesInCommitmentBranches()
 	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
 	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
 
@@ -830,7 +830,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
-	wantsReferencesInBranches := a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+	wantsReferencesInBranches := a.referencesInCommitmentBranches()
 	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
 	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
 

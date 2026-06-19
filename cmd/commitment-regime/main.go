@@ -6,31 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
-
-// branchHasShortenedKey reports whether any plain key in the branch is a
-// shortened (file-offset) reference rather than a full account/storage key.
-func branchHasShortenedKey(branch commitment.BranchData) bool {
-	var found bool
-	_, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) != length.Addr+length.Hash {
-				found = true
-			}
-		} else if len(key) != length.Addr {
-			found = true
-		}
-		return nil, nil
-	})
-	if err != nil {
-		return true
-	}
-	return found
-}
 
 // scan reads every key/value pair greedily and stops at the first branch that
 // carries a shortened key. referenced=true means at least one shortened key was
@@ -60,7 +39,7 @@ func scan(path string) (referenced bool, firstAt, pairs uint64, err error) {
 		if bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) {
 			continue
 		}
-		if branchHasShortenedKey(valBuf) {
+		if commitment.BranchData(valBuf).HasShortenedKeys() {
 			return true, pairs, pairs, nil
 		}
 	}

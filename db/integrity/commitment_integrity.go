@@ -528,17 +528,7 @@ func commitmentFileReferencing(file state.VisibleFile) bool {
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			continue
 		}
-		var short bool
-		if _, err := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-			full := length.Addr
-			if isStorage {
-				full = length.Addr + length.Hash
-			}
-			if len(key) != full {
-				short = true
-			}
-			return nil, nil
-		}); err != nil || short {
+		if commitment.BranchData(v).HasShortenedKeys() {
 			return true
 		}
 	}
@@ -552,7 +542,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	endTxNum := file.EndRootNum()
 	if !commitmentFileReferencing(file) {
 		logger.Info(
-			"[integrity] CommitmentKvDeref skipped, file sampled as plain (no shortened keys)",
+			"[integrity] CommitmentKvDeref skipped, no shortened keys found (full scan)",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,

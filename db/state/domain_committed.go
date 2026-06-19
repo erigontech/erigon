@@ -45,25 +45,8 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 // when sampling a commitment file for shortened (referenced) keys at open time.
 const commitmentReferenceSampleCount = 200
 
-// branchHasShortenedKey reports whether a branch value carries a shortened (referenced) key:
-// an account key field whose length is not length.Addr, or a storage key field whose length is
-// not length.Addr+length.Hash. A shortened key is a varint file offset, never 20/52 bytes long.
 func branchHasShortenedKey(branch commitment.BranchData) bool {
-	var found bool
-	_, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) != length.Addr+length.Hash {
-				found = true
-			}
-		} else if len(key) != length.Addr {
-			found = true
-		}
-		return nil, nil
-	})
-	if err != nil {
-		return true // malformed branch: treat as referenced rather than under-report as plain
-	}
-	return found
+	return branch.HasShortenedKeys()
 }
 
 // commitmentFileReferenced reports whether a commitment .kv carries shortened (referenced) keys,
