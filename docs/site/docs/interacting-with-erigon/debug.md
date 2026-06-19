@@ -9,7 +9,7 @@ sidebar_position: 6
 
 The `debug` namespace provides debugging and diagnostic methods for Erigon node operators and developers. These methods offer deep introspection into blockchain state, transaction execution, and node performance.
 
-The debug namespace must be explicitly enabled using the `--http.api=debug` flag when starting the RPC daemon.
+The debug namespace must be explicitly enabled using the `--http.api=debug` flag when starting the RPC Daemon.
 
 :::warning
 The `debug` namespace is intended for debugging and development purposes, not for production use.

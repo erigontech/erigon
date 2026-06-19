@@ -367,33 +367,33 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	ctx := context.Background()
 	withdrawalAddr := config.GetWithdrawalRequestContract()
 	consolidationAddr := config.GetConsolidationRequestContract()
-	return db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		domains, err := execctx.NewSharedDomains(ctx, tx, logger)
-		if err != nil {
-			return err
-		}
-		defer domains.Close()
-		latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
-		if err != nil {
-			return err
-		}
-		stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-		stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
-			CodeHash: withdrawalRequestCodeHash,
-		})
-		stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
-		stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
-			CodeHash: consolidationRequestCodeHash,
-		})
-		stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-		if err := domains.Flush(ctx, tx); err != nil {
-			return err
-		}
-
-		return nil
+	stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
+		CodeHash: withdrawalRequestCodeHash,
 	})
+	stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
+	stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
+		CodeHash: consolidationRequestCodeHash,
+	})
+	stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+
+	return domains.Commit(ctx, tx)
 }
 
 // GenerateChain creates a chain of n blocks. The first block's

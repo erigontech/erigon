@@ -247,9 +247,11 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 	return nil
 }
 
-// Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	st, root, _, err := t.RunNoVerify(tb, tx, subtest, vmconfig, dirs)
+// Run executes a specific subtest and verifies the post-state and logs.
+// sd is the caller-owned SharedDomains: discard (Close without Flush) to
+// prevent per-subtest state from polluting the long-lived branch cache.
+func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
+	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig, dirs)
 
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
@@ -273,8 +275,12 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 	return st, root, nil
 }
 
-// RunNoVerify runs a specific subtest and returns the statedb, post-state root and gas used.
-func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
+// RunNoVerify runs a specific subtest and returns the statedb, post-state root
+// and gas used. sd is the caller-owned SharedDomains scope; pre-state is loaded
+// into it via MakePreStateInto so the per-subtest writes can be discarded by
+// closing sd without Flush — keeping ephemeral test state out of the long-lived
+// branch cache.
+func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
@@ -288,20 +294,15 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
+	_, err = MakePreStateInto(&chain.Rules{}, sd, tx, t.Json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
-	}
-	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
 	defer func() {
-		rootBytes, rootBytesErr := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+		rootBytes, rootBytesErr := sd.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 		if rootBytesErr != nil {
 			if err != nil {
 				err = fmt.Errorf("ComputeCommitment: %w: %w", rootBytesErr, err)
@@ -313,8 +314,9 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		root = common.BytesToHash(rootBytes)
 	}()
 
-	r := rpchelper.NewLatestStateReader(tx)
-	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
+	// Read through sd.AsGetter so execution sees never-Flushed pre-state held in sd.mem.
+	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
+	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
 
 	var baseFee *uint256.Int
@@ -420,8 +422,27 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	return statedb, root, gasUsed, nil
 }
 
+// Loads pre-state and flushes it to db + branch cache; for callers needing pre-state to outlive the call.
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := rpchelper.NewLatestStateReader(tx)
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer sd.Close()
+	statedb, err := MakePreStateInto(rules, sd, tx, alloc, blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if err := sd.Flush(context2.Background(), tx); err != nil {
+		return nil, err
+	}
+	return statedb, nil
+}
+
+// Loads pre-state into the caller-owned sd; closing sd without Flush discards it (keeps test state out of the branch cache).
+func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	// Read through sd.AsGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
+	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
@@ -435,28 +456,20 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v[:])
 			statedb.SetState(address, key, *val)
 		}
-
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
 			statedb.SetIncarnation(address, state.FirstContractIncarnation)
 		}
 	}
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer domains.Close()
-	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(context.Background(), tx)
 	if err != nil {
 		return nil, err
 	}
 
-	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
-
-	// Commit and re-open to start with a clean state.
+	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), blockNr-1)
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
 	}
@@ -464,12 +477,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := domains.Flush(context2.Background(), tx); err != nil {
+	if _, err := sd.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "pre-state-commitment", nil); err != nil {
 		return nil, err
 	}
 	return statedb, nil
@@ -577,6 +585,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	}
 	if gasPrice == nil {
 		return nil, errors.New("no gas price provided")
+	}
+	if baseFee == nil {
+		feeCap = big.Int(*gasPrice)
+		tipCap = big.Int(*gasPrice)
 	}
 
 	gpi := big.Int(*gasPrice)

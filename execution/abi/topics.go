@@ -182,14 +182,14 @@ func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Ar
 			reconstr = topics[i]
 		case FunctionTy:
 			if garbage := binary.BigEndian.Uint64(topics[i][0:8]); garbage != 0 {
-				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i].Bytes())
+				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i][:])
 			}
 			var tmp [24]byte
 			copy(tmp[:], topics[i][8:32])
 			reconstr = tmp
 		default:
 			var err error
-			reconstr, err = toGoType(0, arg.Type, topics[i].Bytes())
+			reconstr, err = toGoType(0, arg.Type, topics[i][:])
 			if err != nil {
 				return err
 			}
