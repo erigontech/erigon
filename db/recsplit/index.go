@@ -430,9 +430,6 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
-	if idx.keyCount == 1 {
-		return 0, true
-	}
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
 		case 1:
@@ -444,6 +441,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 				return 0, false
 			}
 		}
+	}
+	if idx.keyCount == 1 {
+		if !idx.enums {
+			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+		}
+		return 0, true
 	}
 
 	var gr GolombRiceReader

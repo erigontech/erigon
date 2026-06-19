@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -173,7 +174,7 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
@@ -181,9 +182,23 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
 			return fmt.Errorf("clearing exec state tables: %w", err)
 		}
-		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
+		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.
+	if hasAgg, ok := db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			aggTx := agg.BeginFilesRo()
+			defer aggTx.Close()
+			if bc := aggTx.BranchCache(); bc != nil {
+				bc.Clear()
+			}
+		}
+	}
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {

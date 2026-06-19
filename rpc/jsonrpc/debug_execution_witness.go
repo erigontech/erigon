@@ -750,7 +750,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
+	// mode; canonical mode stays minimal to match the reference witness.
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -1121,6 +1123,7 @@ func buildWitnessTrie(
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
+	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
@@ -1140,7 +1143,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction", produceExclusionProofs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1340,7 +1343,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 
 	// Generate the trie with correct storage roots
-	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState")
+	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState", false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate post-state trie: %w", err)
 	}

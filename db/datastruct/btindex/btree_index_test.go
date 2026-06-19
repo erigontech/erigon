@@ -18,7 +18,10 @@ package btindex
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -184,6 +187,194 @@ func Test_BtreeIndex_Build(t *testing.T) {
 		require.Equal(t, keys[i], c.Key())
 		c.Close()
 	}
+}
+
+// writeV0Index writes a legacy v0-format .bt over dataPath: [EF][nodeCount(8)][di(8)+keyLen(2)+key per node],
+// nodes kept at di = 0, M, 2M, ... The writer no longer emits v0, so this reproduces the released layout to
+// keep the v0 read path (decodeListNodesV0 + EF-first detection) covered.
+func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, m uint64) {
+	tb.Helper()
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	r := seg.NewReader(decomp.MakeGetter(), compressed)
+	r.Reset(0)
+	count := uint64(r.Count() / 2)
+
+	f, err := os.Create(indexPath)
+	require.NoError(tb, err)
+	defer f.Close()
+	w := getBufioWriter(f)
+	defer putBufioWriter(w)
+
+	if count > 0 {
+		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))
+		var nodes []Node
+		var key []byte
+		var pos, di uint64
+		for r.HasNext() {
+			key, _ = r.Next(key[:0])
+			ef.AddOffset(pos)
+			if di%m == 0 {
+				nodes = append(nodes, Node{key: common.Copy(key), di: di})
+			}
+			di++
+			pos, _ = r.Skip()
+		}
+		ef.Build()
+		require.NoError(tb, ef.Write(w))
+
+		var hdr [10]byte
+		binary.BigEndian.PutUint64(hdr[:8], uint64(len(nodes)))
+		_, err = w.Write(hdr[:8])
+		require.NoError(tb, err)
+		for i := range nodes {
+			binary.BigEndian.PutUint64(hdr[:8], nodes[i].di)
+			binary.BigEndian.PutUint16(hdr[8:10], uint16(len(nodes[i].key)))
+			_, err = w.Write(hdr[:10])
+			require.NoError(tb, err)
+			_, err = w.Write(nodes[i].key)
+			require.NoError(tb, err)
+		}
+	}
+	require.NoError(tb, w.Flush())
+}
+
+func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	const M = uint64(32)
+	keyCount := 500
+	compressFlags := seg.CompressKeys | seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+
+	v2Path := filepath.Join(tmp, "v2.bt")
+	buildBtreeIndex(t, dataPath, v2Path, compressFlags, 1, logger, true)
+
+	v0Path := filepath.Join(tmp, "v0.bt")
+	writeV0Index(t, dataPath, v0Path, compressFlags, M)
+
+	for _, tc := range []struct{ name, path string }{{"v0", v0Path}, {"v2", v2Path}} {
+		t.Run(tc.name, func(t *testing.T) {
+			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, M, compressFlags, false)
+			require.NoError(t, err)
+			defer bt.Close()
+			defer kv.Close()
+			require.EqualValues(t, keyCount, bt.KeyCount())
+
+			getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+			c, err := bt.Seek(getter, nil)
+			require.NoError(t, err)
+			for i := range keys {
+				require.Equalf(t, keys[i], c.Key(), "%s forward scan i=%d", tc.name, i)
+				c.Next()
+			}
+			c.Close()
+			for i := range keys {
+				cur, err := bt.Seek(getter, keys[i])
+				require.NoErrorf(t, err, "%s i=%d", tc.name, i)
+				require.Equalf(t, keys[i], cur.Key(), "%s seek i=%d", tc.name, i)
+				cur.Close()
+			}
+		})
+	}
+}
+
+func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
+	f := Footer{
+		Meta:          Metadata{KeysCount: 12345, M: 256, EfOffset: 1 << 33}, // EfOffset > 4GiB: must be uint64
+		FormatVersion: btVersion,
+	}
+	var buf bytes.Buffer
+	require.NoError(t, f.Encode(&buf))
+	require.Equal(t, btMetadataLen+btAnchorLen, buf.Len())
+
+	got, footerStart, err := ReadFooter(buf.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, 0, footerStart) // no body in this isolated buffer
+	require.Equal(t, f.Meta.KeysCount, got.Meta.KeysCount)
+	require.Equal(t, f.Meta.M, got.Meta.M)
+	require.Equal(t, f.Meta.EfOffset, got.Meta.EfOffset)
+	require.Equal(t, f.FormatVersion, got.FormatVersion)
+
+	// missing/wrong magic -> legacy fallback signal, not a hard error
+	_, _, err = ReadFooter(bytes.Repeat([]byte{0xAB}, btMetadataLen+btAnchorLen))
+	require.ErrorIs(t, err, errNotFooterFormat)
+	_, _, err = ReadFooter([]byte{0x00})
+	require.ErrorIs(t, err, errNotFooterFormat)
+}
+
+func TestFooter_ZeroKeyCount(t *testing.T) {
+	// A footer-format file with KeysCount=0 must not panic (overflow guard).
+	// The file is well-formed structurally but has no EF data, so Open must
+	// return an error rather than silently succeed with a corrupt index.
+	tmp := t.TempDir()
+
+	// Build a minimal footer-format binary with KeysCount=0:
+	//   [0x01][4095 zeros][64 zeros as fake EF region][footer][anchor]
+	// EfOffset=4096, footerStart=4160: satisfies EfOffset < footerStart.
+	var body bytes.Buffer
+	body.WriteByte(btFirstByteUseFooter)
+	body.Write(make([]byte, 4095)) // pad to EfOffset=4096
+	body.Write(make([]byte, 64))   // fake EF bytes at offset 4096
+	// 4096+64=4160, already 8-byte aligned → footerStart=4160
+	footer := Footer{
+		Meta:          Metadata{KeysCount: 0, M: 256, EfOffset: 4096},
+		FormatVersion: btVersion,
+	}
+	require.NoError(t, footer.Encode(&body))
+
+	indexPath := filepath.Join(tmp, "zero_keys.bt")
+	require.NoError(t, os.WriteFile(indexPath, body.Bytes(), 0644))
+
+	// Use a 1-key KV as the reader — it won't be consulted because Open will
+	// fail before building the BpsTree.
+	dataPath := generateKV(t, tmp, 8, 8, 1, log.New(), seg.CompressNone)
+	_, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, 256, seg.CompressNone, false)
+	if err == nil {
+		defer bt.Close()
+		require.True(t, bt.Empty())
+	}
+	// error is acceptable; what is not acceptable is a panic
+}
+
+func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	keyCount := 5000
+	compressFlags := seg.CompressKeys | seg.CompressVals
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+
+	v2Path := filepath.Join(tmp, "v2.bt")
+	buildBtreeIndex(t, dataPath, v2Path, compressFlags, 1, logger, true)
+
+	data, err := os.ReadFile(v2Path)
+	require.NoError(t, err)
+	require.EqualValues(t, btFirstByteUseFooter, data[0], "v2 must start with a non-zero leading byte (no conflict with v0's 0x00)")
+	footer, footerStart, err := ReadFooter(data)
+	require.NoError(t, err)
+	require.EqualValues(t, keyCount, footer.Meta.KeysCount)
+	require.EqualValues(t, DefaultBtreeM, footer.Meta.M)
+
+	require.Zero(t, footer.Meta.EfOffset%btEFAlign, "EF must start 4kb-aligned")
+	require.Positive(t, footer.Meta.EfOffset)
+	require.Less(t, int(footer.Meta.EfOffset), footerStart)
+
+	// EfOffset must point at a valid EF holding all keys...
+	ef, _ := eliasfano32.ReadEliasFano(data[footer.Meta.EfOffset:])
+	require.EqualValues(t, keyCount, ef.Count())
+
+	// ...and equal the position the reader would otherwise derive from the nodes section (which starts after the leading byte).
+	nodesCount := (footer.Meta.KeysCount + footer.Meta.M - 1) / footer.Meta.M
+	_, nodesEnd, err := decodeNodes(data[1:], nodesCount, footer.Meta.M)
+	require.NoError(t, err)
+	require.EqualValues(t, alignUp(1+nodesEnd, btEFAlign), footer.Meta.EfOffset)
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
@@ -408,6 +599,41 @@ func TestNewBtIndex(t *testing.T) {
 	}
 }
 
+func TestBtIndex_MStoredInFile(t *testing.T) {
+	t.Parallel()
+
+	const wantM = uint64(8)
+	tmp := t.TempDir()
+	logger := log.New()
+	kvPath := generateKV(t, tmp, 20, 10, 1000, logger, seg.CompressNone)
+
+	decomp, err := seg.NewDecompressor(kvPath)
+	require.NoError(t, err)
+	defer decomp.Close()
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
+	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: wantM, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
+	require.NoError(t, err)
+	defer iw.Close()
+
+	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	r.Reset(0)
+	var pos uint64
+	for r.HasNext() {
+		key, _ := r.Next(nil)
+		require.NoError(t, iw.AddKey(key, pos))
+		pos, _ = r.Skip()
+	}
+	iw.DisableFsync()
+	require.NoError(t, iw.Build())
+
+	r2 := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, 1, r2) // pass wrong M — file M should win
+	require.NoError(t, err)
+	defer bt.Close()
+	require.Equal(t, wantM, bt.M())
+}
+
 func BenchmarkBtIndex_Get(b *testing.B) {
 	keyCount := 1_000_000
 	if testing.Short() {
@@ -445,4 +671,40 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestDecodeNodes(t *testing.T) {
+	const M = 256
+	for _, keys := range [][][]byte{
+		nil,
+		{[]byte("a")},
+		{[]byte("a"), []byte("bcd"), bytes.Repeat([]byte{0xff}, 300)},
+	} {
+		var buf bytes.Buffer
+		var hdr [2]byte
+		for _, k := range keys {
+			binary.BigEndian.PutUint16(hdr[:], uint16(len(k)))
+			buf.Write(hdr[:])
+			buf.Write(k)
+		}
+		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)), M)
+		require.NoError(t, err)
+		require.Equal(t, buf.Len(), n)
+		require.Len(t, got, len(keys))
+		for i := range keys {
+			require.Equal(t, uint64(i)*M, got[i].di) // di recomputed, not stored
+			require.True(t, bytes.Equal(keys[i], got[i].key))
+		}
+	}
+}
+
+func TestNodeEncode_NoAlloc(t *testing.T) {
+	node := Node{di: 42, key: []byte("some-key")}
+	var headerBuf [10]byte
+	allocs := testing.AllocsPerRun(1000, func() {
+		if err := node.Encode(io.Discard, headerBuf[:]); err != nil {
+			t.Fatal(err)
+		}
+	})
+	require.Zero(t, allocs)
 }
