@@ -114,7 +114,7 @@ func TestResolveErigonDBSettingsExistingFileExplicitTrueHonored(t *testing.T) {
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 	require.NotNil(t, settings.ReferencesInCommitmentBranches)
-	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
+	require.True(t, settings.RefsInCommitmentBranches())
 }
 
 func TestResolveErigonDBSettingsLegacyWritesDefault(t *testing.T) {
