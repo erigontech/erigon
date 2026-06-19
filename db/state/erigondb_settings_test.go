@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 )
 
@@ -69,7 +70,7 @@ func TestErigonDBSettingsAbsentFieldUnmarshalsNil(t *testing.T) {
 	require.True(t, got.RefsInCommitmentBranches())
 }
 
-func TestResolveErigonDBSettingsExistingFileAbsentFieldNormalizesToTrue(t *testing.T) {
+func TestResolveErigonDBSettingsExistingFileAbsentFieldNormalizesToDefault(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
@@ -79,7 +80,7 @@ func TestResolveErigonDBSettingsExistingFileAbsentFieldNormalizesToTrue(t *testi
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 	require.NotNil(t, settings.ReferencesInCommitmentBranches)
-	require.True(t, settings.RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
 
 	// Existing erigondb.toml is synced snapshot metadata and must NOT be rewritten.
 	after, err := os.ReadFile(path)
@@ -113,10 +114,10 @@ func TestResolveErigonDBSettingsExistingFileExplicitTrueHonored(t *testing.T) {
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 	require.NotNil(t, settings.ReferencesInCommitmentBranches)
-	require.True(t, settings.RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
 }
 
-func TestResolveErigonDBSettingsLegacyWritesTrue(t *testing.T) {
+func TestResolveErigonDBSettingsLegacyWritesDefault(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
@@ -124,27 +125,27 @@ func TestResolveErigonDBSettingsLegacyWritesTrue(t *testing.T) {
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 	require.NotNil(t, settings.ReferencesInCommitmentBranches)
-	require.True(t, settings.RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
 
 	written, err := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
 	require.NoError(t, err)
 	require.NotNil(t, written.ReferencesInCommitmentBranches)
-	require.True(t, *written.ReferencesInCommitmentBranches)
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, *written.ReferencesInCommitmentBranches)
 }
 
-func TestResolveErigonDBSettingsFreshNoDownloaderWritesTrue(t *testing.T) {
+func TestResolveErigonDBSettingsFreshNoDownloaderWritesDefault(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), true)
 	require.NoError(t, err)
 	require.NotNil(t, settings.ReferencesInCommitmentBranches)
-	require.True(t, settings.RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
 
 	written, err := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
 	require.NoError(t, err)
 	require.NotNil(t, written.ReferencesInCommitmentBranches)
-	require.True(t, *written.ReferencesInCommitmentBranches)
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, *written.ReferencesInCommitmentBranches)
 }
 
 func TestResolveErigonDBSettingsFreshWithDownloaderDoesNotWrite(t *testing.T) {
@@ -153,7 +154,7 @@ func TestResolveErigonDBSettingsFreshWithDownloaderDoesNotWrite(t *testing.T) {
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
-	require.True(t, settings.RefsInCommitmentBranches())
+	require.Equal(t, config3.DefaultReferencesInCommitmentBranches, settings.RefsInCommitmentBranches())
 
 	_, err = os.Stat(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
 	require.True(t, os.IsNotExist(err), "fresh+downloader must leave erigondb.toml for the downloader")
