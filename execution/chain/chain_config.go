@@ -152,6 +152,7 @@ var (
 		BerlinBlock:           common.NewUint64(0),
 		LondonBlock:           common.NewUint64(0),
 		Aura:                  &AuRaConfig{},
+		DisabledEIPs:          []int{170},
 	}
 
 	TestChainBerlinConfig = &Config{
@@ -819,6 +820,13 @@ func (r *Rules) IsEIPDisabled(eip int) bool {
 // loads disable it via DisabledEIPs to retain declared empty accounts).
 func (r *Rules) IsEIP161Enabled() bool {
 	return r.IsSpuriousDragon && !r.IsEIPDisabled(161)
+}
+
+// IsEIP170Enabled reports whether EIP-170 (the contract code-size limit) is
+// enabled: Spurious Dragon is active and EIP-170 is not disabled (Gnosis/Chiado
+// disable it via DisabledEIPs).
+func (r *Rules) IsEIP170Enabled() bool {
+	return r.IsSpuriousDragon && !r.IsEIPDisabled(170)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
