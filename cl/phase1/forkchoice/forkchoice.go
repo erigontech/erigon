@@ -173,8 +173,8 @@ type ForkChoiceStore struct {
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
 	// Used by is_head_late and proposer boost reorg logic.
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
-	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
-	indexedWeightStore *indexedWeightStore
+	// [New in Gloas:EIP7732]
+	gloasWeightTree *gloasWeightTree
 	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
 	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
 	// Due to network timing, the envelope may arrive before its corresponding block.
@@ -411,8 +411,7 @@ func NewForkChoiceStore(
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
-	// [New in Gloas:EIP7732] Initialize indexed weight store
-	f.indexedWeightStore = NewIndexedWeightStore(f)
+	f.gloasWeightTree = newGloasWeightTree(f)
 
 	return f, nil
 }

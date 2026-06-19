@@ -183,16 +183,6 @@ type WeightStoreReader interface {
 	GetWeight(node ForkChoiceNode) uint64
 }
 
-// headWeightStore returns the incremental indexed weight store for a head
-// computation, with cs supplying fresh validator balances and active/slashed
-// status. It seeds the index from latestMessages on first use. The caller must
-// hold f.mu for the duration of the scoring pass.
-func (f *ForkChoiceStore) headWeightStore(cs *checkpointState) WeightStore {
-	f.indexedWeightStore.seedFromLatestMessages()
-	f.indexedWeightStore.setCheckpointState(cs)
-	return f.indexedWeightStore
-}
-
 // ComputeWeightsWithAuxState computes weights for all blocks using an auxiliary state.
 // This is used during head selection when we have a cached state available.
 // [New in Gloas:EIP7732] Uses WeightStore for weight calculation.

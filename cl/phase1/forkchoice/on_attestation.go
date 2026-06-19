@@ -151,19 +151,11 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	return attestationIndicies, nil
 }
 
-func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage, maintainIndexedVotes bool) {
-	// The indexed weight store is only read by GLOAS get_head; maintaining it on
-	// the pre-GLOAS path is wasted per-vote work under the fork-choice lock.
-	if maintainIndexedVotes && f.indexedWeightStore != nil {
-		if oldMessage, has := f.latestMessages.get(int(index)); has && oldMessage != (LatestMessage{}) {
-			f.indexedWeightStore.RemoveVote(index, oldMessage.Root)
-		}
-	}
-
+func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage, trackGloasWeights bool) {
 	f.latestMessages.set(int(index), message)
 
-	if maintainIndexedVotes && f.indexedWeightStore != nil {
-		f.indexedWeightStore.IndexVote(index, message)
+	if trackGloasWeights && f.gloasWeightTree != nil {
+		f.gloasWeightTree.markDirty(index)
 	}
 }
 
@@ -193,6 +185,9 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
+	if f.gloasWeightTree != nil {
+		f.gloasWeightTree.markDirty(validatorIndex)
+	}
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(

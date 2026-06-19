@@ -192,7 +192,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
 
-	ws := f.headWeightStore(cs)
+	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
 		children := f.getNodeChildren(head, blocks)

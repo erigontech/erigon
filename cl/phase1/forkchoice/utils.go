@@ -105,9 +105,8 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-	// Drop indexed fork-choice votes for finalized blocks.
-	if f.indexedWeightStore != nil {
-		f.indexedWeightStore.pruneFinalized(finalizedSlot)
+	if f.gloasWeightTree != nil {
+		f.gloasWeightTree.pruneFinalized(finalizedSlot)
 	}
 	// Clean up GLOAS-specific payload votes for finalized blocks.
 	// Note: envelope files are cleaned up in forkGraph.Prune().
