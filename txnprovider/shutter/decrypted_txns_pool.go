@@ -63,13 +63,18 @@ func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error
 
 	select {
 	case <-ctx.Done():
-		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
-		// in the waiting goroutine the ones that still need to wait will go back to sleep
 		p.decryptionCond.Broadcast()
+		<-done
 	case <-done:
 		// no-op
 	}
 
+	p.decryptionCond.L.Lock()
+	_, found := p.decryptedTxns[mark]
+	p.decryptionCond.L.Unlock()
+	if found {
+		return nil
+	}
 	return ctx.Err()
 }
 

@@ -246,12 +246,10 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		decryptionMarkWaitStart := time.Now()
 		err = p.decryptedTxnsPool.Wait(decryptionMarkWaitCtx, decryptionMark)
 		if err != nil {
-			decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
-			decryptionMarkMissed.Inc()
-
 			if errors.Is(err, context.DeadlineExceeded) {
+				decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
 				p.logger.Warn(
-					"decryption mark wait timeout, falling back to secondary txn provider",
+					"decryption mark wait timeout",
 					"slot", slot,
 					"blockNum", blockNum,
 					"eon", eon.Index,
@@ -259,15 +257,15 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 					"cutoffTime", cutoffTime.Unix(),
 					"timeout", decryptionMarkWaitTimeout,
 				)
-
-				return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+			} else {
+				decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
+				decryptionMarkMissed.Inc()
+				return nil, err
 			}
-
-			return nil, err
+		} else {
+			decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
+			decryptionMarkOnTime.Inc()
 		}
-
-		decryptionMarkWaitSecs.ObserveDuration(decryptionMarkWaitStart)
-		decryptionMarkOnTime.Inc()
 	}
 
 	decryptedTxns, ok := p.decryptedTxnsPool.DecryptedTxns(decryptionMark)
