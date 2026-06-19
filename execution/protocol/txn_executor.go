@@ -264,11 +264,33 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 	return nil
 }
 
-// preCheck validates consensus rules (nonce, fees, EIP-7825 gas cap) and buys gas.
+// preCheck enforces the consensus rules that must hold before the message is
+// applied and then buys gas. Every check runs before buyGas (and before the
+// nonce increment in Execute), so a rejected tx leaves sender state untouched:
+//
+//  1. no overflow computing intrinsic gas — checked by the caller
+//  2. the gas limit does not exceed the EIP-7825 cap (Osaka+)
+//  3. the sender nonce is correct
+//  4. the sender can pay the gas fee (gaslimit * gasprice)
+//  5. the block has enough gas left for the tx
+//  6. the sender can fund the topmost call's value transfer — checked by the EVM
+//  7. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
+
+	// Clause 7: the gas limit must cover intrinsic usage.
+	// EIP-8037: it must cover RegularGas + StateGas, not each separately.
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
+	}
+
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
 		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
@@ -340,9 +362,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap.
-	// Intrinsic gas is computed before preCheck() in Execute so that the
-	// fork-dependent cap can be validated here, before buyGas(), so pool gas
-	// is never consumed for rejected txs.
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
@@ -493,42 +512,21 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 	}
-	// First check this message satisfies all consensus rules before
-	// applying the message. The rules include these clauses
-	//
-	// 1. there is no overflow when calculating intrinsic gas
-	// 2. the transaction gas limit does not exceed the EIP-7825 cap (Osaka+)
-	// 3. the nonce of the message caller is correct
-	// 4. caller has enough balance to cover transaction fee(gaslimit * gasprice)
-	// 5. the amount of gas required is available in the block
-	// 6. caller has enough balance to cover asset transfer for **topmost** call
-	// 7. the purchased gas is enough to cover intrinsic usage
-
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 
-	// Check clause 1: compute intrinsic gas before preCheck so the EIP-7825
-	// cap can be checked there (before buyGas) for all fork variants.
+	// Compute intrinsic gas up front: preCheck validates it against the gas
+	// limit, and the result feeds the gas accounting below.
 	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
 
-	// Validate intrinsic gas (incl. the EIP-7623 floor) before any state
-	// mutation, so an insufficient-gas tx is rejected side-effect-free.
-	// EIP-8037: the limit must cover RegularGas + StateGas, not each separately.
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
-	}
-
-	// Check clauses 2-6, buy gas if everything is correct
+	// Validate consensus rules and buy gas. Everything here precedes the state
+	// mutations below, so a rejected tx leaves sender state untouched.
 	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
 	}
