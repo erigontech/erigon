@@ -1373,6 +1373,21 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 	return fullNode, nil
 }
 
+// witnessMaterializeBranchChild decodes the branch at branchPrefix and verifies it
+// hashes to wantHash, returning a node a strict verifier can descend instead of a bare
+// HashNode. Same hash, so the witness root is unchanged.
+func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte, childDepth int16, wantHash []byte) (*trie.FullNode, error) {
+	branchNode, err := hph.witnessMaterializeBranch(branchPrefix, childDepth)
+	if err != nil {
+		return nil, err
+	}
+	subRoot := trie.NewInMemoryTrie(branchNode).Hash()
+	if !bytes.Equal(subRoot[:], wantHash) {
+		return nil, fmt.Errorf("[witness] materialized branch root mismatch at prefix %x: got %x want %x", branchPrefix, subRoot, wantHash)
+	}
+	return branchNode, nil
+}
+
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (*trie.Trie, error) {
 	var rootNode trie.Node = &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -1434,13 +1449,9 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					branchPrefix := make([]byte, 0, int(keyPos)+1+len(hashedExtKey))
 					branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
 					branchPrefix = append(branchPrefix, hashedExtKey...)
-					branchNode, err := hph.witnessMaterializeBranch(branchPrefix, int16(len(branchPrefix))+1)
+					branchNode, err := hph.witnessMaterializeBranchChild(branchPrefix, int16(len(branchPrefix))+1, cellToExpand.hash[:cellToExpand.hashLen])
 					if err != nil {
 						return nil, err
-					}
-					subRoot := trie.NewInMemoryTrie(branchNode).Hash()
-					if !bytes.Equal(subRoot[:], cellToExpand.hash[:cellToExpand.hashLen]) {
-						return nil, fmt.Errorf("[witness] materialized extension-child branch root mismatch at prefix %x: got %x want %x", branchPrefix, subRoot, cellToExpand.hash[:cellToExpand.hashLen])
 					}
 					short.Val = branchNode
 				}
@@ -1488,11 +1499,21 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 					} else if cellToExpand.hashLen > 0 && len(hashedKey) != 64 && len(hashedKey) != 128 {
-						// Intermediate key (not account or full storage) landing on extension → branch:
-						// extension key should NOT have a terminator, Val is the branch hash.
+						// Intermediate key landing on extension→branch; the extension key carries no
+						// terminator. In exclusion-proof mode materialize the branch (same hash, witness
+						// root unchanged) so a strict verifier collapsing the sibling can descend it.
+						var branchVal trie.Node = trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen]))
+						if produceExclusionProofs {
+							branchPrefix := common.Copy(hashedKey[:keyPos+1])
+							branchNode, err := hph.witnessMaterializeBranchChild(branchPrefix, int16(len(branchPrefix))+1, cellToExpand.hash[:cellToExpand.hashLen])
+							if err != nil {
+								return nil, err
+							}
+							branchVal = branchNode
+						}
 						nextNode = &trie.ShortNode{
 							Key: common.Copy(hashedExtKey),
-							Val: trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen])),
+							Val: branchVal,
 						}
 					}
 					if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 128 {
