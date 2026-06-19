@@ -100,8 +100,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
-	EnableWarmupCache(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -144,12 +142,11 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
-	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
+	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
+// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
@@ -158,12 +155,6 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
-	case VariantBinPatriciaTrie:
-		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
-		//fn := func(key []byte) []byte { return hexToBin(key) }
-		//tree := NewUpdateTree(mode, tmpdir, fn)
-		//return trie, tree
-		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -350,7 +341,6 @@ type BranchEncoder struct {
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache              *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -557,31 +547,24 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-func (be *BranchEncoder) SetCache(cache *WarmupCache) {
-	be.cache = cache
-}
-
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	var prev []byte
-	var foundInCache bool
 	var err error
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
-		}
-	}
-	if !foundInCache {
+	if !isNew {
 		prev, _, err = ctx.Branch(prefix)
 		if err != nil {
 			return err
 		}
+	}
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -604,9 +587,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.cache != nil {
-		be.cache.PutBranch(prefixCopy, updateCopy)
-	}
+	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -624,6 +605,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
 	limit := be.maxDeferredUpdates
@@ -642,24 +624,17 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// try to get previous data from cache
-	var (
-		prev         []byte
-		foundInCache bool
-		err          error
-	)
+	var prev []byte
+	var err error
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
+	if !isNew {
+		prev, _, err = ctx.Branch(prefix)
+		if err != nil {
+			return err
 		}
 	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-	}
-	if err != nil {
-		return err
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	// Track this prefix as pending
@@ -1254,8 +1229,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "bin":
-		trieVariant = VariantBinPatriciaTrie
 	case "hex-parallel":
 		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
@@ -1387,8 +1360,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantBinPatriciaTrie:
-					stat.ExtSize += uint64(c.extLen)
 				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}
@@ -1832,9 +1803,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if warmuper != nil && warmuper.Cache() != nil {
-				warmuper.Cache().EvictPlainKey(v)
-			}
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)

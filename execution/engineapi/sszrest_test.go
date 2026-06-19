@@ -230,7 +230,8 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 	payload := engine_types.NewExecutionPayloadSSZ(clparams.GloasVersion)
 	slot := hexutil.Uint64(123)
 	payload.SlotNumber = &slot
-	payload.BlockAccessList = hexutil.Bytes{0x01, 0x02, 0x03}
+	bal := hexutil.Bytes{0x01, 0x02, 0x03}
+	payload.BlockAccessList = &bal
 
 	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
 	require.NoError(t, err)
@@ -242,7 +243,8 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 
 	require.NotNil(t, out.SlotNumber)
 	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
-	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, out.BlockAccessList)
+	require.NotNil(t, out.BlockAccessList)
+	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
 }
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {

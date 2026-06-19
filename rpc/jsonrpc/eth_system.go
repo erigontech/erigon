@@ -364,14 +364,14 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil || header.ExcessBlobGas == nil {
-		return (*hexutil.Big)(common.Big0), nil
+		return nil, nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	if config == nil {
-		return (*hexutil.Big)(common.Big0), nil
+		return nil, nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
 	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
@@ -391,17 +391,14 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil {
-		return (*hexutil.Big)(common.Big0), nil
+		return nil, nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if config == nil {
-		return (*hexutil.Big)(common.Big0), nil
-	}
-	if !config.IsLondon(header.Number.Uint64() + 1) {
-		return (*hexutil.Big)(common.Big0), nil
+	if config == nil || !config.IsLondon(header.Number.Uint64()+1) {
+		return nil, nil
 	}
 	baseFee := misc.CalcBaseFee(config, header)
 	return (*hexutil.Big)(baseFee.ToBig()), nil

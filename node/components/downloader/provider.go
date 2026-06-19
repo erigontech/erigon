@@ -125,9 +125,11 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	}
 	p.Downloader = d
 
-	if p.debugMux != nil {
-		d.HandleTorrentClientStatus(p.debugMux)
-	}
+	// Always call: HandleTorrentClientStatus registers the status handler on
+	// http.DefaultServeMux (reachable via GOPPROF=http) regardless of whether
+	// debugMux is nil. Guarding on p.debugMux != nil drops the default-mux
+	// registration when --metrics/--pprof are disabled.
+	d.HandleTorrentClientStatus(p.debugMux)
 
 	bittorrentServer, err := dl.NewGrpcServer(d)
 	if err != nil {
