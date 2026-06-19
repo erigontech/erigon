@@ -195,7 +195,20 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 - `--ethstats` credentials are redacted from the startup command log (#20890) — by @MysticRyuujin
 - DoS-resistance limits on inbound P2P message volume (#20577, #21557) and bounded RPC/stream buffers (#20446, #20783) — by @yperbasis, @lupin012
 
-**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.5.0
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.4...v3.5.0
+
+---
+
+## [3.4.4] "Splashing Saga" – 2026-06-18
+
+v3.4.4 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- execution/stagedsync: prune in-RAM overlay when execution unwind is a no-op (#21824, #21847) by @JkLondon  — third fix for the post-reorg `gas used mismatch`.
+- caplin: serialize uint64 beacon API fields as JSON strings (#21805) by @BitWonka - Per the beacon-APIs spec, Uint64/Gwei fields must be serialized as JSON strings. Several Caplin response types were emitting them as JSON numbers, breaking spec-compliant clients. Fixes #20562.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.4.4
 
 ---
 
