@@ -295,6 +295,7 @@ func (p *ParallelPatriciaHashed) Process(
 	if warmuper != nil {
 		warmuper.DrainPending()
 	}
+	flushTrieStateRates()
 	return out, nil
 }
 

@@ -21,7 +21,8 @@ import "math/bits"
 const prefixSlabSize = 16384
 
 // prefixNode is a path-compressed prefix-trie node keyed on nibbles (each ext byte is one nibble 0x00..0x0F).
-// children is dense: len == popcount(bitmap). subtreeCount counts traversing inserts, not distinct keys.
+// children is dense: len == popcount(bitmap). subtreeCount is the number of distinct keys in the
+// subtree; re-inserting an existing key merges its update without bumping it.
 type prefixNode struct {
 	ext          []byte
 	children     []*prefixNode

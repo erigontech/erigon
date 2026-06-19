@@ -124,7 +124,7 @@ func TestAccountCompactWriteTo(t *testing.T) {
 
 	b, expectedLen := mustWriteAccountOp(t, acc)
 	if len(b) != expectedLen {
-		t.Errorf("unexpected serialization len for default fields, expected %d (no fields seralized), got %d (raw: %v)", expectedLen, len(b), b)
+		t.Errorf("unexpected serialization len for default fields, expected %d (no fields serialized), got %d (raw: %v)", expectedLen, len(b), b)
 	}
 }
 
