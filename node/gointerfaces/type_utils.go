@@ -110,11 +110,16 @@ func ConvertH160toAddress(h160 *typesproto.H160) [20]byte {
 	return addr
 }
 
+type h160Arena struct {
+	h  typesproto.H160
+	hi typesproto.H128
+}
+
 func ConvertAddressToH160(addr [20]byte) *typesproto.H160 {
-	return &typesproto.H160{
-		Lo: binary.BigEndian.Uint32(addr[16:]),
-		Hi: &typesproto.H128{Lo: binary.BigEndian.Uint64(addr[8:]), Hi: binary.BigEndian.Uint64(addr[0:])},
-	}
+	a := &h160Arena{}
+	a.hi = typesproto.H128{Hi: binary.BigEndian.Uint64(addr[0:]), Lo: binary.BigEndian.Uint64(addr[8:])}
+	a.h = typesproto.H160{Hi: &a.hi, Lo: binary.BigEndian.Uint32(addr[16:])}
+	return &a.h
 }
 
 func ConvertH256ToUint256Int(h256 *typesproto.H256) *uint256.Int {
