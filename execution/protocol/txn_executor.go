@@ -88,7 +88,7 @@ type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
 	gasRemaining        mdgas.MdGas
-	intrinsicGasResult  mdgas.IntrinsicGasCalcResult // computed by preCheck; consumed by buyGas and gas accounting
+	intrinsicGas        mdgas.IntrinsicGasCalcResult // computed by preCheck; consumed by buyGas and gas accounting
 	blockRegularGasUsed uint64                       // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
 	blockStateGasUsed   uint64                       // Per-tx state gas for block-level Bottleneck (EIP-8037)
 	txnGasUsed          uint64
@@ -245,15 +245,16 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		}
 	}
 
-	// EIP-8037 (sum) + EIP-7623 floor: the gas limit must cover intrinsic usage.
-	// Placed before the debit (an under-gassed tx isn't charged) yet after the
+	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
+	// The tx must cover the sum, not just each component individually.
+	// Checked before the debit (an under-gassed tx isn't charged) yet after the
 	// affordability check (insufficient-funds keeps precedence, as in geth).
-	intrinsicGas, overflow := math.SafeAdd(st.intrinsicGasResult.RegularGas, st.intrinsicGasResult.StateGas)
+	intrinsicGasSum, overflow := math.SafeAdd(st.intrinsicGas.RegularGas, st.intrinsicGas.StateGas)
 	if overflow {
 		return ErrGasUintOverflow
 	}
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < st.intrinsicGasResult.FloorGasCost {
-		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, st.intrinsicGasResult.FloorGasCost))
+	if st.msg.Gas() < intrinsicGasSum || st.msg.Gas() < st.intrinsicGas.FloorGasCost {
+		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasSum, st.intrinsicGas.FloorGasCost))
 	}
 
 	if !gasBailout {
@@ -300,7 +301,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 	from := st.msg.From()
 
 	var overflow bool
-	st.intrinsicGasResult, overflow = st.calcIntrinsicGas()
+	st.intrinsicGas, overflow = st.calcIntrinsicGas()
 	if overflow {
 		return ErrGasUintOverflow
 	}
@@ -350,7 +351,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
-	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGasResult, rules.IsAmsterdam)
+	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGas, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
 		return err
 	}
@@ -379,7 +380,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
-			gasToCap := max(st.intrinsicGasResult.RegularGas, st.intrinsicGasResult.FloorGasCost)
+			gasToCap := max(st.intrinsicGas.RegularGas, st.intrinsicGas.FloorGasCost)
 			if gasToCap > params.MaxTxnGasLimit {
 				return fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
 					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
@@ -430,13 +431,13 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	intrinsicGasSum, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.msg.Gas() < intrinsicGas {
+	if st.msg.Gas() < intrinsicGasSum {
 		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
-			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas)
+			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGasSum)
 	}
 	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
@@ -538,7 +539,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
 	}
-	intrinsicGasResult := st.intrinsicGasResult
+	intrinsicGasResult := st.intrinsicGas
 
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
