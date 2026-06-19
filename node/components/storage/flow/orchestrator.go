@@ -1152,13 +1152,50 @@ func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
 // onDownloadComplete promotes the file to the local inventory at TrustVerified
 // and publishes TrustPromoted to signal the transition from peer-claim trust
 // to locally-verified content.
+// recordExternalDownload is called when a DownloadComplete fires for
+// a file the orchestrator never explicitly requested — typically a
+// preverified entry that requestGapsFor subsumed under a wider
+// merged sibling, but that SyncSnapshots' ReconcilePreverifiedAgainstDisk
+// requested via the parallel-path. The bytes are on disk now; the
+// Inventory must track them so Provider.unwindSnapshotsPastBlock's
+// trim path catches them. Phase-1 accounting and peer-claim
+// bookkeeping are intentionally skipped — this file was never part
+// of the InitialStateReady gate.
+func (o *Orchestrator) recordExternalDownload(e DownloadComplete) {
+	entry := &snapshot.FileEntry{
+		Name:        e.FileName,
+		Size:        e.Size,
+		TorrentHash: e.InfoHash,
+		Trust:       snapshot.TrustVerified,
+		Local:       true,
+	}
+	snapshot.PopulateFromName(entry)
+	if err := o.storage.RecordFile(entry); err != nil {
+		o.log.Warn("[flow] recordExternalDownload: storage.RecordFile failed (file on disk but Inventory drift; subsequent Mode-B unwind preflight will refuse)",
+			"file", e.FileName, "err", err)
+		return
+	}
+	o.log.Info("[flow] recordExternalDownload: registered post-hoc",
+		"file", e.FileName, "reason", "preverified-subsumed-by-merged-sibling")
+}
+
 func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	o.log.Debug("[flow] onDownloadComplete", "file", e.FileName, "size", e.Size)
 	o.peerMu.RLock()
 	claim, ok := o.peerFiles[e.FileName]
 	o.peerMu.RUnlock()
 	if !ok {
-		o.log.Warn("[flow] DownloadComplete for unknown file", "file", e.FileName)
+		// Parallel-request artifact: SyncSnapshots'
+		// ReconcilePreverifiedAgainstDisk requests every preverified
+		// item regardless of orchestrator coverage dedup, so 1k stubs
+		// subsumed by a wider merged chunk (e.g. 002990-002991-*.seg
+		// vs the merged 002900-003000-*.seg) land on disk without a
+		// peerFiles entry. Register them in Inventory anyway — the
+		// trim path (Provider.unwindSnapshotsPastBlock + the post-
+		// unwind orphan verifier) iterates Inventory and would
+		// otherwise refuse the unwind. Skip phase-1 accounting:
+		// these files aren't part of the InitialStateReady gate.
+		o.recordExternalDownload(e)
 		return
 	}
 	peerEntry := claim.entry
