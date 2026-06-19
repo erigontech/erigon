@@ -310,7 +310,7 @@ func (r *preBlockReader) TracePrefix() string                                   
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
 //	  → those land in blockIO.WriteSet → rawWrites
-//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader, nil, true)
+//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader, nil, true, false)
 //	  → calcState.ApplyWrites(normalized)
 //	  → calcState.FlushToUpdates(updates)
 //
@@ -378,7 +378,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
 
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
 	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
@@ -488,7 +488,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	}
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
 
 	// Sanity: normalizeWriteSet should have appended one StoragePath=0
 	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing
@@ -563,7 +563,7 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 		vm.Write(w.Address, w.Path, accounts.NilKey, ver, w.Val, true)
 	}
 
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false, false)
 
 	for _, w := range normalized {
 		assert.NotEqual(t, state.SelfDestructPath, w.Path,
@@ -602,7 +602,7 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 		vm.Write(w.Address, w.Path, accounts.NilKey, ver, w.Val, true)
 	}
 
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true, false)
 
 	sdSeen := false
 	for _, w := range normalized {
