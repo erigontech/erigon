@@ -199,8 +199,9 @@ jobs:
           set +e # Disable exit on error
           echo "Starting Erigon..."
 
-          # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise leave it
-          # unset so erigon uses its built-in default.
+          # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise ensure it's
+          # unset so erigon uses its built-in default (and doesn't inherit runner env).
+          unset ERIGON_EXEC3_PARALLEL
           if [ "$EXEC_MODE" = "parallel" ]; then
             export ERIGON_EXEC3_PARALLEL=true
           elif [ "$EXEC_MODE" = "serial" ]; then
