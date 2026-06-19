@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -146,6 +147,6 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// State overrides are simulation-only mutations and must not trigger
 	// EIP-161 empty-account clearing.
 	noEIP161Rules := *rules
-	noEIP161Rules.DisabledEIPs = append(noEIP161Rules.DisabledEIPs, 161)
+	noEIP161Rules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
 	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
 }
