@@ -300,10 +300,7 @@ func (btw *BtIndexWriter) Build() error {
 			return fmt.Errorf("[index] pad before footer: %w", err)
 		}
 
-		footer := Footer{
-			Meta:          Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M, EfOffset: efOffset, BodyChecksum: btw.writer.checksum()},
-			FormatVersion: btVersion,
-		}
+		footer := Footer{Meta: Metadata{KeysCount: btw.args.KeyCount, M: btw.args.M, EfOffset: efOffset}, FormatVersion: btVersion}
 		if err = footer.Encode(btw.writer); err != nil {
 			return fmt.Errorf("[index] write footer: %w", err)
 		}
@@ -629,23 +626,6 @@ func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
 func (b *BtIndex) M() uint64 { return b.indexM }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
-
-// VerifyChecksum recomputes the body crc32c and compares it to the value stored in the footer.
-// Empty and legacy (v0) files carry no checksum and return nil. It reads the whole body, so call
-// it on demand (integrity checks), not on every open.
-func (b *BtIndex) VerifyChecksum() error {
-	if b == nil || len(b.data) == 0 || b.data[0] == btFirstByteLegacy {
-		return nil
-	}
-	footer, footerStart, err := ReadFooter(b.data)
-	if err != nil {
-		return err
-	}
-	if !footer.Meta.verifyBody(b.data[:footerStart]) {
-		return fmt.Errorf("btindex: body checksum mismatch in %s", b.FileName())
-	}
-	return nil
-}
 
 func (b *BtIndex) KeyCount() uint64 {
 	if b.Empty() {
