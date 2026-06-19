@@ -545,7 +545,7 @@ func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 }
 
 func (b *GasPriceOracleBackend) GetLatestBlockNumber() (uint64, error) {
-	return rpchelper.GetLatestExecutedBlockNumber(b.tx)
+	return rpchelper.GetLatestBlockNumber(b.tx)
 }
 
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
@@ -567,7 +567,7 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 	if block := b.baseApi.pendingBlock(); block != nil {
 		return block, nil
 	}
-	latestNum, err := rpchelper.GetLatestExecutedBlockNumber(b.tx)
+	latestNum, err := rpchelper.GetLatestBlockNumber(b.tx)
 	if err != nil {
 		return nil, nil
 	}

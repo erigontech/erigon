@@ -104,11 +104,9 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			// Use the execution stage progress so "latest" always refers to the last
-			// fully-executed block. ForkchoiceHead (read by GetLatestBlockNumber) can
-			// be N+1 when a block's header/body have been written but execution hasn't
-			// finished yet; that causes CheckBlockExecuted to fail for all state queries.
-			blockNumber = plainStateBlockNumber
+			if blockNumber, err = GetLatestBlockNumber(overlayTx); err != nil {
+				return 0, common.Hash{}, false, false, err
+			}
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:
