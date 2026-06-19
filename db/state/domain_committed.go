@@ -360,7 +360,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
-func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
+func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem, refsEnabled bool) (valueTransformer, error) {
 	if !rng.needMerge {
 		panic(fmt.Sprintf("assert: commitmentValTransformDomain called with domain.needMerge=false (from=%d to=%d): caller must guard with values.needMerge", rng.from, rng.to))
 	}
@@ -410,7 +410,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	// reshorten governs whether merged output keys are re-referenced (offsets into the merged
 	// account/storage files). It is keyed off the live write flag and the OUTPUT range only;
 	// input expansion below is keyed off each input file's own version+range instead.
-	reshorten := dt.d.ReferencesInCommitmentBranches && ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to)
+	reshorten := refsEnabled && ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to)
 
 	// Per-merge caches for findShortenedKey results, invariant within this read-only
 	// transformer; hot contracts recur across many branches in the same merge range.

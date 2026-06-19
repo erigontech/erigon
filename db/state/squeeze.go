@@ -122,7 +122,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	stepSize := at.StepSize()
 	dirs := at.Dirs()
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
+	commitmentUseReferencedBranches := at.a.referencesInCommitmentBranches()
 	if !commitmentUseReferencedBranches {
 		return nil
 	}
@@ -241,7 +241,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
@@ -345,7 +345,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	var s strings.Builder
 	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", latestBlock, latestTx, rootHash))
-	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReferencesInCommitmentBranches enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches))
+	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReferencesInCommitmentBranches enabled %t\n", rwTx.Debug().StepSize(), a.referencesInCommitmentBranches()))
 	return s.String(), nil
 }
 

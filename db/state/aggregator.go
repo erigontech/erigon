@@ -78,6 +78,9 @@ type Aggregator struct {
 	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
+	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
+	// flag: ReloadErigonDBSettings writes it while background merges read it.
+	commitmentRefsMu sync.RWMutex
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
@@ -262,7 +265,17 @@ func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 }
 
 func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v bool) {
+	a.commitmentRefsMu.Lock()
+	defer a.commitmentRefsMu.Unlock()
 	a.d[domain].ReferencesInCommitmentBranches = v
+}
+
+// referencesInCommitmentBranches reads the live commitment flag under the lock; merge and
+// squeeze paths must use it instead of touching the field directly.
+func (a *Aggregator) referencesInCommitmentBranches() bool {
+	a.commitmentRefsMu.RLock()
+	defer a.commitmentRefsMu.RUnlock()
+	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -272,8 +285,9 @@ func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
 		a.commitmentRefsOverride = &refs
 		return
 	}
-	if a.d[kv.CommitmentDomain] != nil &&
-		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches != refs {
+	a.commitmentRefsMu.Lock()
+	defer a.commitmentRefsMu.Unlock()
+	if a.d[kv.CommitmentDomain] != nil {
 		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches = refs
 	}
 }
@@ -1794,7 +1808,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 
 	r := &Ranges{}
 	// Account/storage must stay range-aligned with commitment whenever referencing is active.
-	commitmentMergeReferencing := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches || at.commitmentVisibleFilesReferenced()
+	commitmentMergeReferencing := at.a.referencesInCommitmentBranches() || at.commitmentVisibleFilesReferenced()
 	if commitmentMergeReferencing {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
@@ -1888,8 +1902,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	// to expand referenced inputs, or to re-shorten the output. Plain inputs merged without
 	// re-shortening (flag off, or flag on below threshold) need neither and run in parallel.
 	comVals := r.domain[kv.CommitmentDomain].values
+	commitmentRefsEnabled := at.a.referencesInCommitmentBranches()
 	needCommitmentTransform := comVals.needMerge &&
-		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches, at.StepSize(), comVals.from, comVals.to)
+		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1914,7 +1929,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 
 				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
-					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
+					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain], commitmentRefsEnabled)
 
 				if err != nil {
 					return fmt.Errorf("failed to create commitment value transformer: %w", err)

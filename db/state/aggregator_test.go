@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -148,6 +149,30 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
 	return db, agg
+}
+
+// TestReferencesInCommitmentBranchesConcurrent exercises the lock guarding the runtime-mutable
+// commitment flag against the reload-writes-while-merge-reads race; meaningful under -race.
+func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			agg.applyReferencesInCommitmentBranches(i%2 == 0)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = agg.referencesInCommitmentBranches()
+		}
+	}()
+	wg.Wait()
 }
 
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
