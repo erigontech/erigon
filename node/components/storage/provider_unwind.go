@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // UnwindOpts holds the per-call inputs Provider.Unwind needs that it
@@ -114,22 +115,23 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	}
 
 	// Pre-condition: every block-snapshot .seg file on disk past
-	// toBlock MUST be known to Inventory. Without this, the trim
-	// pass below silently misses the on-disk file (collectFilesPastBlock
-	// iterates Inventory.BlockFiles), no-ops the snapshot side, and the
-	// commitment anchor still applies — leaving the writable DB at
-	// toBlock while on-disk snapshots cover past it. Caller wedges
-	// trying to recover. Refuse loud and early instead. Live-caught
-	// 2026-06-12 in the 5-iter soak when retire output from a prior
-	// session left orphan v1.1-*.seg files whose .torrent never built
-	// and whose announcement never fired.
-	if orphans, err := p.findInventoryOrphansPastBlock(toBlock); err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: inventory pre-flight check: %w", err)
-	} else if len(orphans) > 0 {
-		return fmt.Errorf("storage.Provider.Unwind: refusing setHead — %d block-snapshot file(s) exist on disk past toBlock=%d but are NOT in Inventory (would be missed by trim): %v. "+
-			"Likely a prior retire crashed mid-build or its announcement was lost. "+
-			"Delete the orphan .seg/.idx pair(s) and let retire re-produce them, or restart erigon to re-trigger the publication path",
-			len(orphans), toBlock, orphans)
+	// toBlock MUST be known to Inventory so the trim pass catches it.
+	// Without this the trim silently misses on-disk files
+	// (collectFilesPastBlock iterates Inventory.BlockFiles), no-ops the
+	// snapshot side, and the commitment anchor still applies — leaving
+	// the writable DB at toBlock while on-disk snapshots cover past it.
+	//
+	// Self-heal: register the orphans into Inventory ourselves. The
+	// orphans typically come from OtterSync's "Requesting remaining
+	// snapshots from downloader" path (RequestSnapshotsDownload over
+	// gRPC, not the bus-driven flow) — so no flow.DownloadComplete
+	// fires and the orchestrator never learns of them. Refusing the
+	// unwind here is too brittle: every retire-after-unwind cycle that
+	// pulls 1k stubs subsumed by a wider merged sibling would wedge.
+	// Live-caught 2026-06-12 (orphan retire output) and 2026-06-19 soak
+	// v15/v17/v18 (preverified 1k stubs subsumed by 100k merged chunk).
+	if err := p.healInventoryOrphansPastBlock(toBlock); err != nil {
+		return err
 	}
 
 	// 1. Probe-compute the commitment anchor. Two outcomes:
@@ -371,6 +373,48 @@ func (p *Provider) findInventoryEntriesPastBlock(toBlock uint64) ([]string, erro
 	}
 	sort.Strings(extras)
 	return extras, nil
+}
+
+// healInventoryOrphansPastBlock registers every on-disk v1.1-*.seg
+// file past toBlock that isn't already in Inventory. Called from
+// Provider.Unwind as a pre-condition for the trim pass — without it,
+// collectFilesPastBlock iterates Inventory.BlockFiles and silently
+// misses files written via paths that don't fire flow.DownloadComplete
+// (OtterSync's RequestSnapshotsDownload-over-gRPC after each mode-B
+// recovery is the common source — 1k stubs subsumed by a wider
+// merged sibling). PopulateFromName-style parsing fills FromBlock /
+// ToBlock so the entry classifies in collectFilesPastBlock's
+// range-based filter.
+//
+// No-op when snapDir or Inventory aren't set (tools and tests that
+// construct a bare Provider).
+func (p *Provider) healInventoryOrphansPastBlock(toBlock uint64) error {
+	orphans, err := p.findInventoryOrphansPastBlock(toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: inventory pre-flight check: %w", err)
+	}
+	if len(orphans) == 0 {
+		return nil
+	}
+	for _, name := range orphans {
+		entry := &snapshot.FileEntry{
+			Name:         name,
+			Local:        true,
+			Advertisable: true,
+		}
+		if info, _, ok := snaptype.ParseFileName(p.snapDir, name); ok {
+			entry.FromBlock = info.From
+			entry.ToBlock = info.To
+		}
+		if err := p.Inventory.AddFile(entry); err != nil {
+			return fmt.Errorf("storage.Provider.Unwind: inventory self-heal (file %s): %w", name, err)
+		}
+	}
+	if p.logger != nil {
+		p.logger.Info("[storage] Provider.Unwind: self-healed inventory drift",
+			"orphans", len(orphans), "files", orphans, "toBlock", toBlock)
+	}
+	return nil
 }
 
 // findInventoryOrphansPastBlock scans the snapshots dir for top-level
