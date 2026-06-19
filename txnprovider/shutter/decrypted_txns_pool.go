@@ -49,6 +49,7 @@ func NewDecryptedTxnsPool() *DecryptedTxnsPool {
 }
 
 func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error {
+	var found bool
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -59,6 +60,7 @@ func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error
 		for _, ok := p.decryptedTxns[mark]; !ok && ctx.Err() == nil; _, ok = p.decryptedTxns[mark] {
 			p.decryptionCond.Wait()
 		}
+		_, found = p.decryptedTxns[mark]
 	}()
 
 	select {
@@ -66,10 +68,13 @@ func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error
 		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
 		// in the waiting goroutine the ones that still need to wait will go back to sleep
 		p.decryptionCond.Broadcast()
+		<-done
 	case <-done:
-		// no-op
 	}
 
+	if found {
+		return nil
+	}
 	return ctx.Err()
 }
 
