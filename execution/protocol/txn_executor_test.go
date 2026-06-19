@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -132,6 +133,55 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		require.Less(t, gp.Gas(), poolAfterReject,
 			"second tx must succeed and debit the gas pool")
 	})
+}
+
+// TestIntrinsicGasReject_NoStateMutation pins that a transaction rejected for
+// insufficient intrinsic gas — exercised here via the EIP-7623 calldata floor —
+// leaves the sender nonce and balance untouched, matching the execution-spec
+// ordering that validates intrinsic gas before any state mutation.
+func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
+	t.Parallel()
+
+	const (
+		blockGasLimit = 30_000_000
+		// 100 zero-byte calldata: regular intrinsic = 21000 + 100*4 = 21400;
+		// EIP-7623 floor = 21000 + 100*10 = 22000. A gas limit between the two
+		// clears the regular intrinsic check but fails the floor check.
+		gasLimit = 21404
+	)
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainOsakaConfig // Prague active (EIP-7623 floor), Amsterdam inactive
+
+	ibs := state.New(state.NewNoopReader())
+	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		gasPrice, gasPrice, gasPrice,
+		make([]byte, 100), nil,
+		false, // checkNonce
+		false, // checkTransaction
+		true,  // checkGas
+		false, // isFree
+		nil,   // maxFeePerBlobGas
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.ErrorIs(t, err, ErrIntrinsicGas, "tx below the EIP-7623 floor must be rejected")
+
+	nonce, err := ibs.GetNonce(sender)
+	require.NoError(t, err)
+	require.Zero(t, nonce, "sender nonce must not be incremented when the tx is rejected for intrinsic gas")
+
+	balance, err := ibs.GetBalance(sender)
+	require.NoError(t, err)
+	require.Equal(t, *initialBalance, balance, "sender balance must not be debited when the tx is rejected for intrinsic gas")
 }
 
 // TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the

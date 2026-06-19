@@ -517,6 +517,17 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		return nil, ErrGasUintOverflow
 	}
 
+	// Validate intrinsic gas (incl. the EIP-7623 floor) before any state
+	// mutation, so an insufficient-gas tx is rejected side-effect-free.
+	// EIP-8037: the limit must cover RegularGas + StateGas, not each separately.
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
+	}
+
 	// Check clauses 2-6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
@@ -533,17 +544,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
-	}
-
-	// Check clause 7, subtract intrinsic gas if everything is correct
-	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
-	// The tx must cover the sum, not just each component individually.
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 
 	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
