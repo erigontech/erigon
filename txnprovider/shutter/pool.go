@@ -228,9 +228,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	slotStartTime := p.slotCalculator.CalcSlotStartTimestamp(slot)
 	cutoffTime := time.Unix(int64(slotStartTime), 0).Add(p.config.MaxDecryptionKeysDelay)
 	if time.Now().Before(cutoffTime) {
-		decryptionMarkWaitTimeout := time.Until(cutoffTime)
-		// enforce the max cap for malicious inputs with slot times far ahead in the future
-		decryptionMarkWaitTimeout = min(decryptionMarkWaitTimeout, p.config.MaxDecryptionKeysDelay)
+		decryptionMarkWaitTimeout := p.config.MaxDecryptionKeysDelay
 		p.logger.Debug(
 			"waiting for decryption keys",
 			"slot", slot,
