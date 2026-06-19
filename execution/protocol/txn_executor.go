@@ -288,10 +288,11 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 //  4. the gas limit does not exceed the EIP-7825 cap (Osaka+)
 //  5. the sender can pay the gas fee (gaslimit * gasprice)
 //  6. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//  7. the sender can cover the topmost call's value transfer (checked by the EVM)
 //
-// Clauses 5-6 and the debit live in buyGas. It returns the computed intrinsic
-// gas for Execute's accounting; the topmost call's value transfer is checked
-// later by the EVM.
+// Clauses 5-6 and the debit live in buyGas; clause 7 is enforced by the EVM
+// during the call. preCheck returns the computed intrinsic gas for Execute's
+// accounting.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, error) {
 	rules := st.evm.ChainRules()
