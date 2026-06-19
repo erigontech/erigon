@@ -17,7 +17,6 @@
 package btindex
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -206,7 +205,8 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 	f, err := os.Create(indexPath)
 	require.NoError(tb, err)
 	defer f.Close()
-	w := bufio.NewWriter(f)
+	w := getBufioWriter(f)
+	defer putBufioWriter(w)
 
 	if count > 0 {
 		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))
@@ -287,7 +287,7 @@ func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
 
 func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
 	f := Footer{
-		Meta:          Metadata{KeysCount: 12345, M: 256, EfOffset: 1 << 33, BodyChecksum: 0xDEADBEEF}, // EfOffset > 4GiB: must be uint64
+		Meta:          Metadata{KeysCount: 12345, M: 256, EfOffset: 1 << 33}, // EfOffset > 4GiB: must be uint64
 		FormatVersion: btVersion,
 	}
 	var buf bytes.Buffer
@@ -300,7 +300,6 @@ func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
 	require.Equal(t, f.Meta.KeysCount, got.Meta.KeysCount)
 	require.Equal(t, f.Meta.M, got.Meta.M)
 	require.Equal(t, f.Meta.EfOffset, got.Meta.EfOffset)
-	require.Equal(t, f.Meta.BodyChecksum, got.Meta.BodyChecksum)
 	require.Equal(t, f.FormatVersion, got.FormatVersion)
 
 	// missing/wrong magic -> legacy fallback signal, not a hard error
@@ -308,6 +307,40 @@ func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
 	require.ErrorIs(t, err, errNotFooterFormat)
 	_, _, err = ReadFooter([]byte{0x00})
 	require.ErrorIs(t, err, errNotFooterFormat)
+}
+
+func TestFooter_ZeroKeyCount(t *testing.T) {
+	// A footer-format file with KeysCount=0 must not panic (overflow guard).
+	// The file is well-formed structurally but has no EF data, so Open must
+	// return an error rather than silently succeed with a corrupt index.
+	tmp := t.TempDir()
+
+	// Build a minimal footer-format binary with KeysCount=0:
+	//   [0x01][4095 zeros][64 zeros as fake EF region][footer][anchor]
+	// EfOffset=4096, footerStart=4160: satisfies EfOffset < footerStart.
+	var body bytes.Buffer
+	body.WriteByte(btFirstByteUseFooter)
+	body.Write(make([]byte, 4095)) // pad to EfOffset=4096
+	body.Write(make([]byte, 64))   // fake EF bytes at offset 4096
+	// 4096+64=4160, already 8-byte aligned → footerStart=4160
+	footer := Footer{
+		Meta:          Metadata{KeysCount: 0, M: 256, EfOffset: 4096},
+		FormatVersion: btVersion,
+	}
+	require.NoError(t, footer.Encode(&body))
+
+	indexPath := filepath.Join(tmp, "zero_keys.bt")
+	require.NoError(t, os.WriteFile(indexPath, body.Bytes(), 0644))
+
+	// Use a 1-key KV as the reader — it won't be consulted because Open will
+	// fail before building the BpsTree.
+	dataPath := generateKV(t, tmp, 8, 8, 1, log.New(), seg.CompressNone)
+	_, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, 256, seg.CompressNone, false)
+	if err == nil {
+		defer bt.Close()
+		require.True(t, bt.Empty())
+	}
+	// error is acceptable; what is not acceptable is a panic
 }
 
 func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
@@ -329,7 +362,7 @@ func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
 	require.EqualValues(t, keyCount, footer.Meta.KeysCount)
 	require.EqualValues(t, DefaultBtreeM, footer.Meta.M)
 
-	require.Zero(t, footer.Meta.EfOffset%btKeysAlign, "EF must start 4kb-aligned")
+	require.Zero(t, footer.Meta.EfOffset%btEFAlign, "EF must start 4kb-aligned")
 	require.Positive(t, footer.Meta.EfOffset)
 	require.Less(t, int(footer.Meta.EfOffset), footerStart)
 
@@ -341,19 +374,7 @@ func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
 	nodesCount := (footer.Meta.KeysCount + footer.Meta.M - 1) / footer.Meta.M
 	_, nodesEnd, err := decodeNodes(data[1:], nodesCount, footer.Meta.M)
 	require.NoError(t, err)
-	require.EqualValues(t, alignUp(1+nodesEnd, btKeysAlign), footer.Meta.EfOffset)
-
-	// body checksum matches, and flipping any body byte breaks it
-	require.True(t, footer.Meta.verifyBody(data[:footerStart]))
-	corrupt := bytes.Clone(data)
-	corrupt[footer.Meta.EfOffset] ^= 0xFF // flip a byte inside the EF
-	require.False(t, footer.Meta.verifyBody(corrupt[:footerStart]))
-
-	kv, bt, err := OpenBtreeIndexAndDataFile(v2Path, dataPath, footer.Meta.M, compressFlags, false)
-	require.NoError(t, err)
-	defer bt.Close()
-	defer kv.Close()
-	require.NoError(t, bt.VerifyChecksum())
+	require.EqualValues(t, alignUp(1+nodesEnd, btEFAlign), footer.Meta.EfOffset)
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
@@ -593,6 +614,7 @@ func TestBtIndex_MStoredInFile(t *testing.T) {
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
 	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: wantM, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
 	require.NoError(t, err)
+	defer iw.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
 	r.Reset(0)

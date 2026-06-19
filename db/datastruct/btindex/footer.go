@@ -21,13 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"io"
 )
-
-// castagnoli (crc32c) is the body checksum: cheap on every arch — Go uses a CPU CRC instruction where
-// one exists and a portable software table otherwise.
-var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
 // btFooterMagic is the file's trailing 8 bytes: it identifies the format and proves the file isn't truncated.
 var btFooterMagic = binary.BigEndian.Uint64([]byte("erigon\x00\x00"))
@@ -36,10 +31,10 @@ const (
 	// btVersion is the bt format version (v1), stored in the footer anchor next to the magic so the layout can change later.
 	btVersion = uint16(1)
 
-	btMetadataLen = 28 // keys_count(8) + M(8) + ef_offset(8) + body_checksum(4)
+	btMetadataLen = 24 // keys_count(8) + M(8) + ef_offset(8)
 	btAnchorLen   = 16 // footer_len(4) + flags(2) + format_version(2) + magic(8)
 
-	btKeysAlign   = 4096 // nodes and EF start page-aligned: mmap/SIMD-friendly unsafe reads
+	btEFAlign     = 4096 // EF section starts page-aligned for mmap/SIMD-friendly unsafe reads (nodes are byte-parsed, so left unaligned)
 	btFooterAlign = 8
 )
 
@@ -47,27 +42,19 @@ var errNotFooterFormat = errors.New("btindex: not a footer-format file")
 
 // Metadata is the footer payload: what a reader needs that the body doesn't already carry.
 type Metadata struct {
-	KeysCount    uint64
-	M            uint64
-	EfOffset     uint64 // byte offset of the EF section, so a reader can locate it without decoding nodes
-	BodyChecksum uint32 // crc32c of the body (everything before the footer)
+	KeysCount uint64
+	M         uint64
+	EfOffset  uint64 // byte offset of the EF section, so a reader can locate it without decoding nodes
 }
 
-// verifyBody reports whether body matches the stored crc32c.
-func (m Metadata) verifyBody(body []byte) bool {
-	return crc32.Checksum(body, castagnoli) == m.BodyChecksum
-}
-
-// Footer is the trailing self-describing record of a footer-format file.
-//
-// Store metadata at `Footer`: wins at write-once by append-only use-cases.
+// Footer store metadata at `Footer`: wins at write-once by append-only use-cases.
 // Store metadata at `Header`: wins at forward-stream consumers (sockets, tar to tape), mutable
-// page-addressed files (SQLite, Postgres, InnoDB — when mutate/extend file Footer will change it's offset).
+// page-addressed files (SQLite, Postgres, InnoDB — when mutate/extend file Footer will change its offset).
 //
 // `Footer` style file (for example `.bt`):
 //
 //	[ body ] # variable length. 4kb-alignment
-//	[ footer: keys_count | M | ef_offset | body_checksum ] # variable length. 8-bytes-alignment
+//	[ footer: keys_count | M | ef_offset ] # variable length. 8-bytes-alignment
 //	[ ANCHOR: footer_len:u32 | flags:u16 | format_version:u16 | magic:u64 ] # Fixed length. 8-bytes-alignment
 //
 // Build such files will be much more streaming-style-friendly. Don't need `etl` all incoming keys
@@ -90,11 +77,10 @@ func (f Footer) Encode(w io.Writer) error {
 	binary.BigEndian.PutUint64(buf[0:8], f.Meta.KeysCount)
 	binary.BigEndian.PutUint64(buf[8:16], f.Meta.M)
 	binary.BigEndian.PutUint64(buf[16:24], f.Meta.EfOffset)
-	binary.BigEndian.PutUint32(buf[24:28], f.Meta.BodyChecksum)
-	binary.BigEndian.PutUint32(buf[28:32], uint32(btMetadataLen))
-	binary.BigEndian.PutUint16(buf[32:34], f.Flags)
-	binary.BigEndian.PutUint16(buf[34:36], f.FormatVersion)
-	binary.BigEndian.PutUint64(buf[36:44], btFooterMagic)
+	binary.BigEndian.PutUint32(buf[24:28], uint32(btMetadataLen))
+	binary.BigEndian.PutUint16(buf[28:30], f.Flags)
+	binary.BigEndian.PutUint16(buf[30:32], f.FormatVersion)
+	binary.BigEndian.PutUint64(buf[32:40], btFooterMagic)
 	_, err := w.Write(buf[:])
 	return err
 }
@@ -118,40 +104,35 @@ func ReadFooter(data []byte) (f Footer, footerStart int, err error) {
 	payload := data[footerStart : len(data)-btAnchorLen]
 	return Footer{
 		Meta: Metadata{
-			KeysCount:    binary.BigEndian.Uint64(payload[0:8]),
-			M:            binary.BigEndian.Uint64(payload[8:16]),
-			EfOffset:     binary.BigEndian.Uint64(payload[16:24]),
-			BodyChecksum: binary.BigEndian.Uint32(payload[24:28]),
+			KeysCount: binary.BigEndian.Uint64(payload[0:8]),
+			M:         binary.BigEndian.Uint64(payload[8:16]),
+			EfOffset:  binary.BigEndian.Uint64(payload[16:24]),
 		},
 		Flags:         binary.BigEndian.Uint16(anchor[4:6]),
 		FormatVersion: binary.BigEndian.Uint16(anchor[6:8]),
 	}, footerStart, nil
 }
 
-func alignUp(n, a int) int { return (n + a - 1) &^ (a - 1) }
+func alignUp[T ~int | ~uint64](n, a T) T { return (n + a - 1) &^ (a - 1) }
 
-var alignPad [btKeysAlign]byte
+var alignPad [btEFAlign]byte
 
-// countingWriter tracks the byte offset (for alignment padding) and a running crc32c of everything written.
+// countingWriter tracks the byte offset so sections can be padded to alignment.
 type countingWriter struct {
 	w       *bufio.Writer
-	crc     uint32
-	written int
+	written uint64
 }
 
 func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
-	c.crc = crc32.Update(c.crc, castagnoli, p[:n])
-	c.written += n
+	c.written += uint64(n)
 	return n, err
 }
-
-func (c *countingWriter) checksum() uint32 { return c.crc }
 
 func (c *countingWriter) Flush() error { return c.w.Flush() }
 
 func (c *countingWriter) padTo(align int) error {
-	pad := alignUp(c.written, align) - c.written
+	pad := int(alignUp(c.written, uint64(align)) - c.written)
 	if pad == 0 {
 		return nil
 	}
