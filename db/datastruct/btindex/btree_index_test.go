@@ -774,8 +774,12 @@ func TestDecodeNodes(t *testing.T) {
 		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)))
 		require.NoError(t, err)
 		require.Equal(t, buf.Len(), n)
-		require.Len(t, got, len(keys))
-		bp := &BpsTree{keysBlob: buf.Bytes(), nodeOfft: got, nodeStride: M}
+		if len(keys) == 0 {
+			require.Nil(t, got)
+			continue
+		}
+		require.EqualValues(t, len(keys), got.Count())
+		bp := &BpsTree{keysBlob: buf.Bytes(), nodeOfftEF: got, nodeStride: M}
 		for i := range keys {
 			require.Equal(t, uint64(i)*M, bp.nodeDi(i)) // di recomputed, not stored
 			require.True(t, bytes.Equal(keys[i], bp.nodeKey(i)))
@@ -803,7 +807,7 @@ func TestDecodeListNodesV0_Validation(t *testing.T) {
 	off, stride, _, err := decodeListNodesV0(build(0, 32, 64, 96))
 	require.NoError(t, err)
 	require.Equal(t, uint64(32), stride)
-	require.Len(t, off, 4)
+	require.EqualValues(t, 4, off.Count())
 
 	// di0==0 is required, so stride=di1 can't underflow; corrupt progressions are rejected
 	for name, dis := range map[string][]uint64{
