@@ -512,7 +512,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	}
 	idx.data = idx.m[:idx.size]
 
-	var nodeOfft []uint64
+	var nodeOfftEF *eliasfano32.EliasFano
 	var keysBlob []byte
 	var nodeStride uint64
 	switch idx.data[0] {
@@ -521,7 +521,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
 			keysBlob = idx.data[pos:]
-			if nodeOfft, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
+			if nodeOfftEF, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
 				return nil, err
 			}
 			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
@@ -552,7 +552,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		keysBlob = idx.data[1:]
 		nodeStride = M
 		var nodesEnd int
-		if nodeOfft, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
+		if nodeOfftEF, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
 			return nil, err
 		}
 		if footer.Meta.EfOffset != uint64(alignUp(1+nodesEnd, btEFAlign)) { // cross-check ef_offset against the decoded nodes
@@ -573,10 +573,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if len(nodeOfft) == 0 {
+	if nodeOfftEF == nil {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
 	} else {
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, keysBlob, nodeOfft, nodeStride)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
 	}
 	idx.bplus.cursorGetter = idx.newCursor
 
