@@ -265,24 +265,24 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 }
 
 // preCheck enforces the consensus rules that must hold before the message is
-// applied and then buys gas. Every check runs before buyGas (and before the
-// nonce increment in Execute), so a rejected tx leaves sender state untouched:
+// applied and then buys gas. Every check precedes buyGas (and the nonce
+// increment in Execute), so a rejected tx leaves sender state untouched. The
+// main rules, in the order checked:
 //
-//  1. no overflow computing intrinsic gas — checked by the caller
-//  2. the gas limit does not exceed the EIP-7825 cap (Osaka+)
-//  3. the sender nonce is correct
-//  4. the sender can pay the gas fee (gaslimit * gasprice)
-//  5. the block has enough gas left for the tx
-//  6. the sender can fund the topmost call's value transfer — checked by the EVM
-//  7. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//  1. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//  2. the sender nonce is correct
+//  3. the block has enough gas left for the tx
+//  4. the gas limit does not exceed the EIP-7825 cap (Osaka+)
+//  5. the sender can pay the gas fee (gaslimit * gasprice)
 //
+// Intrinsic-gas overflow is checked by the caller; the topmost call's value
+// transfer is checked by the EVM.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
-	// Clause 7: the gas limit must cover intrinsic usage.
-	// EIP-8037: it must cover RegularGas + StateGas, not each separately.
+	// EIP-8037: the limit must cover RegularGas + StateGas, not each separately.
 	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
 	if overflow {
 		return ErrGasUintOverflow
