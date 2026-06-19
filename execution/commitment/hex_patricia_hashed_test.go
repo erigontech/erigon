@@ -3535,6 +3535,69 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.True(t, witnessResolvesAbsence(witnessTrie.RootNode, hashedAbsent, 0),
 			"witness must materialize the branch behind the diverging extension to prove the absent account")
 	})
+
+	t.Run("CollapseSiblingExtensionMustBeMaterialized", func(t *testing.T) {
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hph.SetTrace(false)
+
+		// storage-bearing account sitting inside a populated state branch
+		acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
+		acctPlain := acctPlains[0]
+
+		// surviving sibling: two slots sharing a 4-nibble hashed prefix, so under their
+		// 3rd nibble sits an extension (nibble 3) over a sub-branch (split at nibble 4).
+		const storSharedLen = 4
+		storPrefix := []byte{0x4, 0x3}
+		survPlain, survHashed := generatePlainKeysWithSameHashPrefix(t, storPrefix, length.Hash, storSharedLen, 2)
+
+		// doomed sibling: shares only the 2-nibble branch prefix, diverging at nibble 2,
+		// so the branch at storage-depth 2 has exactly two children {doomed leaf, surviving ext}.
+		var doomedPlain []byte
+		for {
+			k, h := generateKeyWithHashedPrefix(storPrefix, length.Hash)
+			if h[2] != survHashed[0][2] {
+				doomedPlain = k
+				break
+			}
+		}
+
+		builder := NewUpdateBuilder()
+		for i, a := range acctPlains {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		}
+		builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(doomedPlain), common.Bytes2Hex(doomedPlain))
+		for _, sk := range survPlain {
+			builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+		}
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// The collapse sibling detectCollapseSiblings records when the doomed slot is
+		// zero-written: the intermediate hashed path to the surviving extension subtree.
+		acctHashed := KeyToHexNibbleHash(acctPlain)
+		siblingPath := append(common.Copy(acctHashed), survHashed[0][:storSharedLen]...)
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(acctPlain), nil, toWitness.TouchAccount)
+		toWitness.TouchHashedKey(siblingPath)
+
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "", true)
+		require.NoError(t, err)
+		require.Equal(t, root, rootW, "witness root must equal commitment root")
+
+		// Collapsing the 2-child branch requires re-forming it around the surviving
+		// sibling; its sub-branch must be materialized, not left as a bare HashNode.
+		require.True(t, witnessMaterializesNodeAt(witnessTrie.RootNode, siblingPath),
+			"collapse-sibling sub-branch must be materialized, not a bare HashNode")
+	})
 }
 
 // Test_ModeUpdate_SiblingConsistency verifies that ModeUpdate produces
