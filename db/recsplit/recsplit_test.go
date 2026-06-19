@@ -312,7 +312,7 @@ func BenchmarkFindSplit(b *testing.B) {
 
 	for b.Loop() {
 		for i := range buckets {
-			findSplit(buckets[i][:], salt, fanout, unit, count)
+			findSplitVec(buckets[i][:], salt, fanout, unit, count)
 		}
 	}
 }
@@ -334,7 +334,7 @@ func BenchmarkFindBijection(b *testing.B) {
 
 	for b.Loop() {
 		for i := range buckets {
-			findBijection(buckets[i][:], salt)
+			findBijectionVec(buckets[i][:], salt)
 		}
 	}
 }

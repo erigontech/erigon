@@ -781,7 +781,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		salt = findBijection(bucket, salt)
+		salt = findBijectionVec(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
@@ -800,7 +800,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
-		salt = findSplit(bucket, salt, fanout, unit, count)
+		salt = findSplitVec(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
