@@ -1128,8 +1128,26 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 
 	scope.restoreChildGas(returnGas, childUsed, evm.config.Tracer)
-	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.frameStateUsed += childUsed.State
+	if evm.chainRules.IsAmsterdam {
+		if err == nil {
+			scope.frameStateUsed += childUsed.State
+		} else if !value.IsZero() {
+			// EIP-8037: "If the operation is unsuccessful before entering
+			// the call frame (e.g., due to insufficient balance or due to
+			// the stack depth), or if the child frame reverts or halts
+			// exceptionally, the charged state-gas is refilled in LIFO
+			// order and execution_state_gas_used decreases by the same
+			// amount." The new-account state gas was charged by gasCall
+			// (via statefulGasCall) when value > 0 and the target was
+			// empty. Refund it now that the call has failed.
+			//
+			// Note: we must re-check Empty() because the gasCall
+			// charge was conditional on (transfersValue && empty).
+			empty, _ := evm.IntraBlockState().Empty(toAddr)
+			if empty {
+				scope.creditStateGasRefund(params.StateGasNewAccount)
+			}
+		}
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
