@@ -184,6 +184,42 @@ func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
 	require.Equal(t, *initialBalance, balance, "sender balance must not be debited when the tx is rejected for intrinsic gas")
 }
 
+// TestPreCheck_InsufficientFundsBeforeIntrinsicGas pins that a transaction
+// failing both the affordability check and the intrinsic-gas check reports
+// insufficient funds first, matching geth — so eth_call/eth_callMany error
+// messages stay geth-compatible. Mirrors rpc-tests eth_callMany/test_04: a
+// contract creation (nil recipient) with gas 21000 < 53000 intrinsic, whose
+// sender also can't afford gas*price + value.
+func TestPreCheck_InsufficientFundsBeforeIntrinsicGas(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	cfg := chain.TestChainOsakaConfig
+
+	ibs := state.New(state.NewNoopReader())
+	require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(5120), tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	gasPrice := uint256.NewInt(20)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(366), 21000,
+		gasPrice, gasPrice, gasPrice,
+		nil, nil,
+		false, // checkNonce
+		false, // checkTransaction
+		true,  // checkGas
+		false, // isFree
+		nil,   // maxFeePerBlobGas
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.ErrorIs(t, err, ErrInsufficientFunds, "insufficient funds must take precedence over intrinsic gas")
+	require.NotErrorIs(t, err, ErrIntrinsicGas)
+}
+
 // TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the
 // EIP-8037 two-dimensional gas pool decrements regular and state budgets
 // independently — neither is conflated with max(regular, state).

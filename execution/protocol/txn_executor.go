@@ -194,7 +194,7 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-func (st *TxnExecutor) buyGas(gasBailout bool) error {
+func (st *TxnExecutor) buyGas(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
 	gasVal, overflow := u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
@@ -242,6 +242,20 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		if have, want := balance, balanceCheck; have.Cmp(&want) < 0 {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From(), &have, &want)
 		}
+	}
+
+	// EIP-8037 (sum) + EIP-7623 floor: the gas limit must cover intrinsic usage.
+	// Placed before the debit (an under-gassed tx isn't charged) yet after the
+	// affordability check (insufficient-funds keeps precedence, as in geth).
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
+	}
+
+	if !gasBailout {
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
@@ -265,18 +279,18 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 }
 
 // preCheck computes intrinsic gas and enforces the consensus rules that must
-// hold before the message is applied, then buys gas. Every check precedes
-// buyGas (and the nonce increment in Execute), so a rejected tx leaves sender
-// state untouched. The main rules, in the order checked:
+// hold before the message is applied, debiting the gas fee only after they all
+// pass so a rejected tx leaves sender state untouched. The rules, in order:
 //
-//  1. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
-//  2. the sender nonce is correct
-//  3. the block has enough gas left for the tx
-//  4. the gas limit does not exceed the EIP-7825 cap (Osaka+)
-//  5. the sender can pay the gas fee (gaslimit * gasprice)
+//  1. the sender nonce is correct
+//  2. the block has enough gas left for the tx
+//  3. the gas limit does not exceed the EIP-7825 cap (Osaka+)
+//  4. the sender can pay the gas fee (gaslimit * gasprice)
+//  5. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
 //
-// It returns the computed intrinsic gas for the gas accounting in Execute. The
-// topmost call's value transfer is checked later by the EVM.
+// Clauses 4-5 and the debit live in buyGas. It returns the computed intrinsic
+// gas for Execute's accounting; the topmost call's value transfer is checked
+// later by the EVM.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, error) {
 	rules := st.evm.ChainRules()
@@ -285,15 +299,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 	intrinsicGasResult, overflow := st.calcIntrinsicGas(st.msg.To().IsNil(), st.msg.Authorizations(), st.msg.AccessList())
 	if overflow {
 		return intrinsicGasResult, ErrGasUintOverflow
-	}
-
-	// EIP-8037: the limit must cover RegularGas + StateGas, not each separately.
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
-	if overflow {
-		return intrinsicGasResult, ErrGasUintOverflow
-	}
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return intrinsicGasResult, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
 	}
 
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
@@ -380,7 +385,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 		}
 	}
 
-	if err := st.buyGas(gasBailout); err != nil {
+	if err := st.buyGas(gasBailout, intrinsicGasResult); err != nil {
 		return intrinsicGasResult, err
 	}
 	return intrinsicGasResult, nil
