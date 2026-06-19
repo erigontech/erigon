@@ -282,13 +282,14 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 // hold before the message is applied, debiting the gas fee only after they all
 // pass so a rejected tx leaves sender state untouched. The rules, in order:
 //
-//  1. the sender nonce is correct
-//  2. the block has enough gas left for the tx
-//  3. the gas limit does not exceed the EIP-7825 cap (Osaka+)
-//  4. the sender can pay the gas fee (gaslimit * gasprice)
-//  5. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//  1. there is no overflow when calculating intrinsic gas
+//  2. the sender nonce is correct
+//  3. the block has enough gas left for the tx
+//  4. the gas limit does not exceed the EIP-7825 cap (Osaka+)
+//  5. the sender can pay the gas fee (gaslimit * gasprice)
+//  6. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
 //
-// Clauses 4-5 and the debit live in buyGas. It returns the computed intrinsic
+// Clauses 5-6 and the debit live in buyGas. It returns the computed intrinsic
 // gas for Execute's accounting; the topmost call's value transfer is checked
 // later by the EVM.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
