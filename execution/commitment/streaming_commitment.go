@@ -36,7 +36,6 @@ type splitState struct {
 	cell           cell
 	deferred       []*DeferredBranchUpdate
 	gen            uint64
-	refolds        uint64
 	keyCount       uint64
 	lastFoldedSize uint64
 	dirty          bool
@@ -485,7 +484,6 @@ func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 		for _, upd := range deferred {
 			putDeferredUpdate(upd)
 		}
-		s.refolds++
 		sc.refoldTotal.Add(1)
 		// Re-fold a mid-fold-touched split only if the gate still passes, bounding
 		// a streaming whale to O(N) instead of O(N^2) re-folds.
