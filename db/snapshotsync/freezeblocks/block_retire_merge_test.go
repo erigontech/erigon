@@ -81,7 +81,9 @@ func TestBlockMergeRunsWithoutSemaphore(t *testing.T) {
 			}
 			t.Fatalf("expected a merge to happen; snapDir=%v", names)
 		}
-	case <-time.After(120 * time.Second):
+	// Generous bound: the merge runs ~10x slower under -race on contended CI, so
+	// this only catches a true (would-be infinite) block on the semaphore.
+	case <-time.After(10 * time.Minute):
 		t.Fatal("block merge blocked on the shared build semaphore")
 	}
 
@@ -107,7 +109,7 @@ func TestRetireBlocksInBackgroundReleasesSemaphore(t *testing.T) {
 
 	select {
 	case <-retireDone:
-	case <-time.After(120 * time.Second):
+	case <-time.After(10 * time.Minute):
 		t.Fatal("background retire did not finish")
 	}
 	br.WaitForMerges(ctx)
