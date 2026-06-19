@@ -142,6 +142,8 @@ type BlockRetire struct {
 	working            atomic.Bool
 	merging            atomic.Bool
 	mergeWg            sync.WaitGroup
+	mergeMu            sync.Mutex
+	mergeClosing       bool
 	lastRetireGapStart atomic.Uint64
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
@@ -476,6 +478,12 @@ func (br *BlockRetire) RetireBlocksInBackground(
 // semaphore. At most one merge runs at a time; a request arriving while one is
 // in flight is dropped and picked up by a later retire cycle.
 func (br *BlockRetire) mergeBlocksInBackground(ctx context.Context, lvl log.Lvl, seeder downloader.SeederClient) {
+	br.mergeMu.Lock()
+	defer br.mergeMu.Unlock()
+	// Once WaitForMerges has begun draining we must not start (and Add) a new merge.
+	if br.mergeClosing {
+		return
+	}
 	if !br.merging.CompareAndSwap(false, true) {
 		return
 	}
@@ -489,8 +497,14 @@ func (br *BlockRetire) mergeBlocksInBackground(ctx context.Context, lvl log.Lvl,
 	}()
 }
 
-// WaitForMerges blocks until in-flight background block merges complete.
-func (br *BlockRetire) WaitForMerges() { br.mergeWg.Wait() }
+// WaitForMerges blocks until in-flight background block merges complete and
+// prevents new ones from starting, so callers can safely close the DB after.
+func (br *BlockRetire) WaitForMerges() {
+	br.mergeMu.Lock()
+	br.mergeClosing = true
+	br.mergeMu.Unlock()
+	br.mergeWg.Wait()
+}
 
 func (br *BlockRetire) RetireBlocks(
 	ctx context.Context,

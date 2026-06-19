@@ -3460,8 +3460,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if _, err := br.MergeBlocks(ctx, log.LvlInfo, downloader.NoopSeederClient{}); err != nil {
-		return err
+	for {
+		merged, err := br.MergeBlocks(ctx, log.LvlInfo, downloader.NoopSeederClient{})
+		if err != nil {
+			return err
+		}
+		if !merged {
+			break
+		}
 	}
 
 	if err := br.RemoveOverlaps(nil); err != nil {
