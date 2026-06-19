@@ -382,3 +382,81 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
 	})
 }
+
+// TestBlobGasPreservedOnReject verifies that a transaction rejected before it is
+// applied does not deplete the block blob-gas pool: blob gas is reserved only
+// after buyGas's validation checks pass.
+func TestBlobGasPreservedOnReject(t *testing.T) {
+	t.Parallel()
+
+	const (
+		blockGasLimit = 30_000_000
+		blockBlobGas  = 6 * params.GasPerBlob
+		txBlobGas     = 2 * params.GasPerBlob // two blob hashes
+	)
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainOsakaConfig // Cancun active -> blob path
+
+	newBlobMsg := func(gas uint64) *types.Message {
+		m := types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), gas,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil,
+			false, false, true, false,
+			uint256.NewInt(1), // maxFeePerBlobGas
+		)
+		m.SetBlobVersionedHashes(make([]common.Hash, 2))
+		return m
+	}
+
+	t.Run("rejected tx preserves blob pool", func(t *testing.T) {
+		// Sender has no balance, so the blob fee makes the tx unaffordable and it
+		// is rejected before blob gas is reserved.
+		ibs := state.New(state.NewNoopReader())
+		evm := newTestEVM(ibs, cfg, blockGasLimit)
+		gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(blockBlobGas)
+
+		_, err := NewTxnExecutor(evm, newBlobMsg(100_000), gp).Execute(true, false)
+
+		require.ErrorIs(t, err, ErrInsufficientFunds)
+		require.Equal(t, uint64(blockBlobGas), gp.BlobGas(),
+			"blob-gas pool must be unchanged after a rejected tx")
+	})
+
+	t.Run("valid blob tx consumes blob pool", func(t *testing.T) {
+		ibs := state.New(state.NewNoopReader())
+		require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified))
+		evm := newTestEVM(ibs, cfg, blockGasLimit)
+		gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(blockBlobGas)
+
+		_, err := NewTxnExecutor(evm, newBlobMsg(100_000), gp).Execute(true, false)
+
+		require.NoError(t, err)
+		require.Equal(t, uint64(blockBlobGas-txBlobGas), gp.BlobGas(),
+			"a valid blob tx must consume its blob gas from the pool")
+	})
+}
+
+// TestApplyFrame_IntrinsicGasBeforeAuthorities pins that ApplyFrame validates
+// intrinsic gas before verifyAuthorities mutates state. On a pre-Prague config
+// verifyAuthorities rejects a non-nil authorization list with a distinct error,
+// so reaching ErrIntrinsicGas proves the gas check runs first.
+func TestApplyFrame_IntrinsicGasBeforeAuthorities(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainBerlinConfig // pre-Prague
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, cfg, 30_000_000)
+	msg := newSimpleTransferMsg(sender, recipient, 1000 /* below intrinsic */, true)
+	msg.SetAuthorizations([]types.Authorization{{}})
+
+	gp := new(GasPool).AddGas(30_000_000)
+	_, err := NewTxnExecutor(evm, msg, gp).ApplyFrame()
+
+	require.ErrorIs(t, err, ErrIntrinsicGas)
+}

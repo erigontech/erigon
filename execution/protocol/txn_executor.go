@@ -208,9 +208,6 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		if overflow {
 			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &blobGasVal)
 		}
-		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
-			return err
-		}
 	}
 
 	if !gasBailout {
@@ -257,6 +254,14 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasSum, st.intrinsicGas.FloorGasCost))
 	}
 
+	// Reserve blob gas from the block pool only after validation passes, so a
+	// rejected tx never depletes it.
+	if st.evm.ChainRules().IsCancun {
+		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
+			return err
+		}
+	}
+
 	if !gasBailout {
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
@@ -281,9 +286,9 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 }
 
 // preCheck computes intrinsic gas and enforces the consensus rules that must
-// hold before the message is applied. The gas fee (buyGas) and block pool gas
-// (Execute) are charged only after they all pass, so a rejected tx leaves
-// sender state untouched and consumes no pool gas. The main rules, in order:
+// hold before the message is applied. The gas fee and block pool gas are
+// charged only after every check passes, so a rejected tx leaves sender state
+// untouched and consumes no pool gas. The main rules, in order:
 //
 //  1. there is no overflow when calculating intrinsic gas
 //  2. the sender nonce is correct
@@ -414,13 +419,6 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	isEIP3860 := vmConfig.HasEip3860(rules)
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
-	// set code tx
-	auths := msg.Authorizations()
-	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
-	if err != nil {
-		return nil, err
-	}
-
 	// Check whether the init code size has been exceeded.
 	if contractCreation {
 		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
@@ -439,6 +437,14 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if st.msg.Gas() < intrinsicGasSum {
 		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
 			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGasSum)
+	}
+
+	// set code tx — verifyAuthorities mutates state (SetCode/SetNonce), so it
+	// runs only after the gas checks above, leaving a rejected frame untouched.
+	auths := msg.Authorizations()
+	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	if err != nil {
+		return nil, err
 	}
 	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
