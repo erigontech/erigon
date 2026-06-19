@@ -1702,7 +1702,7 @@ func (result *execResult) calcFees(
 	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
-	emptyRemoval := chainRules.IsSpuriousDragon
+	emptyRemoval := chainRules.IsEIP161Enabled()
 	// nil pre-state must not short-circuit to empty=true: a worker may
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
@@ -2589,7 +2589,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						}
 						return keys
 					}
-					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum))
+					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum))
 				}
 
 				// Snapshot the finalized result before pushing — prevents

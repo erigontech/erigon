@@ -144,8 +144,8 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// detection in multi-block eth_simulateV1 when a prior simulated block
 	// deployed a contract at the overridden address.
 	// State overrides are simulation-only mutations and must not trigger
-	// consensus rules like EIP-161.
+	// EIP-161 empty-account clearing.
 	noEIP161Rules := *rules
-	noEIP161Rules.IsSpuriousDragon = false
+	noEIP161Rules.DisabledEIPs = append(noEIP161Rules.DisabledEIPs, 161)
 	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
 }

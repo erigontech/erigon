@@ -303,7 +303,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 	}
 
 	var acc accounts.Account
-	emptyRemoval := rules.IsSpuriousDragon
+	emptyRemoval := rules.IsEIP161Enabled()
 	for addr, increase := range balanceIncreases {
 		addrValue := addr.Value()
 		// Read current account — from blockCache if available, otherwise domain.
