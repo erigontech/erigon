@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -262,6 +263,21 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 
 func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
+}
+
+func (s *CaplinStateSnapshots) blocksAvailableForType(name string) uint64 {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
+
+	v, ok := s.visible.Load(name)
+	if !ok {
+		return 0
+	}
+	segs, ok := v.([]*VisibleSegment)
+	if !ok || len(segs) == 0 {
+		return 0
+	}
+	return segs[len(segs)-1].to
 }
 
 func (s *CaplinStateSnapshots) Close() {
@@ -690,20 +706,44 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	return nil
 }
 
-func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	fromSlot = (fromSlot / blocksPerFile) * blocksPerFile
+type caplinStateDumpJob struct {
+	name     string
+	from, to uint64
+}
+
+// planStateDump computes the per-type slot ranges to dump. Each type resumes
+// from its own coverage (availability) rather than a shared floor, so a type
+// already caught up is not re-sliced into files that overlap its existing ones,
+// and a newly added type is still dumped from genesis.
+func planStateDump(availability map[string]uint64, toSlot, blocksPerFile uint64) []caplinStateDumpJob {
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
-	for snapName, kvGetter := range s.snapshotTypes.KeyValueGetters {
-		for i := fromSlot; i < toSlot; i += blocksPerFile {
-			if toSlot-i < blocksPerFile {
-				break
-			}
-			// keep beaconblocks here but whatever....
-			to := i + blocksPerFile
-			logger.Log(lvl, "Dumping "+snapName, "from", i, "to", to)
-			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[snapName]); err != nil {
-				return err
-			}
+
+	names := make([]string, 0, len(availability))
+	for name := range availability {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	jobs := make([]caplinStateDumpJob, 0)
+	for _, name := range names {
+		from := (availability[name] / blocksPerFile) * blocksPerFile
+		for i := from; i+blocksPerFile <= toSlot; i += blocksPerFile {
+			jobs = append(jobs, caplinStateDumpJob{name: name, from: i, to: i + blocksPerFile})
+		}
+	}
+	return jobs
+}
+
+func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+	availability := make(map[string]uint64, len(s.snapshotTypes.KeyValueGetters))
+	for name := range s.snapshotTypes.KeyValueGetters {
+		availability[name] = s.blocksAvailableForType(name)
+	}
+
+	for _, job := range planStateDump(availability, toSlot, blocksPerFile) {
+		logger.Log(lvl, "Dumping "+job.name, "from", job.from, "to", job.to)
+		if err := dumpCaplinState(ctx, job.name, s.snapshotTypes.KeyValueGetters[job.name], job.from, job.to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[job.name]); err != nil {
+			return err
 		}
 	}
 	return nil

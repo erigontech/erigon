@@ -594,7 +594,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		if err := s.stateSn.DumpCaplinState(
 			ctx,
-			s.stateSn.BlocksAvailable()+1,
 			to,
 			blocksPerStatefulFile,
 			s.sn.Salt,
