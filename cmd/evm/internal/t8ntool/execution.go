@@ -98,16 +98,11 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 		}
 	}
-	// Commit and re-open to start with a clean state. EIP-161 empty-account
-	// clearing is disabled for the alloc: like geth's deleteEmptyObjects=false
-	// for the pre-state, an empty (balance=nonce=code=0) account declared in
-	// the alloc must be retained; clearing applies to execution, not loading.
-	preStateRules := *chainRules
-	preStateRules.IsSpuriousDragon = false
-	if err := statedb.FinalizeTx(&preStateRules, stateWriter); err != nil {
+	// Commit and re-open to start with a clean state.
+	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(&preStateRules, stateWriter); err != nil {
+	if err := statedb.CommitBlock(chainRules, stateWriter); err != nil {
 		panic(err)
 	}
 	return stateReader, stateWriter
