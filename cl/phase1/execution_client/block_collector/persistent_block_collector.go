@@ -220,7 +220,31 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	inserted := uint64(0)
 	var lastInsertedBlock *types.Block
 
-	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
+	// minInsertableBlockNumber is the floor below which Flush skips
+	// cached entries — blocks already absorbed into EL state. Use
+	// elHead+1, not FrozenBlocks(): after a Mode-B unwind, EL's
+	// chaindata head sits well below the snapshot tip
+	// (FrozenBlocks returns the snapshot tip, untouched by mode-B).
+	// Keying the skip on FrozenBlocks would discard exactly the
+	// blocks we need to push into EL for it to catch up across the
+	// gap — observed live on hoodi soak v19 iter 4 (depth 60k,
+	// elHead=2,986,464, FrozenBlocks=3,042,999): every cached
+	// gap-block was skipped, Flush surfaced no work to do, and the
+	// chain wedged at the unwind target for 1802s until the soak
+	// driver gave up. elHead+1 makes the floor track EL's actual
+	// progress, including the post-unwind regression.
+	var minInsertableBlockNumber uint64
+	if currentHeader, err := p.engine.CurrentHeader(ctx); err == nil && currentHeader != nil {
+		minInsertableBlockNumber = currentHeader.Number.Uint64() + 1
+	} else {
+		// CurrentHeader fetch failed (rare — engine RPC down). Fall
+		// back to FrozenBlocks as the old behaviour did; the prune-stale
+		// step above already runs CurrentHeader once and gates on its
+		// success, so reaching here means we're in degraded state and
+		// the safer move is to skip more (avoid trying to insert blocks
+		// EL probably can't accept right now).
+		minInsertableBlockNumber = p.engine.FrozenBlocks(ctx)
+	}
 	var pending []*types.Block // variants at pendingHeight, awaiting resolution
 	var pendingHeight uint64
 	var lastCommittedHeight uint64

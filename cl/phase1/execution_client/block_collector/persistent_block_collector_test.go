@@ -89,6 +89,15 @@ func (h *flushTestHarness) insertedNumbers() []uint64 {
 
 func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 	t.Helper()
+	return newFlushTestHarnessWithElHead(t, frozen, nil)
+}
+
+// newFlushTestHarnessWithElHead lets tests control EL's reported head
+// header. Pass nil for the legacy nil-header behaviour; pass a
+// non-nil header to exercise the post-Mode-B catchup path where EL's
+// chaindata head sits below frozen.
+func newFlushTestHarnessWithElHead(t *testing.T, frozen uint64, elHead *types.Header) *flushTestHarness {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 
@@ -99,7 +108,7 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		}).AnyTimes()
-	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
+	engine.EXPECT().CurrentHeader(gomock.Any()).Return(elHead, nil).AnyTimes()
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 			h.fcuHeads = append(h.fcuHeads, head)
@@ -288,6 +297,51 @@ func TestFlushDupThenGapKeepsPostGapRows(t *testing.T) {
 	require.False(t, h.collector.HasBlock(1))
 	require.False(t, h.collector.HasBlock(2))
 	require.True(t, h.collector.HasBlock(4))
+}
+
+// TestFlushFloorIsElHeadNotFrozenAfterModeBUnwind pins the
+// post-Mode-B-recovery contract: when EL's chaindata head sits
+// BELOW the snapshot tip (a deep Mode-B unwind to a target inside
+// the snapshot range), Flush's floor must be elHead+1, NOT
+// FrozenBlocks(). Otherwise it skips precisely the gap blocks the
+// catchup needs to push and the chain wedges at the unwind target.
+//
+// Live-caught on hoodi soak v19 iter 4 (depth 60k, target=2,986,464,
+// FrozenBlocks=3,042,999): every cached gap-block was skipped by
+// Flush, the chain wedged at the unwind target for 1802s until
+// soak driver timed out.
+//
+// Setup: elHead=2 (post-unwind head), FrozenBlocks=5 (snapshot tip
+// untouched by unwind). Cached blocks: 3, 4, 5, 6. Under the
+// fixed code path: floor = elHead+1 = 3, all four blocks insert.
+// Under the buggy (pre-fix) code path: floor = FrozenBlocks = 5,
+// blocks 3 and 4 are skipped and the chain can't bridge to block 5.
+func TestFlushFloorIsElHeadNotFrozenAfterModeBUnwind(t *testing.T) {
+	// elHead at block 2 — post-Mode-B unwind state.
+	elHead := &types.Header{
+		Number:  *uint256.NewInt(2),
+		BaseFee: uint256.NewInt(1),
+	}
+	// FrozenBlocks=5 — snapshot tip well above elHead.
+	h := newFlushTestHarnessWithElHead(t, 5, elHead)
+
+	// Build a chain b3 → b4 → b5 → b6 that fills the gap from elHead
+	// up past FrozenBlocks. Without the fix, blocks 3 and 4 would be
+	// silently skipped (< FrozenBlocks=5) and the chain wedges; b5
+	// would then fail to insert because EL has no parent for it.
+	prev := common.Hash{}
+	blocks := make([]*cltypes.BeaconBlock, 4)
+	for i := 0; i < 4; i++ {
+		blocks[i] = makeBeaconBlock(t, uint64(i+3), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(blocks[i]))
+		prev = blockHash(blocks[i])
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{3, 4, 5, 6}, h.insertedNumbers(),
+		"all blocks past elHead must be inserted — including those below FrozenBlocks; "+
+			"using FrozenBlocks as the floor wedges post-Mode-B recovery")
 }
 
 func TestFlushDropsRowsBelowFrozen(t *testing.T) {
