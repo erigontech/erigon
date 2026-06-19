@@ -180,6 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -196,27 +197,32 @@ jobs:
             fi
             echo "Root-cause job(s):"
             echo "$root"
+            # A fast-cancelling leaf failure leaves every need reported as `cancelled`, so a
+            # succeeded cancel step — not the needs results — distinguishes a real failure from a reshuffle.
+            self_cancelled=$(echo "$jobs" | jq '[.jobs[] | select(any(.steps[]?; .name == "Cancel workflow run on failure" and .conclusion == "success"))] | length' 2>/dev/null || echo 0)
+            if jq -e '[to_entries[].value.result] | any(. == "failure")' needs.json >/dev/null || [ "${self_cancelled:-0}" -gt 0 ]; then
+              echo "real_failure=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "real_failure=false" >> "$GITHUB_OUTPUT"
+            fi
             exit 1
           fi
           echo "All required jobs passed or were skipped."
 
-      # GitHub does not auto-remove UNMERGEABLE entries from the merge queue
-      # when their required checks fail — they sit at the queue position with
-      # state UNMERGEABLE until someone manually dequeues. This step does that
-      # automatically on real failures (not queue-reshuffle cancellations,
-      # where all needs come back as `cancelled` and GitHub re-creates a fresh
-      # merge_group event for us).
+      # GitHub leaves an UNMERGEABLE entry sitting in the queue when its required checks
+      # fail, so dequeue it ourselves — but only on a real failure (see real_failure above),
+      # not a reshuffle cancellation, where GitHub re-creates a fresh merge_group for us.
       - name: Dequeue failed merge-queue PR
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-          NEEDS: ${{ toJSON(needs) }}
+          REAL_FAILURE: ${{ steps.gate.outputs.real_failure }}
           REF: ${{ github.ref_name }}
           OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          if ! echo "$NEEDS" | jq -e 'to_entries[] | select(.value.result == "failure")' > /dev/null; then
-            echo "No gate need failed (only cancellations) — likely a queue reshuffle, skipping dequeue."
+          if [ "$REAL_FAILURE" != "true" ]; then
+            echo "ci-gate cancelled with no leaf failure (queue reshuffle / orphaned run) — skipping dequeue."
             exit 0
           fi
           pr_number=$(echo "$REF" | grep -oE 'pr-[0-9]+' | head -1 | cut -d- -f2)
