@@ -98,11 +98,15 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 		}
 	}
-	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
+	// Commit and re-open to start with a clean state. EIP-161 is disabled here
+	// so the alloc retains declared empty accounts (matching geth's pre-state);
+	// empty-account clearing still applies during transaction execution.
+	preStateRules := *chainRules
+	preStateRules.DisabledEIPs = append([]int{161}, chainRules.DisabledEIPs...)
+	if err := statedb.FinalizeTx(&preStateRules, stateWriter); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(chainRules, stateWriter); err != nil {
+	if err := statedb.CommitBlock(&preStateRules, stateWriter); err != nil {
 		panic(err)
 	}
 	return stateReader, stateWriter

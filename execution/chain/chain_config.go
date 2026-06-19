@@ -808,6 +808,13 @@ func (r *Rules) IsEIPDisabled(eip int) bool {
 	return slices.Contains(r.DisabledEIPs, eip)
 }
 
+// IsEIP161Enabled reports whether EIP-161 empty-account clearing applies: the
+// Spurious Dragon fork is active and EIP-161 is not disabled (genesis/pre-state
+// loads disable it via DisabledEIPs to retain declared empty accounts).
+func (r *Rules) IsEIP161Enabled() bool {
+	return r.IsSpuriousDragon && !r.IsEIPDisabled(161)
+}
+
 // isForked returns whether a fork scheduled at block s is active at the given head block.
 func isForked(s *uint64, head uint64) bool {
 	if s == nil {
