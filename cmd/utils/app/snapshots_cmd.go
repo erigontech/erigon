@@ -2936,27 +2936,65 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger := log.Root()
+	return lsDatadir(cliCtx.Context, dirs, log.Root())
+}
+
+func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	defer logger.Info("Done")
-	ctx := cliCtx.Context
 
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
+	chainDB, chainName := tryOpenChaindata(ctx, dirs, logger)
+	if chainDB != nil {
+		defer chainDB.Close()
+	}
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockSnaps, borSnaps, caplinSnaps, agg := res.BlockSnaps, res.BorSnaps, res.CaplinSnaps, res.Aggregator
-	if err != nil {
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainName)
+
+	blockSnaps := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := blockSnaps.OpenFolder(); err != nil {
 		return err
 	}
-	defer clean()
-
+	defer blockSnaps.Close()
 	blockSnaps.Ls()
+
+	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
+	borSnaps := heimdall.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := borSnaps.OpenFolder(); err != nil {
+		return err
+	}
+	defer borSnaps.Close()
 	borSnaps.Ls()
-	caplinSnaps.LS()
-	agg.LS()
+
+	if agg, err := tryOpenAgg(ctx, dirs, chainDB, logger); err == nil {
+		defer agg.Close()
+		agg.LS()
+	} else {
+		logger.Info("state aggregator unavailable, skipping", "reason", err)
+	}
+
+	if chainName != "" {
+		if _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(chainName); err == nil {
+			caplinSnaps := freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
+			if err := caplinSnaps.OpenFolder(); err == nil {
+				defer caplinSnaps.Close()
+				caplinSnaps.LS()
+			}
+		}
+	}
 
 	return nil
+}
+
+func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (kv.RwDB, string) {
+	if _, err := os.Stat(dirs.Chaindata); err != nil {
+		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
+		return nil, ""
+	}
+	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
+		return nil, ""
+	}
+	return db, fromdb.ChainConfig(db).ChainName
 }
 
 type OpenSnapsResult struct {
@@ -3585,18 +3623,27 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
-		panic(err)
-	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
-	if err != nil {
-		panic(err)
-	}
-	if err = agg.OpenFolder(); err != nil {
 		panic(err)
 	}
 	return agg
+}
+
+func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (*state.Aggregator, error) {
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	if err != nil {
+		return nil, err
+	}
+	if err = agg.OpenFolder(); err != nil {
+		agg.Close()
+		return nil, err
+	}
+	return agg, nil
 }
 
 // ── du (disk usage) helpers ─────────────────────────────────────────────
