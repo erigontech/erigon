@@ -134,7 +134,7 @@ func foldStorageLeaf(w *HexPatriciaHashed, childPrefix []byte, group []touchedKe
 // trie root and a concurrent-read SIGSEGV on mainnet block 25142734. The
 // top-level per-account-nibble mount fold stays parallel; only the second-tier
 // storage split is off until its correctness + file-view pinning is fixed.
-var deepStorageFold = false
+var deepStorageFold = true
 
 // isDeepStorageAccount reports whether node is an account leaf whose touched storage
 // is large and forked enough to fold concurrently.
