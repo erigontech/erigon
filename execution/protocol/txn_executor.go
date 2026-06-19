@@ -88,8 +88,9 @@ type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
 	gasRemaining        mdgas.MdGas
-	blockRegularGasUsed uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
-	blockStateGasUsed   uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	intrinsicGasResult  mdgas.IntrinsicGasCalcResult // computed by preCheck; consumed by buyGas and gas accounting
+	blockRegularGasUsed uint64                       // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
+	blockStateGasUsed   uint64                       // Per-tx state gas for block-level Bottleneck (EIP-8037)
 	txnGasUsed          uint64
 	txnGasUsedB4Refunds uint64 // txnGasUsed before refunds
 	gasPrice            *uint256.Int
@@ -194,7 +195,7 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-func (st *TxnExecutor) buyGas(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
+func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	gasVal, overflow := u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
@@ -247,12 +248,12 @@ func (st *TxnExecutor) buyGas(gasBailout bool, intrinsicGasResult mdgas.Intrinsi
 	// EIP-8037 (sum) + EIP-7623 floor: the gas limit must cover intrinsic usage.
 	// Placed before the debit (an under-gassed tx isn't charged) yet after the
 	// affordability check (insufficient-funds keeps precedence, as in geth).
-	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	intrinsicGas, overflow := math.SafeAdd(st.intrinsicGasResult.RegularGas, st.intrinsicGasResult.StateGas)
 	if overflow {
 		return ErrGasUintOverflow
 	}
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, intrinsicGasResult.FloorGasCost))
+	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < st.intrinsicGasResult.FloorGasCost {
+		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGas, st.intrinsicGasResult.FloorGasCost))
 	}
 
 	if !gasBailout {
@@ -280,7 +281,7 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 
 // preCheck computes intrinsic gas and enforces the consensus rules that must
 // hold before the message is applied, debiting the gas fee only after they all
-// pass so a rejected tx leaves sender state untouched. The rules, in order:
+// pass so a rejected tx leaves sender state untouched. The main rules, in order:
 //
 //  1. there is no overflow when calculating intrinsic gas
 //  2. the sender nonce is correct
@@ -291,36 +292,37 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 //  7. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
 //
 // Clauses 5-7 and the debit live in buyGas — 5 and 6 are the gas and value
-// terms of one balance check. preCheck returns the computed intrinsic gas for
-// Execute's accounting.
+// terms of one balance check. The computed intrinsic gas is stored on the
+// executor for buyGas and Execute's accounting.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, error) {
+func (st *TxnExecutor) preCheck(gasBailout bool) error {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(st.msg.To().IsNil(), st.msg.Authorizations(), st.msg.AccessList())
+	var overflow bool
+	st.intrinsicGasResult, overflow = st.calcIntrinsicGas()
 	if overflow {
-		return intrinsicGasResult, ErrGasUintOverflow
+		return ErrGasUintOverflow
 	}
 
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
-		return intrinsicGasResult, fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
+		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
 
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
-			return intrinsicGasResult, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
-			return intrinsicGasResult, fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
+			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
 				from, msgNonce, stNonce)
 		} else if stNonce > msgNonce {
-			return intrinsicGasResult, fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
+			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
 				from, msgNonce, stNonce)
 		} else if stNonce+1 < stNonce {
-			return intrinsicGasResult, fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
+			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				from, stNonce)
 		}
 	}
@@ -329,7 +331,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 		// Make sure the sender is an EOA (EIP-3607)
 		codeHash, err := st.state.GetCodeHash(from)
 		if err != nil {
-			return intrinsicGasResult, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if !codeHash.IsEmpty() {
 			// common.Hash{} means that the sender is not in the state.
@@ -339,18 +341,18 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 			// eip-7702 allows tx origination from accounts having delegated designation code.
 			_, ok, err := st.state.GetDelegatedDesignation(from)
 			if err != nil {
-				return intrinsicGasResult, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 			if !ok {
-				return intrinsicGasResult, fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 					from, codeHash)
 			}
 		}
 	}
 
-	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), intrinsicGasResult, rules.IsAmsterdam)
+	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGasResult, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
-		return intrinsicGasResult, err
+		return err
 	}
 
 	// Make sure the transaction feeCap is greater than the block's baseFee.
@@ -359,7 +361,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
 			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
-				return intrinsicGasResult, err
+				return err
 			}
 		}
 	}
@@ -368,7 +370,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		skipBlobCheck := st.evm.Config().NoBaseFee && (maxFeePerBlobGas == nil || maxFeePerBlobGas.IsZero())
 		if !skipBlobCheck && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
-			return intrinsicGasResult, fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
+			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
 				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
 	}
@@ -377,20 +379,17 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (mdgas.IntrinsicGasCalcResult, 
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
-			gasToCap := max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
+			gasToCap := max(st.intrinsicGasResult.RegularGas, st.intrinsicGasResult.FloorGasCost)
 			if gasToCap > params.MaxTxnGasLimit {
-				return intrinsicGasResult, fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
+				return fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
 					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
 			}
 		} else if st.msg.Gas() > params.MaxTxnGasLimit {
-			return intrinsicGasResult, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
+			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 		}
 	}
 
-	if err := st.buyGas(gasBailout, intrinsicGasResult); err != nil {
-		return intrinsicGasResult, err
-	}
-	return intrinsicGasResult, nil
+	return st.buyGas(gasBailout)
 }
 
 // ApplyFrame is similar to Execute but without gas accounting, for use in RIP-7560 transactions
@@ -427,7 +426,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
+	intrinsicGasResult, overflow := st.calcIntrinsicGas()
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -533,13 +532,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 
-	// Validate consensus rules (incl. intrinsic gas) and buy gas. Everything
-	// here precedes the state mutations below, so a rejected tx leaves sender
-	// state untouched.
-	intrinsicGasResult, err := st.preCheck(gasBailout)
-	if err != nil {
+	// Validate consensus rules (incl. intrinsic gas) and buy gas. Every check
+	// precedes the gas debit and the mutations below, so a rejected tx leaves
+	// sender state untouched.
+	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
 	}
+	intrinsicGasResult := st.intrinsicGasResult
 
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -843,15 +842,16 @@ func (st *TxnExecutor) refundGas() {
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 }
 
-func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {
+func (st *TxnExecutor) calcIntrinsicGas() (mdgas.IntrinsicGasCalcResult, bool) {
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
+	accessList := st.msg.AccessList()
 	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
-		IsContractCreation: contractCreation,
+		AuthorizationsLen:  uint64(len(st.msg.Authorizations())),
+		AccessListLen:      uint64(len(accessList)),
+		StorageKeysLen:     uint64(accessList.StorageKeys()),
+		IsContractCreation: st.msg.To().IsNil(),
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
