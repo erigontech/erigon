@@ -195,7 +195,7 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 - `--ethstats` credentials are redacted from the startup command log (#20890) — by @MysticRyuujin
 - DoS-resistance limits on inbound P2P message volume (#20577, #21557) and bounded RPC/stream buffers (#20446, #20783) — by @yperbasis, @lupin012
 
-**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.5.0
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.4...v3.5.0
 
 ---
 
