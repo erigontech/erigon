@@ -18,10 +18,10 @@ package backup
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -58,7 +58,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	return src, dst
 }
 
-func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int, logger log.Logger) error {
+func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logger log.Logger) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -79,41 +79,78 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 		}
 	}
 
-	for name, b := range tablesMap {
-		if b.IsDeprecated {
+	var copiedTables int
+	var copiedRows uint64
+	for _, name := range slices.Sorted(maps.Keys(tablesMap)) { // deterministic order for reproducible benchmarks
+		if tablesMap[name].IsDeprecated {
 			continue
 		}
-		if err := backupTable(ctx, srcTx, dst, name, logEvery, logger); err != nil {
+		rows, err := backupTable(ctx, src, srcTx, dst, name, logEvery, logger)
+		if err != nil {
 			return err
 		}
+		if rows > 0 {
+			copiedTables++
+			copiedRows += rows
+		}
 	}
-	logger.Info("done")
+	logger.Info("done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
-func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, logger log.Logger) error {
-	var total uint64
+// warmupWhile warms `table` into RAM in the background while `fn` runs, and
+// cancels the warmup as soon as `fn` returns — bounds warmup to one table at a
+// time and keeps fn's reads off disk on chaindata >> RAM.
+func warmupWhile(ctx context.Context, db kv.RoDB, table string, fn func() error) error {
+	warmupCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		db.WarmupTable(warmupCtx, table)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	return fn()
+}
+
+func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, logger log.Logger) (uint64, error) {
+	t := time.Now()
 	srcC, err := srcTx.Cursor(table)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer srcC.Close()
-	total, _ = srcTx.Count(table)
+	total, _ := srcTx.Count(table)
+	size, _ := srcTx.BucketSize(table)
+	if total > 0 {
+		logger.Info("[mdbx_to_mdbx] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
+	}
+
+	// Parallel read-ahead: keep a bounded band of pages warm just ahead of the
+	// copy cursor (cold page faults are slow; one reader can't saturate nvme).
+	// No-op unless WARMUP_TABLE_WORKERS is set.
+	var ra *kv.ReadAheader
+	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
+		ra = kv.NewReadAheader(ctx, src, table, nil, workers)
+	}
+	defer ra.Close()
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ClearTable(table)
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	dstTx, err := dst.BeginRw(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer dstTx.Rollback()
 
 	c, err := dstTx.RwCursor(table)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer c.Close()
 	casted, isDupsort := c.(kv.RwCursorDupSort)
@@ -121,34 +158,43 @@ func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, lo
 
 	for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		if isDupsort {
 			if err = casted.AppendDup(k, v); err != nil {
-				return err
+				return 0, err
 			}
 		} else {
 			if err = c.Append(k, v); err != nil {
-				return err
+				return 0, err
 			}
 		}
 
 		i++
+		if i%1000 == 0 {
+			ra.SetPos(k)
+		}
 		if i%100_000 == 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return 0, ctx.Err()
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				logger.Info("Progress", "table", table, "progress",
-					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)), "key", hex.EncodeToString(k),
+					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)),
+					"size", common.ByteCount(size), "keys/s", uint64(float64(i)/time.Since(t).Seconds()),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			default:
 			}
 		}
 	}
+
+	// TODO: Unwind doesn't need to decrement the auto-increment sequence — it's
+	// not exposed to users and not part of consensus, so we could switch to
+	// mdbx's native Sequence.
+
 	// migrate bucket sequences to native mdbx implementation
 	//currentID, err := srcTx.Sequence(name, 0)
 	//if err != nil {
@@ -159,17 +205,17 @@ func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, lo
 	//	return err
 	//}
 	if err2 := dstTx.Commit(); err2 != nil {
-		return err2
+		return 0, err2
 	}
-	return nil
+	return i, nil
 }
 
-const ReadAheadThreads = 2048
-
-func ClearTables(ctx context.Context, tx kv.RwTx, tables ...string) error {
+func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
 	for _, tbl := range tables {
 		log.Info("Clear", "table", tbl)
-		if err := tx.ClearTable(tbl); err != nil {
+		if err := warmupWhile(ctx, db, tbl, func() error {
+			return tx.ClearTable(tbl)
+		}); err != nil {
 			return err
 		}
 	}

@@ -36,8 +36,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -880,6 +882,179 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	defer tx.Rollback()
 
 	return f(tx)
+}
+
+func (db *MdbxKV) WarmupTable(ctx context.Context, bucket string) {
+	workers := int(dbg.WarmupTableWorkers)
+	if workers <= 0 {
+		return
+	}
+	const lvl = log.LvlInfo
+
+	var total, size uint64
+	var bounds [][]byte
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		if total, err = tx.Count(bucket); err != nil {
+			return err
+		}
+		if size, err = tx.BucketSize(bucket); err != nil {
+			return err
+		}
+		if total == 0 {
+			return nil
+		}
+		b, err := tx.(*MdbxTx).SplitBucketByCount(bucket, nil, workers*4) // count-balanced via b-tree, even when keys cluster
+		if err != nil {
+			return err
+		}
+		bounds = make([][]byte, len(b)) // b's interior keys are zero-copy, valid only until this tx ends
+		for i, k := range b {
+			bounds[i] = bytes.Clone(k)
+		}
+		return nil
+	}); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			db.log.Warn("[warmup] inspect failed", "table", bucket, "err", err)
+		}
+		return
+	}
+	if len(bounds) < 2 {
+		return
+	}
+
+	started := time.Now()
+	var progress, alive atomic.Int64
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	for i := 0; i+1 < len(bounds); i++ {
+		from, to := bounds[i], bounds[i+1]
+		g.Go(func() error {
+			alive.Add(1)
+			defer alive.Add(-1)
+			return db.View(ctx, func(tx kv.Tx) error {
+				it, err := tx.Range(bucket, from, to, order.Asc, -1)
+				if err != nil {
+					return err
+				}
+				defer it.Close()
+				for it.HasNext() {
+					k, v, err := it.Next()
+					if err != nil {
+						return err
+					}
+					if len(v) > 0 {
+						_, _ = v[0], v[len(v)-1]
+					}
+					if len(k) > 0 {
+						_, _ = k[0], k[len(k)-1]
+					}
+					if p := progress.Add(1); p%128 == 0 {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-logEvery.C:
+							pct := min(100, 100*float64(progress.Load())/float64(total))
+							db.log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %s %.2f%%, workers: %d/%d", bucket, common.ByteCount(size), pct, alive.Load(), workers))
+						default:
+						}
+					}
+				}
+				return nil
+			})
+		})
+	}
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		db.log.Warn("[warmup] failed", "table", bucket, "err", err)
+	}
+	if took := time.Since(started); took > 30*time.Second {
+		db.log.Log(lvl, "[warmup] done", "table", bucket, "size", common.ByteCount(size), "keys", common.PrettyCounter(total), "took", took.Round(time.Second), "workers", workers)
+	}
+}
+
+// SplitBucketByCount partitions bucket into n approximately equal-COUNT key
+// ranges using mdbx's b-tree distribution, returning n+1 boundaries with
+// bounds[0]==from and a nil last. It stays even when keys cluster, where byte
+// interpolation collapses to a single range. The interior boundaries are
+// zero-copy and valid only until tx end; clone to retain.
+func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byte, error) {
+	const maxChunks = 4096 // bound DistributeCursors' ~O(n^2) cost and the per-cursor leaf fault
+	if n > maxChunks {
+		n = maxChunks
+	}
+	if n <= 1 {
+		return [][]byte{from, nil}, nil
+	}
+
+	firstC, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer firstC.Close()
+	first := firstC.(*MdbxCursor).c
+	if from == nil {
+		_, _, err = first.Get(nil, nil, mdbx.First)
+	} else {
+		_, _, err = first.Get(from, nil, mdbx.SetRange)
+	}
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return [][]byte{from, nil}, nil
+		}
+		return nil, err
+	}
+
+	cursors := make([]*mdbx.Cursor, n)
+	for i := range cursors {
+		cw, err := tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		defer cw.Close()
+		cursors[i] = cw.(*MdbxCursor).c
+	}
+
+	// Distribute at the lowest branch level (Depth-2), not the leaves: keeps the
+	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
+	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
+	deepness := uint(42)
+	if st, err := tx.BucketStat(bucket); err == nil && st.Depth > 2 {
+		deepness = st.Depth - 2
+	}
+	if _, err := mdbx.DistributeCursors(first, nil, cursors, deepness); err != nil {
+		return nil, err
+	}
+
+	keys := make([][]byte, 0, n)
+	for _, c := range cursors {
+		// An unset surplus cursor (range held fewer positions than n) reports
+		// GetCurrent as NotFound or ENODATA; either way the set cursors are a
+		// leading prefix, so stop at the first one that isn't positioned.
+		k, _, err := c.Get(nil, nil, mdbx.GetCurrent)
+		if err != nil || len(k) == 0 {
+			break
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) > 0 {
+		keys = keys[:len(keys)-1] // last cursor pins to the table's last key; nil closes the final range
+	}
+
+	bounds := make([][]byte, 0, len(keys)+2)
+	bounds = append(bounds, from)
+	var prev []byte
+	for _, k := range keys {
+		if prev != nil && bytes.Equal(k, prev) {
+			continue // clustered keys collapsed to one boundary
+		}
+		bounds = append(bounds, k)
+		prev = k
+	}
+	bounds = append(bounds, nil)
+	return bounds, nil
 }
 
 func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {

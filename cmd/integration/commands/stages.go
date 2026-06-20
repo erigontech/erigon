@@ -546,7 +546,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, tx) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, db, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -710,7 +710,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(ctx, p, tx, cfg, 0, logger)
+		_, err = stagedsync.PruneExecutionStage(ctx, p, tx, cfg, 0, logger)
 		if err != nil {
 			return err
 		}
@@ -758,10 +758,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
-			if err := doms.Commit(ctx, tx); err != nil {
+			if err := doms.Flush(ctx, tx); err != nil {
 				return err
 			}
-			doms.Close()
+			doms.ClearRam(true)
+			if err := tx.Commit(); err != nil {
+				return err
+			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -770,27 +773,22 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err != nil {
 				return err
 			}
-			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+			if _, err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
 				return err
 			}
 
 			if err := tx.Commit(); err != nil {
 				return err
 			}
-			if bn+1 >= block { // last block committed; nothing more to run
-				break
-			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
-			// Fresh SD for the next block: a committed SD is never reused.
-			if doms, err = execctx.NewSharedDomains(ctx, tx, logger); err != nil {
-				return err
-			}
-			doms.SetInMemHistoryReads(false)
 		}
-		doms.Close()
-		return nil
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		doms.ClearRam(true)
+		return tx.Commit()
 	}
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
@@ -809,22 +807,41 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
+		txNum := doms.TxNum()
 		doms.ClearRam(true)
-
-		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
-		if err != nil {
-			return err
-		}
-		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-			return err
-		}
-
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+
+			agg.BuildFilesInBackground(txNum)
+
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
+			}
+		}
+
+		// Prune in bounded, committed batches so a long prune survives Ctrl-C:
+		// prune progress is durable, so a restart only repeats the last batch.
+		for {
+			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, false)
+			if err != nil {
+				return err
+			}
+			hasMore, err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, time.Minute, logger)
+			if err != nil {
+				return err
+			}
+			if !noCommit {
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				if tx, err = db.BeginTemporalRw(ctx); err != nil {
+					return err
+				}
+			}
+			if !hasMore {
+				break
 			}
 		}
 

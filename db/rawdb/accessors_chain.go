@@ -1102,12 +1102,26 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 	return header.Difficulty.Sign() == 0, nil
 }
 
-// PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
-func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) error {
+// PruneTable deletes entries with blockNum < pruneTo from the front of the table, in
+// batches bounded by `limit`/`timeout`. Returns haveMore=true when it stopped early;
+// resuming from the front makes a committed loop interrupt-safe.
+func PruneTable(tx kv.RwTx, db kv.RoDB, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) (haveMore bool, err error) {
 	t := time.Now()
+
+	// Parallel read-ahead: keep a bounded band of pages warm just ahead of the
+	// delete cursor (cold page faults are slow; one reader can't saturate nvme).
+	// No-op unless WARMUP_TABLE_WORKERS is set.
+	var ra *kv.ReadAheader
+	if db != nil {
+		if workers := int(dbg.WarmupTableWorkers); workers > 0 {
+			ra = kv.NewReadAheader(ctx, db, table, nil, workers)
+		}
+	}
+	defer ra.Close()
+
 	c, err := tx.RwCursor(table)
 	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
+		return false, fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
 
@@ -1115,37 +1129,46 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 	defer logEvery.Stop()
 
 	i := 0
+	var lastBlockNum uint64
+	defer func() {
+		if secs := time.Since(t).Seconds(); secs > 0 && i > 0 {
+			size, _ := tx.BucketSize(table)
+			logger.Info(fmt.Sprintf("[%s] prune done", logPrefix), "table", table, "blockNum", lastBlockNum, "size", common.ByteCount(size), "deleted", common.PrettyCounter(i), "took", time.Since(t).Round(time.Second), "keys/s", uint64(float64(i)/secs))
+		}
+	}()
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
-			return err
+			return false, err
 		}
 		i++
 		if i > limit {
-			break
+			return true, nil // hit the batch limit - more to prune
 		}
 
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= pruneTo {
-			break
+			return false, nil // reached the prune target
 		}
+		lastBlockNum = blockNum
 
 		if err = c.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+			return false, fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 		if i%1000 == 0 {
+			ra.SetPos(k)
 			select {
 			case <-ctx.Done():
-				return common.ErrStopped
+				return false, common.ErrStopped
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
+				logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum, "deleted", common.PrettyCounter(i), "keys/s", uint64(float64(i)/time.Since(t).Seconds()))
 			default:
 			}
 			if time.Since(t) > timeout {
-				break
+				return true, nil // hit the time budget - more to prune
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {

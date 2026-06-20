@@ -466,9 +466,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+// PruneExecutionStage returns haveMore=true when a prune step stopped early on
+// its limit/timeout, so a caller can loop (committing between calls) to drain a
+// long prune without losing progress on interrupt.
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (haveMore bool, err error) {
 	if dbg.NoPrune() {
-		return s.Done(tx)
+		return false, s.Done(tx)
 	}
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
@@ -509,15 +512,16 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 200_000
+		var pruneDiffsLimitOnChainTip = 2_000_000
 		pruneTimeout := quickPruneTimeout
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneDiffsLimitOnChainTip = math.MaxInt
 			pruneTimeout = time.Hour
 		}
 		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
+		csMore, err := rawdb.PruneTable(
 			tx,
+			cfg.db,
 			kv.ChangeSets3,
 			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
 			ctx,
@@ -525,9 +529,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneTimeout,
 			logger,
 			s.LogPrefix(),
-		); err != nil {
-			return err
+		)
+		if err != nil {
+			return false, err
 		}
+		haveMore = haveMore || csMore
 		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
 			logger.Debug(
 				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
@@ -544,8 +550,9 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneBalLimit = math.MaxInt
 			pruneTimeout = time.Hour
 		}
-		if err := rawdb.PruneTable(
+		balMore, err := rawdb.PruneTable(
 			tx,
+			cfg.db,
 			kv.BlockAccessList,
 			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
 			ctx,
@@ -553,9 +560,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneTimeout,
 			logger,
 			s.LogPrefix(),
-		); err != nil {
-			return err
+		)
+		if err != nil {
+			return false, err
 		}
+		haveMore = haveMore || balMore
 	}
 
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
@@ -567,9 +576,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	}
 
 	pruneSmallBatchesStartTime := time.Now()
-	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
-		return err
+	aggMore, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout)
+	if err != nil {
+		return false, err
 	}
+	haveMore = haveMore || aggMore
 	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
 		logger.Debug(
 			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
@@ -578,7 +589,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		)
 	}
 	if err = s.Done(tx); err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return haveMore, nil
 }
