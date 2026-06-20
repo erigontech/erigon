@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -219,7 +218,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -306,7 +304,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
@@ -359,7 +356,6 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 	isBor := cfg.chainConfig.Bor != nil
 	canDefer := headersProgress > 0 && !isBor
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
 	if !canDefer {
 		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 			return err
@@ -383,7 +379,6 @@ func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCf
 	canDefer := headersProgress > 0
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if !canDefer {
 		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 			return err
