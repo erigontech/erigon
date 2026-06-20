@@ -319,7 +319,7 @@ var snapshotCommand = cli.Command{
 			Action:  doRmStateSnapshots,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "step"},
+				&cli.StringFlag{Name: "step", Usage: "step range to remove: 'from-to' (e.g. 5-10), or 'from+' (e.g. 5+) for everything from step N to the latest"},
 				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
@@ -748,6 +748,31 @@ type DeleteStateSnapshotsArgs struct {
 	DomainNames            []string
 }
 
+// parseStepRange parses a --step value of "from-to" (e.g. "5-10") or "from+"
+// (e.g. "5+"), where "+" means from the given step to maxAvailableStep.
+func parseStepRange(stepRange string, maxAvailableStep uint64) (from, to uint64, err error) {
+	if prefix, ok := strings.CutSuffix(stepRange, "+"); ok {
+		from, err = strconv.ParseUint(prefix, 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+		}
+		return from, maxAvailableStep, nil
+	}
+	fromS, toS, ok := strings.Cut(stepRange, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	from, err = strconv.ParseUint(fromS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	to, err = strconv.ParseUint(toS, 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("step expected in format from-to or N+, got %s", stepRange)
+	}
+	return from, to, nil
+}
+
 func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	dirs := args.Dirs
 	removeLatest := args.RemoveLatest
@@ -877,15 +902,12 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	if stepRange != "" || removeLatest {
 		var minS, maxS uint64
 		if stepRange != "" {
-			parseStep := func(step string) (uint64, uint64, error) {
-				var from, to uint64
-				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
-					return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
-				}
-				return from, to, nil
+			var maxAvailableStep uint64
+			for _, res := range files {
+				maxAvailableStep = max(maxAvailableStep, res.To)
 			}
 			var err error
-			minS, maxS, err = parseStep(stepRange)
+			minS, maxS, err = parseStepRange(stepRange, maxAvailableStep)
 			if err != nil {
 				return err
 			}
@@ -2914,27 +2936,65 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger := log.Root()
+	return lsDatadir(cliCtx.Context, dirs, log.Root())
+}
+
+func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	defer logger.Info("Done")
-	ctx := cliCtx.Context
 
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
+	chainDB, chainName := tryOpenChaindata(ctx, dirs, logger)
+	if chainDB != nil {
+		defer chainDB.Close()
+	}
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockSnaps, borSnaps, caplinSnaps, agg := res.BlockSnaps, res.BorSnaps, res.CaplinSnaps, res.Aggregator
-	if err != nil {
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainName)
+
+	blockSnaps := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := blockSnaps.OpenFolder(); err != nil {
 		return err
 	}
-	defer clean()
-
+	defer blockSnaps.Close()
 	blockSnaps.Ls()
+
+	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
+	borSnaps := heimdall.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := borSnaps.OpenFolder(); err != nil {
+		return err
+	}
+	defer borSnaps.Close()
 	borSnaps.Ls()
-	caplinSnaps.LS()
-	agg.LS()
+
+	if agg, err := tryOpenAgg(ctx, dirs, chainDB, logger); err == nil {
+		defer agg.Close()
+		agg.LS()
+	} else {
+		logger.Info("state aggregator unavailable, skipping", "reason", err)
+	}
+
+	if chainName != "" {
+		if _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(chainName); err == nil {
+			caplinSnaps := freezeblocks.NewCaplinSnapshots(cfg, beaconConfig, dirs, logger)
+			if err := caplinSnaps.OpenFolder(); err == nil {
+				defer caplinSnaps.Close()
+				caplinSnaps.LS()
+			}
+		}
+	}
 
 	return nil
+}
+
+func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (kv.RwDB, string) {
+	if _, err := os.Stat(dirs.Chaindata); err != nil {
+		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
+		return nil, ""
+	}
+	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
+		return nil, ""
+	}
+	return db, fromdb.ChainConfig(db).ChainName
 }
 
 type OpenSnapsResult struct {
@@ -3400,6 +3460,16 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	for {
+		merged, err := br.MergeBlocks(ctx, log.LvlInfo, downloader.NoopSeederClient{})
+		if err != nil {
+			return err
+		}
+		if !merged {
+			break
+		}
+	}
+
 	if err := br.RemoveOverlaps(nil); err != nil {
 		return err
 	}
@@ -3563,18 +3633,27 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
-		panic(err)
-	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
-	if err != nil {
-		panic(err)
-	}
-	if err = agg.OpenFolder(); err != nil {
 		panic(err)
 	}
 	return agg
+}
+
+func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (*state.Aggregator, error) {
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	if err != nil {
+		return nil, err
+	}
+	if err = agg.OpenFolder(); err != nil {
+		agg.Close()
+		return nil, err
+	}
+	return agg, nil
 }
 
 // ── du (disk usage) helpers ─────────────────────────────────────────────

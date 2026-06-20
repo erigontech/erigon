@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 var (
@@ -88,6 +89,9 @@ type Domain struct {
 	dirtyFiles *DirtyFiles
 
 	checker *DependencyIntegrityChecker
+
+	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
+	branchCache *commitment.BranchCache
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
@@ -134,6 +138,13 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 }
 func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
+}
+
+// BranchCache returns the long-lived commitment-trie branch cache attached
+// to this domain. Non-nil only on the commitment domain. Lifetime is the
+// owning Aggregator's lifetime.
+func (d *Domain) BranchCache() *commitment.BranchCache {
+	return d.branchCache
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
@@ -916,7 +927,8 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(stepFrom, stepTo)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		kveiPath := d.kvExistenceIdxNewFilePath(stepFrom, stepTo)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1018,7 +1030,8 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1122,7 +1135,8 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 
 		g.Go(func() error {
 			idxPath := d.kvBtAccessorNewFilePath(item.StepRange(d.stepSize))
-			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			kveiPath := d.kvExistenceIdxNewFilePath(item.StepRange(d.stepSize))
+			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, kveiPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
@@ -1661,7 +1675,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
 	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(dt.name, start)
+		metrics.UpdateFileReadsUnique(dt.name, key, start)
 	}
 
 	if err != nil {

@@ -1542,6 +1542,15 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
+	// Drain the fire-and-forget background block-snapshot merge goroutine for
+	// shutdown hygiene; the merge itself touches neither chainDB nor snapshots,
+	// so the wait is bounded.
+	if s.components != nil && s.components.Storage != nil && s.components.Storage.BlockRetire != nil {
+		mergeCtx, mergeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		s.components.Storage.BlockRetire.WaitForMerges(mergeCtx)
+		mergeCancel()
+	}
+
 	s.chainDB.Close()
 
 	if s.config.Downloader != nil {

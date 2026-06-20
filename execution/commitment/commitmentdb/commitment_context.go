@@ -170,17 +170,8 @@ func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Update
 	sdc.updates = updates
 }
 
-// EnableWarmupCache enables/disables warmup cache during commitment processing.
-func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
-	sdc.patriciaTrie.EnableWarmupCache(enable)
-}
-
-// ClearWarmupCache discards any stale account/storage values held in the active
-// warmup cache. Safe to call at block boundaries between ComputeCommitment calls.
-func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.Cache() != nil {
-		hph.Cache().Clear()
-	}
+func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
+	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
@@ -273,10 +264,10 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix)
+		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix, produceExclusionProofs)
 	}
 
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
@@ -408,13 +399,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 				log.Info("[commitment] trie trace saved", "path", savePath, "branches", len(trace.Branches), "accounts", len(trace.Accounts), "storages", len(trace.Storages), "updates", len(trace.Updates))
 			}
 		}()
-	}
-
-	if recorder != nil {
-		// Disable warmup cache during recording — cache hits bypass the
-		// RecordingContext, producing incomplete traces for replay.
-		sdc.patriciaTrie.EnableWarmupCache(false)
-		defer sdc.patriciaTrie.EnableWarmupCache(true)
 	}
 
 	var warmupConfig commitment.WarmupConfig
@@ -591,10 +575,9 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 	return nil, e.err
 }
 
-// by that key stored latest root hash and tree state
-const keyCommitmentStateS = "state"
-
-var KeyCommitmentState = []byte(keyCommitmentStateS)
+// KeyCommitmentState aliases commitment.KeyCommitmentState — single source of
+// truth so BranchCache can exclude it by construction.
+var KeyCommitmentState = commitment.KeyCommitmentState
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
