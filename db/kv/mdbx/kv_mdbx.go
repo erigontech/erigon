@@ -980,12 +980,8 @@ func (db *MdbxKV) WarmupTable(ctx context.Context, bucket string) {
 // bounds[0]==from and a nil last. It stays even when keys cluster, where byte
 // interpolation collapses to a single range. The interior boundaries are
 // zero-copy and valid only until tx end; clone to retain.
-func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byte, error) {
-	const maxChunks = 4096 // bound DistributeCursors' ~O(n^2) cost and the per-cursor leaf fault
-	if n > maxChunks {
-		n = maxChunks
-	}
-	if n <= 1 {
+func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, numChunks int) ([][]byte, error) {
+	if numChunks <= 1 {
 		return [][]byte{from, nil}, nil
 	}
 
@@ -1007,7 +1003,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byt
 		return nil, err
 	}
 
-	cursors := make([]*mdbx.Cursor, n)
+	cursors := make([]*mdbx.Cursor, numChunks)
 	for i := range cursors {
 		cw, err := tx.Cursor(bucket)
 		if err != nil {
@@ -1028,7 +1024,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byt
 		return nil, err
 	}
 
-	keys := make([][]byte, 0, n)
+	keys := make([][]byte, 0, numChunks)
 	for _, c := range cursors {
 		// An unset surplus cursor (range held fewer positions than n) reports
 		// GetCurrent as NotFound or ENODATA; either way the set cursors are a
