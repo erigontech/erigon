@@ -17,6 +17,7 @@
 package eliasfano16
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -30,6 +31,9 @@ func FuzzSingleEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
+		// The fuzzing engine hands the input as a read-only buffer; clone it
+		// before growing so the appends below never write into that buffer.
+		in = bytes.Clone(in)
 		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
 			in = append(in, in...)
 		}
@@ -67,6 +71,9 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
+		// The fuzzing engine hands the input as a read-only buffer; clone it
+		// before growing so the appends below never write into that buffer.
+		in = bytes.Clone(in)
 		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
 			in = append(in, in...)
 		}
