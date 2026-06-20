@@ -4,6 +4,7 @@ package recsplit
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,16 @@ func makeBucket(prefix string, size int) []uint64 {
 	return bucket
 }
 
+func aggrBounds(leafSize uint16) (primary, secondary uint16) {
+	primary = leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(leafSize)+0.5)))
+	if leafSize < 7 {
+		secondary = primary * 2
+	} else {
+		secondary = primary * uint16(math.Ceil(0.21*float64(leafSize)+0.9))
+	}
+	return
+}
+
 func TestFindBijectionSIMDMatchesScalar(t *testing.T) {
 	if !useSIMD {
 		t.Skip("AVX512 not available")
@@ -31,20 +42,20 @@ func TestFindBijectionSIMDMatchesScalar(t *testing.T) {
 	}
 }
 
+// TestFindSplitSIMDMatchesScalar covers both a power-of-two leaf size (SIMD fast/general
+// paths) and a non-power-of-two one (unit not a power of two -> scalar fallback guard).
 func TestFindSplitSIMDMatchesScalar(t *testing.T) {
 	if !useSIMD {
 		t.Skip("AVX512 not available")
 	}
-	const (
-		leafSize           = uint16(8)
-		primaryAggrBound   = uint16(32)
-		secondaryAggrBound = uint16(96)
-	)
-	for _, m := range []uint16{32, 48, 64, 96} {
-		bucket := makeBucket("simd_split", int(m))
-		fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-		want := findSplit(bucket, 0, fanout, unit, make([]uint16, secondaryAggrBound))
-		got := findSplitSIMD(bucket, 0, fanout, unit, make([]uint16, secondaryAggrBound))
-		require.Equal(t, want, got, "m %d", m)
+	for _, leafSize := range []uint16{8, 12} {
+		primary, secondary := aggrBounds(leafSize)
+		for _, m := range []uint16{leafSize * 2, primary, primary + leafSize, secondary, secondary + 1} {
+			bucket := makeBucket("simd_split", int(m))
+			fanout, unit := splitParams(m, leafSize, primary, secondary)
+			want := findSplit(bucket, 0, fanout, unit, make([]uint16, secondary*2))
+			got := findSplitSIMD(bucket, 0, fanout, unit, make([]uint16, secondary*2))
+			require.Equal(t, want, got, "leafSize %d m %d fanout %d unit %d", leafSize, m, fanout, unit)
+		}
 	}
 }
