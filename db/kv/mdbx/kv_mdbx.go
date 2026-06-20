@@ -980,8 +980,8 @@ func (db *MdbxKV) WarmupTable(ctx context.Context, bucket string) {
 // bounds[0]==from and a nil last. It stays even when keys cluster, where byte
 // interpolation collapses to a single range. The interior boundaries are
 // zero-copy and valid only until tx end; clone to retain.
-func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, numChunks int) ([][]byte, error) {
-	if numChunks <= 1 {
+func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, chunksAmount int) ([][]byte, error) {
+	if chunksAmount <= 1 {
 		return [][]byte{from, nil}, nil
 	}
 
@@ -990,20 +990,16 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, numChunks int) 
 		return nil, err
 	}
 	defer firstC.Close()
-	first := firstC.(*MdbxCursor).c
-	if from == nil {
-		_, _, err = first.Get(nil, nil, mdbx.First)
-	} else {
-		_, _, err = first.Get(from, nil, mdbx.SetRange)
-	}
+	k, _, err := firstC.Seek(from)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return [][]byte{from, nil}, nil
-		}
 		return nil, err
 	}
+	if k == nil { // empty table, or `from` past the last key
+		return [][]byte{from, nil}, nil
+	}
+	first := firstC.(*MdbxCursor).c
 
-	cursors := make([]*mdbx.Cursor, numChunks)
+	cursors := make([]*mdbx.Cursor, chunksAmount)
 	for i := range cursors {
 		cw, err := tx.Cursor(bucket)
 		if err != nil {
@@ -1013,18 +1009,21 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, numChunks int) 
 		cursors[i] = cw.(*MdbxCursor).c
 	}
 
-	// Distribute at the lowest branch level (Depth-2), not the leaves: keeps the
-	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
-	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
-	deepness := uint(42)
-	if st, err := tx.BucketStat(bucket); err == nil && st.Depth > 2 {
-		deepness = st.Depth - 2
+	st, err := tx.BucketStat(bucket)
+	if err != nil {
+		return nil, err
 	}
+
+	deepness := uint(42)
+	if st.Depth > 2 {
+		deepness = st.Depth - 2 // Use only branch-pages it `DistributeCursors()` - otherwise too slow
+	}
+
 	if _, err := mdbx.DistributeCursors(first, nil, cursors, deepness); err != nil {
 		return nil, err
 	}
 
-	keys := make([][]byte, 0, numChunks)
+	keys := make([][]byte, 0, chunksAmount)
 	for _, c := range cursors {
 		// An unset surplus cursor (range held fewer positions than n) reports
 		// GetCurrent as NotFound or ENODATA; either way the set cursors are a
