@@ -2885,6 +2885,39 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	return nil
 }
 
+// removeAccessorsForRebuild deletes all accessor/index files so the subsequent
+// BuildMissed* passes regenerate them from the data files (.seg/.kv/.v/.ef).
+func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
+	targets := []struct {
+		dir  string
+		exts []string
+	}{
+		{dirs.Snap, []string{".idx"}},
+		{dirs.SnapCaplin, []string{".idx"}},
+		{dirs.SnapAccessors, []string{".vi", ".efi"}},
+		{dirs.SnapDomain, []string{".kvi", ".bt", ".kvei"}},
+	}
+	for _, t := range targets {
+		files, err := dir2.ListFiles(t.dir, t.exts...)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		for _, fPath := range files {
+			if err := dir2.RemoveFile(fPath); err != nil {
+				return fmt.Errorf("rebuild: remove %s: %w", fPath, err)
+			}
+			if err := dir2.RemoveFile(fPath + ".torrent"); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("rebuild: remove %s: %w", fPath+".torrent", err)
+			}
+			logger.Info("[rebuild] removed accessor", "file", filepath.Base(fPath))
+		}
+	}
+	return nil
+}
+
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
@@ -2895,7 +2928,9 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 
 	if rebuild {
-		panic("not implemented")
+		if err := removeAccessorsForRebuild(dirs, logger); err != nil {
+			return err
+		}
 	}
 
 	if err := freezeblocks.RemoveIncompatibleIndices(dirs); err != nil {
