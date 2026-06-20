@@ -160,6 +160,9 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		if err != nil {
 			return 0, err
 		}
+		if i%1024 == 0 {
+			ra.SetPos(k)
+		}
 
 		if isDupsort {
 			if err = casted.AppendDup(k, v); err != nil {
@@ -172,9 +175,6 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		}
 
 		i++
-		if i%1024 == 0 {
-			ra.SetPos(k)
-		}
 		if i%100_000 == 0 {
 			select {
 			case <-ctx.Done():
