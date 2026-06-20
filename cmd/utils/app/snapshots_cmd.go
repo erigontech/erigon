@@ -2897,6 +2897,13 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 		{dirs.SnapAccessors, []string{".vi", ".efi"}},
 		{dirs.SnapDomain, []string{".kvi", ".bt", ".kvei"}},
 	}
+	remove := func(fPath string) error {
+		if err := dir2.RemoveFile(fPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("rebuild: remove %s: %w", fPath, err)
+		}
+		logger.Info("[rebuild] removed accessor", "file", filepath.Base(fPath))
+		return nil
+	}
 	for _, t := range targets {
 		files, err := dir2.ListFiles(t.dir, t.exts...)
 		if err != nil {
@@ -2906,13 +2913,22 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 			return err
 		}
 		for _, fPath := range files {
-			if err := dir2.RemoveFile(fPath); err != nil {
-				return fmt.Errorf("rebuild: remove %s: %w", fPath, err)
+			if err := remove(fPath); err != nil {
+				return err
 			}
-			if err := dir2.RemoveFile(fPath + ".torrent"); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("rebuild: remove %s: %w", fPath+".torrent", err)
+		}
+		torrents, err := dir2.ListFiles(t.dir, ".torrent")
+		if err != nil {
+			return err
+		}
+		for _, fPath := range torrents {
+			base := strings.TrimSuffix(fPath, ".torrent")
+			if !slices.ContainsFunc(t.exts, func(ext string) bool { return strings.HasSuffix(base, ext) }) {
+				continue
 			}
-			logger.Info("[rebuild] removed accessor", "file", filepath.Base(fPath))
+			if err := remove(fPath); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

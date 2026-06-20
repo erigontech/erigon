@@ -1461,13 +1461,20 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		touch(f)
 	}
 
+	orphanTorrent := filepath.Join(dirs.SnapDomain, "v1.0-storage.0-64.kvi.torrent")
+	touch(orphanTorrent)
+	dataTorrent := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg.torrent")
+	touch(dataTorrent)
+
 	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
 
 	for _, f := range accessors {
 		confirmDoesntExist(t, f)
 		confirmDoesntExist(t, f+".torrent")
 	}
+	confirmDoesntExist(t, orphanTorrent)
 	for _, f := range dataFiles {
 		confirmExist(t, f)
 	}
+	confirmExist(t, dataTorrent)
 }
