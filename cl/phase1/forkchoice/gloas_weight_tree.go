@@ -57,6 +57,10 @@ type gloasWeightTree struct {
 
 	boostKnown bool
 	boost      bool
+
+	topologySeen map[common.Hash]struct{}
+	weightSeen   map[common.Hash]struct{}
+	stack        []common.Hash
 }
 
 func newGloasWeightTree(f *ForkChoiceStore) *gloasWeightTree {
@@ -115,15 +119,19 @@ func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointStat
 
 func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 	changed := false
-	seen := make(map[common.Hash]struct{})
-	stack := []common.Hash{root}
-	for len(stack) > 0 {
-		current := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if _, ok := seen[current]; ok {
+	if t.topologySeen == nil {
+		t.topologySeen = make(map[common.Hash]struct{})
+	} else {
+		clear(t.topologySeen)
+	}
+	t.stack = append(t.stack[:0], root)
+	for len(t.stack) > 0 {
+		current := t.stack[len(t.stack)-1]
+		t.stack = t.stack[:len(t.stack)-1]
+		if _, ok := t.topologySeen[current]; ok {
 			continue
 		}
-		seen[current] = struct{}{}
+		t.topologySeen[current] = struct{}{}
 
 		node, ok := t.nodes[current]
 		if !ok {
@@ -132,12 +140,10 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 			changed = true
 		}
 
-		children := t.liveChildren(current)
-		if !equalHashes(node.children, children) {
-			node.children = append(node.children[:0], children...)
+		if t.filterLiveChildren(current, node) {
 			changed = true
 		}
-		for _, child := range children {
+		for _, child := range node.children {
 			childNode, ok := t.nodes[child]
 			if !ok {
 				childNode = &gloasWeightNode{root: child}
@@ -151,18 +157,16 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 				childNode.parentPayloadStatus = parentPayloadStatus
 				changed = true
 			}
-			stack = append(stack, child)
+			t.stack = append(t.stack, child)
 		}
 	}
 	return changed
 }
 
-func (t *gloasWeightTree) liveChildren(root common.Hash) []common.Hash {
+func (t *gloasWeightTree) filterLiveChildren(root common.Hash, node *gloasWeightNode) bool {
 	children := t.f.children(root)
-	if len(children) == 0 {
-		return nil
-	}
-	live := make([]common.Hash, 0, len(children))
+	liveCount := 0
+	changed := false
 	for _, child := range children {
 		if _, hasHeader := t.f.forkGraph.GetHeader(child); !hasHeader {
 			continue
@@ -171,21 +175,22 @@ func (t *gloasWeightTree) liveChildren(root common.Hash) []common.Hash {
 		if !hasBlock || block == nil {
 			continue
 		}
-		live = append(live, child)
-	}
-	return live
-}
-
-func equalHashes(a, b []common.Hash) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+		if liveCount >= len(node.children) {
+			node.children = append(node.children, child)
+			changed = true
+		} else {
+			if node.children[liveCount] != child {
+				changed = true
+			}
+			node.children[liveCount] = child
 		}
+		liveCount++
 	}
-	return true
+	if liveCount != len(node.children) {
+		changed = true
+		node.children = node.children[:liveCount]
+	}
+	return changed
 }
 
 func (t *gloasWeightTree) rebuildDirectWeights(cs *checkpointState) {
@@ -294,13 +299,17 @@ func (t *gloasWeightTree) addDirectContribution(message LatestMessage, contribut
 }
 
 func (t *gloasWeightTree) recompute(root common.Hash) {
-	seen := make(map[common.Hash]struct{})
+	if t.weightSeen == nil {
+		t.weightSeen = make(map[common.Hash]struct{})
+	} else {
+		clear(t.weightSeen)
+	}
 	var walk func(common.Hash)
 	walk = func(current common.Hash) {
-		if _, ok := seen[current]; ok {
+		if _, ok := t.weightSeen[current]; ok {
 			return
 		}
-		seen[current] = struct{}{}
+		t.weightSeen[current] = struct{}{}
 		node := t.nodes[current]
 		if node == nil {
 			return
