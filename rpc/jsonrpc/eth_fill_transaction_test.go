@@ -97,6 +97,54 @@ func TestFillTransactionContractCreationNoData(t *testing.T) {
 	require.Contains(t, err.Error(), "contract creation")
 }
 
+func TestFillTransactionNoFrom(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To: &to,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, hexutil.Uint64(0), result.Tx.Nonce, "nonce must default to 0 when From is absent")
+}
+
+func TestFillTransactionExplicitNoncePreserved(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	nonce := hexutil.Uint64(42)
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		From:  &from,
+		To:    &to,
+		Nonce: &nonce,
+	})
+	require.NoError(t, err)
+	require.Equal(t, nonce, result.Tx.Nonce, "explicit nonce must not be overwritten")
+}
+
+func TestFillTransactionExplicitGasPreserved(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(50000)
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		From: &from,
+		To:   &to,
+		Gas:  &gas,
+	})
+	require.NoError(t, err)
+	require.Equal(t, gas, result.Tx.Gas, "explicit gas must not be overwritten by estimation")
+}
+
 func TestFillTransactionBlobPreCancun(t *testing.T) {
 	// TestChainBerlinConfig has no Cancun (ExcessBlobGas == nil on head).
 	// A blob tx request must return a clear error, not panic.

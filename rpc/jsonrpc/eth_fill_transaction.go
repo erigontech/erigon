@@ -45,6 +45,9 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
 		return nil, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
 	}
+	if args.MaxFeePerBlobGas != nil && args.MaxFeePerBlobGas.ToInt().Sign() == 0 {
+		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
+	}
 
 	dbTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -160,14 +163,17 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}, nil
 }
 
+func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {
+	return gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
+}
+
 func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, head *types.Header, dbTx kv.TemporalTx) error {
 	if head.BaseFee == nil {
 		if args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil {
 			return errors.New("maxFeePerGas and maxPriorityFeePerGas are not valid before London is active")
 		}
 		if args.GasPrice == nil {
-			oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
-			price, err := oracle.SuggestTipCap(ctx)
+			price, err := api.newGasOracle(dbTx).SuggestTipCap(ctx)
 			if err != nil {
 				return err
 			}
@@ -193,8 +199,7 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		return nil
 	}
 
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
-	tip, err := oracle.SuggestTipCap(ctx)
+	tip, err := api.newGasOracle(dbTx).SuggestTipCap(ctx)
 	if err != nil {
 		return err
 	}
