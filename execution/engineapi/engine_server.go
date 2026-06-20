@@ -56,13 +56,12 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
@@ -79,7 +78,8 @@ type EngineServer struct {
 	caplin           bool // we need to send errors for caplin.
 	internalCL       bool // true when any embedded CL is active (suppresses "no CL" warning)
 	executionService execmodule.ExecutionModule
-	txpool           txpoolproto.TxpoolClient // needed for getBlobs
+	txpool           txpoolproto.TxpoolClient // gRPC client, reused by the embedded eth API
+	blobGetter       txpool.BlobGetter        // interface for remote or embedded blob retrieval; for embedded it avoids unnecessary gRPC hops
 
 	chainRW chainreader.ChainReaderWriterEth1
 	filters *rpchelper.Filters
@@ -88,9 +88,7 @@ type EngineServer struct {
 	logger  log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
-	// TODO Remove this on next release
-	printPectraBanner bool
-	maxReorgDepth     uint64
+	maxReorgDepth   uint64
 }
 
 func NewEngineServer(
@@ -103,23 +101,24 @@ func NewEngineServer(
 	proposing bool,
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
+	blobGetter txpool.BlobGetter,
 	fcuTimeout time.Duration,
 	maxReorgDepth uint64,
 ) *EngineServer {
 	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
-		logger:            logger,
-		config:            config,
-		executionService:  executionService,
-		blockDownloader:   blockDownloader,
-		chainRW:           chainRW,
-		proposing:         proposing,
-		caplin:            caplin,
-		internalCL:        internalCL,
-		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
-		printPectraBanner: true,
-		txpool:            txPool,
-		maxReorgDepth:     maxReorgDepth,
+		logger:           logger,
+		config:           config,
+		executionService: executionService,
+		blockDownloader:  blockDownloader,
+		chainRW:          chainRW,
+		proposing:        proposing,
+		caplin:           caplin,
+		internalCL:       internalCL,
+		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
+		txpool:           txPool,
+		blobGetter:       blobGetter,
+		maxReorgDepth:    maxReorgDepth,
 	}
 
 	srv.consuming.Store(consuming)
@@ -208,6 +207,9 @@ func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
 	}
@@ -228,13 +230,18 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
-	// TODO: enable once tests catch up with glamsterdam-devnet-4 spec
-	// if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
-	// 	return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
-	// }
+	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	}
+	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry slotNumber
+	}
 	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
 	}
@@ -354,7 +361,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(req.BlockAccessList) == 0 {
+		bal := *req.BlockAccessList
+		if len(bal) == 0 {
 			blockAccessList = make(types.BlockAccessList, 0)
 			hash := empty.BlockAccessListHash
 			header.BlockAccessListHash = &hash
@@ -363,9 +371,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
 			}
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(bal)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
 				return &engine_types.PayloadStatus{
 					Status:          engine_types.InvalidStatus,
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
@@ -377,9 +385,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
 				}, nil
 			}
-			hash := crypto.HashData(req.BlockAccessList)
+			hash := crypto.HashData(bal)
 			header.BlockAccessListHash = &hash
-			blockAccessListBytes = req.BlockAccessList
+			blockAccessListBytes = bal
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
@@ -388,8 +396,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
-
-	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
@@ -471,7 +477,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
+	// binaryTransactions cache so the downstream Block.RawBody() invocation
+	// inside InsertBlocks doesn't re-encode every tx
+	// via rlp.EncodeToBytes. Both slices reference the same underlying
+	// byte buffers from req.Transactions.
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
@@ -486,11 +497,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
-	}
-
-	if version == clparams.ElectraVersion && s.printPectraBanner && payloadStatus.Status == engine_types.ValidStatus {
-		s.printPectraBanner = false
-		log.Info(engine_helpers.PectraBanner)
 	}
 
 	return payloadStatus, nil
@@ -1001,11 +1007,11 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	var accessLists map[common.Hash][]byte
+	var bals [][]byte
 	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
-		accessLists = map[common.Hash][]byte{block.Hash(): blockAccessListBytes}
+		bals = [][]byte{blockAccessListBytes}
 	}
-	if err := e.chainRW.InsertBlocksAndWaitWithAccessLists(ctx, []*types.Block{block}, accessLists); err != nil {
+	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}, bals); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
@@ -1115,12 +1121,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		ep.SlotNumber = &sn
 	}
 	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
-		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
-		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
-		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
-			ep.BlockAccessList = encoded
+			bal := hexutil.Bytes(encoded)
+			ep.BlockAccessList = &bal
 		}
 	}
 
@@ -1219,17 +1223,13 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
-	for i := range blobHashes {
-		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(blobHashes[i])
+	if e.blobGetter == nil {
+		return nil, txpool.ErrPoolDisabled
 	}
-	res, err := e.txpool.GetBlobs(ctx, req)
-	if err != nil {
-		return nil, err
-	}
+	bundles := e.blobGetter.GetBlobs(blobHashes)
 	logLine := []string{}
 
-	if len(blobHashes) != len(res.BlobsWithProofs) {
+	if len(blobHashes) != len(bundles) {
 		log.Warn("[GetBlobs] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
 		return nil, nil
 	}
@@ -1237,57 +1237,57 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	switch version {
 	case clparams.FuluVersion: // GetBlobsV3
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
-		for i, bwp := range res.BlobsWithProofs {
+		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bwp.Blob) == 0 {
+			if len(bb.Blob) == 0 {
 				logLine = append(logLine, logHead, "nil")
-			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
-				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
+			} else if len(bb.Proofs) != int(params.CellsPerExtBlob) {
+				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
 			} else {
-				ret[i] = &engine_types.BlobAndProofV2{Blob: bwp.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				ret[i] = &engine_types.BlobAndProofV2{Blob: bb.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
-					ret[i].CellProofs[c] = bwp.Proofs[c]
+					ret[i].CellProofs[c] = bb.Proofs[c][:]
 				}
-				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bwp.Blob)))
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bb.Blob)))
 			}
 		}
 		e.logger.Debug("[GetBlobsV3]", "Responses", logLine)
 		return ret, nil
 	case clparams.ElectraVersion: // GetBlobsV2
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
-		for i, bwp := range res.BlobsWithProofs {
+		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bwp.Blob) == 0 {
+			if len(bb.Blob) == 0 {
 				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, "nil")
 				break
-			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
+			} else if len(bb.Proofs) != int(params.CellsPerExtBlob) {
 				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
-				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
+				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
 				break
 			} else {
-				ret[i] = &engine_types.BlobAndProofV2{Blob: bwp.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				ret[i] = &engine_types.BlobAndProofV2{Blob: bb.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
-					ret[i].CellProofs[c] = bwp.Proofs[c]
+					ret[i].CellProofs[c] = bb.Proofs[c][:]
 				}
-				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bwp.Blob)))
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bb.Blob)))
 			}
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
 	case clparams.DenebVersion: // GetBlobsV1
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
-		for i, bwp := range res.BlobsWithProofs {
+		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bwp.Blob) == 0 {
+			if len(bb.Blob) == 0 {
 				logLine = append(logLine, logHead, "nil")
-			} else if len(bwp.Proofs) != 1 {
-				logLine = append(logLine, logHead, fmt.Sprintf("post-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
+			} else if len(bb.Proofs) != 1 {
+				logLine = append(logLine, logHead, fmt.Sprintf("post-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
 			} else {
-				ret[i] = &engine_types.BlobAndProofV1{Blob: bwp.Blob, Proof: bwp.Proofs[0]}
-				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d len(proof)=%d ", len(bwp.Blob), len(bwp.Proofs[0])))
+				ret[i] = &engine_types.BlobAndProofV1{Blob: bb.Blob, Proof: bb.Proofs[0][:]}
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d len(proof)=%d ", len(bb.Blob), len(bb.Proofs[0])))
 			}
 		}
 		e.logger.Debug("[GetBlobsV1]", "Responses", logLine)

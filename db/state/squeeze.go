@@ -476,7 +476,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	rebuildCfg := commitment.DefaultTrieConfig()
+	rebuildCfg.Variant = execctx.PickTrieVariant()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(rebuildCfg))
 	if err != nil {
 		return nil, err
 	}
@@ -486,9 +488,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.CodeDomain)
 	domains.SetInMemHistoryReads(false)
 	domains.EnableParaTrieDB(rwDb)
-	domains.EnableTrieWarmup(true)
-	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
-	domains.EnableWarmupCache(useWarmupCache)
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
 	if err != nil {
@@ -517,8 +516,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize,
-			"warmupCache", useWarmupCache)
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize)
 	}
 	var totalKeysProcessed uint64
 	var rh []byte
@@ -532,14 +530,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
 			"memBatchSize", common.ByteCount(domains.Size()), "root", hex.EncodeToString(rh))
 
-		if err := domains.Flush(ctx, rwTx); err != nil {
+		if err := domains.Commit(ctx, rwTx); err != nil {
 			return err
 		}
 		domains.Close()
-
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
@@ -583,7 +577,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err != nil {
 			return err
 		}
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger)
+		flushCfg := commitment.DefaultTrieConfig()
+		flushCfg.Variant = execctx.PickTrieVariant()
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(flushCfg))
 		if err != nil {
 			return err
 		}
@@ -598,8 +594,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.CodeDomain)
 		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
-		domains.EnableTrieWarmup(true)
-		domains.EnableWarmupCache(useWarmupCache)
 		return nil
 	}
 
@@ -699,11 +693,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						return err
 					}
 				}
-				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
+				// Set correct state reader before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
-				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}
 			var domain kv.Domain
@@ -881,6 +874,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 
+	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
+	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
+	rebuildTrieCfg := commitment.DefaultTrieConfig()
+	rebuildTrieCfg.EnableTrieWarmup = false
+	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
+
 	var totalKeysCommitted uint64
 
 	for i, r := range ranges {
@@ -909,7 +908,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 64))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -981,7 +980,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomainsWithTrieVariant(ctx, rwTx, log.New(), trieVariant)
+			iterTrieCfg := rebuildTrieCfg
+			iterTrieCfg.Variant = trieVariant
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
 			if err != nil {
 				return nil, err
 			}

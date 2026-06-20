@@ -45,6 +45,7 @@ type ForkChoiceStorageMock struct {
 	AnchorRootVal          common.Hash
 	FinalizedCheckpointVal solid.Checkpoint
 	FinalizedSlotVal       uint64
+	LowestAvailableSlotVal *uint64
 	HeadVal                common.Hash
 	HeadSlotVal            uint64
 	HeadPayloadStatusVal   cltypes.PayloadStatus
@@ -69,6 +70,8 @@ type ForkChoiceStorageMock struct {
 	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
 	Blocks                    map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                 map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	VerifiedPayloads          map[common.Hash]bool
+	OnExecutionPayloadErr     error
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -82,6 +85,7 @@ type ForkChoiceStorageMock struct {
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
+	PayloadStatusByRootMap    map[common.Hash]execution_client.PayloadStatus
 	// [New in Gloas:EIP7732] Execution payload gas limit by execution block hash
 	ExecutionPayloadGasLimitMap map[common.Hash]uint64
 }
@@ -213,6 +217,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		SyncContributionPool:        makeSyncContributionPoolMock(t),
 		MockPeerDas:                 mockPeerDas,
 		ExecutionPayloadStatusMap:   make(map[common.Hash]execution_client.PayloadStatus),
+		PayloadStatusByRootMap:      make(map[common.Hash]execution_client.PayloadStatus),
 		ExecutionPayloadGasLimitMap: make(map[common.Hash]uint64),
 	}
 }
@@ -338,7 +343,7 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
-	return nil
+	return f.OnExecutionPayloadErr
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -370,6 +375,9 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 }
 
 func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
+	if f.LowestAvailableSlotVal != nil {
+		return *f.LowestAvailableSlotVal
+	}
 	return f.FinalizedSlotVal
 }
 
@@ -424,6 +432,13 @@ func (f *ForkChoiceStorageMock) GetBlock(
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 	_, ok := f.Envelopes[blockRoot]
 	return ok
+}
+
+func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
+	if f.VerifiedPayloads == nil {
+		return false
+	}
+	return f.VerifiedPayloads[blockRoot]
 }
 
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -527,6 +542,11 @@ func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64V
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
 	status, ok := f.ExecutionPayloadStatusMap[executionBlockHash]
+	return status, ok
+}
+
+func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := f.PayloadStatusByRootMap[blockRoot]
 	return status, ok
 }
 

@@ -179,6 +179,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
 			panic(err)
 		}
+		anchorState.SetPreviousStateRoot(anchorHeader.Root)
 	}
 
 	farthestExtendingPath[anchorRoot] = true
