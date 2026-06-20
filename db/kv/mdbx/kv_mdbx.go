@@ -976,12 +976,10 @@ func (db *MdbxKV) WarmupTable(ctx context.Context, bucket string) {
 }
 
 // SplitBucketByCount partitions bucket into n approximately equal-COUNT key
-// ranges using mdbx's b-tree distribution, returning n+1 boundaries with
-// bounds[0]==from and a nil last. It stays even when keys cluster, where byte
-// interpolation collapses to a single range. The interior boundaries are
-// zero-copy and valid only until tx end; clone to retain.
-func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, chunksAmount int) ([][]byte, error) {
-	if chunksAmount <= 1 {
+// ranges using mdbx's b-tree distribution. The interior boundaries are
+// zero-copy and valid until tx end
+func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, boundariesAmount int) ([][]byte, error) {
+	if boundariesAmount <= 1 {
 		return [][]byte{from, nil}, nil
 	}
 
@@ -999,7 +997,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, chunksAmount in
 	}
 	first := firstC.(*MdbxCursor).c
 
-	cursors := make([]*mdbx.Cursor, chunksAmount)
+	cursors := make([]*mdbx.Cursor, boundariesAmount)
 	for i := range cursors {
 		cw, err := tx.Cursor(bucket)
 		if err != nil {
@@ -1023,7 +1021,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, chunksAmount in
 		return nil, err
 	}
 
-	keys := make([][]byte, 0, chunksAmount)
+	keys := make([][]byte, 0, boundariesAmount)
 	for _, c := range cursors {
 		// An unset surplus cursor (range held fewer positions than n) reports
 		// GetCurrent as NotFound or ENODATA; either way the set cursors are a
