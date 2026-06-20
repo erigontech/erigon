@@ -460,3 +460,41 @@ func TestApplyFrame_IntrinsicGasBeforeAuthorities(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrIntrinsicGas)
 }
+
+// TestType4Prereq_NoStateMutationOnReject pins that a SetCode (EIP-7702)
+// transaction rejected for a deterministic prerequisite — here, a type-4 tx
+// before Prague — leaves the sender's nonce and balance untouched, because
+// preCheck validates those prerequisites before buying gas.
+func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainBerlinConfig // pre-Prague: type-4 not allowed
+
+	ibs := state.New(state.NewNoopReader())
+	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, 30_000_000)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		gasPrice, gasPrice, gasPrice,
+		nil, nil,
+		false, false, true, false, nil,
+	)
+	msg.SetAuthorizations([]types.Authorization{{}})
+
+	gp := new(GasPool).AddGas(30_000_000)
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.Error(t, err)
+
+	nonce, nErr := ibs.GetNonce(sender)
+	require.NoError(t, nErr)
+	require.Zero(t, nonce, "nonce must be untouched on a type-4 prerequisite rejection")
+
+	bal, bErr := ibs.GetBalance(sender)
+	require.NoError(t, bErr)
+	require.Equal(t, *initialBalance, bal, "balance must be untouched on a type-4 prerequisite rejection")
+}

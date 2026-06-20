@@ -357,6 +357,12 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
+	// EIP-7702: reject malformed SetCode transactions before buying gas, so a
+	// rejected tx leaves sender state untouched.
+	if err := checkSetCodeAuthorizations(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
+		return err
+	}
+
 	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGas, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
 		return err
@@ -733,19 +739,31 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
+// checkSetCodeAuthorizations validates the deterministic EIP-7702 prerequisites
+// that don't depend on state, so callers can reject before mutating anything.
+func checkSetCodeAuthorizations(auths []types.Authorization, contractCreation, isPrague bool) error {
+	if auths == nil {
+		return nil
+	}
+	if !isPrague {
+		return errors.New("SetCode transaction not allowed before Prague fork")
+	}
+	if contractCreation {
+		return errors.New("contract creation not allowed with type4 txs")
+	}
+	if len(auths) == 0 {
+		return errors.New("SetCode transaction must have at least one authorization")
+	}
+	return nil
+}
+
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
 	var stateIgasRefund uint64
 	verifiedAuthorities := make([]accounts.Address, 0)
+	if err := checkSetCodeAuthorizations(auths, contractCreation, st.evm.ChainRules().IsPrague); err != nil {
+		return nil, stateIgasRefund, err
+	}
 	if auths != nil {
-		if !st.evm.ChainRules().IsPrague {
-			return nil, stateIgasRefund, errors.New("SetCode transaction not allowed before Prague fork")
-		}
-		if contractCreation {
-			return nil, stateIgasRefund, errors.New("contract creation not allowed with type4 txs")
-		}
-		if len(auths) == 0 {
-			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
-		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
