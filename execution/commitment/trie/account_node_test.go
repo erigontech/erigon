@@ -21,7 +21,6 @@ import (
 	"reflect"
 	"testing"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -169,25 +168,9 @@ func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 	}
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	hash, err := hashVal(addr[:])
+	hash, err := common.HashData(addr[:])
 	if err != nil {
 		return nil, common.Address{}, common.Hash{}, err
 	}
 	return key, addr, hash, nil
-}
-
-func hashVal(v []byte) (common.Hash, error) {
-	sha := keccak.NewFastKeccak()
-	sha.Reset()
-	_, err := sha.Write(v)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	var hash common.Hash
-	_, err = sha.Read(hash[:])
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return hash, nil
 }

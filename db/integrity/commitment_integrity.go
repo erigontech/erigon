@@ -210,7 +210,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
 	maxTxNum := f.EndRootNum() - 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
@@ -1062,7 +1062,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates())
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return err
 	}
@@ -1130,6 +1130,11 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer tx.Rollback()
+			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
 			idx, err := NewChangedKeysPerBlockIdx(wCtx, tx, br, windowStart, windowEnd, logger)
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
