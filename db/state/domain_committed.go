@@ -241,6 +241,11 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 	return dt.lookupFullKey, true
 }
 
+// keyCacheMaxEntries caps the per-merge findShortenedKey caches so a
+// whole-state merge can't grow them unbounded; clearing on overflow keeps
+// memory bounded while still caching hot recurring keys.
+const keyCacheMaxEntries = 4_000_000
+
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
@@ -371,6 +376,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 						return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 					}
+					if len(storageKeyCache) >= keyCacheMaxEntries {
+						clear(storageKeyCache)
+					}
 					storageKeyCache[string(auxBuf)] = shortenedKeyOffset
 				}
 				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
@@ -406,6 +414,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
 						"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
 					return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+				}
+				if len(accountKeyCache) >= keyCacheMaxEntries {
+					clear(accountKeyCache)
 				}
 				accountKeyCache[string(auxBuf)] = shortenedKeyOffset
 			}
