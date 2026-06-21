@@ -362,7 +362,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
