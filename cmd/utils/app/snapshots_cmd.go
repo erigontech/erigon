@@ -3524,7 +3524,7 @@ func pruneExecChangesets(ctx context.Context, db kv.RwDB, cliCtx *cli.Context, l
 	for hasMore := true; hasMore; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			var err error
-			hasMore, err = stagedsync.PruneExecutionBlockHistory(ctx, tx, db, syncCfg, execProgress, 10_000_000, 1_000_000, 10*time.Minute, logger, "retire")
+			hasMore, err = stagedsync.PruneExecutionBlockHistory(ctx, tx, db, syncCfg, execProgress, 1_000_000, 1_000_000, 10*time.Minute, logger, "retire")
 			return err
 		}); err != nil {
 			return err
