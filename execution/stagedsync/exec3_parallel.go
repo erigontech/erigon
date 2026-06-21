@@ -98,7 +98,7 @@ type parallelExecutor struct {
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
 	// reachedMaxBlock is set by the exec loop when it exits cleanly because
 	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
-	// as opposed to sizeEst > batchLimit (more work pending). The apply loop
+	// as opposed to sizeEst >= batchLimit (more work pending). The apply loop
 	// uses this to decide whether to return ErrLoopExhausted (more work) or
 	// nil (clean exit). Read after applyResults is closed; safe under happens-
 	// before because the exec loop sets it before triggering the channel close.
@@ -429,7 +429,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
 					}
 					// Two reasons the exec loop closes the channel:
-					//   (1) sizeEst > batchLimit — flush and tell the stage loop
+					//   (1) sizeEst >= batchLimit — flush and tell the stage loop
 					//       there is more work pending (ErrLoopExhausted)
 					//   (2) blockResult.BlockNum >= pe.maxBlockNum — we processed
 					//       every block we were asked to; clean exit, not "more work"
@@ -1019,15 +1019,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Unlock()
 				pe.scheduleNextPending(ctx)
 
-				// Use AfterCommitment estimate (2x) in per-block mode since
-				// commitment is already computed. BeforeCommitment (4x) is
-				// for batch mode where commitment hasn't run yet.
-				var sizeEst uint64
-				if dbg.BatchCommitments {
-					sizeEst = pe.rs.SizeEstimateBeforeCommitment()
-				} else {
-					sizeEst = pe.rs.SizeEstimateAfterCommitment()
-				}
+				// Always the BeforeCommitment (4x) estimate, matching serial exec:
+				// commit a little early rather than let the buffer overshoot batchSize.
+				sizeEst := pe.rs.SizeEstimateBeforeCommitment()
 				batchLimit := pe.cfg.batchSize.Bytes()
 				// We are inside the `blockResult != nil` branch, so at least one
 				// complete (non-partial) block has been applied in this batch.
@@ -1237,7 +1231,7 @@ const (
 // 864 calls this and dispatches based on the returned decision.
 //
 // Priority order (matches production):
-//  1. sizeEst > batchLimit         (size-limit batch flush — most urgent)
+//  1. sizeEst >= batchLimit        (size-limit batch flush — most urgent)
 //  2. blockResult.BlockNum >= max  (clean end — flip reachedMaxBlock)
 //  3. blockResult.Exhausted != nil (per-cycle dispatch limit hit)
 //  4. dbg.StopAfterBlock crossed   (debug-only halt)
@@ -1248,7 +1242,7 @@ const (
 // the size limit), which is why the test pins the exact precedence.
 // See TestExecLoopShouldExitPriority.
 func execLoopShouldExit(blockResult *blockResult, sizeEst, batchLimit, maxBlockNum, stopAfterBlock uint64) execLoopExitDecision {
-	if sizeEst > batchLimit {
+	if sizeEst >= batchLimit {
 		return execLoopExitSizeLimit
 	}
 	if blockResult.BlockNum >= maxBlockNum {

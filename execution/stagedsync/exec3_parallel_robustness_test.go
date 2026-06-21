@@ -654,6 +654,12 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 			want: execLoopExitSizeLimit,
 		},
 		{
+			// Exactly at the limit fires too: the check is `>=`, like serial exec.
+			name:     "size at limit fires",
+			blockNum: 5, sizeEst: batchLimit, maxBlockNum: 99,
+			want: execLoopExitSizeLimit,
+		},
+		{
 			// maxBlockNum alone — flag for clean batch end.
 			name:     "maxBlockNum reached",
 			blockNum: 99, sizeEst: smallSizeEst, maxBlockNum: 99,
