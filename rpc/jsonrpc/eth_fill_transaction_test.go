@@ -18,16 +18,62 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+// errPoolClient simulates a txpool gRPC call failure.
+type errPoolClient struct{ stubTxPoolClient }
+
+func (errPoolClient) Nonce(_ context.Context, _ *txpoolproto.NonceRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+	return nil, errors.New("pool unavailable")
+}
+
+// fixedNoncePoolClient always reports a specific pending nonce for the sender.
+type fixedNoncePoolClient struct {
+	stubTxPoolClient
+	nonce uint64
+}
+
+func (c fixedNoncePoolClient) Nonce(_ context.Context, _ *txpoolproto.NonceRequest, _ ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+	return &txpoolproto.NonceReply{Found: true, Nonce: c.nonce}, nil
+}
+
+// newLondonApiForTest returns an API backed by a fresh London-activated chain (genesis only).
+// The genesis baseFee is params.InitialBaseFee (1_000_000_000 wei).
+func newLondonApiForTest(t *testing.T) *APIImpl {
+	londonCfg := &chain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 chain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
+		Ethash:                new(chain.EthashConfig),
+	}
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(londonCfg))
+	return newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+}
 
 func TestFillTransactionFillsDefaults(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -162,4 +208,113 @@ func TestFillTransactionBlobPreCancun(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Cancun")
+}
+
+func TestFillTransactionPoolErrorFallsBackToOnChainNonce(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, errPoolClient{}, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+
+	// Pool error must not surface as a FillTransaction error; on-chain nonce is used.
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{From: &from, To: &to})
+	require.NoError(t, err, "pool gRPC error must not propagate to the caller")
+	require.NotNil(t, result)
+}
+
+func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	// GasCap in newEthApiForTest is 5_000_000; pass double to trigger the cap.
+	userGas := hexutil.Uint64(10_000_000)
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		From: &from,
+		To:   &to,
+		Gas:  &userGas,
+	})
+	require.NoError(t, err)
+	require.Equal(t, userGas, result.Tx.Gas, "user-provided gas must not be silently capped")
+}
+
+func TestFillTransactionPoolNonce(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	const pendingNonce = uint64(5)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, fixedNoncePoolClient{nonce: pendingNonce}, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{From: &from, To: &to})
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(pendingNonce+1), result.Tx.Nonce, "nonce must be pool nonce + 1")
+}
+
+func TestFillTransactionOnlyMaxFeePerGas(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+	maxFee := (*hexutil.Big)(new(big.Int).SetUint64(1_000_000_000_000_000_000)) // 1e18 wei
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:           &to,
+		Gas:          &gas,
+		MaxFeePerGas: maxFee,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Tx.MaxPriorityFeePerGas, "oracle must fill maxPriorityFeePerGas")
+	require.GreaterOrEqual(t, result.Tx.MaxFeePerGas.ToInt().Cmp(result.Tx.MaxPriorityFeePerGas.ToInt()), 0)
+	require.Equal(t, hexutil.Uint64(types.DynamicFeeTxType), result.Tx.Type)
+}
+
+func TestFillTransactionOnlyMaxPriorityFeePerGas(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+	const userTip = int64(1_000_000_000) // 1 gwei
+	// London genesis baseFee = params.InitialBaseFee = 1_000_000_000
+	const initialBaseFee = int64(1_000_000_000)
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(userTip)),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Tx.MaxFeePerGas, "oracle must fill maxFeePerGas")
+	require.Equal(t, userTip+2*initialBaseFee, result.Tx.MaxFeePerGas.ToInt().Int64())
+	require.Equal(t, hexutil.Uint64(types.DynamicFeeTxType), result.Tx.Type)
+}
+
+func TestFillTransactionMaxFeePerGasTooLow(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "maxFeePerGas")
+}
+
+func TestFillTransactionGasPricePostLondon(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:       &to,
+		Gas:      &gas,
+		GasPrice: (*hexutil.Big)(big.NewInt(10_000_000_000)), // 10 gwei
+	})
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(types.LegacyTxType), result.Tx.Type, "explicit gasPrice must produce a legacy tx")
 }

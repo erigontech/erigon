@@ -74,9 +74,12 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			reply, err2 := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
 				Address: gointerfaces.ConvertAddressToH160(*args.From),
 			}, &grpc.EmptyCallOption{})
-			if err2 == nil && reply != nil && reply.Found {
+			if err2 == nil && reply.Found {
 				nonce = reply.Nonce + 1
 			} else {
+				if err2 != nil {
+					api.logger.Warn("eth_fillTransaction: txpool nonce lookup failed, falling back to on-chain nonce", "err", err2)
+				}
 				latestBlock := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 				count, err3 := api.GetTransactionCount(ctx, *args.From, &latestBlock)
 				if err3 != nil {
@@ -94,11 +97,12 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
 	}
 
-	if args.BlobVersionedHashes != nil && len(args.BlobVersionedHashes) == 0 {
-		return nil, errors.New("need at least 1 blob for a blob transaction")
-	}
-	if len(args.BlobVersionedHashes) > params.MaxBlobsPerTxn {
-		return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", len(args.BlobVersionedHashes), params.MaxBlobsPerTxn)
+	if args.BlobVersionedHashes != nil {
+		if n := len(args.BlobVersionedHashes); n == 0 {
+			return nil, errors.New("need at least 1 blob for a blob transaction")
+		} else if n > params.MaxBlobsPerTxn {
+			return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", n, params.MaxBlobsPerTxn)
+		}
 	}
 
 	if args.To == nil {
@@ -145,9 +149,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		args.Gas = &estimated
 	}
 
-	baseFee := head.BaseFee
-
-	txn, err := args.ToTransaction(api.GasCap, baseFee)
+	txn, err := args.ToTransaction(0, head.BaseFee)
 	if err != nil {
 		return nil, err
 	}
@@ -199,11 +201,12 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		return nil
 	}
 
-	tip, err := api.newGasOracle(dbTx).SuggestTipCap(ctx)
-	if err != nil {
-		return err
-	}
-	if args.MaxPriorityFeePerGas == nil {
+	autoFilledPriorityFee := args.MaxPriorityFeePerGas == nil
+	if autoFilledPriorityFee {
+		tip, err := api.newGasOracle(dbTx).SuggestTipCap(ctx)
+		if err != nil {
+			return err
+		}
 		args.MaxPriorityFeePerGas = (*hexutil.Big)(tip.ToBig())
 	}
 	if args.MaxFeePerGas == nil {
@@ -214,6 +217,9 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		args.MaxFeePerGas = (*hexutil.Big)(val)
 	}
 	if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
+		if autoFilledPriorityFee {
+			return fmt.Errorf("suggested maxPriorityFeePerGas (%v) exceeds provided maxFeePerGas (%v)", args.MaxPriorityFeePerGas, args.MaxFeePerGas)
+		}
 		return fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", args.MaxFeePerGas, args.MaxPriorityFeePerGas)
 	}
 	return nil

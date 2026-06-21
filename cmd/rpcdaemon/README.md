@@ -310,7 +310,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
-| eth_fillTransaction                        | Yes     |                                                       |
+| eth_fillTransaction                        | Yes     | Blob sidecar generation (KZG commitments/proofs from raw blobs) not yet supported |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |
