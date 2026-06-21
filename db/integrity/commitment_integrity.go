@@ -955,7 +955,6 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 // checkCommitmentHistAtBlkWithIdx checks commitment for blockNum using the pre-built
 // per-domain key index from ChangedKeysPerBlockIdx.
 func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, br services.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
-	sd.ClearRam(true)
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	header, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
@@ -1131,11 +1130,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates())
-			if err != nil {
-				return err
-			}
-			defer sd.Close()
 			idx, err := NewChangedKeysPerBlockIdx(wCtx, tx, br, windowStart, windowEnd, logger)
 			if err != nil {
 				return fmt.Errorf("CheckCommitmentHistAtBlkRange: build index window=[%d,%d): %w", windowStart, windowEnd, err)
@@ -1143,7 +1137,15 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			// Each goroutine needs its own Sampler — the RNG is not goroutine-safe.
 			sampler := sc.NewWindowSampler(windowStart)
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
-				if err := checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, br, blockNum, idx, log.LvlTrace, logger); err != nil {
+				// Fresh SharedDomains per block: an SD is committed-or-closed,
+				// never reset in place.
+				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates())
+				if err != nil {
+					return err
+				}
+				err = checkCommitmentHistAtBlkWithIdx(wCtx, tx, sd, br, blockNum, idx, log.LvlTrace, logger)
+				sd.Close()
+				if err != nil {
 					return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 				}
 				checked.Add(1)

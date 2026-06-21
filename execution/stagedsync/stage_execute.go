@@ -392,78 +392,76 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
-	if u.UnwindPoint >= s.BlockNumber {
-		// The committed execution progress (s.BlockNumber) is at or below the
-		// unwind point, so MDBX has nothing above u.UnwindPoint to roll back and
-		// the disk unwind below would be a no-op. However the in-RAM
-		// SharedDomains / TemporalMemBatch overlay can still hold *uncommitted*
-		// writes for blocks above u.UnwindPoint — e.g. a block whose
-		// post-execution gas check failed mid-batch, before its step was ever
-		// flushed. Those entries must still be pruned: the overlay is reused
-		// across the unwind→retry loop within a single sync.Run, so leaving them
-		// makes the re-execution read a stale value (observed on Hoodi 3004265:
-		// ca5daf64 slot0 kept tx19's first-write, the contract took the
-		// "already initialised" branch, skipped an SSTORE_SET, came up 21045 gas
-		// short, and the node spun in an unwind/retry loop). The committed prune
-		// (#20625) only runs from unwindExec3, which the early return skipped.
-		txNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, u.UnwindPoint+1)
+
+	// Discard deferred commitment updates from the previous (failed) execution;
+	// otherwise the next ComputeCommitment flushes stale branch data. Runs on both
+	// unwind paths (the pre-refactor early return skipped it on the no-op path).
+	doms.ResetPendingUpdates()
+
+	if u.UnwindPoint < s.BlockNumber {
+		// Execution committed past the unwind point: roll the committed blocks back
+		// on disk (unwindExec3 also prunes the in-RAM overlay), and u.Done lowers the
+		// stage progress so re-execution resumes from u.UnwindPoint+1.
+		logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+		unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 		if err != nil {
 			return err
 		}
-		doms.Unwind(txNum, nil)
-		doms.SetTxNum(txNum)
-		return nil
+		if !ok {
+			return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+		}
+
+		var accumulator *shards.Accumulator
+		if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+			accumulator = cfg.notifications.Accumulator
+
+			hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+			if err != nil {
+				return fmt.Errorf("read canonical hash of unwind point: %w", err)
+			}
+			if !ok {
+				return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
+			}
+			header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
+			if err != nil {
+				return fmt.Errorf("read canonical header of unwind point: %w", err)
+			}
+			if header == nil {
+				return fmt.Errorf("canonical header for unwind point not found: %s", hash)
+			}
+			txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
+			if err != nil {
+				return err
+			}
+			accumulator.StartChange(header, txs, true)
+		}
+
+		if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
+			return err
+		}
+
+		if err = u.Done(rwTx); err != nil {
+			return err
+		}
+	} else {
+		// Nothing above the unwind point was committed, so there's no disk rollback
+		// and u.Done must NOT run — it would raise stage progress to u.UnwindPoint and
+		// mark uncommitted blocks executed. Re-execution resumes from the committed
+		// block, so prune the in-RAM overlay to that boundary (Min(s.BlockNumber+1)),
+		// not u.UnwindPoint+1.
+		committedTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
+		if err != nil {
+			return err
+		}
+		doms.Unwind(committedTxNum, nil)
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
-
-	// Discard any pending deferred commitment updates from the previous
-	// (failed) execution. If left in place, the next ComputeCommitment
-	// would flush stale branch data that doesn't match the unwound state.
-	doms.ResetPendingUpdates()
-
-	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
+	// Re-establish doms' position at the committed state for re-execution.
+	_, _, err = doms.SeekCommitment(ctx, rwTx)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
-	}
-
-	var accumulator *shards.Accumulator
-	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
-		accumulator = cfg.notifications.Accumulator
-
-		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
-		if err != nil {
-			return fmt.Errorf("read canonical hash of unwind point: %w", err)
-		}
-		if !ok {
-			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
-		}
-		header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
-		if err != nil {
-			return fmt.Errorf("read canonical header of unwind point: %w", err)
-		}
-		if header == nil {
-			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
-		}
-		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
-		if err != nil {
-			return err
-		}
-		accumulator.StartChange(header, txs, true)
-	}
-
-	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
-		return err
-	}
-
-	if err = u.Done(rwTx); err != nil {
-		return err
-	}
-
-	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
