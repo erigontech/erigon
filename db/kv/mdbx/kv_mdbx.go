@@ -1200,6 +1200,46 @@ func (tx *MdbxTx) ClearTable(bucket string) error {
 	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
+// DeleteRange removes keys in [from, to) using mdbx's native bulk range-delete,
+// which cuts whole pages and branches out of the B-tree at once. to==nil deletes
+// through the last key. Returns the number of keys removed.
+func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	beginC, err := tx.RwCursor(table)
+	if err != nil {
+		return 0, err
+	}
+	defer beginC.Close()
+	bk, _, err := beginC.Seek(from)
+	if err != nil {
+		return 0, err
+	}
+	if bk == nil {
+		return 0, nil
+	}
+
+	begin := rawCursor(beginC)
+	var end *mdbx.Cursor
+	endIncluding := true // nil end => delete through the last key
+	if to != nil {
+		endC, err := tx.RwCursor(table)
+		if err != nil {
+			return 0, err
+		}
+		defer endC.Close()
+		ek, _, err := endC.Seek(to)
+		if err != nil {
+			return 0, err
+		}
+		if ek != nil {
+			if bytes.Compare(bk, ek) >= 0 {
+				return 0, nil // empty range
+			}
+			end, endIncluding = rawCursor(endC), false
+		}
+	}
+	return begin.DeleteRange(end, endIncluding)
+}
+
 func (tx *MdbxTx) DropTable(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
 		return fmt.Errorf("%w, bucket: %s", kv.ErrAttemptToDeleteNonDeprecatedBucket, bucket)

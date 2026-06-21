@@ -391,6 +391,13 @@ func (tx *RwTx) WarmupDB(force bool) error {
 	return nil
 }
 
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	return 0, fmt.Errorf("DeleteRange unsupported by %T", tx.RwTx)
+}
+
 func (tx *RwTx) LockDBInRam() error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.LockDBInRam()

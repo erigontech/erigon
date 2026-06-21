@@ -105,9 +105,7 @@ var cmdClearBadBlocks = &cobra.Command{
 		}
 		defer db.Close()
 
-		return db.Update(ctx, func(tx kv.RwTx) error {
-			return backup.ClearTables(ctx, db, tx, kv.BadHeaderNumber)
-		})
+		return backup.ClearTables(ctx, db, kv.BadHeaderNumber)
 	},
 }
 

@@ -606,6 +606,14 @@ type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
 }
 
+// HasDeleteRange is implemented by backends offering a native bulk range-delete
+// (mdbx cuts whole B-tree pages/branches out at once, far faster than per-key
+// deletion). The range is [from, to); to==nil deletes through the last key.
+// Returns the number of keys removed.
+type HasDeleteRange interface {
+	DeleteRange(table string, from, to []byte) (uint64, error)
+}
+
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
 	ListTables() ([]string, error)
