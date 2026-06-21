@@ -138,6 +138,12 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
+func (db *DB) Warmup(ctx context.Context, force bool) error {
+	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		return tx.(*Tx).WarmupDB(force)
+	})
+}
+
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
@@ -330,6 +336,15 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
+// SplitBucketByCount forwards to the underlying engine so kv.ReadAheader's
+// BucketSplitter assertion works through the temporal wrapper.
+func (tx *Tx) SplitBucketByCount(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.Tx.(kv.BucketSplitter); ok {
+		return s.SplitBucketByCount(table, from, n)
+	}
+	return [][]byte{from, nil}, nil
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -374,6 +389,13 @@ func (tx *RwTx) WarmupDB(force bool) error {
 		return mdbxTx.WarmupDB(force)
 	}
 	return nil
+}
+
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	return 0, fmt.Errorf("DeleteRange unsupported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {

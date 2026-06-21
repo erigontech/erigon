@@ -781,6 +781,9 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 
 	stepVal := ^uint64(step)
 
+	if d.db != nil {
+		go func() { d.db.WarmupTable(ctx, d.ValuesTable) }()
+	}
 	if d.LargeValues {
 		valsCursor, err := roTx.Cursor(d.ValuesTable)
 		if err != nil {
@@ -1903,6 +1906,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	defer mxPruneTookDomain.ObserveDuration(time.Now())
 	var valsCursor kv.PseudoDupSortRwCursor
 	var mode prune.StorageMode
+
 	if dt.d.LargeValues {
 		mode = prune.StepKeyStorageMode
 		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
@@ -1927,6 +1931,14 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
 		defer valsCursor.Close()
+	}
+
+	// Parallel read-ahead: warm a bounded band of pages ahead of the delete scan
+	// (e.g. CommitmentVals is huge). No-op unless WARMUP_TABLE_WORKERS is set.
+	if dt.d.db != nil && dbg.WarmupTableWorkers > 0 {
+		ra := kv.NewReadAheader(ctx, dt.d.db, dt.d.ValuesTable, nil, int(dbg.WarmupTableWorkers))
+		defer ra.Close()
+		valsCursor = &readAheadValsCursor{PseudoDupSortRwCursor: valsCursor, ra: ra}
 	}
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
@@ -1956,6 +1968,35 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	stat.Progress = pruneStat.ValueProgress
 
 	return stat, err
+}
+
+// readAheadValsCursor publishes the values-prune scan position to a background
+// read-aheader so it can warm pages ahead of the delete cursor.
+type readAheadValsCursor struct {
+	kv.PseudoDupSortRwCursor
+	ra *kv.ReadAheader
+	n  int
+}
+
+func (c *readAheadValsCursor) First() ([]byte, []byte, error) {
+	k, v, err := c.PseudoDupSortRwCursor.First()
+	c.tick(k)
+	return k, v, err
+}
+func (c *readAheadValsCursor) Seek(seek []byte) ([]byte, []byte, error) {
+	k, v, err := c.PseudoDupSortRwCursor.Seek(seek)
+	c.tick(k)
+	return k, v, err
+}
+func (c *readAheadValsCursor) NextNoDup() ([]byte, []byte, error) {
+	k, v, err := c.PseudoDupSortRwCursor.NextNoDup()
+	c.tick(k)
+	return k, v, err
+}
+func (c *readAheadValsCursor) tick(k []byte) {
+	if c.n++; k != nil && c.n%1024 == 0 {
+		c.ra.SetPos(k)
+	}
 }
 
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {

@@ -108,7 +108,7 @@ func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwD
 	})
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -139,7 +139,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 	}
 
 	// ensure no garbage records left (it may happen if db is inconsistent)
-	if err := bw.TruncateBodies(db, tx, 2); err != nil {
+	if err := bw.TruncateBodies(tx, 2); err != nil {
 		return err
 	}
 
@@ -157,14 +157,14 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 	return nil
 }
 
-func ResetSenders(ctx context.Context, tx kv.RwTx) error {
-	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
+func ResetSenders(ctx context.Context, db kv.RwDB) error {
+	if err := backup.ClearTables(ctx, db, kv.Senders); err != nil {
 		return fmt.Errorf("clearing senders table: %w", err)
 	}
-	return clearStageProgress(tx, stages.Senders)
+	return db.Update(ctx, func(tx kv.RwTx) error { return clearStageProgress(tx, stages.Senders) })
 }
 
-func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
+func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain))
 	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
 	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)
@@ -174,17 +174,14 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, stages.Execution); err != nil {
-			return err
-		}
-
-		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
-			return fmt.Errorf("clearing exec state tables: %w", err)
-		}
-		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
-		return nil
+		return clearStageProgress(tx, stages.Execution)
 	}); err != nil {
 		return err
+	}
+
+	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
+	if err := backup.ClearTables(ctx, db, cleanupList...); err != nil {
+		return fmt.Errorf("clearing exec state tables: %w", err)
 	}
 
 	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.
@@ -237,6 +234,7 @@ var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
 	kv.TblPruningValsProg,
 	kv.ChangeSets3,
+	kv.BlockAccessList,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
@@ -262,17 +260,12 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 }
 
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		for _, st := range stagesList {
-			if err := backup.ClearTables(ctx, tx, Tables[st]...); err != nil {
-				return err
-			}
-			if err := clearStageProgress(tx, stagesList...); err != nil {
-				return err
-			}
+	for _, st := range stagesList {
+		if err := backup.ClearTables(ctx, db, Tables[st]...); err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return db.Update(ctx, func(tx kv.RwTx) error { return clearStageProgress(tx, stagesList...) })
 }
 
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {

@@ -122,6 +122,9 @@ type RoDB interface {
 	AllTables() TableCfg
 	PageSize() datasize.ByteSize
 
+	// WarmupTable pulls a single table into the OS page-cache via parallel scans.
+	WarmupTable(ctx context.Context, table string)
+
 	// CHandle pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
 	Path() string
@@ -582,6 +585,10 @@ type TemporalRoDB interface {
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 	Debug() TemporalDebugDB
+
+	// Warmup pulls the whole DB into RAM (mdbx env warmup). force re-touches
+	// pages already resident; non-force only prefetches missing ones.
+	Warmup(ctx context.Context, force bool) error
 }
 type TemporalRwDB interface {
 	RwDB
@@ -597,6 +604,14 @@ type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canon
 
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
+}
+
+// HasDeleteRange is implemented by backends offering a native bulk range-delete
+// (mdbx cuts whole B-tree pages/branches out at once, far faster than per-key
+// deletion). The range is [from, to); to==nil deletes through the last key.
+// Returns the number of keys removed.
+type HasDeleteRange interface {
+	DeleteRange(table string, from, to []byte) (uint64, error)
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
