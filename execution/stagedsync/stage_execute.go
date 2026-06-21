@@ -535,7 +535,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 
 	// On initial sync prune in one pass; on chain-tip use small bounded batches
 	// so block processing isn't blocked.
-	changesetsLimit, balLimit, blockHistTimeout := 2_000_000, 10_000, quickPruneTimeout
+	changesetsLimit, balLimit, blockHistTimeout := 20_000_000, 10_000, quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		changesetsLimit, balLimit, blockHistTimeout = math.MaxInt, math.MaxInt, time.Hour
 	}
