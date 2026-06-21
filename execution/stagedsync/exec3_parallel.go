@@ -842,6 +842,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	applyTx := pe.applyTx
 	pe.RUnlock()
 
+	// SizeEstimate takes the hot latestStateLock; sample the batch buffer on its
+	// own 5s cadence rather than on every applied block.
+	bufSizeEvery := time.NewTicker(5 * time.Second)
+	defer bufSizeEvery.Stop()
+
 	for {
 		err := func() error {
 			pe.Lock()
@@ -1029,12 +1034,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 				// Use AfterCommitment estimate (2x) in per-block mode since
 				// commitment is already computed. BeforeCommitment (4x) is
-				// for batch mode where commitment hasn't run yet.
+				// for batch mode where commitment hasn't run yet. Sampled only on
+				// the 5s tick — reading it every block contends on latestStateLock;
+				// between ticks sizeEst stays 0 so no size-flush fires.
 				var sizeEst uint64
-				if dbg.BatchCommitments {
-					sizeEst = pe.rs.SizeEstimateBeforeCommitment()
-				} else {
-					sizeEst = pe.rs.SizeEstimateAfterCommitment()
+				select {
+				case <-bufSizeEvery.C:
+					if dbg.BatchCommitments {
+						sizeEst = pe.rs.SizeEstimateBeforeCommitment()
+					} else {
+						sizeEst = pe.rs.SizeEstimateAfterCommitment()
+					}
+				default:
 				}
 				batchLimit := pe.cfg.batchSize.Bytes()
 				// We are inside the `blockResult != nil` branch, so at least one

@@ -62,6 +62,10 @@ func (g *gatedRoDB) AllTables() TableCfg                     { return g.inner.Al
 func (g *gatedRoDB) PageSize() datasize.ByteSize             { return g.inner.PageSize() }
 func (g *gatedRoDB) CHandle() unsafe.Pointer                 { return g.inner.CHandle() }
 func (g *gatedRoDB) Path() string                            { return g.inner.Path() }
+
+// WarmupTable is a no-op: warmup spawns long-lived read scans, exactly the
+// freelist-pinning readers the gate exists to keep off the commit path.
+func (g *gatedRoDB) WarmupTable(ctx context.Context, table string) {}
 func (g *gatedRoDB) View(ctx context.Context, f func(tx Tx) error) error {
 	g.gate.RLock()
 	defer g.gate.RUnlock()

@@ -58,6 +58,7 @@ import (
 type InvertedIndex struct {
 	statecfg.InvIdxCfg
 	dirs    datadir.Dirs
+	db      kv.RoDB // set by the Aggregator; nil for standalone test instances (warmup then skipped)
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
@@ -938,6 +939,9 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
+	if ii.db != nil {
+		go func() { ii.db.WarmupTable(ctx, ii.KeysTable) }()
+	}
 	keysCursor, err := roTx.CursorDupSort(ii.KeysTable)
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s keys cursor: %w", ii.FilenameBase, err)

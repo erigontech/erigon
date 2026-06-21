@@ -214,6 +214,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	if err != nil {
 		return err
 	}
+	a.d[cfg.Name].db = a.db
 	a.d[cfg.Name].salt.Store(salt)
 	a.AddDependencyBtwnHistoryII(cfg.Name)
 	return nil
@@ -230,6 +231,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	if err != nil {
 		return err
 	}
+	ii.db = a.db
 	ii.salt.Store(salt)
 	if a.iisCount >= kv.StandaloneIdxLen {
 		return fmt.Errorf("too many standalone inverted indices: max %d", kv.StandaloneIdxLen)

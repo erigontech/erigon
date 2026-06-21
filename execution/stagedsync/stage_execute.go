@@ -468,9 +468,39 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+// PruneExecutionBlockHistory prunes the block-keyed Execution-stage tables
+// (ChangeSets3, BlockAccessList) older than MaxReorgDepth. ChangeSets3 is kept
+// when AlwaysGenerateChangesets is set, to allow unwinds deeper than MaxReorgDepth.
+// It needs no staged-sync state, so callers outside the sync loop can reuse it.
+func PruneExecutionBlockHistory(ctx context.Context, tx kv.RwTx, db kv.RoDB, syncCfg ethconfig.Sync, forwardProgress uint64, changesetsLimit, balLimit int, timeout time.Duration, logger log.Logger, logPrefix string) (haveMore bool, err error) {
+	if forwardProgress <= syncCfg.MaxReorgDepth {
+		return false, nil
+	}
+	pruneTo := forwardProgress - syncCfg.MaxReorgDepth
+
+	if !syncCfg.AlwaysGenerateChangesets {
+		csMore, err := rawdb.PruneTable(tx, db, kv.ChangeSets3, pruneTo, ctx, changesetsLimit, timeout, logger, logPrefix)
+		if err != nil {
+			return false, err
+		}
+		haveMore = haveMore || csMore
+	}
+
+	balMore, err := rawdb.PruneTable(tx, db, kv.BlockAccessList, pruneTo, ctx, balLimit, timeout, logger, logPrefix)
+	if err != nil {
+		return false, err
+	}
+	haveMore = haveMore || balMore
+
+	return haveMore, nil
+}
+
+// PruneExecutionStage returns haveMore=true when a prune step stopped early on
+// its limit/timeout, so a caller can loop (committing between calls) to drain a
+// long prune without losing progress on interrupt.
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (haveMore bool, err error) {
 	if dbg.NoPrune() {
-		return s.Done(tx)
+		return false, s.Done(tx)
 	}
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
@@ -503,62 +533,17 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		quickPruneTimeout = timeout
 	}
 
-	// AlwaysGenerateChangesets disables this prune so the node retains
-	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
-	// tool / explicit --experimental.always-generate-changesets flag).
-	// Without the guard, the flag still controls *generation* but every
-	// generated changeset is pruned 96 blocks later, defeating the point.
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
-		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 200_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
-			tx,
-			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneDiffsLimitOnChainTip,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
-		}
-		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
-		}
+	// On initial sync prune in one pass; on chain-tip use small bounded batches
+	// so block processing isn't blocked.
+	changesetsLimit, balLimit, blockHistTimeout := 2_000_000, 10_000, quickPruneTimeout
+	if s.CurrentSyncCycle.IsInitialCycle {
+		changesetsLimit, balLimit, blockHistTimeout = math.MaxInt, math.MaxInt, time.Hour
 	}
-
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		pruneBalLimit := 10_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		if err := rawdb.PruneTable(
-			tx,
-			kv.BlockAccessList,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneBalLimit,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
-		}
+	blockHistMore, err := PruneExecutionBlockHistory(ctx, tx, cfg.db, cfg.syncCfg, s.ForwardProgress, changesetsLimit, balLimit, blockHistTimeout, logger, s.LogPrefix())
+	if err != nil {
+		return false, err
 	}
+	haveMore = haveMore || blockHistMore
 
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
@@ -569,9 +554,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	}
 
 	pruneSmallBatchesStartTime := time.Now()
-	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
-		return err
+	aggMore, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout)
+	if err != nil {
+		return false, err
 	}
+	haveMore = haveMore || aggMore
 	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
 		logger.Debug(
 			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
@@ -580,7 +567,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		)
 	}
 	if err = s.Done(tx); err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return haveMore, nil
 }
