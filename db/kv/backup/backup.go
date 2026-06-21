@@ -228,11 +228,11 @@ func ClearTableInTx(tx kv.RwTx, table string) error {
 }
 
 func clearTable(ctx context.Context, db kv.RwDB, table string) error {
-	log.Info("[clear]", "table", table)
-	bounds, err := chunkBounds(ctx, db, table)
+	bounds, size, err := chunkBounds(ctx, db, table)
 	if err != nil {
 		return err
 	}
+	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
 	if len(bounds) < 2 { // backend can't count-split: clear in one shot
 		return db.Update(ctx, func(tx kv.RwTx) error { return ClearTableInTx(tx, table) })
 	}
@@ -245,6 +245,8 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	started := time.Now()
+	var deleted uint64
 
 	i := 0
 	for i+1 < len(bounds) {
@@ -256,9 +258,11 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 			}
 			start := time.Now()
 			for i+1 < len(bounds) {
-				if _, err := dr.DeleteRange(table, bounds[i], bounds[i+1]); err != nil {
+				n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
+				if err != nil {
 					return err
 				}
+				deleted += n
 				i++
 				if i+1 < len(bounds) {
 					ra.SetPos(bounds[i]) // next chunk's lower bound (interior, non-nil)
@@ -267,7 +271,13 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					log.Info("[clear]", "table", table, "chunk", i, "chunks", len(bounds)-1)
+					secs := time.Since(started).Seconds()
+					frac := float64(i) / float64(len(bounds)-1)
+					log.Info("[clear]", "table", table,
+						"progress", fmt.Sprintf("%d/%d", i, len(bounds)-1),
+						"size", common.ByteCount(size),
+						"keys/s", common.PrettyCounter(uint64(float64(deleted)/secs)),
+						"speed", common.ByteCount(uint64(frac*float64(size)/secs))+"/s")
 				default:
 				}
 				if time.Since(start) >= clearCommitEvery {
@@ -283,15 +293,15 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 }
 
 // chunkBounds splits table into ~clearChunkSize count-balanced ranges and
-// returns the cloned boundaries (nil if the backend can't count-split).
-func chunkBounds(ctx context.Context, db kv.RoDB, table string) ([][]byte, error) {
-	var bounds [][]byte
-	err := db.View(ctx, func(tx kv.Tx) error {
+// returns the cloned boundaries (nil if the backend can't count-split) plus the
+// table's on-disk size.
+func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte, size uint64, err error) {
+	err = db.View(ctx, func(tx kv.Tx) error {
 		s, ok := tx.(kv.BucketSplitter)
 		if !ok {
 			return nil
 		}
-		size, _ := tx.BucketSize(table)
+		size, _ = tx.BucketSize(table)
 		b, err := s.SplitBucketByCount(table, nil, int(size/clearChunkSize.Bytes()))
 		if err != nil {
 			return err
@@ -302,5 +312,5 @@ func chunkBounds(ctx context.Context, db kv.RoDB, table string) ([][]byte, error
 		}
 		return nil
 	})
-	return bounds, err
+	return bounds, size, err
 }
