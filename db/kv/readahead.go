@@ -119,7 +119,7 @@ func (r *ReadAheader) run(ctx context.Context, db RoDB, table string, from []byt
 // it can't prefetch) plus how many chunks to keep warm ahead of the consumer.
 func (r *ReadAheader) plan(ctx context.Context, db RoDB, table string, from []byte) (bounds [][]byte, ahead int64) {
 	const aheadBytes = 1 * datasize.GB
-	const chunkSize = 64 * datasize.MB // chunk size — by table size, not worker count
+	const chunkSize = 32 * datasize.MB // chunk size — by table size, not worker count
 	var tableSize uint64
 	err := db.View(ctx, func(tx Tx) error {
 		s, ok := tx.(BucketSplitter)
