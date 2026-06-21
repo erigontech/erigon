@@ -882,6 +882,103 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
+func (db *MdbxKV) WarmupTable(ctx context.Context, bucket string) {
+	workers := int(dbg.WarmupTableWorkers)
+	if workers <= 0 {
+		return
+	}
+	kv.WarmupTable(ctx, db, bucket, workers)
+}
+
+func rawCursor(c kv.Cursor) *mdbx.Cursor {
+	if dc, ok := c.(*MdbxDupSortCursor); ok {
+		return dc.c
+	}
+	return c.(*MdbxCursor).c
+}
+
+// SplitBucketByCount partitions bucket into n approximately equal-COUNT key
+// ranges using mdbx's b-tree distribution, returning n+1 boundaries with
+// bounds[0]==from and a nil last. It stays even when keys cluster, where byte
+// interpolation collapses to a single range. The interior boundaries are
+// zero-copy and valid only until tx end; clone to retain.
+func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byte, error) {
+	const maxChunks = 4096 // bound DistributeCursors' ~O(n^2) cost and the per-cursor leaf fault
+	if n > maxChunks {
+		n = maxChunks
+	}
+	if n <= 1 {
+		return [][]byte{from, nil}, nil
+	}
+
+	firstC, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer firstC.Close()
+	first := rawCursor(firstC)
+	if from == nil {
+		_, _, err = first.Get(nil, nil, mdbx.First)
+	} else {
+		_, _, err = first.Get(from, nil, mdbx.SetRange)
+	}
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return [][]byte{from, nil}, nil
+		}
+		return nil, err
+	}
+
+	cursors := make([]*mdbx.Cursor, n)
+	for i := range cursors {
+		cw, err := tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		defer cw.Close()
+		cursors[i] = rawCursor(cw)
+	}
+
+	// Distribute at the lowest branch level (Depth-2), not the leaves: keeps the
+	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
+	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
+	deepness := uint(42)
+	if st, err := tx.BucketStat(bucket); err == nil && st.Depth > 2 {
+		deepness = st.Depth - 2
+	}
+	if _, err := mdbx.DistributeCursors(first, nil, cursors, deepness); err != nil {
+		return nil, err
+	}
+
+	keys := make([][]byte, 0, n)
+	for _, c := range cursors {
+		// An unset surplus cursor (range held fewer positions than n) reports
+		// GetCurrent as NotFound or ENODATA; either way the set cursors are a
+		// leading prefix, so stop at the first one that isn't positioned.
+		k, _, err := c.Get(nil, nil, mdbx.GetCurrent)
+		if err != nil || len(k) == 0 {
+			break
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) > 0 {
+		keys = keys[:len(keys)-1] // last cursor pins to the table's last key; nil closes the final range
+	}
+
+	bounds := make([][]byte, 0, len(keys)+2)
+	bounds = append(bounds, from)
+	var prev []byte
+	for _, k := range keys {
+		if prev != nil && bytes.Equal(k, prev) {
+			continue // clustered keys collapsed to one boundary
+		}
+		bounds = append(bounds, k)
+		prev = k
+	}
+	bounds = append(bounds, nil)
+	return bounds, nil
+}
+
 func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {
 	return f(tx)
 }
@@ -1101,6 +1198,46 @@ func (tx *MdbxTx) ClearTable(bucket string) error {
 		return nil
 	}
 	return tx.tx.Drop(mdbx.DBI(dbi), false)
+}
+
+// DeleteRange removes keys in [from, to) using mdbx's native bulk range-delete,
+// which cuts whole pages and branches out of the B-tree at once. to==nil deletes
+// through the last key. Returns the number of keys removed.
+func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	beginC, err := tx.RwCursor(table)
+	if err != nil {
+		return 0, err
+	}
+	defer beginC.Close()
+	bk, _, err := beginC.Seek(from)
+	if err != nil {
+		return 0, err
+	}
+	if bk == nil {
+		return 0, nil
+	}
+
+	begin := rawCursor(beginC)
+	var end *mdbx.Cursor
+	endIncluding := true // nil end => delete through the last key
+	if to != nil {
+		endC, err := tx.RwCursor(table)
+		if err != nil {
+			return 0, err
+		}
+		defer endC.Close()
+		ek, _, err := endC.Seek(to)
+		if err != nil {
+			return 0, err
+		}
+		if ek != nil {
+			if bytes.Compare(bk, ek) >= 0 {
+				return 0, nil // empty range
+			}
+			end, endIncluding = rawCursor(endC), false
+		}
+	}
+	return begin.DeleteRange(end, endIncluding)
 }
 
 func (tx *MdbxTx) DropTable(bucket string) error {

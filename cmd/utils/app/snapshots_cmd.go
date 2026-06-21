@@ -78,6 +78,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
@@ -190,6 +191,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ErigondbDomainStepsInFrozenFileFlag,
+				&utils.AlwaysGenerateChangesetsFlag,
 			}),
 		},
 		{
@@ -3449,14 +3451,23 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	logger.Info("Prune state history")
-	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
-			return err
-		}); err != nil {
-			return err
+	if err := warmupWhile(ctx, db, kv.TblCommitmentVals, func() error {
+		logger.Info("Prune state history")
+		for hasMoreToPrune := true; hasMoreToPrune; {
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
+				return err
+			}); err != nil {
+				return err
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := pruneExecChangesets(ctx, db, cliCtx, logger); err != nil {
+		return err
 	}
 
 	logger.Info("waiting for background build/merge to drain")
@@ -3469,6 +3480,56 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	return nil
+}
+
+// warmupWhile warms `table` into RAM in the background while `fn` runs, and
+// cancels the warmup as soon as `fn` returns — bounds warmup to one table at a
+// time and keeps fn's reads off disk on chaindata >> RAM.
+func warmupWhile(ctx context.Context, db kv.RoDB, table string, fn func() error) error {
+	warmupCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		db.WarmupTable(warmupCtx, table)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	return fn()
+}
+
+// pruneExecChangesets trims the block-keyed Execution-stage tables (ChangeSets3,
+// BlockAccessList); the aggregator prune that retire already runs does not cover them.
+func pruneExecChangesets(ctx context.Context, db kv.RwDB, cliCtx *cli.Context, logger log.Logger) error {
+	syncCfg := ethconfig.Defaults.Sync
+	if cliCtx.IsSet(utils.AlwaysGenerateChangesetsFlag.Name) {
+		syncCfg.AlwaysGenerateChangesets = cliCtx.Bool(utils.AlwaysGenerateChangesetsFlag.Name)
+	}
+
+	var execProgress uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		execProgress, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}); err != nil {
+		return err
+	}
+	if execProgress <= syncCfg.MaxReorgDepth {
+		return nil
+	}
+
+	logger.Info("pruning execution changesets", "to", execProgress-syncCfg.MaxReorgDepth)
+	for hasMore := true; hasMore; {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			var err error
+			hasMore, err = stagedsync.PruneExecutionBlockHistory(ctx, tx, db, syncCfg, execProgress, 1_000_000, 1_000_000, 10*time.Minute, logger, "retire")
+			return err
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

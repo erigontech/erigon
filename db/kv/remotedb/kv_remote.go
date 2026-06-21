@@ -236,6 +236,10 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 	return f(tx)
 }
 
+func (db *DB) Warmup(ctx context.Context, force bool) error { return nil }
+
+func (db *DB) WarmupTable(ctx context.Context, table string) {}
+
 func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .Update method")
 }

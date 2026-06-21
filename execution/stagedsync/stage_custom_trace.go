@@ -475,12 +475,6 @@ func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
 }
 
 func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Produce) error {
-	tx, err := db.BeginTemporalRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	var tables []string
 	if produce.ReceiptDomain {
 		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
@@ -500,8 +494,5 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if produce.TraceTo {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 	}
-	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return backup.ClearTables(ctx, db, tables...)
 }
