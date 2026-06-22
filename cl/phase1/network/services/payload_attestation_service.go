@@ -62,6 +62,7 @@ const (
 	seenPayloadAttestationCacheSize        = 2048
 	pendingPayloadAttestationExpiry        = 30 * time.Second
 	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
+	maxPendingAttestations                 = 2048
 )
 
 type payloadAttestationService struct {
@@ -150,7 +151,8 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 	// [IGNORE] The message's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue attestation for processing once the block is retrieved.
-	if _, ok := s.forkchoiceStore.GetHeader(blockRoot); !ok {
+	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
+	if !ok {
 		// Block hasn't arrived yet, queue attestation for later processing
 		s.queuePendingAttestation(blockRoot, msg)
 		log.Trace("Queued payload attestation for later processing",
@@ -158,9 +160,13 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 			"validatorIndex", validatorIndex)
 		return nil
 	}
+	// [IGNORE] The block referenced by data.beacon_block_root is at data.slot.
+	if blockHeader.Slot != slot {
+		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
+	}
 
 	// Process through forkchoice which handles:
-	// [IGNORE] block state not found, slot mismatch
+	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
 	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
@@ -190,18 +196,25 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
+	if s.pendingCount.Add(1) > maxPendingAttestations {
+		s.pendingCount.Add(-1)
+		return
+	}
+
 	key := pendingPayloadAttestationKey{
 		blockRoot:      blockRoot,
 		validatorIndex: msg.ValidatorIndex,
 	}
 
-	// Only add if not already present
 	if _, loaded := s.pendingAttestations.LoadOrStore(key, &pendingPayloadAttestationJob{
 		msg:          msg,
 		creationTime: time.Now(),
-	}); !loaded {
-		s.pendingCount.Add(1)
+	}); loaded {
+		s.pendingCount.Add(-1)
+	} else {
+		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
+		s.pendingCond.L.Unlock()
 	}
 }
 
@@ -210,7 +223,9 @@ func (s *payloadAttestationService) loop(ctx context.Context) {
 	// Wake any blocked Wait() on context cancellation to prevent deadlock.
 	go func() {
 		<-ctx.Done()
+		s.pendingCond.L.Lock()
 		s.pendingCond.Broadcast()
+		s.pendingCond.L.Unlock()
 	}()
 
 	for {

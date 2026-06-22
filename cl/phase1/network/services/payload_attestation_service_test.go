@@ -161,6 +161,28 @@ func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
 	require.True(t, exists)
 }
 
+func TestPayloadAttestationServiceReferencedBlockSlotMismatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+
+	blockRoot := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
+		Slot: 99,
+	}
+
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrIgnore))
+	require.Contains(t, err.Error(), "does not match referenced block slot")
+	require.False(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
+}
+
 func TestPayloadAttestationServiceSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -358,6 +380,57 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.Equal(t, int32(0), service.pendingCount.Load())
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 2}))
+}
+
+func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+
+	// Fill the queue to the cap
+	service.pendingCount.Store(maxPendingAttestations)
+
+	blockRoot := common.HexToHash("0xffff")
+	msg := newTestPayloadAttestationMessage(100, 999, blockRoot)
+
+	service.queuePendingAttestation(blockRoot, msg)
+
+	// Should still be at cap — new item was rejected
+	require.Equal(t, int32(maxPendingAttestations), service.pendingCount.Load())
+	key := pendingPayloadAttestationKey{blockRoot: blockRoot, validatorIndex: 999}
+	_, exists := service.pendingAttestations.Load(key)
+	require.False(t, exists)
+}
+
+func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+
+	// Start near cap so only a few slots remain
+	service.pendingCount.Store(maxPendingAttestations - 5)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			blockRoot := common.Hash{byte(idx), byte(idx >> 8)}
+			msg := newTestPayloadAttestationMessage(100, uint64(10000+idx), blockRoot)
+			service.queuePendingAttestation(blockRoot, msg)
+		}(i)
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(maxPendingAttestations), service.pendingCount.Load())
+	stored := 0
+	service.pendingAttestations.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Equal(t, 5, stored)
 }
 
 func TestPayloadAttestationServiceNames(t *testing.T) {

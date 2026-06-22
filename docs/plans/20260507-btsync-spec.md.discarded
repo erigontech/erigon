@@ -1,0 +1,296 @@
+# btsync — devp2p subprotocol for BitTorrent state propagation
+
+**Status**: Proposed for PR-B (after current storage-correctness PR lands).
+**Scope**: New devp2p sub-protocol that exchanges peers' signed ENR records
+on connection, bridging devp2p identity to BitTorrent participation state
+(chain-toml info-hash, BT port, UCAN reference, future fields) without
+requiring a discv5 round-trip.
+
+## Problem statement
+
+The 2026-05-07 Phase 2 test surfaced a 4-minute startup hang on a fresh
+consumer with a known publisher (`--staticpeers=<publisher-enode>`,
+`--bootnodes=<publisher-enode>`). The consumer's devp2p connection to the
+publisher established in seconds. The consumer's chain-toml acquisition
+loop scanned its `NodeSource.AllNodes()` — devp2p peers + discv5 routing
+table — and saw 0 peers with chain-toml ENR for the first ~4 minutes.
+
+Why: chain-toml is one entry on the publisher's ENR record. Today the
+ENR record is fetched via discv5's PING/ENR-response cadence, which has
+its own latency (random walks, sequence-number bumps, lookup-as-side-
+effect). Even a *known* peer's ENR fields take minutes to refresh.
+`--staticpeers` adds a peer to devp2p's connected set; it does not add
+anything to discv5's routing table or shortcut its ENR-refresh cycle.
+
+This is the user-visible "Erigon sits there searching the network and
+seems to do nothing" failure mode. Pre-V2, when download dominated
+(hours), the 4-minute discovery wait was hidden in the noise. Post-V2,
+when download is minutes, the discovery wait IS the visible startup
+phase.
+
+The fix is structural: an ENR record is a self-signed payload. discv5
+is one delivery vehicle for it; devp2p is another. A connected peer can
+hand its current ENR record straight over the RLPx-authenticated link;
+the receiver verifies the signature against the same node key RLPx
+already authenticated.
+
+## Why btsync, not "chaintoml-handshake"
+
+Earlier framing called this "chain-toml handshake." That name was too
+narrow. The protocol carries the peer's **full signed ENR record** —
+which includes the chain-toml info-hash, BT port (for direct torrent-
+peer connection), UCAN reference (for trust-chain verification),
+bootnode-trust hints, and any other ENR entry future versions add. The
+common thread is "BitTorrent-related peer state" — hence btsync.
+
+The renaming also makes the trust story clearer: the protocol propagates
+the peer's signed ENR, which IS the trust-bearing artefact. Pulling out
+chain-toml as one specific field obscures that the same delivery
+mechanism brings UCAN refs, BT ports, etc.
+
+## Trust transfer model
+
+A common concern: "without a discv5 handshake, do we have ENR credentials?"
+Yes — the ENR record's signature is verifiable independently of how the
+record was delivered.
+
+**Three layers of trust**, all available without discv5:
+
+| Layer | Mechanism | Available via btsync? |
+|---|---|---|
+| Peer identity (node-key ownership) | RLPx handshake at devp2p connection time | ✓ — comes from devp2p, not discv5 |
+| ENR field authenticity (chain-toml info-hash, BT port, UCAN ref, ...) | ENR's self-signature, verified against the node key | ✓ — btsync delivers the signed ENR; receiver verifies against the RLPx-authenticated node key |
+| Publisher authority (UCAN delegation from a trust root) | UCAN reference in ENR + UCAN body fetched via manifest_exchange | ✓ — UCAN ref comes from ENR, body fetch is unchanged |
+
+**Verification flow for an incoming btsync ENR**:
+
+1. Receive btsync envelope with peer's signed ENR record.
+2. Parse ENR record. Verify signature against node-key K — where K is the
+   key RLPx already authenticated for this connection. If signature ↔ K
+   mismatch, drop the connection (peer is impersonating).
+3. ENR is now trusted: its entries (chain-toml info-hash, BT port, UCAN
+   hash, etc.) are authenticated claims by K.
+4. (Optional, when trust-roots are configured.) Fetch the UCAN body
+   referenced by the ENR via manifest_exchange. Verify the UCAN delegation
+   chain reaches a configured trust root and names node-key K. If the
+   delegation chain is invalid, drop the peer's claims (they own the key
+   but aren't authorised to publish).
+
+This is exactly the same trust pipeline as the discv5 path — just with
+the ENR record delivered over RLPx instead of discv5 PING/PONG.
+
+## Non-goals
+
+- **Discovery** (finding peers in the first place). That's the discv5
+  fast crawler in PR-C.
+- **Manifest body transfer**. `manifest_exchange` already handles
+  transferring chain.toml file bytes and UCAN bodies between peers via
+  RLPx. btsync announces *which* manifest the peer claims; the existing
+  bytes-transfer path moves it.
+- **Re-implementing trust verification**. The UCAN verifier from the
+  existing snapshotauth package handles the chain-walk; btsync just
+  carries the signed ENR that names the UCAN.
+
+## Protocol shape
+
+### Subprotocol identity
+
+- Name: `btsync`
+- Versions: `1`
+- Capability advertised in devp2p Hello: `btsync/1`
+- Per-peer enabled iff both sides advertise the capability — old peers
+  see no traffic, new peers exchange the message.
+
+### Single message: `ENRRecord`
+
+```rlp
+ENRRecord {
+    Record:       []byte    // the peer's full signed ENR record (RLP-encoded)
+}
+```
+
+The record contains everything: the signature, the sequence number, all
+ENR entries (chain-toml info-hash, BT port `bt`, UCAN hash, etc.). The
+receiver parses it as an `enode.Node` / `enr.Record` and verifies the
+signature.
+
+Reusing the existing ENR record format means:
+- Zero new wire formats to bikeshed.
+- The peer's btsync-published ENR is identical to its discv5-published
+  ENR — single source of truth for the peer's state.
+- Future ENR fields (added later) are automatically carried.
+
+### When sent
+
+Each peer sends `ENRRecord` immediately on subprotocol start (right
+after the `btsync/1` capability negotiation completes), and re-sends
+whenever its local ENR sequence advances — i.e. every time the local
+node calls `LocalNode.Set(...)` to update an ENR entry. The retire-driven
+chain-toml republish path already does this via `enrUpdater`; the new
+code adds a fanout on the btsync side.
+
+### When NOT sent
+
+- Sender's ENR sequence hasn't advanced since the last send to this peer
+  — silent (avoid re-sending identical records).
+- Sender has no ENR yet (very early startup) — silent. The peer's first
+  send happens once the local ENR is initialised.
+
+### Receiver behaviour
+
+On receiving `ENRRecord` from peer P:
+
+1. Parse the record. If parse fails → drop connection (malformed).
+2. Verify the record's signature: the recovered key must equal the
+   RLPx-authenticated node key for P. Mismatch → drop connection
+   (impersonation attempt).
+3. If the parsed record's sequence number is `<=` the last-seen sequence
+   for P, ignore (stale or duplicate). Update the high-water mark only on
+   strictly newer sequence.
+4. Hand the record to the consumers that care about ENR-derived state:
+   - **Chain-toml acquisition**: fetch the chain-toml entry, run through
+     the same `DiscoverChainToml` candidate path used today.
+   - **Direct torrent peering**: extract `bt` ENR entry, hand to
+     `TorrentPeerManager` so peer P is added to all torrents the client
+     is downloading (closes the gap surfaced by Phase 2 testing).
+   - **Trust gating** (when wired): extract UCAN hash, fetch UCAN body
+     via manifest_exchange, verify chain to trust roots. If untrusted,
+     suppress P's chain-toml claims from the candidate pool.
+
+## Implementation surface
+
+### New code
+
+- `node/components/btsync/protocol.go` — subprotocol definition,
+  message type, encoder/decoder. ~120 LOC.
+- `node/components/btsync/peer.go` — per-peer goroutine handling inbound
+  ENR records (parse, verify, dispatch) and writing outbound records
+  (initial + on-update). ~120 LOC.
+- `node/components/btsync/registry.go` — registers the protocol with
+  `sentry.Provider`'s subprotocol list, plumbs through
+  `ResolvedNodeReceiver` (a callback that the existing chain-toml
+  acquisition / TorrentPeerManager already use to learn about peers
+  with up-to-date ENR records). ~50 LOC.
+- Tests:
+  - `protocol_test.go` — message round-trip, signature verification,
+    capability negotiation.
+  - `peer_test.go` — initial-on-connect send, send-on-ENR-update,
+    impersonation rejection, sequence-number monotonicity.
+  - Integration: extend
+    `node/components/integration/snapshot/scenarios/` with a "two-peer
+    btsync delivers ENR with chain-toml + bt entries in <100ms"
+    scenario.
+
+### Modified code
+
+- `node/components/sentry/provider.go` — register the new subprotocol
+  alongside `eth/69` etc. ~20 LOC.
+- `db/downloader/p2p_chaintoml.go` — `CompositeNodeSource` gains a new
+  source type, `BtsyncNodeSource`, that returns peers known via btsync.
+  This integrates btsync-delivered ENR records into the same
+  `DiscoverChainToml` flow used today. ~50 LOC.
+- `db/downloader/torrent_peer_manager.go` — when a btsync ENR delivers
+  a `bt` entry, add the peer to all torrents (mirrors what the discv5
+  path already does). May need a small API expansion. ~20 LOC.
+- `node/eth/backend.go` — wire the btsync subprotocol into the existing
+  ENR-update path so the publisher's enrUpdater also fans out to btsync
+  peers. ~30 LOC.
+
+## Wire-level concerns
+
+### Backwards compatibility
+
+- Old peers without `btsync/1` capability: zero traffic exchanged. They
+  continue to be discovered via ENR through discv5 (slowly).
+- ENR record format unchanged — peers running PR-B publish the same
+  fields they always did, just with an extra delivery channel.
+
+### Liveness
+
+- `ENRRecord` is push-only. No reply expected.
+- If the connection drops, the cached ENR from that peer is evicted on
+  disconnect.
+- Re-sending on every sequence bump keeps the cache fresh — peers don't
+  need to poll.
+
+### Scale
+
+- One ENR record per peer per sequence bump. Sequence bumps every
+  retire (~3 hours per publisher). 500-byte record × peer count ≈
+  negligible.
+- Initial-on-connect: 500 bytes per peer at devp2p connection time.
+  Trivial.
+
+### Security: replay / downgrade
+
+- Sequence number monotonicity rejects replays of older ENRs.
+- Attacker can't fake a valid ENR record without the node key (signature
+  verification catches it).
+- Attacker on the wire (not owning the node key) can't substitute a
+  different record under RLPx (which provides per-peer authenticated
+  encryption).
+- A malicious node CAN publish a valid ENR with whatever entries it
+  chooses — but all "trust-bearing" entries (UCAN ref) are themselves
+  delegated/signed claims that the verifier checks against trust roots.
+  ENR alone doesn't grant trust; ENR + UCAN-chain-to-trust-root does.
+
+## Sequencing
+
+### Within PR-B
+
+1. **Subprotocol skeleton** — registration, capability negotiation,
+   round-trip test of an empty ENRRecord.
+2. **Initial-on-connect** — sender pushes its current ENR on subprotocol
+   start. Receiver parses, verifies, hands off to consumers.
+3. **Update-on-sequence-bump** — sender re-sends on every local ENR
+   update. Receiver dedupes via sequence number.
+4. **TorrentPeerManager wire** — when btsync delivers an ENR with `bt`
+   entry, add the peer to all torrents.
+5. **Integration test** — two in-process peers, A starts publishing,
+   B connects; assert B has applied A's chain-toml AND added A as a
+   torrent peer within 100ms of handshake completion.
+
+### Relative to PR-C (crawler) and PR-D (event-bus migration)
+
+Independent of both. They compose:
+
+- **PR-C** finds peers organically via discv5. After connection, PR-B
+  delivers their current ENR via btsync. Without PR-B, PR-C-found peers
+  still face the ENR-resolve latency.
+- **PR-D** changes how internal subscribers learn about inventory
+  changes (event-bus snapshot+subscribe). Orthogonal to the wire
+  protocol.
+
+## Acceptance criteria
+
+For PR-B to be considered done:
+
+- **Two-peer integration test**: peer B with `--staticpeers=A` learns
+  A's chain-toml entry AND adds A as a torrent peer for all listed
+  files within 100ms of devp2p connection. Currently 4+ min.
+- **Re-publish on sequence bump**: after A's ENR updates (e.g. retire-
+  driven chain-toml change), B sees the new ENR within one round-trip.
+- **Impersonation rejection**: a peer that sends an ENR signed by a
+  different key than its RLPx-authenticated node key has the
+  connection dropped, with an explicit log line.
+- **Sequence monotonicity**: replayed older ENRs are ignored silently.
+- **Backwards compatible**: B running PR-B still functions when
+  connecting to A running pre-PR-B (slow discv5 path still works).
+- **Negligible bandwidth**: in steady state, < 1 KB/hour per connected
+  peer for btsync traffic.
+- `make lint` clean. Unit tests at `btsync/...`. Integration test in
+  scenarios.
+
+## Open questions
+
+- **Should btsync also exchange other peer state?** ENR is the obvious
+  scope. If we need stuff that doesn't fit ENR (large UCAN bodies,
+  partial-coverage manifests), `manifest_exchange` already handles those
+  via separate RLPx subprotocol — keep btsync ENR-only.
+- **Initial-on-connect timing vs Hello**: send ENRRecord at the first
+  message after capability negotiation, or wait for some application-
+  level ready signal? Recommend: send on subprotocol start (capabilities
+  matched). Latency budget is microseconds, no reason to wait.
+- **What happens if both sides send ENRRecord simultaneously?** They're
+  both push messages, no ordering required. Each side processes the
+  other's record independently. No race.

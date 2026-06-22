@@ -382,6 +382,12 @@ func WithAdminUnwindWired() Option {
 	}
 }
 
+func WithSentryProtocol(protocol uint) Option {
+	return func(opts *options) {
+		opts.sentryProtocol = protocol
+	}
+}
+
 type options struct {
 	stepSize                 *uint64
 	experimentalBAL          bool
@@ -396,6 +402,7 @@ type options struct {
 	fcuBackgroundPrune       bool
 	adminUnwindWired         bool
 	alwaysGenerateChangesets *bool
+	sentryProtocol           uint
 }
 
 func applyOptions(opts []Option) options {
@@ -406,6 +413,7 @@ func applyOptions(opts []Option) options {
 		pruneMode:       &defaultPruneMode,
 		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
+		sentryProtocol:  direct.ETH68,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -570,7 +578,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
+	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock, nil)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
@@ -864,14 +872,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	balMap := make(map[common.Hash][]byte)
-	for i, bal := range chain.BlockAccessLists {
-		if len(bal) > 0 {
-			block := chain.Blocks[i]
-			balMap[block.Hash()] = bal
-		}
-	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
 		return err
 	}
 

@@ -414,9 +414,9 @@ func TestRequestGenerator_getLogs2(t *testing.T) {
 }
 
 func TestRequestGenerator_accountRange(t *testing.T) {
-	hash1 := common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca")
-	hash2 := common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de")
-	hash3 := common.HexToHash("0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c27664463fb5978b97f8b2d1b")
+	addr1 := common.HexToAddress("0x6f9e34c00812a80fa87df26208bbe69411e36d6a")
+	addr2 := common.HexToAddress("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812")
+	addr3 := common.HexToAddress("0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c")
 	testCases := []struct {
 		reqId    int
 		blockNum uint64
@@ -427,23 +427,23 @@ func TestRequestGenerator_accountRange(t *testing.T) {
 		{
 			1,
 			4756370,
-			hash1[:],
+			addr1[:],
 			1,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "b540wAgSqA+offJiCLvmlBHjbWqfALNURO9BgfbEg8o=", 1, false, false], "id":1}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "0x6f9e34c00812a80fa87df26208bbe69411e36d6a", 1, false, false], "id":1}`,
 		},
 		{
 			2,
 			0,
-			hash2[:],
+			addr2[:],
 			2,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "HP586VoWlNiWk2XLRyzkoNPu2BLFQP13CLvmlB40xN4=", 2, false, false], "id":2}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812", 2, false, false], "id":2}`,
 		},
 		{
 			3,
 			1234567,
-			hash3[:],
+			addr3[:],
 			3,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "HNc8et9bMfPPlMZ7niUeaZVZ2RwnZkRj+1l4uX+LLRs=", 3, false, false], "id":3}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c", 3, false, false], "id":3}`,
 		},
 	}
 

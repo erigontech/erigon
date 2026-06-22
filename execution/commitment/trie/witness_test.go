@@ -2,7 +2,6 @@ package trie
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -52,24 +51,20 @@ func generateOperands() []WitnessOperator {
 	}
 }
 
-func witnessesEqual(w1, w2 *Witness) bool {
-	if w1 == nil {
-		return w2 == nil
-	}
-
-	if w2 == nil {
-		return w1 == nil
+func witnessesEqual(t *testing.T, w1, w2 *Witness) bool {
+	t.Helper()
+	if w1 == nil || w2 == nil {
+		return w1 == nil && w2 == nil
 	}
 
 	var buff bytes.Buffer
-
 	w1.WriteDiff(w2, &buff)
 
-	diff := buff.String()
-
-	fmt.Printf("%s", diff)
-
-	return len(diff) == 0
+	if diff := buff.String(); len(diff) > 0 {
+		t.Log(diff)
+		return false
+	}
+	return true
 }
 
 func TestWitnessSerialization(t *testing.T) {
@@ -90,7 +85,7 @@ func TestWitnessSerialization(t *testing.T) {
 		t.Error(err)
 	}
 
-	if !witnessesEqual(&expectedWitness, decodedWitness) {
+	if !witnessesEqual(t, &expectedWitness, decodedWitness) {
 		t.Errorf("witnesses not equal: expected %+v; got %+v", expectedWitness, decodedWitness)
 	}
 }

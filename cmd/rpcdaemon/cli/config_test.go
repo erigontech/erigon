@@ -17,11 +17,27 @@
 package cli
 
 import (
+	"net/http"
 	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// TestIsWebsocket tests if an incoming websocket upgrade request is detected properly.
+func TestIsWebsocket(t *testing.T) {
+	r, _ := http.NewRequest("GET", "/", nil)
+
+	require.False(t, isWebsocket(r))
+	r.Header.Set("upgrade", "websocket")
+	require.False(t, isWebsocket(r))
+	r.Header.Set("connection", "upgrade")
+	require.True(t, isWebsocket(r))
+	r.Header.Set("connection", "upgrade,keep-alive")
+	require.True(t, isWebsocket(r))
+	r.Header.Set("connection", " UPGRADE,keep-alive")
+	require.True(t, isWebsocket(r))
+}
 
 func TestParseSocketUrl(t *testing.T) {
 	t.Run("sock", func(t *testing.T) {

@@ -212,48 +212,11 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
-	return c.InsertBlocksAndWaitWithAccessLists(ctx, blocks, nil)
-}
-
-// InsertBlocksAndWaitWithAccessLists inserts blocks and waits for confirmation.
-// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
-func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
-	rawBlocks := blocksToRaw(blocks, accessLists)
-	for {
-		status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
-		if err != nil {
-			return err
-		}
-		if status != execmodule.ExecutionStatusBusy {
-			if status != execmodule.ExecutionStatusSuccess {
-				return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", status)
-			}
-			return nil
-		}
-		const retryDelay = 100 * time.Millisecond
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
-}
-
-// InsertBlocksWithAccessLists inserts blocks without waiting for confirmation.
-// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
-func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
-	rawBlocks := blocksToRaw(blocks, accessLists)
+func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
+	rawBlocks := blocksToRaw(blocks, bals)
 	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
 	if err != nil {
 		return err
-	}
-	if status == execmodule.ExecutionStatusBusy {
-		return context.DeadlineExceeded
 	}
 	if status != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
@@ -261,19 +224,16 @@ func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, 
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *types.Block) error {
-	return c.InsertBlocksAndWait(ctx, []*types.Block{block})
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
+	return c.InsertBlocks(ctx, []*types.Block{block}, [][]byte{bal})
 }
 
-func blocksToRaw(blocks []*types.Block, accessLists map[common.Hash][]byte) []*types.RawBlock {
+func blocksToRaw(blocks []*types.Block, bals [][]byte) []*types.RawBlock {
 	raw := make([]*types.RawBlock, len(blocks))
 	for i, b := range blocks {
-		rawBody := b.RawBody()
-		rb := &types.RawBlock{Header: b.Header(), Body: rawBody}
-		if accessLists != nil {
-			if bal, ok := accessLists[b.Hash()]; ok {
-				rb.BlockAccessList = bal
-			}
+		rb := &types.RawBlock{Header: b.Header(), Body: b.RawBody()}
+		if i < len(bals) {
+			rb.BlockAccessList = bals[i]
 		}
 		raw[i] = rb
 	}

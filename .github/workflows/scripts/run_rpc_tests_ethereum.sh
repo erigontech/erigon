@@ -39,9 +39,6 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
-  # Temporarily disabled: the following tests hang (possible regression in Erigon).
-  # For debug_traceTransaction, the issue is under analysis.
-  debug_traceTransaction/test_12.json
   # Temportary disable waiting merge PR #21418
   eth_simulateV1/test_131.json
   eth_simulateV1/test_143.json

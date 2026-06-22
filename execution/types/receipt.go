@@ -303,7 +303,10 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		// EIP-2718 typed txn receipt. Read the envelope as raw bytes,
 		// then decode from them using a fresh stream.
 		if size == 0 {
-			return rlp.EOL
+			// Empty string is not a valid typed receipt. Return a real error
+			// rather than rlp.EOL: as a slice element EOL would be read as
+			// end-of-list and silently drop the receipt.
+			return errShortTypedReceipt
 		}
 		b := make([]byte, size)
 		if err = s.ReadBytes(b); err != nil {

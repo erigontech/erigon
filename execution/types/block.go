@@ -1654,7 +1654,10 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 }
 
 func checkErrListEnd(s *rlp.Stream, err error) error {
-	if !errors.Is(err, rlp.EOL) {
+	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
+	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
+	// error and must propagate, not be treated as a clean end-of-list.
+	if err != rlp.EOL {
 		return err
 	}
 	if err = s.ListEnd(); err != nil {

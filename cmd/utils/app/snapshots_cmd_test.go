@@ -18,12 +18,14 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -37,6 +39,11 @@ type bundle struct {
 }
 
 type RootNum = kv.RootNum
+
+func TestSegLS_NoChaindata(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))
+}
 
 func Test_DeleteLatestStateSnaps(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
@@ -325,6 +332,72 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 	}
 
 	// Base files should still exist
+	file, _ := b.domain.DataFile(version.V1_0, RootNum(0), RootNum(128))
+	confirmExist(t, file)
+	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(192))
+	confirmExist(t, file)
+}
+
+func Test_parseStepRange(t *testing.T) {
+	const maxStep = 224
+	for _, tc := range []struct {
+		name     string
+		in       string
+		from, to uint64
+		wantErr  bool
+	}{
+		{name: "range", in: "5-10", from: 5, to: 10},
+		{name: "range from zero", in: "0-128", from: 0, to: 128},
+		{name: "from plus", in: "5+", from: 5, to: maxStep},
+		{name: "from plus zero", in: "0+", from: 0, to: maxStep},
+		{name: "from plus equals max", in: "224+", from: 224, to: maxStep},
+		{name: "empty", in: "", wantErr: true},
+		{name: "plus only", in: "+", wantErr: true},
+		{name: "single number", in: "5", wantErr: true},
+		{name: "bad plus prefix", in: "5x+", wantErr: true},
+		{name: "range trailing chars", in: "5-10x", wantErr: true},
+		{name: "range extra dash", in: "5-10-20", wantErr: true},
+		{name: "not a number", in: "abc", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			from, to, err := parseStepRange(tc.in, maxStep)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.from, from)
+			require.Equal(t, tc.to, to)
+		})
+	}
+}
+
+// Test_DeleteStateSnaps_StepRange_FromPlus verifies that "N+" resolves "to" to the
+// highest available step, removing everything from step N to the latest.
+func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
+
+	ranges := [][2]int{
+		{0, 128}, {128, 192},
+		{192, 224},
+		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+	}
+	for _, r := range ranges {
+		createFiles(t, dirs, r[0], r[1], &b)
+	}
+
+	// "192+" must behave like "192-224" because 224 is the highest available step.
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, StepRange: "192+", DomainNames: []string{"receipt"}})
+	require.NoError(t, err)
+
+	for _, r := range [][2]int{{192, 224}, {192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224}} {
+		file, _ := b.domain.DataFile(version.V1_0, RootNum(r[0]), RootNum(r[1]))
+		confirmDoesntExist(t, file)
+	}
+
 	file, _ := b.domain.DataFile(version.V1_0, RootNum(0), RootNum(128))
 	confirmExist(t, file)
 	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(192))
@@ -1353,4 +1426,55 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	require.NoError(t, err)
 
 	confirmDoesntExist(t, tmp)
+}
+
+func Test_removeAccessorsForRebuild(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	touch := func(path string) {
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	accessors := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.idx"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.idx"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.vi"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.efi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvei"),
+	}
+	dataFiles := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.seg"),
+		filepath.Join(dirs.SnapIdx, "v1.0-accounts.0-64.ef"),
+		filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv"),
+	}
+	for _, f := range accessors {
+		touch(f)
+		touch(f + ".torrent")
+	}
+	for _, f := range dataFiles {
+		touch(f)
+	}
+
+	orphanTorrent := filepath.Join(dirs.SnapDomain, "v1.0-storage.0-64.kvi.torrent")
+	touch(orphanTorrent)
+	dataTorrent := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg.torrent")
+	touch(dataTorrent)
+
+	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
+
+	for _, f := range accessors {
+		confirmDoesntExist(t, f)
+		confirmDoesntExist(t, f+".torrent")
+	}
+	confirmDoesntExist(t, orphanTorrent)
+	for _, f := range dataFiles {
+		confirmExist(t, f)
+	}
+	confirmExist(t, dataTorrent)
 }

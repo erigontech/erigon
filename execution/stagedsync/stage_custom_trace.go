@@ -237,22 +237,19 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			return err
 		}
 
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-
-		//asserts
-		if produce.ReceiptDomain {
-			if err = AssertReceipts(ctx, cfg, db, fromBlock, toBlock); err != nil {
-				return err
+		// Commit runs the validate hook after flush, before the commit, so the
+		// asserts + SeekCommitment see the flushed state on tx exactly as the
+		// prior Flush-then-commit shape did.
+		if err := doms.Commit(ctx, tx, func(tx kv.RwTx) error {
+			if produce.ReceiptDomain {
+				if err := AssertReceipts(ctx, cfg, db, fromBlock, toBlock); err != nil {
+					return err
+				}
 			}
-		}
-
-		lastTxNum, _, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
+			var err error
+			lastTxNum, _, err = doms.SeekCommitment(ctx, tx.(kv.TemporalTx))
 			return err
-		}
-		if err := tx.Commit(); err != nil {
+		}); err != nil {
 			return err
 		}
 

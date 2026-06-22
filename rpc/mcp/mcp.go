@@ -514,7 +514,7 @@ func (e *ErigonMCPServer) handleGetBlockTransactionCountByHash(ctx context.Conte
 func (e *ErigonMCPServer) handleGetBalance(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
-	balance, err := e.ethAPI.GetBalance(ctx, addr, blockNumOrHash)
+	balance, err := e.ethAPI.GetBalance(ctx, addr, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -630,7 +630,7 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 func (e *ErigonMCPServer) handleGetCode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
-	code, err := e.ethAPI.GetCode(ctx, addr, blockNumOrHash)
+	code, err := e.ethAPI.GetCode(ctx, addr, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -644,7 +644,7 @@ func (e *ErigonMCPServer) handleGetStorageAt(ctx context.Context, req mcp.CallTo
 	addr := common.HexToAddress(req.GetString("address", ""))
 	pos := req.GetString("position", "0x0")
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
-	result, err := e.ethAPI.GetStorageAt(ctx, addr, pos, blockNumOrHash)
+	result, err := e.ethAPI.GetStorageAt(ctx, addr, pos, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -672,7 +672,7 @@ func (e *ErigonMCPServer) handleGetStorageValues(ctx context.Context, req mcp.Ca
 		requests[addr] = hashes
 	}
 
-	result, err := e.ethAPI.GetStorageValues(ctx, requests, blockNumOrHash)
+	result, err := e.ethAPI.GetStorageValues(ctx, requests, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -691,7 +691,7 @@ func (e *ErigonMCPServer) handleGetStorageValues(ctx context.Context, req mcp.Ca
 func (e *ErigonMCPServer) handleGetTransactionCount(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
-	count, err := e.ethAPI.GetTransactionCount(ctx, addr, blockNumOrHash)
+	count, err := e.ethAPI.GetTransactionCount(ctx, addr, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -817,7 +817,7 @@ func (e *ErigonMCPServer) handleGetProof(ctx context.Context, req mcp.CallToolRe
 		}
 	}
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
-	result, err := e.ethAPI.GetProof(ctx, addr, keys, blockNumOrHash)
+	result, err := e.ethAPI.GetProof(ctx, addr, keys, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

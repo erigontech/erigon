@@ -758,13 +758,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
-			if err := doms.Flush(ctx, tx); err != nil {
+			if err := doms.Commit(ctx, tx); err != nil {
 				return err
 			}
-			doms.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return err
-			}
+			doms.Close()
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -780,15 +777,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			if bn+1 >= block { // last block committed; nothing more to run
+				break
+			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
+			// Fresh SD for the next block: a committed SD is never reused.
+			if doms, err = execctx.NewSharedDomains(ctx, tx, logger); err != nil {
+				return err
+			}
+			doms.SetInMemHistoryReads(false)
 		}
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-		doms.ClearRam(true)
-		return tx.Commit()
+		doms.Close()
+		return nil
 	}
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))

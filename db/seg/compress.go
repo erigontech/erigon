@@ -123,6 +123,8 @@ type Compressor struct {
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
 	superstring       []byte
+	scannedBytes      int
+	superstringLimit  int
 	wordsCount        uint64
 	superstringCount  uint64
 	uncompressedBytes int
@@ -187,6 +189,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		wg:               wg,
 		logger:           logger,
 		version:          FileCompressionFormatV1,
+		superstringLimit: superstringLimit,
 	}
 
 	if cfg.ValuesOnCompressedPage > 0 {
@@ -267,16 +270,8 @@ func (c *Compressor) AddWord(word []byte) error {
 		}
 	}
 
-	l := 2*len(word) + 2
-	if len(c.superstring)+l > superstringLimit {
-		if c.superstringCount%c.SamplingFactor == 0 {
-			c.superstrings <- c.superstring
-		}
-		c.superstringCount++
-		c.superstring = superStringsPool.Get().([]byte)[:0]
-	}
-
-	if c.superstringCount%c.SamplingFactor == 0 {
+	c.advanceScan(2*len(word) + 2)
+	if c.sampledSuperstring() {
 		for _, a := range word {
 			c.superstring = append(c.superstring, 1, a)
 		}
@@ -285,6 +280,25 @@ func (c *Compressor) AddWord(word []byte) error {
 
 	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.Append(word)
+}
+
+func (c *Compressor) sampledSuperstring() bool { return c.superstringCount%c.SamplingFactor == 0 }
+
+// advanceScan accounts for the next word (encoded size l) and cuts a new superstring when the
+// current one would overflow. Bytes are counted for every word so boundaries don't depend on
+// sampling; a superstring fills only when sampled, so only a non-empty buffer is sent and replaced.
+func (c *Compressor) advanceScan(l int) {
+	if c.scannedBytes+l <= c.superstringLimit {
+		c.scannedBytes += l
+		return
+	}
+
+	if len(c.superstring) > 0 {
+		c.superstrings <- c.superstring
+		c.superstring = superStringsPool.Get().([]byte)[:0]
+	}
+	c.superstringCount++
+	c.scannedBytes = 0
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {

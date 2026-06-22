@@ -17,10 +17,12 @@ import (
 	"github.com/edsrzf/mmap-go"
 )
 
+const bufSize = 4096
+
 // WriterOffHeap does write all keys to temporary mmap file - and using it as a source for `fusefilter` building
 type WriterOffHeap struct {
 	count    int
-	page     [512]uint64
+	buf      [bufSize]uint64
 	features Features
 
 	tmpFile     *os.File
@@ -52,9 +54,15 @@ func (w *WriterOffHeap) Close() {
 }
 
 func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
-	defer dir.RemoveFile(w.tmpFilePath)
-	if w.count%len(w.page) != 0 {
-		if _, err := w.tmpFile.Write(castToBytes(w.page[:w.count%len(w.page)])); err != nil {
+	defer func() {
+		if w.tmpFile != nil {
+			w.tmpFile.Close()
+			w.tmpFile = nil
+		}
+		dir.RemoveFile(w.tmpFilePath)
+	}()
+	if w.count%bufSize != 0 {
+		if _, err := w.tmpFile.Write(castToBytes(w.buf[:w.count%bufSize])); err != nil {
 			return nil, err
 		}
 	}
@@ -109,10 +117,10 @@ func writeFilter(features Features, filter *xorfilter.BinaryFuse[uint8], fw io.W
 }
 
 func (w *WriterOffHeap) AddHash(k uint64) error {
-	w.page[w.count%len(w.page)] = k
+	w.buf[w.count%bufSize] = k
 	w.count++
-	if w.count%len(w.page) == 0 {
-		_, err := w.tmpFile.Write(castToBytes(w.page[:]))
+	if w.count%bufSize == 0 {
+		_, err := w.tmpFile.Write(castToBytes(w.buf[:]))
 		if err != nil {
 			return err
 		}
@@ -245,10 +253,16 @@ func (w *WriterSharded) Build() error {
 // Format: [4 bytes header] then 256 × [8 bytes size | blob] pairs (size==0 means absent).
 // Fully streaming: no intermediate files, one shard's fingerprints in RAM at a time.
 func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
-	defer dir.RemoveFile(w.tmpFilePath)
+	defer func() {
+		if w.tmpFile != nil {
+			w.tmpFile.Close()
+			w.tmpFile = nil
+		}
+		dir.RemoveFile(w.tmpFilePath)
+	}()
 
-	if rem := w.count % len(w.page); rem != 0 {
-		if _, err := w.tmpFile.Write(castToBytes(w.page[:rem])); err != nil {
+	if rem := w.count % bufSize; rem != 0 {
+		if _, err := w.tmpFile.Write(castToBytes(w.buf[:rem])); err != nil {
 			return 0, err
 		}
 	}

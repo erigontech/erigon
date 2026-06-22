@@ -575,6 +575,54 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 	require.Equal(t, msg, stored)
 }
 
+func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+
+	// Fill the queue to the cap
+	service.pendingCount.Store(maxPendingBids)
+
+	msg := newTestSignedExecutionPayloadBid(100, 999, 1000)
+
+	service.queuePendingBid(msg)
+
+	// Should still be at cap — new item was rejected
+	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
+	key := pendingBidKey{builderIndex: 999, slot: 100}
+	_, exists := service.pendingBids.Load(key)
+	require.False(t, exists)
+}
+
+func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+
+	service.pendingCount.Store(maxPendingBids - 5)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			msg := newTestSignedExecutionPayloadBid(uint64(10000+idx), uint64(idx), 1000)
+			service.queuePendingBid(msg)
+		}(i)
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
+	stored := 0
+	service.pendingBids.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Equal(t, 5, stored)
+}
+
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

@@ -1,7 +1,7 @@
 ---
 title: "Default ports"
 description: "Default listening ports for each Erigon service and how to override them."
-sidebar_position: 5
+sidebar_position: 10
 ---
 
 # Default ports

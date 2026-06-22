@@ -391,33 +391,30 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		hash := query[lookups]
 		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
-			break
+			return receipts, false, nil
 		}
-		number, _ := br.HeaderNumber(context.Background(), db, hash)
+		// The response carries one receipt list per requested block in request
+		// order, so a block we cannot serve ends the response at that block.
+		number, err := br.HeaderNumber(ctx, db, hash)
+		if err != nil {
+			return nil, false, err
+		}
 		if number == nil {
-			return nil, false, nil
+			return receipts, false, nil
 		}
-		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		b, _, err := br.BlockWithSenders(ctx, db, hash, *number)
 		if err != nil {
 			return nil, false, err
 		}
 		if b == nil {
-			return nil, false, nil
+			return receipts, false, nil
 		}
-
 		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
 			return nil, false, err
 		}
-
-		if results == nil {
-			header, err := rawdb.ReadHeaderByHash(db, hash)
-			if err != nil {
-				return nil, false, err
-			}
-			if header == nil || header.ReceiptHash != empty.RootHash {
-				continue
-			}
+		if results == nil && b.HeaderNoCopy().ReceiptHash != empty.RootHash {
+			return receipts, false, nil
 		}
 
 		// For the first block, skip receipts before firstBlockReceiptIndex (eth/70)

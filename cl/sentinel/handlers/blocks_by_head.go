@@ -31,10 +31,7 @@ func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 		return err
 	}
 
-	count := req.Count
-	if count > c.beaconConfig.MaxRequestBlocksDeneb {
-		count = c.beaconConfig.MaxRequestBlocksDeneb
-	}
+	count := min(req.Count, c.beaconConfig.MaxRequestBlocksDeneb)
 	if count == 0 {
 		return nil
 	}

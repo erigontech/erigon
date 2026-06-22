@@ -223,7 +223,6 @@ type TxTask struct {
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
-	Incarnation           int
 	Tracer                *calltracer.CallTracer
 	Hooks                 *tracing.Hooks
 	Config                *chain.Config

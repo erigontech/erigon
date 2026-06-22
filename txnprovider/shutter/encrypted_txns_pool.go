@@ -21,6 +21,7 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
@@ -214,7 +216,7 @@ func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
 		case err := <-submissionEventSub.Err():
 			return err
 		case event := <-submissionEventC:
-			err := etp.handleEncryptedTxnSubmissionEvent(event)
+			err := etp.handleEncryptedTxnSubmissionEvent(ctx, event)
 			if err != nil {
 				return fmt.Errorf("failed to handle encrypted txn submission event: %w", err)
 			}
@@ -222,7 +224,7 @@ func (etp *EncryptedTxnsPool) watchSubmissions(ctx context.Context) error {
 	}
 }
 
-func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts.SequencerTransactionSubmitted) error {
+func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(ctx context.Context, event *contracts.SequencerTransactionSubmitted) error {
 	encryptedTxnSubmission := EncryptedTxnSubmissionFromLogEvent(event)
 	etp.logger.Debug(
 		"received encrypted txn submission event",
@@ -257,13 +259,13 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 
 	etp.addSubmission(encryptedTxnSubmission)
 	if ok && !EncryptedTxnSubmissionsAreConsecutive(lastEncryptedTxnSubmission, encryptedTxnSubmission) {
-		return etp.fillSubmissionGap(lastEncryptedTxnSubmission, encryptedTxnSubmission)
+		return etp.fillSubmissionGap(ctx, lastEncryptedTxnSubmission, encryptedTxnSubmission)
 	}
 
 	return nil
 }
 
-func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission) error {
+func (etp *EncryptedTxnsPool) fillSubmissionGap(ctx context.Context, last, new EncryptedTxnSubmission) error {
 	fromTxnIndex := last.TxnIndex + 1
 	startBlockNum := last.BlockNum + 1
 	endBlockNum := new.BlockNum
@@ -280,7 +282,7 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(last, new EncryptedTxnSubmission
 		etp.logger.Info("adjusted gap as it is too big", "startBlockNum", startBlockNum, "endBlockNum", endBlockNum)
 	}
 
-	return etp.loadSubmissions(startBlockNum, endBlockNum)
+	return etp.loadSubmissions(ctx, startBlockNum, endBlockNum)
 }
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
@@ -308,12 +310,12 @@ func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) erro
 			}
 
 			// load submissions and complete
-			return etp.loadPastSubmissionsOnFirstBlock(blockEvent.LatestBlockNum)
+			return etp.loadPastSubmissionsOnFirstBlock(ctx, blockEvent.LatestBlockNum)
 		}
 	}
 }
 
-func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) error {
+func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(ctx context.Context, blockNum uint64) error {
 	etp.mu.Lock()
 	defer etp.mu.Unlock()
 
@@ -324,7 +326,7 @@ func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) e
 	}
 
 	etp.logger.Info("loading past submissions on first block", "start", start, "end", end)
-	err := etp.loadSubmissions(start, end)
+	err := etp.loadSubmissions(ctx, start, end)
 	if err != nil {
 		return fmt.Errorf("failed to load submissions on init: %w", err)
 	}
@@ -332,7 +334,7 @@ func (etp *EncryptedTxnsPool) loadPastSubmissionsOnFirstBlock(blockNum uint64) e
 	return nil // we are done
 }
 
-func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64) error {
+func (etp *EncryptedTxnsPool) loadSubmissions(ctx context.Context, start, end uint64) error {
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
@@ -340,11 +342,12 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64) error {
 	}()
 
 	opts := bind.FilterOpts{
-		Start: start,
-		End:   &end,
+		Start:   start,
+		End:     &end,
+		Context: ctx,
 	}
 
-	submissionsIter, err := etp.sequencerContract.FilterTransactionSubmitted(&opts)
+	submissionsIter, err := etp.filterSubmissionsWaitingForHead(ctx, &opts)
 	if err != nil {
 		return fmt.Errorf("failed to filter submissions from sequencer contract: %w", err)
 	}
@@ -367,7 +370,38 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64) error {
 		etp.addSubmission(encryptedTxnSubmission)
 	}
 
+	if err := submissionsIter.Error(); err != nil {
+		return fmt.Errorf("failed to iterate submissions from sequencer contract: %w", err)
+	}
+
 	return nil
+}
+
+const chainHeadCatchUpRetryWait = 50 * time.Millisecond
+
+// isChainHeadBehindErr reports the transient eth_getLogs rejection from the
+// block-event stream momentarily running ahead of the RPC path's RO view.
+func isChainHeadBehindErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), jsonrpc.ErrBlockRangeIntoFuture)
+}
+
+// filterSubmissionsWaitingForHead retries the log filter while the chain head is
+// still behind opts.End, so a transient head lag waits rather than killing the
+// pool. Other errors are returned immediately.
+func (etp *EncryptedTxnsPool) filterSubmissionsWaitingForHead(ctx context.Context, opts *bind.FilterOpts) (*contracts.SequencerTransactionSubmittedIterator, error) {
+	for {
+		iter, err := etp.sequencerContract.FilterTransactionSubmitted(opts)
+		if !isChainHeadBehindErr(err) {
+			return iter, err
+		}
+
+		etp.logger.Debug("waiting for chain head to catch up before loading submissions", "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(chainHeadCatchUpRetryWait):
+		}
+	}
 }
 
 func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {

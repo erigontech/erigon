@@ -21,6 +21,19 @@
       "Bash(gh pr:*)"
     ]
   },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/comment-policy.py\""
+          }
+        ]
+      }
+    ]
+  },
   "includeCoAuthoredBy": false,
   "attribution": {
     "commit": "",

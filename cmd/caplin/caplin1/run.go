@@ -635,7 +635,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			syncedDataManager,
 			statesReader,
 			sentinel,
-			version.GitTag,
+			version.NodeVersion(),
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,

@@ -204,9 +204,10 @@ func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req 
 	// This is a simplified example - you'd need proper URI parsing
 	address := req.Params.URI // Would extract {address} parameter
 
-	balance, _ := e.ethAPI.GetBalance(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
-	nonce, _ := e.ethAPI.GetTransactionCount(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
-	code, _ := e.ethAPI.GetCode(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	balance, _ := e.ethAPI.GetBalance(ctx, common.HexToAddress(address), &latest)
+	nonce, _ := e.ethAPI.GetTransactionCount(ctx, common.HexToAddress(address), &latest)
+	code, _ := e.ethAPI.GetCode(ctx, common.HexToAddress(address), &latest)
 
 	summary := map[string]any{
 		"address":     address,

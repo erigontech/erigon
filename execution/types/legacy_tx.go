@@ -353,14 +353,9 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := RlpHash([]any{
-		tx.Nonce,
-		&tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.V, tx.R, tx.S,
+	payloadSize := tx.payloadSize()
+	hash := rlpPayloadHash(func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize)
 	})
 	tx.hash.Store(&hash)
 	return hash

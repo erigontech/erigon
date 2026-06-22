@@ -144,19 +144,9 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []any{
-		&stx.ChainID,
-		stx.Nonce,
-		&stx.TipCap,
-		&stx.FeeCap,
-		stx.GasLimit,
-		stx.To,
-		&stx.Value,
-		stx.Data,
-		stx.AccessList,
-		&stx.MaxFeePerBlobGas,
-		stx.BlobVersionedHashes,
-		stx.V, stx.R, stx.S,
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
+	hash := prefixedPayloadHash(BlobTxType, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
 	})
 	stx.hash.Store(&hash)
 	return hash
@@ -271,11 +261,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode To
-	b[0] = 128 + 20
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if _, err := w.Write(stx.To[:]); err != nil {
+	if err := EncodeOptionalAddress(stx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value

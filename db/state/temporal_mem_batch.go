@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 )
 
 type iodir int
@@ -172,7 +173,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 	}
 
-	valWithStep := dataWithTxNum{data: val, txNum: txNum}
+	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
+	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
+	valWithStep := dataWithTxNum{data: common.Copy(val), txNum: txNum}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {
@@ -762,12 +765,10 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+// flushLocked is the body of Flush, factored so the callback path can run it
+// inside latestStateLock without re-acquiring.
+func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
-		// Replay against the RAW (step-preserving) changeset — the collapsed
-		// unwindChangeset would lose every (key, step) entry except one per
-		// real key, which leaves orphan domain-values entries at steps above
-		// the unwind target (observed on mainnet for the commitment domain).
 		for domain := range sd.unwindChangesetRaw {
 			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
 				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
@@ -777,7 +778,6 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
@@ -787,6 +787,35 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
 		return fmt.Errorf("can't write plain state version: %w", err)
 	}
+	return nil
+}
+
+// Flush writes the mem-batch to tx.
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+	return sd.flushLocked(ctx, tx)
+}
+
+// Flushes the batch then invokes cb per commitment tuple under the lock.
+func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
+
+	if cb != nil {
+		for keyStr, history := range sd.domains[kv.CommitmentDomain] {
+			if len(history) == 0 {
+				continue
+			}
+			latest := history[len(history)-1]
+			cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+		}
+	}
+
 	return nil
 }
 

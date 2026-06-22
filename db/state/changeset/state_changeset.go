@@ -22,6 +22,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -464,13 +465,37 @@ type DomainIOMetrics struct {
 	DbReadDuration    time.Duration
 	FileReadCount     int64
 	FileReadDuration  time.Duration
+	// UniqueFileReadCount counts distinct prefixes that fell through to a file
+	// read; FileReadCount / UniqueFileReadCount is the read-amplification ratio.
+	UniqueFileReadCount int64
+	// UniqueLenBuckets is the prefix-byte-length distribution of those distinct
+	// prefixes, bucketed by lenBucket (maps compact-encoded length to trie depth).
+	UniqueLenBuckets [10]int64
+
+	// StateCache hit/miss tracks the SharedDomains.stateCache layer
+	// specifically (the per-execution Account/Storage/Code cache), distinct
+	// from CacheReadCount which counts sd.mem and sd.parent.mem hits.
+	// Hit means stateCache.Get returned ok (we skipped MDBX+files).
+	// Miss means stateCache.Get returned !ok and we fell through to aggTx.
+	StateCacheHitCount  int64
+	StateCacheMissCount int64
 }
 
 type DomainMetrics struct {
 	sync.RWMutex
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
+
+	// seenFileReads dedups prefixes for UpdateFileReadsUnique. Capped at
+	// maxSeenFileReads entries: past the cap, uniqueness counting stops so the
+	// set can't grow without bound under a long-lived dbg.KVReadLevelledMetrics run.
+	seenFileReads    sync.Map
+	seenFileReadsLen atomic.Int64
 }
+
+// maxSeenFileReads bounds the read-amplification dedup set; beyond it
+// UniqueFileReadCount saturates rather than tracking every prefix forever.
+const maxSeenFileReads = 1 << 20
 
 func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
@@ -506,6 +531,28 @@ func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
 	}
 }
 
+func (dm *DomainMetrics) UpdateStateCacheHit(domain kv.Domain) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.StateCacheHitCount++
+	if d, ok := dm.Domains[domain]; ok {
+		d.StateCacheHitCount++
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{StateCacheHitCount: 1}
+	}
+}
+
+func (dm *DomainMetrics) UpdateStateCacheMiss(domain kv.Domain) {
+	dm.Lock()
+	defer dm.Unlock()
+	dm.StateCacheMissCount++
+	if d, ok := dm.Domains[domain]; ok {
+		d.StateCacheMissCount++
+	} else {
+		dm.Domains[domain] = &DomainIOMetrics{StateCacheMissCount: 1}
+	}
+}
+
 func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	dm.Lock()
 	defer dm.Unlock()
@@ -520,5 +567,73 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 			FileReadCount:    1,
 			FileReadDuration: readDuration,
 		}
+	}
+}
+
+// Maps prefix byte-length to a UniqueLenBuckets index.
+func lenBucket(n int) int {
+	switch {
+	case n <= 1:
+		return 0
+	case n <= 4:
+		return 1
+	case n <= 8:
+		return 2
+	case n <= 16:
+		return 3
+	case n <= 32:
+		return 4
+	case n == 33:
+		return 5
+	case n <= 36:
+		return 6
+	case n <= 44:
+		return 7
+	case n <= 64:
+		return 8
+	default:
+		return 9
+	}
+}
+
+// Like UpdateFileReads but also tracks prefix uniqueness for the read-amplification ratio; copies key.
+func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, start time.Time) {
+	// Composite key so two domains can hold the same prefix shape without colliding.
+	domainKey := domain.String() + ":" + string(key)
+	alreadySeen := true
+	if dm.seenFileReadsLen.Load() < maxSeenFileReads {
+		if _, loaded := dm.seenFileReads.LoadOrStore(domainKey, struct{}{}); !loaded {
+			dm.seenFileReadsLen.Add(1)
+			alreadySeen = false
+		}
+	}
+	bucket := lenBucket(len(key))
+
+	dm.Lock()
+	defer dm.Unlock()
+	dm.FileReadCount++
+	readDuration := time.Since(start)
+	dm.FileReadDuration += readDuration
+	if !alreadySeen {
+		dm.UniqueFileReadCount++
+		dm.UniqueLenBuckets[bucket]++
+	}
+	if d, ok := dm.Domains[domain]; ok {
+		d.FileReadCount++
+		d.FileReadDuration += readDuration
+		if !alreadySeen {
+			d.UniqueFileReadCount++
+			d.UniqueLenBuckets[bucket]++
+		}
+	} else {
+		newD := &DomainIOMetrics{
+			FileReadCount:    1,
+			FileReadDuration: readDuration,
+		}
+		if !alreadySeen {
+			newD.UniqueFileReadCount = 1
+			newD.UniqueLenBuckets[bucket] = 1
+		}
+		dm.Domains[domain] = newD
 	}
 }

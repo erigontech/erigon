@@ -67,6 +67,7 @@ const (
 	seenBidCacheSize        = 512
 	pendingBidExpiry        = 12 * time.Second // 1 slot
 	pendingBidCheckInterval = 100 * time.Millisecond
+	maxPendingBids          = 1024
 )
 
 type executionPayloadBidService struct {
@@ -333,6 +334,11 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 
 // queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
+	if s.pendingCount.Add(1) > maxPendingBids {
+		s.pendingCount.Add(-1)
+		return
+	}
+
 	key := pendingBidKey{
 		builderIndex: msg.Message.BuilderIndex,
 		slot:         msg.Message.Slot,
@@ -341,9 +347,12 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 	if _, loaded := s.pendingBids.LoadOrStore(key, &pendingBidJob{
 		msg:          msg,
 		creationTime: time.Now(),
-	}); !loaded {
-		s.pendingCount.Add(1)
+	}); loaded {
+		s.pendingCount.Add(-1)
+	} else {
+		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
+		s.pendingCond.L.Unlock()
 	}
 }
 
@@ -352,7 +361,9 @@ func (s *executionPayloadBidService) loop(ctx context.Context) {
 	// Wake any blocked Wait() on context cancellation to prevent deadlock.
 	go func() {
 		<-ctx.Done()
+		s.pendingCond.L.Lock()
 		s.pendingCond.Broadcast()
+		s.pendingCond.L.Unlock()
 	}()
 
 	for {

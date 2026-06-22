@@ -42,10 +42,13 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// ErrBlockRangeIntoFuture is the eth_getLogs message for a range past the
+// executed head, exported so other packages can match on the condition.
+const ErrBlockRangeIntoFuture = "block range extends beyond current head block"
+
 var (
 	errInvalidBlockRange               = "invalid block range params"
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
-	errBlockRangeIntoFuture            = "block range extends beyond current head block"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
 	errExceedMaxTopics                 = "exceed max topics"
 	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
@@ -147,7 +150,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if begin > latest {
-				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 		end = latest
@@ -164,7 +167,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if end > latest {
-				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 	}

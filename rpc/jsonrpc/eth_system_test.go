@@ -589,6 +589,67 @@ func TestEthConfig(t *testing.T) {
 	}
 }
 
+func TestBaseFee(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	t.Run("pre-London returns nil", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BaseFee(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, result)
+	})
+
+	t.Run("post-London returns fee", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainOsakaConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BaseFee(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Positive(t, result.ToInt().Sign())
+	})
+}
+
+func TestBlobBaseFee(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	t.Run("pre-Cancun returns nil", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BlobBaseFee(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, result)
+	})
+
+	t.Run("post-Cancun returns fee", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainOsakaConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BlobBaseFee(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	})
+}
+
 func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecModuleTester {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

@@ -104,7 +104,7 @@ func newFlushTestHarnessWithElHead(t *testing.T, frozen uint64, elHead *types.He
 	h := &flushTestHarness{}
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block, _ bool) error {
+		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		}).AnyTimes()
@@ -155,7 +155,7 @@ func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
 		"missing requests hash":    append([]byte{byte(clparams.ElectraVersion)}, make([]byte, 32)...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := c.decodeBlock(utils.CompressSnappy(raw))
+			_, _, err := c.decodeBlock(utils.CompressSnappy(raw))
 			require.ErrorContains(t, err, "persistent block value too short")
 		})
 	}
@@ -448,7 +448,7 @@ func TestPruneSkipsWhenElHeadIsZero(t *testing.T) {
 	var inserted []*types.Block
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block, _ bool) error {
+		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			inserted = append(inserted, blocks...)
 			return nil
 		}).AnyTimes()
@@ -493,7 +493,7 @@ func pruneCaseCTestHarness(t *testing.T, elHead uint64) *flushTestHarness {
 	h := &flushTestHarness{}
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block, _ bool) error {
+		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		}).AnyTimes()

@@ -258,6 +258,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_gasPrice                               | Yes     |                                                       |
 | eth_maxPriorityFeePerGas                   | Yes     |                                                       |
 | eth_feeHistory                             | Yes     |                                                       |
+| eth_baseFee                                | Yes     |                                                       |
 | eth_blobBaseFee                            | Yes     |                                                       |
 | eth_config                                 | Yes     | EIP-7910                                              |
 | eth_capabilities                           | Yes     | execution-apis#755                                    |

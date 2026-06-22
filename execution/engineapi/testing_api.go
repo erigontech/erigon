@@ -194,6 +194,22 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
+	// Validate slotNumber presence for Glamsterdam+.
+	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
+		return nil, &rpc.InvalidParamsError{Message: "slotNumber required for Glamsterdam and later forks"}
+	}
+	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
+		return nil, &rpc.InvalidParamsError{Message: "slotNumber not supported before Glamsterdam"}
+	}
+
+	// Validate targetGasLimit presence for Glamsterdam+.
+	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+		return nil, &rpc.InvalidParamsError{Message: "targetGasLimit required for Glamsterdam and later forks"}
+	}
+	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
+		return nil, &rpc.InvalidParamsError{Message: "targetGasLimit not supported before Glamsterdam"}
+	}
+
 	customProvider, err := t.decodeTxnProvider(ctx, transactions, parentHeader.Number.Uint64()+1, timestamp)
 	if err != nil {
 		return nil, err
@@ -205,8 +221,6 @@ func (t *testingImpl) BuildBlockV1(
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
-		TargetGasLimit:        (*uint64)(payloadAttributes.TargetGasLimit),
 		CustomTxnProvider:     customProvider,
 	}
 	if version >= clparams.CapellaVersion {
@@ -214,6 +228,10 @@ func (t *testingImpl) BuildBlockV1(
 	}
 	if version >= clparams.DenebVersion {
 		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
+	}
+	if version >= clparams.GloasVersion {
+		assembleParams.SlotNumber = (*uint64)(payloadAttributes.SlotNumber)
+		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
 	}
 
 	// Both steps share a single slot-duration budget so the total wall-clock

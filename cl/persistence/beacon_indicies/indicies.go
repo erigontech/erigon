@@ -410,28 +410,62 @@ func WriteBeaconBlockAndIndicies(ctx context.Context, tx kv.RwTx, block *cltypes
 }
 
 func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
+	_, _, err := PruneBlocksLimit(ctx, tx, to, 0)
+	return err
+}
+
+func PruneBlocksLimit(ctx context.Context, tx kv.RwTx, to uint64, limit int) (deleted int, hasMore bool, err error) {
 	cursor, err := tx.RwCursor(kv.BeaconBlocks)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	defer cursor.Close()
-	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Next() {
+	for k, _, err := cursor.First(); ; k, _, err = cursor.Next() {
+		if err != nil {
+			return deleted, false, err
+		}
+		if k == nil {
+			break
+		}
 		if len(k) != 40 {
 			continue
 		}
 		slot, err := dbutils.DecodeBlockNumber(k[:8])
 		if err != nil {
-			return err
+			return deleted, false, err
 		}
 		if slot >= to {
 			break
 		}
 		if err := cursor.DeleteCurrent(); err != nil {
-			return err
+			return deleted, false, err
+		}
+		deleted++
+		if limit > 0 && deleted >= limit {
+			hasMore, err := hasMorePrunableBeaconBlocks(cursor, to)
+			return deleted, hasMore, err
 		}
 	}
-	return nil
+	return deleted, false, nil
+}
 
+func hasMorePrunableBeaconBlocks(cursor kv.Cursor, to uint64) (bool, error) {
+	for k, _, err := cursor.Next(); ; k, _, err = cursor.Next() {
+		if err != nil {
+			return false, err
+		}
+		if k == nil {
+			return false, nil
+		}
+		if len(k) != 40 {
+			continue
+		}
+		slot, err := dbutils.DecodeBlockNumber(k[:8])
+		if err != nil {
+			return false, err
+		}
+		return slot < to, nil
+	}
 }
 
 func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
