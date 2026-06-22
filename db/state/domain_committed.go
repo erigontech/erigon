@@ -42,20 +42,20 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 }
 
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
-// by looking them up in the account and storage domain files.
+// by looking them up in the account and storage domain files. It guards the call to
+// ExpandShortenedKeysInBranch with the read-path preconditions (config flag, empty branch,
+// KeyCommitmentState carve-out, files-not-empty, threshold-reached range).
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
-	logger := log.Root()
-	aggTx := at
-
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
+		at.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
 
 		return branch, nil // do not transform, return as is
 	}
 
-	sto := aggTx.d[kv.StorageDomain]
-	acc := aggTx.d[kv.AccountsDomain]
+	logger := log.Root()
+	sto := at.d[kv.StorageDomain]
+	acc := at.d[kv.AccountsDomain]
 	storageItem, err := sto.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
@@ -66,58 +66,24 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := sto.dataReader(storageItem.decompressor)
-	accountGetter := acc.dataReader(accountItem.decompressor)
-	metricI := 0
-	for i, f := range aggTx.d[kv.CommitmentDomain].files {
-		if i > 5 {
-			metricI = 5
-			break
+
+	// branchKeyDerefSpent metricI lookup: clamps to max bucket index when the visible commitment
+	// file list grows past the bucket count.
+	if dbg.KVReadLevelledMetrics {
+		metricI := 0
+		for i, f := range at.d[kv.CommitmentDomain].files {
+			if i > 5 {
+				metricI = 5
+				break
+			}
+			if f.startTxNum == fStartTxNum && f.endTxNum == fEndTxNum {
+				metricI = i
+			}
 		}
-		if f.startTxNum == fStartTxNum && f.endTxNum == fEndTxNum {
-			metricI = i
-		}
+		defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
 	}
 
-	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) == length.Addr+length.Hash {
-				return nil, nil // save storage key as is
-			}
-			if dbg.KVReadLevelledMetrics {
-				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
-			}
-			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
-			if !found {
-				s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
-				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
-					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
-				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
-			}
-			return storagePlainKey, nil
-		}
-
-		if len(key) == length.Addr {
-			return nil, nil // save account key as is
-		}
-
-		if dbg.KVReadLevelledMetrics {
-			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
-		}
-		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
-		if !found {
-			s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
-			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
-				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
-			return nil, fmt.Errorf("replace back lost account full key: %x", key)
-		}
-		return apkBuf, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return ExpandShortenedKeysInBranch(branch, acc, sto, accountItem, storageItem, fStartTxNum, fEndTxNum)
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
@@ -211,6 +177,55 @@ func (dt *DomainRoTx) lookupVisibleFileByRange(txFrom, txTo uint64) (*FilesItem,
 	}
 	return nil, fmt.Errorf("file %s-%s.%d-%d.kv not found in visible files",
 		dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+}
+
+// rawLookupFileByRange searches visible files first, then falls back to dirty files.
+// Used by the offline commitment converter, which operates on freshly built files that
+// may still be dirty (not yet integrated into the visible RoTx snapshot).
+func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesItem, error) {
+	for _, f := range dt.files {
+		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
+			return f.src, nil // found in visible files
+		}
+	}
+	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
+		return dirty, nil
+	}
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+}
+
+func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
+	var item *FilesItem
+	if item == nil {
+		dt.d.dirtyFiles.Walk(func(files []*FilesItem) bool {
+			for _, f := range files {
+				if f.startTxNum == txFrom && f.endTxNum == txTo {
+					item = f
+					return false
+				}
+			}
+			return true
+		})
+	}
+
+	if item == nil || item.bindex == nil {
+		var fileStepsss strings.Builder
+		fileStepsss.WriteString("" + dt.d.Name.String() + ": ")
+		for _, item := range dt.d.dirtyFiles.Items() {
+			fromStep, toStep := item.StepRange(dt.d.stepSize)
+			fileStepsss.WriteString(fmt.Sprintf("%d-%d;", fromStep, toStep))
+		}
+		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
+			"stepFrom", txFrom/dt.d.stepSize, "stepTo", txTo/dt.d.stepSize,
+			"files", fileStepsss.String(), "filesCount", dt.d.dirtyFiles.Len())
+
+		if item != nil && item.bindex == nil {
+			dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
+		}
+
+		return nil
+	}
+	return item
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
