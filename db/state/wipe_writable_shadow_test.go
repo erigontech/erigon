@@ -444,6 +444,209 @@ func TestWipeWritableShadowPast_NonAligned_DeletionBeforeLastTxNumLeavesTombston
 	}
 }
 
+// These tests pin AssertWritableShadowConsistentAt — the post-wipe /
+// pre-regen invariant gate added 2026-06-22 after the soak v19 iter-4
+// 88-gas-diff investigation traced the wedge to multi-iter writable-
+// shadow drift. The drift accumulates because no single check
+// validates the post-wipe invariant; parallel-exec catch-up writes
+// past lastTxNum survive across iters and corrupt subsequent reads.
+//
+// The invariant: post-WipeWritableShadowPast(lastTxNum), no row in
+// any writable-domain ValuesTable should have a step coordinate
+// strictly greater than stepContaining = lastTxNum / stepSize. Any
+// such row indicates drift.
+
+// TestAssertWritableShadowConsistentAt_CleanWipePasses pins the
+// happy path: after a complete WipeWritableShadowPast, the consistency
+// check returns nil. This is the regression-safety baseline — any
+// future change that breaks the wipe such that post-wipe entries
+// remain will surface as this test failing.
+func TestAssertWritableShadowConsistentAt_CleanWipePasses(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	acc1Addr := [20]byte{1}
+	acc2Addr := [20]byte{2}
+	acc3Addr := [20]byte{3}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		writeAcc := func(addr [20]byte, txNum uint64, nonce uint64) {
+			acc := accounts.Account{
+				Nonce:    nonce,
+				Balance:  *uint256.NewInt(nonce * 100),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			domains.SetTxNum(txNum)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], buf, txNum, nil))
+		}
+		// Writes spanning steps 0, 1, 2 — the wipe to lastTxNum=5
+		// (mid-step 0) must leave only step-0 entries.
+		writeAcc(acc1Addr, 0, 1)  // step 0
+		writeAcc(acc2Addr, 8, 2)  // step 1 — must be wiped
+		writeAcc(acc3Addr, 16, 3) // step 2 — must be wiped
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 5))
+
+	// Post-wipe: every writable-shadow row must have step <= 0
+	// (stepContaining = 5/8 = 0). The check should return nil.
+	require.NoError(t, agg.AssertWritableShadowConsistentAt(t.Context(), rwTx, 5),
+		"clean wipe must satisfy the post-wipe invariant — every shadow row at step <= stepContaining=0")
+}
+
+// TestAssertWritableShadowConsistentAt_DetectsDrift pins the bug-
+// catching contract: when entries exist in the writable shadow at
+// step coordinates strictly past stepContaining, the consistency check
+// MUST return an error naming the offending domain + offender count.
+//
+// This is the exact shape the soak v19 iter-4 wedge produced: parallel-
+// exec catch-up wrote state past lastTxNum, the writes weren't rolled
+// back when validation failed, and the next read at the corrupted
+// txnum returned the wrong value. With the check wired into
+// WipeWritableShadowPast's tail, that drift surfaces immediately
+// (loudly, at the unwind boundary) instead of accumulating silently
+// across iters until a +44 gas mismatch surfaces 53k blocks later.
+func TestAssertWritableShadowConsistentAt_DetectsDrift(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	acc1Addr := [20]byte{1}
+
+	// Phase 1: write at step 0 (within lastTxNum) — the canonical
+	// post-wipe state.
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		domains.SetTxNum(0)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, acc1Addr[:], buf, 0, nil))
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Phase 2: wipe to lastTxNum=5 (mid-step 0).
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 5))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Phase 3: inject drift — write an account at txnum=12 (step 1)
+	// AFTER the wipe. This simulates parallel-exec catch-up writing
+	// state past lastTxNum without rolling back on validation failure.
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		acc := accounts.Account{Nonce: 99, Balance: *uint256.NewInt(9900), CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		domains.SetTxNum(12)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, acc1Addr[:], buf, 12, nil))
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Phase 4: the consistency check at lastTxNum=5 must catch the
+	// drift. txnum=12 is in step 1 > stepContaining=0.
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	err = agg.AssertWritableShadowConsistentAt(t.Context(), rwTx, 5)
+	require.Error(t, err, "drift past stepContaining must surface as an error")
+	require.Contains(t, err.Error(), "writable shadow drift",
+		"error must identify itself as drift")
+	require.Contains(t, err.Error(), "accounts",
+		"error must name the domain (accounts) that has drift")
+}
+
+// TestAssertWritableShadowConsistentAt_DetectsDriftAcrossDomains pins
+// that the check covers every writable domain (accounts, storage, code,
+// commitment, receipt, rcache), not just accounts. A drift entry in
+// any one of them must surface in the error.
+func TestAssertWritableShadowConsistentAt_DetectsDriftAcrossDomains(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	// Phase 1: write storage at txnum 0 (step 0).
+	addr := [20]byte{0xAB}
+	slot := [32]byte{0xCD}
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		key := append(append([]byte{}, addr[:]...), slot[:]...)
+		domains.SetTxNum(0)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x42}, 0, nil))
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Phase 2: wipe.
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 5))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Phase 3: inject storage drift past stepContaining.
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		key := append(append([]byte{}, addr[:]...), slot[:]...)
+		domains.SetTxNum(20) // step 2 — past stepContaining=0
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0xFF}, 20, nil))
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	// Phase 4: check must catch storage-domain drift.
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	err = agg.AssertWritableShadowConsistentAt(t.Context(), rwTx, 5)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "storage",
+		"storage-domain drift must surface in the error (not just accounts)")
+}
+
 // newWipeTestDB constructs a temporal DB + aggregator sized for fast
 // wipe tests. Mirrors testDbAndAggregatorv3 from squeeze_test.go but
 // exported in this file so wipe tests have a self-contained fixture.

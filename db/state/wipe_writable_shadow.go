@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -208,7 +209,140 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 		}
 	}
 
+	// Post-wipe invariant gate. The wipe + diff-replay above SHOULD
+	// leave every writable-shadow row at step <= stepContaining. If
+	// any row has step > stepContaining it's drift from a prior
+	// catch-up cycle whose parallel-exec writes weren't rolled back
+	// — surface it loudly at the unwind boundary instead of letting
+	// it accumulate silently across iters.
+	//
+	// Live-reproduced 2026-06-20: soak v19 iter 4 (depth 60k) wedged
+	// on +88 gas at block 3,039,999. State at block 3,039,998 had
+	// nonce 478,190 (canonical: 478,094) — local writable shadow
+	// matched canonical at the LIVE TIP (block 3,065,935), 26k blocks
+	// past elHead. Catch-up exec writes accumulated across iters with
+	// no check to detect the drift.
+	if err := a.AssertWritableShadowConsistentAt(ctx, tx, lastTxNum); err != nil {
+		return fmt.Errorf("WipeWritableShadowPast: post-wipe invariant failed: %w", err)
+	}
+
 	return nil
+}
+
+// AssertWritableShadowConsistentAt walks every writable-domain
+// ValuesTable and returns an error if any row's step coordinate is
+// strictly greater than `stepContaining = lastTxNum / stepSize`.
+//
+// Post-WipeWritableShadowPast invariant: NO writable-shadow entry
+// covers any txnum > lastTxNum. The encoded step coordinate of a row
+// IS the step at which the row was last written (per the same
+// LargeValues / DupSort encoding the wipe path uses), so any row with
+// step > stepContaining represents a write at a txnum past
+// lastTxNum — drift from a prior failed catch-up cycle whose parallel-
+// exec state writes never got rolled back.
+//
+// Called from:
+//  1. End of WipeWritableShadowPast (post-wipe sanity gate)
+//  2. Provider.Unwind, before the boundary-step regen reads via
+//     HistorySeek (drift would otherwise propagate into the
+//     regenerated .kv as a baseline)
+//
+// Cheap O(N) cursor walk per domain. The first 16 offenders per
+// domain are formatted into the returned error so the operator can
+// see which keys leaked. Returns nil when every writable-shadow row
+// has step <= stepContaining.
+func (a *Aggregator) AssertWritableShadowConsistentAt(ctx context.Context, tx kv.Tx, lastTxNum uint64) error {
+	stepSize := a.StepSize()
+	if stepSize == 0 {
+		return fmt.Errorf("AssertWritableShadowConsistentAt: StepSize() == 0")
+	}
+	stepContaining := lastTxNum / stepSize
+
+	writableDomains := []kv.Domain{
+		kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain,
+		kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain,
+	}
+
+	var driftDetails []string
+	for _, name := range writableDomains {
+		d := a.d[name]
+		if d == nil {
+			continue
+		}
+		offenders, total, err := findStepCoordinateOffenders(tx, d, stepContaining)
+		if err != nil {
+			return fmt.Errorf("AssertWritableShadowConsistentAt: domain=%s: %w", d.FilenameBase, err)
+		}
+		if total > 0 {
+			driftDetails = append(driftDetails,
+				fmt.Sprintf("  domain=%s: %d entries with step > %d (sample: %s)",
+					d.FilenameBase, total, stepContaining, strings.Join(offenders, "; ")))
+		}
+	}
+
+	if len(driftDetails) > 0 {
+		return fmt.Errorf("writable shadow drift past stepContaining=%d (lastTxNum=%d, stepSize=%d):\n%s",
+			stepContaining, lastTxNum, stepSize, strings.Join(driftDetails, "\n"))
+	}
+	return nil
+}
+
+// findStepCoordinateOffenders walks a domain's ValuesTable and returns
+// formatted descriptions of up to 16 rows whose decoded step coordinate
+// > stepThreshold, along with the total count.
+//
+// The step coordinate's location follows the same convention as
+// wipeDomainValuesFiltered (LargeValues vs DupSort).
+func findStepCoordinateOffenders(tx kv.Tx, d *Domain, stepThreshold uint64) (sample []string, total int, err error) {
+	const maxReport = 16
+
+	if d.LargeValues {
+		c, err := tx.Cursor(d.ValuesTable)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return nil, 0, err
+			}
+			if len(k) < 8 {
+				continue
+			}
+			encodedStep := binary.BigEndian.Uint64(k[len(k)-8:])
+			step := ^encodedStep
+			if step > stepThreshold {
+				total++
+				if len(sample) < maxReport {
+					sample = append(sample, fmt.Sprintf("key=%x step=%d", k[:len(k)-8], step))
+				}
+			}
+		}
+		return sample, total, nil
+	}
+
+	c, err := tx.CursorDupSort(d.ValuesTable)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(v) < 8 {
+			continue
+		}
+		encodedStep := binary.BigEndian.Uint64(v[:8])
+		step := ^encodedStep
+		if step > stepThreshold {
+			total++
+			if len(sample) < maxReport {
+				sample = append(sample, fmt.Sprintf("key=%x step=%d", k, step))
+			}
+		}
+	}
+	return sample, total, nil
 }
 
 // collectKeysChangedInRange returns the deduped set of keys with at
