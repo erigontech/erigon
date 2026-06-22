@@ -894,10 +894,6 @@ func rawCursor(c kv.Cursor) *mdbx.Cursor {
 // It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
 // Returned keys  valid until tx end
 func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
-	const maxChunks = 4096 // bound DistributeCursors' ~O(n^2) cost and the per-cursor leaf fault
-	if n > maxChunks {
-		n = maxChunks
-	}
 	if n <= 1 {
 		return [][]byte{from, nil}, nil
 	}
