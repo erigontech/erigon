@@ -111,7 +111,7 @@ func (r *ReadAhead) plan(ctx context.Context, db RoDB, table string, from []byte
 	err := db.View(ctx, func(tx Tx) error {
 		s, ok := tx.(DBWithDistributionSupport)
 		if !ok { // engine can't count-split (memdb has nothing to warm) -> skip prefetch
-			log.Warn("[read-ahead] disabled: tx is not a BucketSplitter", "table", table, "tx", fmt.Sprintf("%T", tx))
+			log.Warn("[read-ahead] disabled: tx is not a DBWithDistributionSupport", "table", table, "tx", fmt.Sprintf("%T", tx))
 			return nil
 		}
 		tableSize, _ = tx.BucketSize(table)
