@@ -67,12 +67,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	if (blockNrOrHash.BlockHash == nil && hash == common.Hash{}) {
-		stream.WriteNil()
 		return fmt.Errorf("block #%d not found", *blockNrOrHash.BlockNumber)
 	}
 
 	if blockNumber == 0 {
-		stream.WriteNil()
 		return fmt.Errorf("genesis is not traceable")
 	}
 
@@ -88,7 +86,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	if block == nil {
-		stream.WriteNil()
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
@@ -290,7 +287,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 
 	if blockNum == 0 {
-		stream.WriteNil()
 		return fmt.Errorf("genesis is not traceable")
 	}
 
@@ -319,12 +315,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 			return err
 		}
 		if txNumMin+1 > txNum {
-			stream.WriteNil()
 			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 		txnIndex = int(txNum - txNumMin - 1)
 		if txnIndex >= block.Transactions().Len() {
-			stream.WriteNil()
 			return fmt.Errorf("transaction %#x not found", hash)
 		}
 	}
@@ -511,7 +505,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	if len(bundles) == 0 {
-		stream.WriteNil()
 		return errors.New("empty bundles")
 	}
 	empty := true
@@ -522,7 +515,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	if empty {
-		stream.WriteNil()
 		return errors.New("empty bundles")
 	}
 
@@ -544,7 +536,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	if header == nil {
-		stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 

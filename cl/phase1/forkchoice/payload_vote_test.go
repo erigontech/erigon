@@ -19,10 +19,16 @@ import (
 type ptcVoteForkGraph struct {
 	fork_graph.ForkGraph
 	envelopes map[common.Hash]bool
+	blocks    map[common.Hash]*cltypes.SignedBeaconBlock
 }
 
 func (g ptcVoteForkGraph) HasEnvelope(root common.Hash) bool {
 	return g.envelopes[root]
+}
+
+func (g ptcVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := g.blocks[root]
+	return block, ok
 }
 
 type payloadVoteForkGraph struct {
@@ -239,6 +245,54 @@ func TestPtcShouldBuildOnFullWithUnavailableMajority(t *testing.T) {
 	}))
 }
 
+func TestPtcShouldBuildOnFullWithLatePayloadMajority(t *testing.T) {
+	root := common.HexToHash("0x07")
+	f := newPtcVoteTestStore(root)
+	f.payloadTimelinessVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
+
+	require.False(t, f.ShouldBuildOnFull(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}))
+}
+
+func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
+	root := common.HexToHash("0x05")
+	f := newPtcVoteTestStore(root)
+	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
+	f.payloadDataAvailabilityVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
+	f.payloadTimelinessVote.Store(root, ptcVotes(0, ptcVoteThreshold()+1))
+
+	require.True(t, f.ShouldBuildOnFull(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}))
+}
+
+func TestPtcIsPreviousSlotPayloadDecision(t *testing.T) {
+	root := common.HexToHash("0x06")
+	f := newPtcVoteTestStore(root)
+
+	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}))
+	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusEmpty,
+	}))
+	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}))
+
+	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
+	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}))
+}
+
 func TestGloasForkChoiceRequiresVerifiedPayload(t *testing.T) {
 	root := common.HexToHash("0x1234")
 
@@ -381,15 +435,24 @@ func TestStoreAnchorEnvelopeRejectsRootMismatch(t *testing.T) {
 }
 
 func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
+	cfg := &clparams.MainnetBeaconConfig
+	block := &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 0},
+	}
 	verifiedExecutionPayload, _ := lru.New[common.Hash, struct{}](16)
 	verifiedExecutionPayload.Add(root, struct{}{})
-	return &ForkChoiceStore{
-		beaconCfg:                &clparams.MainnetBeaconConfig,
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{root: block}
+	envelopes := map[common.Hash]bool{root: true}
+	fg := ptcVoteForkGraph{envelopes: envelopes, blocks: blocks}
+	f := &ForkChoiceStore{
+		genesisTime: 0,
+		beaconCfg:   cfg,
+		forkGraph:   fg,
+
 		verifiedExecutionPayload: verifiedExecutionPayload,
-		forkGraph: ptcVoteForkGraph{
-			envelopes: map[common.Hash]bool{root: true},
-		},
 	}
+	f.time.Store(cfg.SecondsPerSlot)
+	return f
 }
 
 func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verified bool) *ForkChoiceStore {

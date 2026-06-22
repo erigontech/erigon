@@ -407,7 +407,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. Low values are fine for low read-concurrency nodes (e.g. validators); raise it for nodes serving heavy parallel RPC",
 		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -470,11 +470,6 @@ var (
 		Value: 200,
 	}
 
-	HTTPPathPrefixFlag = cli.StringFlag{
-		Name:  "http.rpcprefix",
-		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
-		Value: "",
-	}
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
 		Usage: "Enable TLS handshake",
@@ -516,11 +511,6 @@ var (
 	WSAllowedOriginsFlag = cli.StringFlag{
 		Name:  "ws.origins",
 		Usage: "Origins from which to accept websockets requests",
-		Value: "",
-	}
-	WSPathPrefixFlag = cli.StringFlag{
-		Name:  "ws.rpcprefix",
-		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
 	}
 	WSSubscribeLogsChannelSize = cli.IntFlag{
@@ -1104,6 +1094,22 @@ var (
 	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.concurrent-commitment",
 		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
+		Value: false,
+	}
+	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
+	// (ModeParallel) for commitment computation. Default off; flip to compare
+	// root hashes against a sequential sync before enabling broadly.
+	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.parallel-commitment",
+		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed). Takes precedence over --experimental.concurrent-commitment if both are set.",
+		Value: false,
+	}
+	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
+	// overlaps commitment fold work with block execution. Default off; takes
+	// precedence over the parallel/concurrent flags when set.
+	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.streaming-commitment",
+		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment and --experimental.concurrent-commitment if set.",
 		Value: false,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -1970,6 +1976,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
 		cfg.ExperimentalConcurrentCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
+		cfg.ExperimentalParallelCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
+		cfg.ExperimentalStreamingCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

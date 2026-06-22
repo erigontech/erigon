@@ -712,8 +712,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Build merkle proofs for all accessed accounts
-	// Use the proof infrastructure from the commitment context
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
+	// Use the proof infrastructure from the commitment context.
+	// Witness generation requires the sequential HexPatriciaHashed (Witness()
+	// type-asserts it); the parallel trie cannot serve it.
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
@@ -750,7 +752,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
+	// mode; canonical mode stays minimal to match the reference witness.
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -1121,6 +1125,7 @@ func buildWitnessTrie(
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
+	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
@@ -1140,7 +1145,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction", produceExclusionProofs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1303,8 +1308,9 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	expectedState := make(map[common.Address]*accounts.Account)
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
-	// Create commitment context for accurate storage roots (since they are not stored explicitly)
-	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
+	// Create commitment context for accurate storage roots (since they are not stored explicitly).
+	// Witness/proof generation requires the sequential HexPatriciaHashed; force it.
+	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
 	}
@@ -1340,7 +1346,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	}
 
 	// Generate the trie with correct storage roots
-	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState")
+	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState", false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate post-state trie: %w", err)
 	}

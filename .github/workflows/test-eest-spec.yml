@@ -24,7 +24,7 @@ jobs:
     outputs:
       matrix: ${{ steps.load.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       # Warming runs replace the shard matrix with one build per cache class;
@@ -60,7 +60,7 @@ jobs:
         run: echo "Runner $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -84,9 +84,10 @@ jobs:
         if: '!inputs.cache-warming-only'
         uses: actions/cache/restore@v5
         with:
-          # Only the .tar.gz files are cached; tools/test-fixtures.sh re-extracts
-          # them each run. cl_mainnet is intentionally excluded (owned by
-          # test-integration-caplin.yml's separate cache).
+          # Only the .tar.gz files are cached; each shard re-extracts just the
+          # fixture set it needs (tools/run-eest-spec-test.sh). cl_mainnet is
+          # intentionally excluded (owned by test-integration-caplin.yml's
+          # separate cache).
           path: |
             test-fixtures-cache/eest_stable.tar.gz
             test-fixtures-cache/eest_devnet.tar.gz

@@ -66,15 +66,16 @@ for tool in yq jq; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "run-eest-spec-test: required tool '$tool' not found in PATH" >&2; exit 1; }
 done
 
-# Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
+# Resolve the fixture set from the shard name. blocktests-{stable,devnet}-race-*
 # inherit from the parent shard (stable/devnet).
 case "$shard" in
-	*zkevm*)      base=test-fixtures-cache/eest_zkevm/fixtures ;;
-	*-stable*)    base=test-fixtures-cache/eest_stable/fixtures ;;
-	*-devnet*)    base=test-fixtures-cache/eest_devnet/fixtures ;;
-	*-benchmark*) base=test-fixtures-cache/eest_benchmark/fixtures ;;
+	*zkevm*)      fixtures=eest_zkevm ;;
+	*-stable*)    fixtures=eest_stable ;;
+	*-devnet*)    fixtures=eest_devnet ;;
+	*-benchmark*) fixtures=eest_benchmark ;;
 	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
+base=test-fixtures-cache/$fixtures/fixtures
 
 # Resolve workers + failure budget + exec3-parallel flag from the single-source
 # manifest. Both this script and the test-eest-spec.yml load-matrix job read
@@ -146,10 +147,14 @@ if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2
 fi
+
+# Provision only this shard's fixture set (no-op when already extracted) —
+# all corpora together are 20G+ extracted and don't fit on the smaller CI
+# runner disks.
+bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache "$fixtures"
+
 if [[ ! -d "$path" ]]; then
-	fixtures_target=test-fixtures-eest
-	case "$shard" in *zkevm*) fixtures_target=test-fixtures-zkevm ;; esac
-	echo "fixture path $path does not exist; run 'make $fixtures_target' first" >&2
+	echo "fixture path $path does not exist in the $fixtures corpus" >&2
 	exit 2
 fi
 

@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
@@ -822,6 +823,10 @@ mainloop:
 			}
 		case result := <-resultChan:
 			if result.err != nil {
+				if isExpectedColumnDownloadMiss(result.err) {
+					log.Trace("column sidecars unavailable from peer", "pid", result.pid, "err", result.err)
+					continue
+				}
 				log.Debug("failed to download columns from peer", "pid", result.pid, "err", result.err)
 				//d.rpc.BanPeer(result.pid)
 				continue
@@ -939,6 +944,17 @@ mainloop:
 	}
 
 	return nil
+}
+
+func isExpectedColumnDownloadMiss(err error) bool {
+	if err == nil {
+		return false
+	}
+	var peerErr *httpreqresp.PeerResponseError
+	if errors.As(err, &peerErr) {
+		return peerErr.Code == httpreqresp.ResponseCodeResourceUnavailable
+	}
+	return false
 }
 
 type downloadTableEntry struct {
