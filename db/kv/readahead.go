@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 )
 
-type BucketSplitter interface {
+type DBWithDistributionSupport interface {
 	// DistributeCursors partitions table into n approximately equal-COUNT key
 	// ranges using mdbx's b-tree distribution.
 	// It's fast on `Table >> RAM` case because touching only bran-nodes of b-tree
@@ -109,7 +109,7 @@ func (r *ReadAhead) plan(ctx context.Context, db RoDB, table string, from []byte
 	const chunkSize = 32 * datasize.MB // chunk size — by table size, not worker count
 	var tableSize uint64
 	err := db.View(ctx, func(tx Tx) error {
-		s, ok := tx.(BucketSplitter)
+		s, ok := tx.(DBWithDistributionSupport)
 		if !ok { // engine can't count-split (memdb has nothing to warm) -> skip prefetch
 			log.Warn("[read-ahead] disabled: tx is not a BucketSplitter", "table", table, "tx", fmt.Sprintf("%T", tx))
 			return nil

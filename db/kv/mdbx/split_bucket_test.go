@@ -60,7 +60,7 @@ func TestSplitBucketByCount(t *testing.T) {
 	}))
 
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		bounds, err := tx.(kv.BucketSplitter).DistributeCursors(table, nil, chunks)
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, nil, chunks)
 		require.NoError(t, err)
 
 		require.Greater(t, len(bounds), 2, "must split clustered keys into many ranges, not one")
@@ -114,7 +114,7 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 	}))
 
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		bounds, err := tx.(kv.BucketSplitter).DistributeCursors(table, nil, chunks)
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, nil, chunks)
 		require.NoError(t, err)
 		require.Greater(t, len(bounds), 2, "must split into many ranges")
 		require.Nil(t, bounds[0])
@@ -165,7 +165,7 @@ func TestSplitBucketByCountFewerPositions(t *testing.T) {
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		from := make([]byte, 8)
 		binary.BigEndian.PutUint64(from, uint64(n-5)) // only ~5 positions left, but n_cap is far larger
-		bounds, err := tx.(kv.BucketSplitter).DistributeCursors(table, from, 4096)
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, from, 4096)
 		require.NoError(t, err) // unset surplus cursors must not surface as an error
 		require.GreaterOrEqual(t, len(bounds), 2)
 		require.Equal(t, from, bounds[0])

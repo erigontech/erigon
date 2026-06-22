@@ -295,7 +295,7 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 // table's on-disk size.
 func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte, size uint64, err error) {
 	err = db.View(ctx, func(tx kv.Tx) error {
-		s, ok := tx.(kv.BucketSplitter)
+		s, ok := tx.(kv.DBWithDistributionSupport)
 		if !ok {
 			return nil
 		}
