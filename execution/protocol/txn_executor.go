@@ -370,7 +370,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
-	// Clause 5 & 6: the sender can pay the gas fee and cover the value transfer.
+	// Clauses 10 & 11: the sender can pay the gas fee and cover the value transfer.
 	if !gasBailout {
 		balanceCheck := st.gasVal
 		if st.feeCap != nil {
@@ -402,7 +402,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
-	// Clause 7. EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
+	// Clause 12. EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
 	// The tx must cover the sum, not just each component individually. Checked after
 	// the affordability check so insufficient-funds keeps precedence, as in geth.
 	intrinsicGasSum, overflow := math.SafeAdd(st.intrinsicGas.RegularGas, st.intrinsicGas.StateGas)
@@ -413,7 +413,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasSum, st.intrinsicGas.FloorGasCost))
 	}
 
-	// EIP-3860/EIP-7907: reject oversized contract-creation initcode before
+	// Clause 13. EIP-3860: reject oversized contract-creation initcode before
 	// buying gas, so a rejected tx leaves sender state untouched.
 	if st.msg.To().IsNil() {
 		vmConfig := st.evm.Config()
