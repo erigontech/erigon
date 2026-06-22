@@ -337,7 +337,7 @@ func (c *Config) IsSpuriousDragon(num uint64) bool {
 // IsEIP161Enabled reports whether EIP-161 empty-account clearing applies at num:
 // Spurious Dragon is active and EIP-161 has not been disabled.
 func (c *Config) IsEIP161Enabled(num uint64) bool {
-	return c.IsSpuriousDragon(num) && !slices.Contains(c.DisabledEIPs, 161)
+	return c.IsSpuriousDragon(num) && !c.IsEIPDisabled(161)
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
