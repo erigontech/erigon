@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Defensive guard — skip silently only when docs/site/ is absent
       # (e.g. branches that predate the Docusaurus migration).
