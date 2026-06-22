@@ -7,11 +7,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -816,10 +818,37 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	return latestRoot, nil
 }
 
+// stepRangeFilter restricts a rebuild to account ranges whose step range is fully
+// contained in [fromStep, toStep). A nil filter processes every range.
+type stepRangeFilter struct {
+	fromStep, toStep kv.Step
+}
+
+func (f *stepRangeFilter) contains(stepSize, fromTxNum, toTxNum uint64) bool {
+	if f == nil {
+		return true
+	}
+	return kv.Step(fromTxNum/stepSize) >= f.fromStep && kv.Step(toTxNum/stepSize) <= f.toStep
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+	return rebuildCommitmentFiles(ctx, rwDb, txNumsReader, logger, squeeze, nil)
+}
+
+// RebuildCommitmentFilesRange recreates only the commitment file(s) whose account range
+// is fully contained in [fromStep, toStep), leaving every other range untouched. It is
+// meant for regenerating a single (e.g. corrupt or root-less) commitment .kv file rather
+// than the whole datadir. The aggregator carried by rwDb decides where output lands and
+// which input files are visible, so point it at a dir that holds the matching
+// accounts/storage/code files but no overlapping commitment files.
+func RebuildCommitmentFilesRange(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, fromStep, toStep kv.Step, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+	return rebuildCommitmentFiles(ctx, rwDb, txNumsReader, logger, squeeze, &stepRangeFilter{fromStep: fromStep, toStep: toStep})
+}
+
+func rebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool, filter *stepRangeFilter) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
 	// disable hard alignment; allowing commitment and storage/account to have
@@ -886,6 +915,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	for i, r := range ranges {
 		rangeFromTxNum, rangeToTxNum := r.FromTo() // start-end txnum of found range
 		lastTxnumInShard := rangeToTxNum
+		if !filter.contains(a.StepSize(), rangeFromTxNum, rangeToTxNum) {
+			logger.Info("[commitment_rebuild] skipping out-of-range", "range", r.String("", a.StepSize()))
+			continue
+		}
 		if acRo.TxNumsInFiles(kv.CommitmentDomain) >= rangeToTxNum {
 			logger.Info("[commitment_rebuild] skipping existing range", "range", r.String("", a.StepSize()))
 			continue
@@ -1039,6 +1072,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		logger.Info("[rebuild_commitment] finished range", "stateRoot", rhx, "range", r.String("", a.StepSize()),
 			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
+		// For a single-range regeneration the prior commitment files were only needed as the
+		// trie's starting state, which the computation above has already consumed. Drop them
+		// before merging so the merge coalesces only the freshly built shards into exactly
+		// [from,to) instead of pulling the priors into a larger merged range.
+		if filter != nil && filter.fromStep > 0 {
+			if err := dropPriorCommitmentFiles(a, filter.fromStep, logger); err != nil {
+				return nil, err
+			}
+		}
+
 		for {
 			smthDone, err := a.mergeLoopStep(ctx, rangeToTxNum)
 			if err != nil {
@@ -1165,4 +1208,147 @@ func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {
 		res = append(res, f)
 	}
 	return res
+}
+
+// LinkCommitmentRebuildInputs populates dst with the input files needed to regenerate a
+// commitment range starting at priorEndStep: the accounts/storage/code domain files, the
+// salt + db-settings files, and the commitment files that end at or before priorEndStep
+// (their trie state is the starting point for a non-base range). Commitment files covering
+// the target range itself and later ranges are skipped so the rebuild produces them fresh
+// without overlap. Files are hardlinked where possible, copied otherwise; src is never
+// modified.
+func LinkCommitmentRebuildInputs(src, dst datadir.Dirs, priorEndStep kv.Step, logger log.Logger) error {
+	domainTags := map[string]kv.Domain{
+		"-" + kv.AccountsDomain.String() + ".":   kv.AccountsDomain,
+		"-" + kv.StorageDomain.String() + ".":    kv.StorageDomain,
+		"-" + kv.CodeDomain.String() + ".":       kv.CodeDomain,
+		"-" + kv.CommitmentDomain.String() + ".": kv.CommitmentDomain,
+	}
+	entries, err := os.ReadDir(src.SnapDomain)
+	if err != nil {
+		return err
+	}
+	var linked, priors int
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		var domain kv.Domain
+		matched := false
+		for tag, d := range domainTags {
+			if strings.Contains(name, tag) {
+				domain, matched = d, true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		if domain == kv.CommitmentDomain {
+			// only bring prior commitment files (state for a non-base range); never the
+			// target range or later ranges, which must be rebuilt from scratch.
+			_, endStep, ok := parseFileStepRange(name)
+			if !ok || endStep > priorEndStep {
+				continue
+			}
+			priors++
+		}
+		if err := linkOrCopy(filepath.Join(src.SnapDomain, name), filepath.Join(dst.SnapDomain, name)); err != nil {
+			return err
+		}
+		linked++
+	}
+
+	for _, name := range []string{"salt-state.txt", "salt-blocks.txt", ERIGONDB_SETTINGS_FILE} {
+		srcPath := filepath.Join(src.Snap, name)
+		exists, err := dir.FileExist(srcPath)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if err := linkOrCopy(srcPath, filepath.Join(dst.Snap, name)); err != nil {
+			return err
+		}
+	}
+	logger.Info("[commitment_rebuild] linked input files", "files", linked, "priorCommitmentFiles", priors, "from", src.SnapDomain, "to", dst.SnapDomain)
+	return nil
+}
+
+// dropPriorCommitmentFiles removes every commitment file (and its accessors) ending at or
+// before fromStep from the aggregator's snapshot dir, then re-opens the folder so the merge
+// only sees the freshly rebuilt shards. The removed files are the hardlinked priors, so the
+// source datadir is unaffected.
+func dropPriorCommitmentFiles(a *Aggregator, fromStep kv.Step, logger log.Logger) error {
+	entries, err := os.ReadDir(a.dirs.SnapDomain)
+	if err != nil {
+		return err
+	}
+	tag := "-" + kv.CommitmentDomain.String() + "."
+	var removed int
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.Contains(name, tag) {
+			continue
+		}
+		_, endStep, ok := parseFileStepRange(name)
+		if !ok || endStep > fromStep {
+			continue
+		}
+		if err := dir.RemoveFile(filepath.Join(a.dirs.SnapDomain, name)); err != nil {
+			return err
+		}
+		removed++
+	}
+	logger.Info("[commitment_rebuild] dropped prior commitment files before merge", "files", removed, "uptoStep", fromStep)
+	return a.OpenFolder()
+}
+
+// parseFileStepRange extracts the [from,to) step range from a snapshot file name such as
+// "v1.0-accounts.0-2048.kv" (the segment right before the extension).
+func parseFileStepRange(name string) (from, to kv.Step, ok bool) {
+	parts := strings.Split(name, ".")
+	if len(parts) < 3 {
+		return 0, 0, false
+	}
+	fromTo := strings.Split(parts[len(parts)-2], "-")
+	if len(fromTo) != 2 {
+		return 0, 0, false
+	}
+	f, err := strconv.ParseUint(fromTo[0], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	t, err := strconv.ParseUint(fromTo[1], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return kv.Step(f), kv.Step(t), true
+}
+
+func linkOrCopy(src, dst string) error {
+	if exists, err := dir.FileExist(dst); err != nil {
+		return err
+	} else if exists {
+		return nil
+	}
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

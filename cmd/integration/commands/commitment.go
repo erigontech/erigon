@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -87,6 +88,13 @@ var (
 	benchUseGetAsOf bool
 )
 
+// rebuild-range command flags
+var (
+	commitmentRangeOutput   string
+	commitmentRangeStepFrom uint64
+	commitmentRangeStepTo   uint64
+)
+
 // bench-history-lookup command flags
 var (
 	benchHistoryPrefix    string
@@ -121,6 +129,16 @@ func init() {
 	withResume(cmdCommitmentRebuild)
 	withNoHistory(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
+
+	// commitment rebuild-range
+	withChain(cmdCommitmentRebuildRange)
+	withDataDir(cmdCommitmentRebuildRange)
+	withConfig(cmdCommitmentRebuildRange)
+	withSqueeze(cmdCommitmentRebuildRange)
+	cmdCommitmentRebuildRange.Flags().StringVar(&commitmentRangeOutput, "output", "", "output datadir for regenerated commitment files (required); source datadir is left untouched")
+	cmdCommitmentRebuildRange.Flags().Uint64Var(&commitmentRangeStepFrom, "step.from", 0, "start step of the commitment file range to regenerate (inclusive)")
+	cmdCommitmentRebuildRange.Flags().Uint64Var(&commitmentRangeStepTo, "step.to", 0, "end step of the commitment file range to regenerate (exclusive)")
+	commitmentCmd.AddCommand(cmdCommitmentRebuildRange)
 
 	// commitment print
 	withChain(cmdCommitmentPrint)
@@ -402,6 +420,91 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			return err
 		}
 	}
+	return nil
+}
+
+// integration commitment rebuild-range
+var cmdCommitmentRebuildRange = &cobra.Command{
+	Use:   "rebuild-range",
+	Short: "Regenerate a single commitment file range into a separate output datadir, leaving the source untouched",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := commitmentRebuildRange(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if commitmentRangeOutput == "" {
+		return errors.New("--output is required")
+	}
+	if commitmentRangeStepTo <= commitmentRangeStepFrom {
+		return fmt.Errorf("invalid step range: --step.to (%d) must be greater than --step.from (%d)", commitmentRangeStepTo, commitmentRangeStepFrom)
+	}
+
+	srcDirs := datadir.New(datadirCli)
+
+	// Regenerated files land directly in the output dir (it is used literally as the
+	// snapshot domain dir), not under an <output>/snapshots/domain subtree.
+	outDirs := datadir.New(commitmentRangeOutput)
+	if outDirs.DataDir == srcDirs.DataDir {
+		return errors.New("--output must differ from --datadir")
+	}
+	outDirs.Snap = outDirs.DataDir
+	outDirs.SnapDomain = outDirs.DataDir
+	outDirs.SnapIdx = outDirs.DataDir
+	outDirs.SnapHistory = outDirs.DataDir
+	outDirs.SnapAccessors = outDirs.DataDir
+
+	if err := dbstate.LinkCommitmentRebuildInputs(srcDirs, outDirs, kv.Step(commitmentRangeStepFrom), logger); err != nil {
+		return fmt.Errorf("linking rebuild inputs into output dir: %w", err)
+	}
+
+	br, _ := blocksIO(db, logger)
+	txNumsReader := br.TxnumReader()
+
+	rawDB := db.(*temporal.DB).InternalDB()
+
+	settings, err := dbstate.ResolveErigonDBSettings(srcDirs, logger, true)
+	if err != nil {
+		return err
+	}
+
+	outAgg := dbstate.New(outDirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(ctx, rawDB)
+	defer outAgg.Close()
+	if err := outAgg.OpenFolder(); err != nil {
+		return fmt.Errorf("opening output aggregator: %w", err)
+	}
+	outAgg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	outAgg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
+	outAgg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
+	outAgg.PresetOfflineMerge()
+
+	outDB, err := temporal.New(rawDB, outAgg)
+	if err != nil {
+		return err
+	}
+	// outDB shares rawDB with db (closed by the caller); closing outAgg above is enough.
+
+	root, err := dbstate.RebuildCommitmentFilesRange(ctx, outDB, &txNumsReader,
+		kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), logger, squeeze)
+	if err != nil {
+		return err
+	}
+	logger.Info("[commitment_rebuild] range regenerated",
+		"steps", fmt.Sprintf("%d-%d", commitmentRangeStepFrom, commitmentRangeStepTo),
+		"root", hex.EncodeToString(root), "output", outDirs.SnapDomain)
 	return nil
 }
 
