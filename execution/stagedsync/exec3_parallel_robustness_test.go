@@ -1048,3 +1048,82 @@ func TestProcessCommitErr(t *testing.T) {
 		require.Nil(t, stash, "non-trie-root errors must not be stashed")
 	})
 }
+
+// TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing pins the apply
+// loop's close-branch precedence: when processCommit's cancel manufactures
+// an in-flight block missing its blockResult, the deferred ErrWrongTrieRoot
+// must surface ahead of the missing-blocks completeness error. Without the
+// reorder, the operator-visible failure is a generic ErrInvalidBlock naming
+// the in-flight block instead of the actual wrong-root block.
+//
+// IMPORTANT: this mirrors the apply-loop close-branch sequence around
+// exec3_parallel.go line 456-465. Keep the order here in lock-step with
+// production or the test will pass vacuously.
+func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
+	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
+		if deferredRootErr != nil {
+			return deferredRootErr
+		}
+		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+			return fmt.Errorf("%w: %d missing blockResult(s) %v", rules.ErrInvalidBlock, len(missing), missing)
+		}
+		return nil
+	}
+
+	mkSet := func(ns ...uint64) map[uint64]struct{} {
+		s := make(map[uint64]struct{}, len(ns))
+		for _, n := range ns {
+			s[n] = struct{}{}
+		}
+		return s
+	}
+
+	t.Run("deferred root + missing block — root error wins", func(t *testing.T) {
+		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+		err := closeBranch(rootErr, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, ErrWrongTrieRoot, "deferred root error must surface ahead of missing-block noise")
+		require.Equal(t, rootErr.Error(), err.Error(), "exact rootErr message must be returned — not the missing-block wrapper")
+	})
+
+	t.Run("missing block only — invalid-block error stands", func(t *testing.T) {
+		err := closeBranch(nil, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.NotErrorIs(t, err, ErrWrongTrieRoot)
+		require.Contains(t, err.Error(), "missing blockResult")
+	})
+
+	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {
+		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+		err := closeBranch(rootErr, mkSet(5), mkSet(5))
+		require.ErrorIs(t, err, ErrWrongTrieRoot)
+	})
+
+	t.Run("clean exit — nil", func(t *testing.T) {
+		require.NoError(t, closeBranch(nil, mkSet(5), mkSet(5)))
+	})
+}
+
+// TestExecLoopExitCheckDeliberateStop verifies execLoopExitCheck returns
+// nil when deliberateStop is set, so the exec loop's pending-block
+// completeness check does not generate ErrInvalidBlock noise that would
+// be joined with the apply loop's deferred ErrWrongTrieRoot.
+func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
+	t.Run("non-empty map but deliberateStop set returns nil", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{
+			3: {},
+			7: {},
+		}
+		pe.deliberateStop.Store(true)
+		if err := pe.execLoopExitCheck("post-cancel-drain"); err != nil {
+			t.Fatalf("deliberateStop must suppress pending-block error, got: %v", err)
+		}
+	})
+
+	t.Run("non-empty map without deliberateStop still errors", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		err := pe.execLoopExitCheck("silent-miss")
+		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
+	})
+}
