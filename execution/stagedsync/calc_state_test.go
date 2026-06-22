@@ -546,3 +546,83 @@ func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string)
 	require.NotNil(t, found, "no Update emitted for plainKey %x", plainKey)
 	return found
 }
+
+// TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount pins that emptyRemoval=false
+// retains an empty account as a full UPDATE rather than emitting SelfDestructPath.
+func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
+	zeroAddr := accounts.InternAddress([20]byte{})
+
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := state.VersionedWrites{
+		&state.VersionedWrite{Address: zeroAddr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: zeroAddr, Path: state.NoncePath, Val: uint64(0), Version: ver},
+		&state.VersionedWrite{Address: zeroAddr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+	}
+	vm := state.NewVersionMap(nil)
+	for _, w := range rawWrites {
+		vm.Write(w.Address, w.Path, accounts.NilKey, ver, w.Val, true)
+	}
+
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false)
+
+	for _, w := range normalized {
+		assert.NotEqual(t, state.SelfDestructPath, w.Path,
+			"emptyRemoval=false must suppress SelfDestructPath emission for empty accounts")
+	}
+
+	cs := newTestCalcState()
+	cs.ApplyWrites(normalized)
+	acc, ok := cs.accounts[zeroAddr]
+	require.True(t, ok)
+	assert.False(t, acc.Deleted)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	keyVal := zeroAddr.Value()
+	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
+	assert.Equal(t,
+		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
+		got.Flags,
+		"empty account at genesis must emit full UPDATE, matching serial's TrieContext.Account")
+}
+
+// TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161 pins that emptyRemoval=true
+// emits SelfDestructPath for an empty account and flushes as DeleteUpdate.
+func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xab, 0xcd})
+
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: uint64(0), Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+	}
+	vm := state.NewVersionMap(nil)
+	for _, w := range rawWrites {
+		vm.Write(w.Address, w.Path, accounts.NilKey, ver, w.Val, true)
+	}
+
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true)
+
+	sdSeen := false
+	for _, w := range normalized {
+		if w.Path == state.SelfDestructPath && w.Address == addr {
+			v, _ := w.Val.(bool)
+			sdSeen = sdSeen || v
+		}
+	}
+	require.True(t, sdSeen, "emptyRemoval=true must emit SelfDestructPath=true for empty account")
+
+	cs := newTestCalcState()
+	cs.ApplyWrites(normalized)
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.True(t, acc.Deleted)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	keyVal := addr.Value()
+	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
+	assert.Equal(t, commitment.DeleteUpdate, got.Flags,
+		"empty account with emptyRemoval=true must emit DeleteUpdate (EIP-161)")
+}
