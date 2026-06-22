@@ -262,6 +262,24 @@ func TestTouchUpdates_Account(t *testing.T) {
 	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
 }
 
+// TestTouchUpdates_AccountModeParallel: ModeParallel must merge per-field
+// touches of one address additively, like ModeUpdate.
+func TestTouchUpdates_AccountModeParallel(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x42})
+
+	writes := VersionedWrites{
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1000)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
+		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
+	}
+
+	updates := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), func(k []byte) []byte { return k })
+	defer updates.Close()
+	writes.TouchUpdates(updates)
+
+	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
+}
+
 // TestToTouchKeys_Storage verifies storage entries use correct composite keys.
 func TestToTouchKeys_Storage(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x55})

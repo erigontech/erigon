@@ -376,7 +376,9 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
+	// context factory wired here, so use the sequential trie (identical root).
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, err
 	}
