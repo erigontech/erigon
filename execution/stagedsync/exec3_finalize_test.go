@@ -1811,30 +1811,18 @@ func countPath(writes state.VersionedWrites, path state.AccountPath) int {
 	return n
 }
 
-// TestNormalizeWriteSet_CodePathTravelsWithCodeHash reproduces the EIP-7702
-// write-drop that wrongly rejected a delegated sender with "sender not an eoa".
-//
-// A delegating tx re-executes in parallel. On the re-exec, SetCode short-circuits
-// (so.Code() already returns the designator written by the prior incarnation, so
-// bytes.Equal(prevcode, code) is true), so the validated incarnation emits the
-// authority's nonce bump but NO fresh CodePath/CodeHashPath. The raw writeset
-// therefore carries the stale prior-incarnation code writes. normalizeWriteSet
-// keeps CodeHashPath (resolved from the versionMap) but the incarnation filter
-// drops the stale CodePath — leaving a codeHash with no code. The account then
-// persists a non-empty codeHash whose code bytes are missing from CodeDomain, so
-// a later block's GetDelegatedDesignation reads empty and EIP-3607 rejects the
-// 7702 sender. CodePath must be recovered so code always travels with its hash.
+// Pins normalizeWriteSet's contract that an EIP-7702 designator never produces
+// a CodeHashPath without its matching CodePath, even when the raw writeset only
+// carries stale-incarnation code entries.
 func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	authority := accounts.InternAddress([20]byte{0x42})
 
-	// EIP-7702 delegation designator: 0xef0100 || target(20 bytes).
 	designator := types.AddressToDelegation(accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02}))
 	designatorHash := accounts.InternCodeHash(crypto.Keccak256Hash(designator))
 
 	const txIndex = 5
 
-	// Incarnation 0 delegates: designator code + its hash + authority nonce bump.
 	vm.FlushVersionedWrites(state.VersionedWrites{
 		{Address: authority, Path: state.CodePath, Val: designator,
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
@@ -1844,16 +1832,11 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}, true, "")
 
-	// Incarnation 1 (validated) re-executes; SetCode short-circuits, so only the
-	// nonce is re-emitted — no fresh CodePath/CodeHashPath.
 	vm.FlushVersionedWrites(state.VersionedWrites{
 		{Address: authority, Path: state.NoncePath, Val: uint64(1),
 			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
 	}, true, "")
 
-	// blockIO.WriteSet retains both incarnations' entries (versionMap doesn't
-	// clear old), so the validated tx's raw writeset carries the stale inc-0
-	// code writes alongside the inc-1 nonce.
 	rawWrites := state.VersionedWrites{
 		{Address: authority, Path: state.NoncePath, Val: uint64(1),
 			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
@@ -1887,12 +1870,9 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 	assert.Equal(t, designator, gotCode, "recovered code is the 7702 designator bytes")
 }
 
-// The SetCode short-circuit variant: the designator is already committed (so a
-// re-delegating tx's SetCode short-circuits and the versionMap holds NO
-// CodePath for this tx at all). The fill-missing loop still fills CodeHashPath
-// from committed state, so recovery must fall back to stateReader.ReadAccountCode
-// — the versionMap path alone (the original fix) would miss this and persist a
-// codeHash with no code.
+// Pins that recovery does NOT fire when the raw writeset has no
+// CodePath/CodeHashPath entry: the committed designator is already in
+// CodeDomain, so re-emitting CodePath would be redundant write-amplification.
 func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	authority := accounts.InternAddress([20]byte{0x42})
@@ -1901,15 +1881,10 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 
 	const txIndex = 5
 
-	// authority is an already-committed 7702 delegation: its designator code +
-	// codeHash live in committed state, NOT in this batch's versionMap.
 	reader := newMapStateReader()
 	reader.accounts[authority] = &accounts.Account{Nonce: 1, CodeHash: designatorHash}
 	reader.code[authority] = designator
 
-	// Re-delegating tx: SetCode short-circuits (code unchanged), so the only
-	// write is the nonce bump — no CodePath/CodeHashPath, and nothing for
-	// CodePath in the versionMap.
 	vm.FlushVersionedWrites(state.VersionedWrites{
 		{Address: authority, Path: state.NoncePath, Val: uint64(2),
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
@@ -1923,30 +1898,16 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 
 	require.Equal(t, 1, countPath(result, state.CodeHashPath),
 		"codeHash is filled from committed state for the modified account")
-	require.Equal(t, 1, countPath(result, state.CodePath),
-		"CodePath must be recovered via stateReader when the versionMap has none")
-	for _, w := range result {
-		if w.Path == state.CodePath {
-			assert.Equal(t, designator, w.Val.([]byte), "recovered code is the committed designator")
-		}
-	}
+	require.Equal(t, 0, countPath(result, state.CodePath),
+		"no raw CodePath/CodeHashPath entry — recovery must skip; code lives in CodeDomain")
 }
 
-// The CREATE/CREATE2 variant of the codeHash-no-code drop: an ORDINARY contract
-// (not a 7702 designator) deployed this block, re-executed so the validated
-// incarnation's SetCode short-circuits and only the stale-incarnation CodePath
-// survives in the raw writeset (dropped by the incarnation filter) while
-// CodeHashPath is kept. The versionMap holds the code (written this block), so
-// recovery must fire for ordinary code too — the original ParseDelegation gate
-// would have skipped it, persisting a codeHash with no code (mainnet 25291004:
-// a SafeProxyFactory CREATE2 proxy, called and reverted 6785 blocks later at
-// 25297789).
+// Pins that recovery covers ordinary CREATE/CREATE2 code, not just EIP-7702
+// designators: the versionMap-hit branch must not gate on ParseDelegation.
 func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	contract := accounts.InternAddress([20]byte{0x8e, 0x75, 0x5f, 0x34})
 
-	// Ordinary contract bytecode (standard Solidity prologue) — NOT a 7702
-	// designator, so types.ParseDelegation rejects it.
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x34, 0x80, 0x15, 0x61, 0x00, 0x10}
 	if _, ok := types.ParseDelegation(code); ok {
 		t.Fatal("test fixture must not be a 7702 designator")
@@ -1955,7 +1916,6 @@ func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 
 	const txIndex = 7
 
-	// Incarnation 0 deploys: code + its hash + nonce=1 (EIP-161 CREATE bump).
 	vm.FlushVersionedWrites(state.VersionedWrites{
 		{Address: contract, Path: state.CodePath, Val: code,
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
@@ -1965,7 +1925,6 @@ func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}, true, "")
 
-	// Incarnation 1 (validated) re-executes; SetCode short-circuits → only nonce.
 	vm.FlushVersionedWrites(state.VersionedWrites{
 		{Address: contract, Path: state.NoncePath, Val: uint64(1),
 			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
@@ -1975,9 +1934,9 @@ func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 		{Address: contract, Path: state.NoncePath, Val: uint64(1),
 			Version: state.Version{TxIndex: txIndex, Incarnation: 1}},
 		{Address: contract, Path: state.CodePath, Val: code,
-			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 		{Address: contract, Path: state.CodeHashPath, Val: codeHash,
-			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}
 
 	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
@@ -2000,9 +1959,8 @@ func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 	assert.Equal(t, code, gotCode, "recovered code is the deployed bytecode")
 }
 
-// Recovery must reject code that does not hash to the emitted CodeHashPath:
-// emitting mismatched code would itself break code/codeHash consistency, so a
-// candidate whose keccak != the recovered hash is skipped, not written.
+// Pins that recovery rejects candidate code whose keccak does not match the
+// emitted CodeHashPath, so a mismatched recovery never persists.
 func TestNormalizeWriteSet_CodePathRecoveryRejectsHashMismatch(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x42})

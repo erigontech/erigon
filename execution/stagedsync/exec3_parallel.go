@@ -3410,16 +3410,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// CodePath must travel with CodeHashPath. The CodeHashPath case and the
-	// fill-missing loop recover a codeHash from the versionMap, but nothing
-	// recovers CodePath: a tx whose validated writeset lacks a fresh CodePath
-	// (SetCode short-circuits on re-execution — bytes.Equal of the prior
-	// incarnation's code) would persist a non-empty codeHash with no code, and a
-	// later CALL would execute it as empty (wrong gas/root). A versionMap hit means
-	// the code was written in this block — recover it for any contract. On a miss,
-	// fall back to committed state only for 7702 designators: stateReader also
-	// returns an unchanged contract's code, and re-emitting that for every touched
-	// contract is write amplification with no correctness benefit.
+	// CodePath must travel with CodeHashPath; gated on raw-writeset
+	// CodePath/CodeHashPath presence to skip the fill-missing-loop case where
+	// the code is already in CodeDomain.
+	codeAddrInRaw := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		switch w.Path {
+		case state.CodePath, state.CodeHashPath:
+			codeAddrInRaw[w.Address] = true
+		}
+	}
 	codeInOutput := make(map[accounts.Address]bool)
 	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
 	for _, w := range filtered {
@@ -3432,9 +3432,6 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			}
 		}
 	}
-	// emit recovers code only if it hashes to the codeHash being recovered:
-	// emitting code that doesn't match its hash would itself break code/codeHash
-	// consistency, so a mismatch is skipped.
 	emit := func(addr accounts.Address, code []byte, want accounts.CodeHash) bool {
 		if crypto.Keccak256Hash(code) != want.Value() {
 			return false
@@ -3445,10 +3442,12 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			Val:     code,
 			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 		})
+		log.Warn("[codepath-recovery] re-emitted dropped CodePath",
+			"addr", common.Address(addr.Value()), "txIndex", txIndex, "incarnation", incarnation)
 		return true
 	}
 	for addr, h := range codeHashInOutput {
-		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] || !codeAddrInRaw[addr] {
 			continue
 		}
 		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
