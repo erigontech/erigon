@@ -106,8 +106,7 @@ type codeSizeEntry struct {
 
 type CodeCache struct {
 	// addrToHash maps a 20-byte Ethereum address to the maphash-derived
-	// codeID for the code at that address. Real LRU (was a no-op-when-full
-	// maphash.Map until commit 7d0998d0db) — fresh-address workloads now
+	// codeID for the code at that address. An LRU so fresh-address workloads
 	// evict oldest entries and warm up the working set, matching geth's
 	// lru.Cache pattern at core/state/database_code.go.
 	addrToHash *lru.Cache[[20]byte, versionedAddressID]

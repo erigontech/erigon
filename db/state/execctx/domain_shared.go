@@ -430,8 +430,7 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 // Concurrent workers (trie-warmup goroutines) pass their own accumulator via
 // ctx, so they neither share metrics state with the main goroutine nor take any
 // lock. Optional method — callers type-assert for it (mirrors the existing
-// AggregatorRoTx.MeteredGetLatest pattern). The plan is to migrate GetLatest
-// callers onto this ctx-carrying form in a follow-up, then drop the split.
+// AggregatorRoTx.MeteredGetLatest pattern).
 func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	return gt.sd.getLatestMetered(name, gt.tx, k, kvmetrics.MetricsFromContext(ctx))
 }

@@ -1006,8 +1006,7 @@ func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader
 }
 
 // CloneForWorker mirrors Clone. eth_simulation runs commitment single-threaded
-// (no concurrent warmup), so worker metering isn't needed here; deferred to the
-// state-read-path migration.
+// (no concurrent warmup), so worker metering isn't needed here.
 func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }

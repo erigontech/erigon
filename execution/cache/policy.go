@@ -33,8 +33,8 @@ package cache
 //
 // Pure LRU is scan-fragile in principle: a flood of one-shot keys (mainnet's
 // long tail of single-touch slots) can evict the genuinely-hot working set
-// because every cold scan is "more recent" than the hot entries. Two known
-// follow-up policies sit behind this seam:
+// because every cold scan is "more recent" than the hot entries. The Mode
+// seam admits two alternative eviction policies:
 //
 //   - ModeEvictFixedCache (reth's choice). Reth's execution cache is
 //     `fixed-cache`: a lock-free direct-mapped / set-associative array
