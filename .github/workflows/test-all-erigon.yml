@@ -147,8 +147,7 @@ jobs:
     strategy:
       matrix:
         os: [ windows-2025 ]
-    runs-on:
-      group: "selfhosted-win"
+    runs-on: ${{ matrix.os }}
 
     env:
       GOMODCACHE: C:\go-cache\mod
