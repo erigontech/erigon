@@ -1435,3 +1435,46 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 		})
 	}
 }
+
+// TestVersionedIO_MergeInPlaceEquivalentToMerge asserts that folding per-tx IO
+// into an accumulator via MergeInPlace yields a BAL identical to repeated Merge,
+// including the merge-into-existing-index path (two txs touching the same index).
+func TestVersionedIO_MergeInPlaceEquivalentToMerge(t *testing.T) {
+	t.Parallel()
+
+	addrs := []accounts.Address{
+		accounts.InternAddress(common.HexToAddress("0x1111")),
+		accounts.InternAddress(common.HexToAddress("0x2222")),
+		accounts.InternAddress(common.HexToAddress("0x3333")),
+	}
+	makeTxIO := func(txIdx int, a accounts.Address, bal uint64) *VersionedIO {
+		io := &VersionedIO{}
+		rs := ReadSet{}
+		rs.Set(VersionedRead{Address: a, Path: BalancePath, Version: Version{TxIndex: txIdx}, Val: bal})
+		io.RecordReads(Version{TxIndex: txIdx}, rs)
+		io.RecordWrites(Version{TxIndex: txIdx}, VersionedWrites{
+			&VersionedWrite{Address: a, Path: BalancePath, Version: Version{TxIndex: txIdx}, Val: *uint256.NewInt(bal + 1)},
+		})
+		io.RecordAccesses(Version{TxIndex: txIdx}, AccessSet{a: &accessOptions{}})
+		return io
+	}
+	txIOs := []*VersionedIO{
+		makeTxIO(0, addrs[0], 10),
+		makeTxIO(1, addrs[1], 20),
+		makeTxIO(2, addrs[2], 30),
+		makeTxIO(2, addrs[0], 40), // same index as a prior tx: exercises merge-into-existing
+	}
+
+	merged := &VersionedIO{}
+	for _, io := range txIOs {
+		merged = merged.Merge(io)
+	}
+	inplace := &VersionedIO{}
+	for _, io := range txIOs {
+		inplace.MergeInPlace(io)
+	}
+
+	require.Equal(t, merged.Len(), inplace.Len(), "Len mismatch")
+	require.Equal(t, merged.AsBlockAccessList().Hash(), inplace.AsBlockAccessList().Hash(),
+		"MergeInPlace must produce a BAL identical to repeated Merge")
+}

@@ -155,7 +155,7 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		return err
 	}
 	if ba.HasBAL() {
-		ba.balIO = ba.balIO.Merge(ibs.TxIO())
+		ba.balIO.MergeInPlace(ibs.TxIO())
 		ibs.ResetVersionedIO()
 	}
 	return nil
@@ -206,7 +206,7 @@ func (ba *BlockAssembler) AddTransactions(
 	writer := state.NewNoopWriter()
 	recordTxIO := func(balIO *state.VersionedIO) {
 		if balIO != nil {
-			ba.balIO = ba.balIO.Merge(ibs.TxIO())
+			ba.balIO.MergeInPlace(ibs.TxIO())
 		}
 		ibs.ResetVersionedIO()
 	}
@@ -398,7 +398,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	header := block.HeaderNoCopy()
 	if ba.HasBAL() {
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
-		ba.balIO = ba.balIO.Merge(ibs.TxIO())
+		ba.balIO.MergeInPlace(ibs.TxIO())
 		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.

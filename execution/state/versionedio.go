@@ -1373,6 +1373,44 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	return merged
 }
 
+// MergeInPlace folds other into io, mutating io. Unlike Merge it does not
+// reallocate io's existing per-tx entries, so accumulating per-transaction IO
+// across a block (e.g. the block builder folding each tx's IO into the block
+// BAL) is linear in total entries rather than O(n^2). Only the non-empty
+// entries of other are touched; the result is identical to io.Merge(other).
+func (io *VersionedIO) MergeInPlace(other *VersionedIO) {
+	if other == nil {
+		return
+	}
+	if n := len(other.inputs); n > len(io.inputs) {
+		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
+	}
+	for i := range other.inputs {
+		if len(other.inputs[i].readSet) == 0 {
+			continue
+		}
+		io.inputs[i] = io.inputs[i].Merge(other.inputs[i])
+	}
+	if n := len(other.outputs); n > len(io.outputs) {
+		io.outputs = append(io.outputs, make([]VersionedWrites, n-len(io.outputs))...)
+	}
+	for i := range other.outputs {
+		if len(other.outputs[i]) == 0 {
+			continue
+		}
+		io.outputs[i] = io.outputs[i].Merge(other.outputs[i])
+	}
+	if n := len(other.accessed); n > len(io.accessed) {
+		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
+	}
+	for i := range other.accessed {
+		if len(other.accessed[i]) == 0 {
+			continue
+		}
+		io.accessed[i] = io.accessed[i].Merge(other.accessed[i])
+	}
+}
+
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	if io == nil {
 		return nil
