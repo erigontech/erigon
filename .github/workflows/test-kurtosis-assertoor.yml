@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -335,7 +335,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
