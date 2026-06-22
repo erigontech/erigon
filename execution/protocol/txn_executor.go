@@ -90,7 +90,7 @@ type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
 	gasRemaining        mdgas.MdGas
-	intrinsicGas        mdgas.IntrinsicGasCalcResult // computed by preCheck; consumed by the intrinsic check and gas accounting
+	intrinsicGas        mdgas.IntrinsicGasCalcResult // computed by preCheck/ApplyFrame; consumed by the intrinsic check and gas accounting
 	gasVal              uint256.Int                  // gas fee, computed by preCheck; debited by buyGas
 	blobGasVal          uint256.Int                  // blob-gas fee, computed by preCheck; debited by buyGas
 	blockRegularGasUsed uint64                       // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
