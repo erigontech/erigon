@@ -19,9 +19,6 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.LeaveDeferredForCaller {
 		t.Error("LeaveDeferredForCaller should default to false")
 	}
-	if !cfg.EnableWarmupCache {
-		t.Error("EnableWarmupCache should default to true")
-	}
 	if !cfg.EnableTrieWarmup {
 		t.Error("EnableTrieWarmup should default to true")
 	}
@@ -38,12 +35,8 @@ func TestDefaultTrieConfig(t *testing.T) {
 
 func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	cfg := TrieConfig{}
-	wantUnset := DefaultWarmupNumWorkers
-	if dbg.TipTrieWarmupers > 0 {
-		wantUnset = dbg.TipTrieWarmupers
-	}
-	if got := cfg.WarmupNumWorkersOrDefault(); got != wantUnset {
-		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", wantUnset, got)
+	if got := cfg.WarmupNumWorkersOrDefault(); got != dbg.TipTrieWarmupers {
+		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", dbg.TipTrieWarmupers, got)
 	}
 
 	cfg = TrieConfig{WarmupNumWorkers: 3}
@@ -52,12 +45,21 @@ func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	}
 }
 
+func TestTrieConfig_WarmupNumWorkers_EnvDisable(t *testing.T) {
+	old := dbg.TipTrieWarmupers
+	dbg.TipTrieWarmupers = 0
+	defer func() { dbg.TipTrieWarmupers = old }()
+
+	if got := (TrieConfig{}).WarmupNumWorkersOrDefault(); got != 0 {
+		t.Errorf("explicit TIP_TRIE_WARMUPERS=0 must propagate as 0 (warmup disabled), got %d", got)
+	}
+}
+
 func TestTrieConfig_Subtrie(t *testing.T) {
 	cfg := TrieConfig{
 		Variant:                VariantHexPatriciaTrie,
 		DeferBranchUpdates:     true,
 		LeaveDeferredForCaller: true,
-		EnableWarmupCache:      true,
 		EnableTrieWarmup:       true,
 		CsvMetricsFilePrefix:   "pre",
 		MemoizationOff:         true,
@@ -81,7 +83,6 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	cfg := TrieConfig{
 		DeferBranchUpdates:     false,
 		LeaveDeferredForCaller: true,
-		EnableWarmupCache:      true,
 		MemoizationOff:         true,
 	}
 
@@ -96,9 +97,6 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	}
 	if !hph.leaveDeferredForCaller {
 		t.Error("leaveDeferredForCaller should be true")
-	}
-	if !hph.enableWarmupCache {
-		t.Error("enableWarmupCache should be true")
 	}
 	if !hph.memoizationOff {
 		t.Error("memoizationOff should be true")
@@ -155,17 +153,6 @@ func TestTrieConfig_ConcurrentPatriciaHashedPropagation(t *testing.T) {
 		}
 		if !mount.cfg.MemoizationOff {
 			t.Errorf("mount[%d] should inherit MemoizationOff=true", i)
-		}
-	}
-
-	// Runtime EnableWarmupCache should propagate to root and all mounts
-	cph.EnableWarmupCache(true)
-	if !cph.root.cfg.EnableWarmupCache {
-		t.Error("EnableWarmupCache should update root config")
-	}
-	for i, mount := range cph.mounts {
-		if !mount.cfg.EnableWarmupCache {
-			t.Errorf("mount[%d] cfg.EnableWarmupCache should be true after EnableWarmupCache(true)", i)
 		}
 	}
 }

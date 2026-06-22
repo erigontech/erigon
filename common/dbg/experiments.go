@@ -46,6 +46,10 @@ var (
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
+	// EnvWarmupParallelProcess gates branch-cache warmup inside the parallel
+	// commitment Process. Off by default; opt in to prefetch under measurement.
+	EnvWarmupParallelProcess = EnvBool("ERIGON_WARMUP_PARALLEL_PROCESS", false)
+
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
@@ -79,7 +83,7 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))

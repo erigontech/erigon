@@ -1550,6 +1550,11 @@ func RLPDecode(encodedNodes [][]byte) (*Trie, error) {
 	// Build a map from hash -> decoded node
 	nodeMap := make(map[common.Hash]Node)
 	for _, encoded := range encodedNodes {
+		// The legacy witness carries the empty storage-trie preimage (RLP empty
+		// string, keccak256 == EmptyRoot); it is not a trie node, so skip it.
+		if len(encoded) == 1 && encoded[0] == 0x80 {
+			continue
+		}
 		hash := crypto.Keccak256Hash(encoded)
 		node, err := decodeTrieNode(encoded)
 		if err != nil {

@@ -27,6 +27,12 @@
 #                                              detection doesn't fire.
 #   blocktests-devnet-race-amsterdam           race-detector variant filtered
 #                                              to the Amsterdam fork only.
+#   zkevm-witness                              zkevm execution-witness conformance
+#                                              (eest_zkevm corpus) via the zkevmtest
+#                                              runner; compares debug_executionWitness
+#                                              (canonical) per block.
+#   zkevm-witness-race                         race-detector variant of the above over
+#                                              the whole corpus (run via evm.race).
 #   *-parallel                                  any of the above with "-parallel"
 #                                              appended runs with
 #                                              ERIGON_EXEC3_PARALLEL=true. Every
@@ -56,14 +62,20 @@ if (( $# != 1 )); then
 fi
 shard="$1"
 
-# Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
+for tool in yq jq; do
+	command -v "$tool" >/dev/null 2>&1 || { echo "run-eest-spec-test: required tool '$tool' not found in PATH" >&2; exit 1; }
+done
+
+# Resolve the fixture set from the shard name. blocktests-{stable,devnet}-race-*
 # inherit from the parent shard (stable/devnet).
 case "$shard" in
-	*-stable*)    base=test-fixtures-cache/eest_stable/fixtures ;;
-	*-devnet*)    base=test-fixtures-cache/eest_devnet/fixtures ;;
-	*-benchmark*) base=test-fixtures-cache/eest_benchmark/fixtures ;;
+	*zkevm*)      fixtures=eest_zkevm ;;
+	*-stable*)    fixtures=eest_stable ;;
+	*-devnet*)    fixtures=eest_devnet ;;
+	*-benchmark*) fixtures=eest_benchmark ;;
 	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
+base=test-fixtures-cache/$fixtures/fixtures
 
 # Resolve workers + failure budget + exec3-parallel flag from the single-source
 # manifest. Both this script and the test-eest-spec.yml load-matrix job read
@@ -120,6 +132,10 @@ case "$shard_route" in
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
+	zkevm-witness*)
+		# Whole eest_zkevm blockchain_tests corpus; the "-race" variant differs
+		# only in the binary (evm.race, picked by the Makefile), not the fixtures.
+		cmd=zkevmtest;   path="$base/blockchain_tests" ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac
 
@@ -131,8 +147,14 @@ if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2
 fi
+
+# Provision only this shard's fixture set (no-op when already extracted) —
+# all corpora together are 20G+ extracted and don't fit on the smaller CI
+# runner disks.
+bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache "$fixtures"
+
 if [[ ! -d "$path" ]]; then
-	echo "fixture path $path does not exist; run 'make test-fixtures-eest' first" >&2
+	echo "fixture path $path does not exist in the $fixtures corpus" >&2
 	exit 2
 fi
 
@@ -165,13 +187,22 @@ echo "running: $evm_bin $cmd ${extra[*]:-} --workers $workers --jsonout $path"
 echo "tmpdir:  $TMPDIR"
 echo "max-allowed-failures: $max"
 
-# Don't fail on non-zero — the runners report all results via JSON regardless,
-# and we want to inspect the JSON to drive the pass/fail decision. The grep
-# filter strips any init-time log lines (e.g. dbg.envLookup's "[WARN] [env]"
-# message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm sets the log
-# handler, and the default log handler writes to stdout) so jq sees only JSON.
+# Don't fail on most non-zero exits — the runners report all results via JSON
+# regardless, and we want to inspect the JSON to drive the pass/fail decision
+# (crashes surface as missing/truncated JSON below). The one exception is exit
+# code 66: the Go race runtime's "data race detected" signal, emitted even when
+# the run completes and the JSON parses clean, so it must be checked explicitly.
+# The grep filter strips any init-time log lines (e.g. dbg.envLookup's
+# "[WARN] [env]" message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm
+# sets the log handler, and the default log handler writes to stdout) so jq
+# sees only JSON.
 raw_file=$(mktemp)
-"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || true
+rc=0
+"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || rc=$?
+if (( rc == 66 )); then
+	echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
+	exit 1
+fi
 grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$result_file"
 rm -f "$raw_file"
 

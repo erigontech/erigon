@@ -257,8 +257,32 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTrace(false)
 
-	// generate list of updates diverging from first nibble (good case for parallelization))
-	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 150)
+	// generate list of updates diverging from first nibble (good case for parallelization).
+	// Use a local fixed-seed RNG instead of generatePlainKeysWithSameHashPrefix: that helper
+	// seeds from a package-global counter shared by parallel tests, so the key set (and the
+	// resulting trie shape) depended on test interleaving and occasionally violated the
+	// CanDoConcurrentNext precondition (issue #21715). Seed 45 yields hashed keys covering
+	// all 16 first nibbles, with 13 keys under first nibble 0 diverging in 11 second nibbles.
+	rnd := rand.New(rand.NewSource(45))
+	plainKeysList := make([][]byte, 150)
+	firstNibbles := make(map[byte]struct{})      // distinct first nibbles of hashed keys
+	zeroSecondNibbles := make(map[byte]struct{}) // distinct second nibbles of hashed keys with first nibble 0
+	for i := range plainKeysList {
+		plainKeysList[i] = make([]byte, length.Addr)
+		rnd.Read(plainKeysList[i])
+		hashed := KeyToHexNibbleHash(plainKeysList[i])
+		firstNibbles[hashed[0]] = struct{}{}
+		if hashed[0] == 0 {
+			zeroSecondNibbles[hashed[1]] = struct{}{}
+		}
+	}
+	// CanDoConcurrentNext requires a root branch without extension (>=2 distinct first nibbles)
+	// and a branch node at nibble path [0] (>=2 keys under first nibble 0 diverging at the
+	// second nibble). Guard the fixture so a future change to key generation fails loudly here
+	// instead of flaking on the canParallel assertion below.
+	require.GreaterOrEqual(t, len(firstNibbles), 2, "fixture must hash to >=2 distinct first nibbles (root branch without extension)")
+	require.GreaterOrEqual(t, len(zeroSecondNibbles), 2, "fixture must have >=2 keys with first hashed nibble 0 diverging at the second nibble (branch at path [0])")
+
 	builder := NewUpdateBuilder()
 	for i := 0; i < len(plainKeysList); i++ {
 		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
@@ -822,7 +846,9 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
 		Build()
 
-	trieNormal := NewHexPatriciaHashed(length.Addr, stateNormal, DefaultTrieConfig())
+	normalCfg := DefaultTrieConfig()
+	normalCfg.DeferBranchUpdates = false
+	trieNormal := NewHexPatriciaHashed(length.Addr, stateNormal, normalCfg)
 	deferredCfg := DefaultTrieConfig()
 	deferredCfg.DeferBranchUpdates = true
 	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
@@ -2265,7 +2291,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			toWitness.TouchHashedKey(hk)
 		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(context.Background(), toWitness, nil, "", false)
 		require.NoError(t, err)
 		_ = witnessTrie
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
@@ -2334,7 +2360,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			}
 		}
 
-		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "", false)
 		require.NoError(t, err)
 		require.NotNil(t, witnessTrie, "witness trie should not be nil")
 		require.NotNil(t, rootWitness, "root witness should not be nil")
@@ -3413,6 +3439,164 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder,
 			[][]byte{accountA, fullStorageKey},
 			[]bool{true, false})
+	})
+
+	t.Run("AbsentStorageSlotDivergingAtFoldedExtension", func(t *testing.T) {
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hph.SetTrace(false)
+
+		// several accounts so the storage-bearing account sits inside a branch
+		acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
+		acctPlain := acctPlains[0]
+		// two storage slots sharing a 5-nibble hashed prefix -> storage extension over a branch
+		storPlain, storHashed := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 5, 2)
+
+		builder := NewUpdateBuilder()
+		for i, a := range acctPlains {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		}
+		for _, sk := range storPlain {
+			builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+		}
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// absent slot sharing the first two nibbles of the extension prefix then diverging at
+		// the third, i.e. it diverges inside the folded extension.
+		shared := storHashed[0]
+		absentPrefix := []byte{shared[0], shared[1], (shared[2] + 1) & 0xf}
+		absentSlotPlain, _ := generateKeyWithHashedPrefix(absentPrefix, length.Hash)
+		storagePlainKey := append(common.Copy(acctPlain), absentSlotPlain...)
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(acctPlain), nil, toWitness.TouchAccount)
+		toWitness.TouchPlainKey(string(storagePlainKey), nil, toWitness.TouchStorage)
+
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "", true)
+		require.NoError(t, err)
+		require.Equal(t, root, rootW, "witness root must equal commitment root")
+
+		hashedAbsent := KeyToHexNibbleHash(storagePlainKey)
+		require.True(t, witnessResolvesAbsence(witnessTrie.RootNode, hashedAbsent, 0),
+			"witness must materialize the branch behind the diverging extension to prove the absent slot")
+	})
+
+	t.Run("AbsentAccountDivergingAtFoldedExtension", func(t *testing.T) {
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hph.SetTrace(false)
+
+		// accounts sharing a 5-nibble hashed prefix -> state-trie extension over a branch
+		extAccts, extHashed := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 5, 2)
+
+		builder := NewUpdateBuilder()
+		n := 0
+		for _, a := range extAccts {
+			builder.Balance(common.Bytes2Hex(a), uint64(n+1))
+			n++
+		}
+		// random filler accounts so the extension sits below a populated root branch
+		for i := 0; i < 8; i++ {
+			a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+			builder.Balance(common.Bytes2Hex(a), uint64(n+1))
+			n++
+		}
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// absent account sharing the first three nibbles of the extension prefix then diverging
+		shared := extHashed[0]
+		absentPrefix := []byte{shared[0], shared[1], shared[2], (shared[3] + 1) & 0xf}
+		absentAcct, _ := generateKeyWithHashedPrefix(absentPrefix, length.Addr)
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(absentAcct), nil, toWitness.TouchAccount)
+
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "", true)
+		require.NoError(t, err)
+		require.Equal(t, root, rootW, "witness root must equal commitment root")
+
+		hashedAbsent := KeyToHexNibbleHash(absentAcct)
+		require.True(t, witnessResolvesAbsence(witnessTrie.RootNode, hashedAbsent, 0),
+			"witness must materialize the branch behind the diverging extension to prove the absent account")
+	})
+
+	t.Run("CollapseSiblingExtensionMustBeMaterialized", func(t *testing.T) {
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hph.SetTrace(false)
+
+		// storage-bearing account sitting inside a populated state branch
+		acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
+		acctPlain := acctPlains[0]
+
+		// surviving sibling: two slots sharing a 4-nibble hashed prefix, so under their
+		// 3rd nibble sits an extension (nibble 3) over a sub-branch (split at nibble 4).
+		const storSharedLen = 4
+		storPrefix := []byte{0x4, 0x3}
+		survPlain, survHashed := generatePlainKeysWithSameHashPrefix(t, storPrefix, length.Hash, storSharedLen, 2)
+
+		// doomed sibling: shares only the 2-nibble branch prefix, diverging at nibble 2,
+		// so the branch at storage-depth 2 has exactly two children {doomed leaf, surviving ext}.
+		var doomedPlain []byte
+		for {
+			k, h := generateKeyWithHashedPrefix(storPrefix, length.Hash)
+			if h[2] != survHashed[0][2] {
+				doomedPlain = k
+				break
+			}
+		}
+
+		builder := NewUpdateBuilder()
+		for i, a := range acctPlains {
+			builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		}
+		builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(doomedPlain), common.Bytes2Hex(doomedPlain))
+		for _, sk := range survPlain {
+			builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+		}
+		plainKeys, updates := builder.Build()
+		require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// The collapse sibling detectCollapseSiblings records when the doomed slot is
+		// zero-written: the intermediate hashed path to the surviving extension subtree.
+		acctHashed := KeyToHexNibbleHash(acctPlain)
+		siblingPath := append(common.Copy(acctHashed), survHashed[0][:storSharedLen]...)
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(acctPlain), nil, toWitness.TouchAccount)
+		toWitness.TouchHashedKey(siblingPath)
+
+		witnessTrie, rootW, err := hph.GenerateWitness(ctx, toWitness, nil, "", true)
+		require.NoError(t, err)
+		require.Equal(t, root, rootW, "witness root must equal commitment root")
+
+		// Collapsing the 2-child branch requires re-forming it around the surviving
+		// sibling; its sub-branch must be materialized, not left as a bare HashNode.
+		require.True(t, witnessMaterializesNodeAt(witnessTrie.RootNode, siblingPath),
+			"collapse-sibling sub-branch must be materialized, not a bare HashNode")
 	})
 }
 
