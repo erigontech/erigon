@@ -125,12 +125,12 @@ type parallelExecutor struct {
 	// after the blockExecutors map went empty mid-batch, with no preceding
 	// blockResult to trigger the install at the rotation site below).
 	currentChangeSetBlock uint64
-	// deliberateStop is set before executorCancel() is invoked from the
-	// apply loop on a deferred ErrWrongTrieRoot. The exec loop's
-	// completeness checks consult it to distinguish a silent miss from an
-	// intentional mid-batch stop, keeping the surfaced error deterministic.
-	deliberateStop atomic.Bool
 }
+
+// errDeliberateStop is the cancel cause set when the apply loop cancels
+// the executor on a deferred ErrWrongTrieRoot. Read via context.Cause so
+// completeness checks can distinguish an intentional stop from a silent miss.
+var errDeliberateStop = errors.New("parallel executor: deliberate stop on wrong trie root")
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
 // block-specific StateChangeSet before any of blockNum's sd.mem writes are
@@ -213,7 +213,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.accumulator = accumulator
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel()
+	defer executorCancel(nil)
 
 	if err != nil {
 		return nil, rwTx, err
@@ -394,22 +394,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			return nil
 		}
 
-		// processCommit runs handleCommitResult and defers ErrWrongTrieRoot
-		// instead of returning it so a later applyResult carrying
-		// ErrInvalidBlock from the same block can supersede it (EEST error
-		// categorisation). Other commitment errors stay fast-fail. The first
-		// ErrWrongTrieRoot also cancels the executor so the exec loop stops
-		// dispatching further blocks on top of a state we already know is
-		// wrong; later blocks' verdicts may therefore never be produced
-		// (workers stopped), which is a semantic change from the pre-cancel
-		// behaviour where any block's validation error could supersede.
-		// deliberateStop is set before cancel so the exec-loop's pending-
-		// blocks completeness check can distinguish this intentional stop
-		// from a silent miss.
-		deliberateCancel := func() {
-			pe.deliberateStop.Store(true)
-			executorCancel()
-		}
+		// processCommit defers ErrWrongTrieRoot via processCommitErr so a
+		// same-block ErrInvalidBlock can supersede it; the first occurrence
+		// cancels the executor with errDeliberateStop, so later blocks'
+		// verdicts may not be produced.
+		deliberateCancel := func() { executorCancel(errDeliberateStop) }
 		processCommit := func(cr commitmentResult) error {
 			return processCommitErr(handleCommitResult(cr), deliberateCancel, &deferredRootErr)
 		}
@@ -466,14 +455,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// lastBlockResult+1 in a follow-up call. Each block still executes
 					// exactly once across the two batches, so we deliberately do NOT
 					// flag maxBlockNum-not-applied here.
-					// Surface the deferred trie-root error before the
-					// missing-blocks completeness check: a deliberate cancel
-					// from processCommit manufactures a missing-block
-					// condition (workers stopped mid-block), which would
-					// otherwise mask ErrWrongTrieRoot behind a generic
-					// ErrInvalidBlock naming an innocent block. No
-					// block-validation error fired during the drain, so the
-					// wrong-root stands.
+					// Surface deferredRootErr ahead of the missing-blocks
+					// check: a deliberate cancel manufactures a missing-block
+					// condition that would otherwise mask ErrWrongTrieRoot.
 					if deferredRootErr != nil {
 						return deferredRootErr
 					}
@@ -683,7 +667,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}
 	}()
 
-	executorCancel()
+	executorCancel(nil)
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
@@ -910,13 +894,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				select {
 				case nextResult, ok := <-pe.rws.ResultCh():
 					if !ok {
-						return pe.execLoopExitCheck("ctx-done-drain: rws.ResultCh closed")
+						return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.ResultCh closed")
 					}
 					if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
 						if err != nil {
 							return err
 						}
-						return pe.execLoopExitCheck("ctx-done-drain: rws.Drain returned closed")
+						return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.Drain returned closed")
 					}
 					blockResult, err := pe.processResults(ctx, applyTx)
 					if err != nil {
@@ -946,19 +930,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 					}
 				default:
-					return pe.execLoopExitCheck("ctx-done-drain: no more pending results")
+					return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
 				}
 			}
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
-				return pe.execLoopExitCheck("main-select: rws.ResultCh closed")
+				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
 			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
 				return err
 			}
 			if closed {
-				return pe.execLoopExitCheck("main-select: rws.Drain returned closed")
+				return pe.execLoopExitCheck(ctx, "main-select: rws.Drain returned closed")
 			}
 		}
 
@@ -1354,8 +1338,8 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // The reason argument tags the call site (which silent-return path
 // triggered the check) so a failure log identifies the exit path
 // involved without needing a stack trace.
-func (pe *parallelExecutor) execLoopExitCheck(reason string) error {
-	if pe.deliberateStop.Load() {
+func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
+	if errors.Is(context.Cause(ctx), errDeliberateStop) {
 		return nil
 	}
 	pe.RLock()
@@ -1444,7 +1428,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
-func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelFunc, error) {
+func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
 	// execRequests holds one entry per decoded block (each containing all its TxTasks).
 	// A large buffer causes the block-loader goroutine to race far ahead of the apply
 	// loop, accumulating all decoded transaction objects in memory simultaneously.
@@ -1461,7 +1445,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
 
-	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
+	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 
 	var err error
@@ -1481,8 +1465,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return pe.execLoop(execLoopCtx)
 	})
 
-	return execLoopCtx, func() {
-		execLoopCtxCancel()
+	return execLoopCtx, func(cause error) {
+		execLoopCtxCancel(cause)
 
 		pe.in.Release()
 		pe.stopWorkers()
