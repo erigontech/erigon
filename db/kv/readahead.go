@@ -57,16 +57,6 @@ type ReadAheader struct {
 func NewReadAheader(ctx context.Context, db RoDB, table string, from []byte, workers int) *ReadAheader {
 	return newReadAheader(ctx, db, table, from, workers, "read-ahead", false)
 }
-
-// WarmupTable pulls the whole table into the OS page cache with `workers`
-// parallel readers and blocks until done or ctx is cancelled — a ReadAheader
-// with no consumer to throttle to, so every chunk gets warmed.
-func WarmupTable(ctx context.Context, db RoDB, table string, workers int) {
-	r := newReadAheader(ctx, db, table, nil, workers, "warmup", true)
-	<-r.done
-	r.cancel()
-}
-
 func newReadAheader(ctx context.Context, db RoDB, table string, from []byte, workers int, label string, full bool) *ReadAheader {
 	if workers < 1 {
 		workers = 1

@@ -25,7 +25,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -88,30 +87,6 @@ func TestSplitBucketByCount(t *testing.T) {
 		require.Equal(t, n, total, "ranges must cover every key exactly once")
 		return nil
 	}))
-}
-
-func TestWarmupTable(t *testing.T) {
-	const table, n = "T", 50_000
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{table: kv.TableCfgItem{}}
-	}).MapSize(512 * datasize.MB).MustOpen()
-	t.Cleanup(db.Close)
-
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(table)
-		require.NoError(t, err)
-		defer c.Close()
-		for i := 0; i < n; i++ {
-			require.NoError(t, c.Append(clusteredKey(i), []byte{1}))
-		}
-		return nil
-	}))
-
-	old := dbg.WarmupTableWorkers
-	dbg.WarmupTableWorkers = 8
-	t.Cleanup(func() { dbg.WarmupTableWorkers = old })
-
-	db.WarmupTable(t.Context(), table) // count-balanced fan-out must warm a clustered table without panicking
 }
 
 // A DupSort table's tx.Cursor returns *MdbxDupSortCursor, not *MdbxCursor, so

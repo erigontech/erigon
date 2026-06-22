@@ -121,7 +121,3 @@ func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
 func (db *Database) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return db.db.View(ctx, f)
 }
-
-func (db *Database) WarmupTable(ctx context.Context, table string) {
-	db.db.WarmupTable(ctx, table)
-}
