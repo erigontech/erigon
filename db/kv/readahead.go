@@ -40,10 +40,10 @@ type BucketSplitter interface {
 	SplitBucketByCount(table string, from []byte, n int) ([][]byte, error)
 }
 
-// ReadAheader keeps a bounded window of pages warm just ahead of a forward table
+// ReadAhead keeps a bounded window of pages warm just ahead of a forward table
 // scan, using `workers` parallel readers throttled to the consumer's SetPos
 // position so RAM stays bounded even on a >> RAM table.
-type ReadAheader struct {
+type ReadAhead struct {
 	bounds        atomic.Pointer[[][]byte]
 	consumerChunk atomic.Int64
 	cancel        context.CancelFunc
@@ -52,22 +52,22 @@ type ReadAheader struct {
 	full          bool // warm every chunk ignoring consumer position (whole-table warmup)
 }
 
-// NewReadAheader starts `workers` background prefetchers over `table` from `from`
+// NewReadAhead starts `workers` background prefetchers over `table` from `from`
 // (nil = table start). Call SetPos as the consumer advances, and Close when done.
-func NewReadAheader(ctx context.Context, db RoDB, table string, from []byte, workers int) *ReadAheader {
-	return newReadAheader(ctx, db, table, from, workers, "read-ahead", false)
+func NewReadAhead(ctx context.Context, db RoDB, table string, from []byte, workers int) *ReadAhead {
+	return newReadAhead(ctx, db, table, from, workers, "read-ahead", false)
 }
-func newReadAheader(ctx context.Context, db RoDB, table string, from []byte, workers int, label string, full bool) *ReadAheader {
+func newReadAhead(ctx context.Context, db RoDB, table string, from []byte, workers int, label string, full bool) *ReadAhead {
 	if workers < 1 {
 		workers = 1
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	r := &ReadAheader{cancel: cancel, done: make(chan struct{}), label: label, full: full}
+	r := &ReadAhead{cancel: cancel, done: make(chan struct{}), label: label, full: full}
 	go r.run(ctx, db, table, from, workers)
 	return r
 }
 
-func (r *ReadAheader) run(ctx context.Context, db RoDB, table string, from []byte, workers int) {
+func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte, workers int) {
 	defer close(r.done)
 
 	bounds, ahead := r.plan(ctx, db, table, from)
@@ -107,7 +107,7 @@ func (r *ReadAheader) run(ctx context.Context, db RoDB, table string, from []byt
 
 // plan splits the table into ~chunkSize chunks and returns the boundaries (nil if
 // it can't prefetch) plus how many chunks to keep warm ahead of the consumer.
-func (r *ReadAheader) plan(ctx context.Context, db RoDB, table string, from []byte) (bounds [][]byte, ahead int64) {
+func (r *ReadAhead) plan(ctx context.Context, db RoDB, table string, from []byte) (bounds [][]byte, ahead int64) {
 	const aheadBytes = 1 * datasize.GB
 	const chunkSize = 32 * datasize.MB // chunk size — by table size, not worker count
 	var tableSize uint64
@@ -140,7 +140,7 @@ func (r *ReadAheader) plan(ctx context.Context, db RoDB, table string, from []by
 
 // waitTurn blocks until chunk idx is within `ahead` of the consumer; returns
 // false if the consumer already passed it or ctx was cancelled.
-func (r *ReadAheader) waitTurn(ctx context.Context, idx int, ahead int64) bool {
+func (r *ReadAhead) waitTurn(ctx context.Context, idx int, ahead int64) bool {
 	for {
 		cc := r.consumerChunk.Load()
 		switch {
@@ -158,7 +158,7 @@ func (r *ReadAheader) waitTurn(ctx context.Context, idx int, ahead int64) bool {
 }
 
 // warm reads [from,to) so the OS faults each key/value page into cache.
-func (r *ReadAheader) warm(ctx context.Context, db RoDB, table string, from, to []byte) {
+func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []byte) {
 	_ = db.View(ctx, func(tx Tx) error {
 		it, err := tx.Range(table, from, to, order.Asc, -1)
 		if err != nil {
@@ -186,7 +186,7 @@ func (r *ReadAheader) warm(ctx context.Context, db RoDB, table string, from, to 
 
 // SetPos reports the consumer's position so prefetchers throttle to a bounded
 // distance ahead; cheap (one binary search), nil-safe, call every few thousand keys.
-func (r *ReadAheader) SetPos(key []byte) {
+func (r *ReadAhead) SetPos(key []byte) {
 	if r == nil {
 		return
 	}
@@ -203,8 +203,8 @@ func (r *ReadAheader) SetPos(key []byte) {
 }
 
 // Close stops the prefetchers and waits for their read txs to be released.
-// Safe to call on a nil *ReadAheader.
-func (r *ReadAheader) Close() {
+// Safe to call on a nil *ReadAhead.
+func (r *ReadAhead) Close() {
 	if r == nil {
 		return
 	}

@@ -115,9 +115,9 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	// Parallel read-ahead: keep a bounded band of pages warm just ahead of the
 	// copy cursor (cold page faults are slow; one reader can't saturate nvme).
 	// No-op unless WARMUP_TABLE_WORKERS is set.
-	var ra *kv.ReadAheader
+	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
-		ra = kv.NewReadAheader(ctx, src, table, nil, workers)
+		ra = kv.NewReadAhead(ctx, src, table, nil, workers)
 	}
 	defer ra.Close()
 
@@ -232,9 +232,9 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 		return db.Update(ctx, func(tx kv.RwTx) error { return ClearTableInTx(tx, table) })
 	}
 
-	var ra *kv.ReadAheader
+	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 {
-		ra = kv.NewReadAheader(ctx, db, table, nil, workers)
+		ra = kv.NewReadAhead(ctx, db, table, nil, workers)
 	}
 	defer ra.Close()
 

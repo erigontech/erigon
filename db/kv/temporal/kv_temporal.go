@@ -330,7 +330,7 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
-// SplitBucketByCount forwards to the underlying engine so kv.ReadAheader's
+// SplitBucketByCount forwards to the underlying engine so kv.ReadAhead's
 // BucketSplitter assertion works through the temporal wrapper.
 func (tx *Tx) SplitBucketByCount(table string, from []byte, n int) ([][]byte, error) {
 	if s, ok := tx.Tx.(kv.BucketSplitter); ok {
