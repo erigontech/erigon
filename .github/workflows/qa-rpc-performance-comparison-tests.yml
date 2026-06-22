@@ -201,11 +201,15 @@ jobs:
 
           # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise ensure it's
           # unset so erigon uses its built-in default (and doesn't inherit runner env).
-          unset ERIGON_EXEC3_PARALLEL
           if [ "$EXEC_MODE" = "parallel" ]; then
             export ERIGON_EXEC3_PARALLEL=true
+            echo "Set ERIGON_EXEC3_PARALLEL=true (parallel mode)"
           elif [ "$EXEC_MODE" = "serial" ]; then
             export ERIGON_EXEC3_PARALLEL=false
+            echo "Set ERIGON_EXEC3_PARALLEL=false (serial mode)"
+          else
+            unset ERIGON_EXEC3_PARALLEL
+            echo "Leaving ERIGON_EXEC3_PARALLEL unset (default behavior)"
           fi
 
           ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &

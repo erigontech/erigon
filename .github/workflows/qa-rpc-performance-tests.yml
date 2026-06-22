@@ -197,12 +197,17 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
 
-          # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise leave it
-          # unset so erigon uses its built-in default.
+          # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise ensure it's
+          # unset so erigon uses its built-in default (and doesn't inherit runner env).
           if [ "$EXEC_MODE" = "parallel" ]; then
             export ERIGON_EXEC3_PARALLEL=true
+            echo "Set ERIGON_EXEC3_PARALLEL=true (parallel mode)"
           elif [ "$EXEC_MODE" = "serial" ]; then
             export ERIGON_EXEC3_PARALLEL=false
+            echo "Set ERIGON_EXEC3_PARALLEL=false (serial mode)"
+          else
+            unset ERIGON_EXEC3_PARALLEL
+            echo "Leaving ERIGON_EXEC3_PARALLEL unset (default behavior)"
           fi
 
           ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net > erigon.log 2>&1 &
