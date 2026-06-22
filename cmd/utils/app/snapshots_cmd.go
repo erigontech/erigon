@@ -3572,19 +3572,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := warmupWhile(ctx, db, kv.TblCommitmentVals, func() error {
-		logger.Info("Prune state history")
-		for hasMoreToPrune := true; hasMoreToPrune; {
-			if err := db.Update(ctx, func(tx kv.RwTx) error {
-				hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
-				return err
-			}); err != nil {
-				return err
-			}
+	logger.Info("Prune state history")
+	for hasMoreToPrune := true; hasMoreToPrune; {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
+			return err
+		}); err != nil {
+			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	if err := pruneExecChangesets(ctx, db, cliCtx, logger); err != nil {
@@ -3602,23 +3597,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	return nil
-}
-
-// warmupWhile warms `table` into RAM in the background while `fn` runs, and
-// cancels the warmup as soon as `fn` returns — bounds warmup to one table at a
-// time and keeps fn's reads off disk on chaindata >> RAM.
-func warmupWhile(ctx context.Context, db kv.RoDB, table string, fn func() error) error {
-	warmupCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		db.WarmupTable(warmupCtx, table)
-	}()
-	defer func() {
-		cancel()
-		<-done
-	}()
-	return fn()
 }
 
 // pruneExecChangesets trims the block-keyed Execution-stage tables (ChangeSets3,
