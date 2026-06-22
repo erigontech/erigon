@@ -210,6 +210,7 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		return err
 	}
 	// register all topics and subscribe
+	subscribed, expired := 0, 0
 	for _, name := range service.Names() {
 		topic := composeTopic(forkDigest, name)
 		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
@@ -229,11 +230,18 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name)); err != nil && !errors.Is(err, ErrExpiryInThePast) {
+		err = g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name))
+		switch {
+		case err == nil:
+			subscribed++
+		case errors.Is(err, ErrExpiryInThePast):
+			expired++
+		default:
 			return err
 		}
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
+	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
 	return nil
 }
 
