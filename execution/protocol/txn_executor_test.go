@@ -354,32 +354,38 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 
 	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool", func(t *testing.T) {
 		gp := new(GasPool).AddGas(blockGasLimit)
-		require.ErrorIs(t, CheckBlockGasInclusion(gp, blockGasLimit+1, 0), ErrGasLimitReached)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, blockGasLimit+1, 0, 0), ErrGasLimitReached)
 	})
 
 	t.Run("CheckBlockGasInclusion accepts contribution <= reservoirs", func(t *testing.T) {
 		gp := new(GasPool).AddGas(blockGasLimit)
-		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit, 0))
-		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit-1, 0))
+		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit, 0, 0))
+		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit-1, 0, 0))
 	})
 
 	t.Run("CheckBlockGasInclusion is a no-op for nil gp", func(t *testing.T) {
-		require.NoError(t, CheckBlockGasInclusion(nil, blockGasLimit*1000, blockGasLimit*1000))
+		require.NoError(t, CheckBlockGasInclusion(nil, blockGasLimit*1000, blockGasLimit*1000, blockGasLimit*1000))
 	})
 
 	t.Run("CheckBlockGasInclusion rejects state contribution > state pool", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
-		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 200_000), ErrGasLimitReached)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 200_000, 0), ErrGasLimitReached)
 	})
 
 	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool (Amsterdam shape)", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
-		require.ErrorIs(t, CheckBlockGasInclusion(gp, 200_000, 50_000), ErrGasLimitReached)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 200_000, 50_000, 0), ErrGasLimitReached)
 	})
 
 	t.Run("CheckBlockGasInclusion accepts when both contributions fit", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
-		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
+		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000, 0))
+	})
+
+	t.Run("CheckBlockGasInclusion rejects blob gas > blob pool", func(t *testing.T) {
+		gp := NewGasPool(100_000, params.GasPerBlob) // budget for one blob
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 50_000, 2*params.GasPerBlob), ErrBlobGasLimitReached)
+		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 50_000, params.GasPerBlob))
 	})
 }
 

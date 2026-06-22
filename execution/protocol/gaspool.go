@@ -170,10 +170,11 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 	return nil
 }
 
-// CheckBlockGasInclusion verifies that the supplied per-dimension gas
-// values fit in the remaining EIP-8037 reservoirs. Callers obtain the
-// dimension contributions from InclusionContributions.
-func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
+// CheckBlockGasInclusion verifies that the supplied gas fits in the block's
+// remaining budgets: regular and state in the EIP-8037 reservoirs, and blob in
+// the EIP-4844 blob-gas pool. Callers obtain the regular and state contributions
+// from InclusionContributions; blobGas is the transaction's blob gas.
+func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas, blobGas uint64) error {
 	if gp == nil {
 		return nil
 	}
@@ -182,6 +183,9 @@ func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
 	}
 	if stateGas > gp.StateGasAvailable() {
 		return ErrGasLimitReached
+	}
+	if blobGas > gp.BlobGas() {
+		return ErrBlobGasLimitReached
 	}
 	return nil
 }

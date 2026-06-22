@@ -46,12 +46,14 @@ import (
 /*
 TxnExecutor applies a single transaction to the current world state.
 
- 1. Validate transaction (nonce, gas cap, intrinsic gas, balance)
- 2. Buy gas (debit sender, reserve from block gas pool)
+ 1. Validate transaction (preCheck): nonce, intrinsic gas, EIP-7825 cap,
+    sender balance, and block gas availability (regular, state, blob)
+ 2. Buy gas (buyGas): debit the sender's gas and blob fees, reserve blob gas
+    from the block pool
  3. Increment sender nonce
  4. Execute: if contract creation, run initcode and store result as code;
     otherwise, call the recipient
- 5. Compute refunds and return unused gas to pool
+ 5. Refund unused gas to the sender; deduct gas used from the block pool
  6. Pay tips to coinbase, burn base fee
 */
 
@@ -197,9 +199,9 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-// buyGas debits the gas and blob-gas fees from the sender and reserves blob gas
-// from the block pool. It performs no validation — preCheck must have run first
-// — and only mutates state, so it is called explicitly after preCheck passes.
+// buyGas debits the gas and blob-gas fees from the sender and reserves the
+// transaction's blob gas from the block pool. preCheck does all transaction
+// validation first; buyGas only mutates state and is called once it passes.
 func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
@@ -310,7 +312,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 	}
 
 	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGas, rules.IsAmsterdam)
-	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
+	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution, st.msg.BlobGas()); err != nil {
 		return err
 	}
 
