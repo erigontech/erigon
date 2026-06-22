@@ -16,17 +16,12 @@
 
 package accounts
 
-// Code is the canonical representation of EVM bytecode: an interned CodeHash
-// paired with the bytes the hash was computed over. Constructed only by
-// cache.StateCache.PutCode at write boundaries (CREATE/CREATE2 finalize,
-// EIP-7702 SetCodeTx, genesis writes, RPC state overrides, chain-rule
-// rewrites). Downstream consumers read code.Bytes as a non-mutating borrow
-// of the cache-owned slice; the Hash field is the interned codeHash so
-// equality is pointer-compare and no consumer needs to re-Keccak the bytes.
+// Code pairs EVM bytecode with its interned CodeHash.
 //
-// INVARIANT: Hash must equal Keccak256(Bytes). PutCode trusts the caller
-// to compute the hash once; downstream paths must NOT mutate Bytes. There
-// is no mutating method on Code by design.
+// INVARIANT: Hash == Keccak256(Bytes), computed once at construction. Bytes is
+// a non-mutating borrow (often of a cache-owned slice) and must not be
+// modified, so equality reduces to comparing the interned Hash without
+// re-hashing. Code has no mutating method by design.
 type Code struct {
 	Hash  CodeHash
 	Bytes []byte

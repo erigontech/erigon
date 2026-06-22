@@ -63,18 +63,16 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 // the readSet).
 //
 // Behaviour preserved from the legacy versionedRead[T]:
-//   - panics ErrDependency on intra-tx read/write version conflicts
-//     (D.1, E.2, F branches); the parallel executor recovers.
+//   - panics ErrDependency on intra-tx read/write version conflicts;
+//     the parallel executor recovers.
 //   - the selfdestruct revival check probes Balance/Nonce/CodeHash
 //     siblings before short-circuiting to zero on a non-CodePath read.
-//   - CodePath is exempt from the SD short-circuit (C.4) and is
-//     separately trumped by a Done SelfDestruct at >= the code's DepIdx
-//     (E.3a).
+//   - CodePath is exempt from the SD short-circuit and is separately
+//     trumped by a Done SelfDestruct at >= the code's DepIdx.
 //   - StoragePath reads return zero when IncarnationPath was rewritten
-//     by a prior tx in this block (G.6), with the IncarnationPath dep
-//     recorded.
+//     by a prior tx in this block, with the IncarnationPath dep recorded.
 //   - For paths in {Balance, Nonce, Incarnation, CodeHash}, an
-//     unwritten slot may resolve via the AddressPath account (G.7).
+//     unwritten slot may resolve via the AddressPath account.
 //
 // The wrapper completes the read by:
 //   - recording the read via the typed ReadSet.SetX path with its typed
@@ -271,7 +269,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 			// SelfDestructPath write exists with Val==false: fall through with
-			// destructedVersion recorded so the D.1 dep check can use it.
+			// destructedVersion recorded so the stale-readSet dependency check
+			// can use it.
 			destructedVersion = Version{TxIndex: destructTxIndex}
 		}
 	}
@@ -368,7 +367,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			s.versionedReads.SetHeader(addr, path, key, hdr)
 			panic(ErrDependency)
 		}
-		// CodePath trumped by SelfDestruct at >= DepIdx (E.3a)
+		// CodePath trumped by SelfDestruct at >= DepIdx
 		if path == CodePath {
 			if destructed, sdres, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdres.Status() == MVReadResultDone && destructed && sdres.DepIdx() >= res.DepIdx() {
 				r.outcome = outcomeReturnDefault
@@ -542,8 +541,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 // readAccountInternal performs an AddressPath versionedReadCore + typed
 // extraction of *accounts.Account.  Used internally by versionedReadCore
-// to resolve sibling-account reads (the G.2 and G.7 branches) without
-// taking a typed callback.
+// to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
