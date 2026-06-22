@@ -179,55 +179,6 @@ func (dt *DomainRoTx) lookupVisibleFileByRange(txFrom, txTo uint64) (*FilesItem,
 		dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
-// rawLookupFileByRange searches visible files first, then falls back to dirty files.
-// Used by the offline commitment converter, which operates on freshly built files that
-// may still be dirty (not yet integrated into the visible RoTx snapshot).
-func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesItem, error) {
-	for _, f := range dt.files {
-		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
-			return f.src, nil // found in visible files
-		}
-	}
-	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
-		return dirty, nil
-	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
-}
-
-func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
-	var item *FilesItem
-	if item == nil {
-		dt.d.dirtyFiles.Walk(func(files []*FilesItem) bool {
-			for _, f := range files {
-				if f.startTxNum == txFrom && f.endTxNum == txTo {
-					item = f
-					return false
-				}
-			}
-			return true
-		})
-	}
-
-	if item == nil || item.bindex == nil {
-		var fileStepsss strings.Builder
-		fileStepsss.WriteString("" + dt.d.Name.String() + ": ")
-		for _, item := range dt.d.dirtyFiles.Items() {
-			fromStep, toStep := item.StepRange(dt.d.stepSize)
-			fileStepsss.WriteString(fmt.Sprintf("%d-%d;", fromStep, toStep))
-		}
-		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
-			"stepFrom", txFrom/dt.d.stepSize, "stepTo", txTo/dt.d.stepSize,
-			"files", fileStepsss.String(), "filesCount", dt.d.dirtyFiles.Len())
-
-		if item != nil && item.bindex == nil {
-			dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
-		}
-
-		return nil
-	}
-	return item
-}
-
 // searches in given list of files for a key or searches in domain files if list is empty
 func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) (fullKey []byte, found bool) {
 	if len(shortKey) < 1 {

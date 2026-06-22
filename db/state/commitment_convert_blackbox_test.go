@@ -269,84 +269,36 @@ func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
 	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfg)
 
-	// First pass: V1 → V2. The aggregator needs to drop its mmap handles on
-	// the V1 file before we swap in the V2 version, so we rollback explicitly
-	// after the conversion (not via defer); t.Cleanup still guards
-	// early-exit/panic cases. The rollback fn satisfies func() — ruleguard's
-	// "right after the error check" rule.
+	// Capture the original V1 .kv bytes before any conversion.
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	t.Cleanup(rwTx.Rollback) //nolint:gocritic // rollback is invoked explicitly below before the file swap
-	at := state.AggTx(rwTx)
-	file := pickLargestCommitmentFile(t, at)
-
-	origPath := file.Fullpath()
-	origBytes := readFileBytes(t, origPath)
-	origKVName := filepath.Base(origPath)
-
-	tmpDir1 := t.TempDir()
-	_, _, _, err = state.ConvertCommitmentFileForTest(t.Context(), at,
-		file, tmpDir1, state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: true},
-		1, 1, uint64(0), uint64(0), log.New())
-	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback) //nolint:gocritic // explicit Rollback below before the orchestrator opens its own RwTx; this is the panic safety net
+	origBytes := readFileBytes(t, pickLargestCommitmentFile(t, state.AggTx(rwTx)).Fullpath())
 	rwTx.Rollback()
 
-	// Swap: replace the V1 .kv (+ its .kvi) in SnapDomain with the V2 file we
-	// just produced in tmpDir1. The orchestrator's Phase 3+4 do the same thing
-	// — here we inline it so we can convert a second time without writing the
-	// full orchestrator yet.
-	snapDir := filepath.Dir(origPath)
-	swapInto(t, tmpDir1, snapDir)
-	// ReloadFiles (close dirty files, then re-scan) is required so the
-	// aggregator drops its mmap handles on the old V1 file and picks up the
-	// V2 file we just swapped in. OpenFolder alone keeps the cached entries.
-	require.NoError(t, agg.ReloadFiles())
+	// Forward V1 → V2 via the orchestrator, which swaps files Windows-safely
+	// (drops the aggregator's mmap handles before the rename, ReloadFiles after).
+	runOrchestrator(t, db, state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: true})
+	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
+	require.NoError(t, dir.RemoveAll(backupDir)) // Phase-1 pre-flight refuses a non-empty backup
 
-	// Second pass: V2 → V1 on the swapped-in file.
+	// Reverse V2 → V1 on the largest (step-span-stable) file via the single-file
+	// API; the result must be byte-equal to the original.
 	rwTx2, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx2.Rollback()
 	at2 := state.AggTx(rwTx2)
-
-	// Re-pick by step range: filename may have a different version prefix after
-	// the round-trip, so finding by basename is unsafe. The largest-span file
-	// is stable across the swap.
-	file2 := pickLargestCommitmentFile(t, at2)
-
 	tmpDir2 := t.TempDir()
 	_, _, _, err = state.ConvertCommitmentFileForTest(t.Context(), at2,
-		file2, tmpDir2, state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: false},
+		pickLargestCommitmentFile(t, at2), tmpDir2,
+		state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: false},
 		1, 1, uint64(0), uint64(0), log.New())
 	require.NoError(t, err)
 
-	finalPath := filepath.Join(tmpDir2, origKVName)
-	if _, statErr := os.Stat(finalPath); errors.Is(statErr, os.ErrNotExist) {
-		finalPath = findKVInDir(t, tmpDir2)
-	}
-	finalBytes := readFileBytes(t, finalPath)
+	finalBytes := readFileBytes(t, findKVInDir(t, tmpDir2))
 	require.True(t, bytes.Equal(origBytes, finalBytes),
 		"V1→V2→V1 round-trip must produce byte-equal .kv (orig %d bytes, final %d bytes)",
 		len(origBytes), len(finalBytes))
-}
-
-// swapInto moves every regular file in srcDir into dstDir, overwriting any
-// existing file with the same basename. Used by the round-trip test to splice
-// the converter's output back into the aggregator's view (as the orchestrator's
-// Phase 3+4 does in production).
-func swapInto(t *testing.T, srcDir, dstDir string) {
-	t.Helper()
-	entries, err := os.ReadDir(srcDir)
-	require.NoError(t, err)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		src := filepath.Join(srcDir, e.Name())
-		dst := filepath.Join(dstDir, e.Name())
-		// Remove any existing target so Rename succeeds across filesystems.
-		_ = dir.RemoveFile(dst)
-		require.NoError(t, os.Rename(src, dst), "rename %s -> %s", src, dst)
-	}
 }
 
 // findKVInDir returns the path of the first *.kv file in dir, or empty string
