@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -406,6 +407,16 @@ func applyOptions(opts []Option) options {
 		}
 	}
 	return opt
+}
+
+func init() {
+	// Every ExecModuleTester builds its own ExecModule, which allocates a
+	// default state cache. Go tests and the `evm blocktest` runner create one
+	// per fixture (thousands of them, run in parallel); at production cache
+	// sizes each allocates hundreds of MB of sharded-LRU tables, exhausting
+	// memory and stalling the run. A tiny cache is correct (it is an LRU) and
+	// sufficient for the few blocks a fixture imports.
+	cache.SetDefaultStateCacheSizesForTesting(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses

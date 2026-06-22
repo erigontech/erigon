@@ -102,16 +102,39 @@ func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode 
 	}
 }
 
-// NewDefaultStateCache creates a new StateCache with default byte capacities.
-// Account: 256MB, Storage: 512MB, Code: 512MB, Addr: 16MB
+// Byte budgets used by NewDefaultStateCache. They start at the production
+// constants and are only mutated by SetDefaultStateCacheSizesForTesting.
+var (
+	defaultAccountCacheBytes = DefaultAccountCacheBytes
+	defaultStorageCacheBytes = DefaultStorageCacheBytes
+	defaultCodeCacheBytes    = DefaultCodeCacheBytes
+	defaultAddrCacheBytes    = DefaultAddrCacheBytes
+)
+
+// NewDefaultStateCache creates a new StateCache with the default byte budgets
+// (Account 100MB, Storage 150MB, Code 100MB, Addr 16MB).
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
-		DefaultAccountCacheBytes,
-		DefaultStorageCacheBytes,
-		DefaultCodeCacheBytes,
-		DefaultAddrCacheBytes,
+		defaultAccountCacheBytes,
+		defaultStorageCacheBytes,
+		defaultCodeCacheBytes,
+		defaultAddrCacheBytes,
 		DefaultCommitmentCacheBytes,
 	)
+}
+
+// SetDefaultStateCacheSizesForTesting shrinks the budgets NewDefaultStateCache
+// allocates. Test and CLI harnesses (execmoduletester, the `evm blocktest`
+// runner) build one ExecModule per fixture; at production sizes each one
+// allocates hundreds of MB of sharded-LRU tables, which makes the parallel
+// eest blocktest exhaust memory and never complete. The cache is transparent
+// to correctness (an LRU populated at flush, invalidated on unwind), so a tiny
+// cache stays correct. Production never calls this and keeps the full sizes.
+func SetDefaultStateCacheSizesForTesting(account, storage, code, addr datasize.ByteSize) {
+	defaultAccountCacheBytes = account
+	defaultStorageCacheBytes = storage
+	defaultCodeCacheBytes = code
+	defaultAddrCacheBytes = addr
 }
 
 // Get retrieves data for the given domain and key.
