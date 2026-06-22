@@ -453,6 +453,14 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 		return fmt.Errorf("invalid step range: --step.to (%d) must be greater than --step.from (%d)", commitmentRangeStepTo, commitmentRangeStepFrom)
 	}
 
+	// This one-off regeneration prioritizes correctness over speed: force the sequential
+	// commitment path. The concurrent ParallelHashSort path is experimental and not
+	// hardened on this branch, and is what failed on real data here.
+	if statecfg.ExperimentalConcurrentCommitment {
+		logger.Info("[commitment_rebuild] forcing sequential commitment for range rebuild")
+		statecfg.ExperimentalConcurrentCommitment = false
+	}
+
 	srcDirs := datadir.New(datadirCli)
 
 	// Regenerated files land directly in the output dir (it is used literally as the

@@ -93,6 +93,67 @@ func readCommitmentStateRoot(t *testing.T, dirs datadir.Dirs, from, to uint64) (
 	return common.Hash{}, false
 }
 
+// rawCommitmentState returns the raw KeyCommitmentState value (and its embedded txNum) from
+// the highest commitment file in dirs — used to simulate a live datadir whose DB still
+// holds committed commitment state.
+func rawCommitmentState(t *testing.T, dirs datadir.Dirs) ([]byte, uint64) {
+	t.Helper()
+	ranges := fileStepRanges(t, dirs, kv.CommitmentDomain)
+	require.NotEmpty(t, ranges)
+	top := ranges[0]
+	for _, r := range ranges {
+		if r.to > top.to {
+			top = r
+		}
+	}
+	suffix := "." + strconv.FormatUint(top.from, 10) + "-" + strconv.FormatUint(top.to, 10) + ".kv"
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	require.NoError(t, err)
+	tag := "-" + kv.CommitmentDomain.String() + "."
+	var path string
+	for _, e := range entries {
+		if strings.Contains(e.Name(), tag) && strings.HasSuffix(e.Name(), suffix) {
+			path = filepath.Join(dirs.SnapDomain, e.Name())
+			break
+		}
+	}
+	require.NotEmpty(t, path)
+	decomp, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer decomp.Close()
+	g := seg.NewReader(decomp.MakeGetter(), statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
+	for g.HasNext() {
+		k, _ := g.Next(nil)
+		require.True(t, g.HasNext())
+		v, _ := g.Next(nil)
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			_, _, txNum, err := commitment.HexTrieExtractStateRoot(v)
+			require.NoError(t, err)
+			return bytes.Clone(v), txNum
+		}
+	}
+	t.Fatalf("no KeyCommitmentState in %s", path)
+	return nil, 0
+}
+
+// injectStaleCommitmentState commits a KeyCommitmentState into the DB's commitment domain,
+// reproducing a live datadir whose DB holds committed commitment state. Without the
+// rebuild's per-shard ClearTable, SeekCommitment would restore this state and the range
+// rebuild would fail with "empty branch data during unfold".
+func injectStaleCommitmentState(t *testing.T, ctx context.Context, db kv.TemporalRwDB, state []byte, txNum uint64) {
+	t.Helper()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	sd.SetTxNum(txNum)
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, commitmentdb.KeyCommitmentState, state, txNum, nil))
+	require.NoError(t, sd.Flush(ctx, rwTx))
+	sd.Close()
+	require.NoError(t, rwTx.Commit())
+}
+
 // TestRebuildCommitmentFilesRange regenerates a single commitment file range into a
 // separate output datadir and verifies (1) the source is untouched, (2) only the targeted
 // range is produced, (3) the regenerated file carries KeyCommitmentState, and (4) its root
@@ -182,6 +243,17 @@ func TestRebuildCommitmentFilesRange(t *testing.T) {
 	accRanges := fileStepRanges(t, dirs, kv.AccountsDomain)
 	require.NotEmpty(t, accRanges, "expected at least one accounts file")
 	t.Logf("account ranges: %v", accRanges)
+
+	// Simulate a live datadir: leave committed commitment state in the DB so the range
+	// rebuild's SeekCommitment would (without the per-shard ClearTable fix) restore it and
+	// fail to unfold against the empty output dir.
+	staleState, staleTxNum := rawCommitmentState(t, dirs)
+	injectStaleCommitmentState(t, ctx, db, staleState, staleTxNum)
+
+	// Exercise the concurrent path for the range rebuilds only (generation/full-rebuild
+	// above stay sequential): with stale DB state restored by SeekCommitment, this is the
+	// path that failed with "empty branch data during unfold".
+	statecfg.ExperimentalConcurrentCommitment = true
 
 	// Verify a base range (from==0) and the first non-zero start range.
 	base := accRanges[0]

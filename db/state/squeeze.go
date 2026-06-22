@@ -1014,6 +1014,16 @@ func rebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
+			// In range mode the DB is shared read-only with a live datadir whose commitment
+			// tables are still populated; clearing them in this rolled-back tx makes
+			// SeekCommitment (run inside NewSharedDomains) restore prior state from files only,
+			// matching the full rebuild which clears these tables up front. Source is untouched.
+			if filter != nil {
+				if err := clearCommitmentTables(rwTx); err != nil {
+					return nil, err
+				}
+			}
+
 			domains, err := execctx.NewSharedDomainsWithTrieVariant(ctx, rwTx, log.New(), trieVariant)
 			if err != nil {
 				return nil, err
@@ -1274,6 +1284,19 @@ func LinkCommitmentRebuildInputs(src, dst datadir.Dirs, priorEndStep kv.Step, lo
 		}
 	}
 	logger.Info("[commitment_rebuild] linked input files", "files", linked, "priorCommitmentFiles", priors, "from", src.SnapDomain, "to", dst.SnapDomain)
+	return nil
+}
+
+// clearCommitmentTables empties the commitment domain's DB tables within tx. It is used in
+// range-rebuild mode where the DB is shared with a live datadir: the clear is never
+// committed (the caller rolls tx back), so the source DB keeps its data, but reads within
+// this tx see an empty commitment domain and fall back to files.
+func clearCommitmentTables(tx kv.TemporalRwTx) error {
+	for _, tn := range statecfg.Schema.CommitmentDomain.Tables() {
+		if err := tx.ClearTable(tn); err != nil {
+			return fmt.Errorf("clear %s: %w", tn, err)
+		}
+	}
 	return nil
 }
 
