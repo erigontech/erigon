@@ -79,10 +79,8 @@ func walkSegDir(dir string, fn func(path string) error) error {
 }
 
 // upgradeSegFileToV2 patches a single seg-format file to a V2 header. Compression
-// is detected from the file's contents because filename/range is unreliable: the
-// merger writes 10k-step files compressed while dumpRange writes sub-100k files
-// uncompressed. A read with the detected compression is validated before writing,
-// so a wrong guess aborts with the file untouched rather than half-patched.
+// is detected from the file's contents (filename/range is unreliable) and validated
+// by a read before writing, so a wrong guess aborts with the file untouched.
 func upgradeSegFileToV2(path string, logger log.Logger) error {
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
@@ -90,6 +88,10 @@ func upgradeSegFileToV2(path string, logger log.Logger) error {
 	}
 	if d.CompressionFormatVersion() < seg.FileCompressionFormatV1 {
 		d.Close() // V0: no header to patch
+		return nil
+	}
+	if d.CompressionFormatVersion() >= seg.FileCompressionFormatV2 {
+		d.Close() // already upgraded; re-detecting would validate the header but write a fresh guess
 		return nil
 	}
 	pageCnt := d.CompressedPageValuesCount()

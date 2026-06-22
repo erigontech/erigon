@@ -87,10 +87,8 @@ func readBackPairs(t *testing.T, path string) [][2]string {
 	return out
 }
 
-// TestUpgradeSegHeadersV2 patches a V1 file per class via content detection, then
-// reads it back through the patched header. The 10k merged-compressed .seg case
-// guards the regression where a filename range threshold under-labeled it as
-// uncompressed; keys-only/vals-only cover mixed domain files.
+// TestUpgradeSegHeadersV2 patches a V1 file per compression class via content
+// detection, then reads it back through the patched header.
 func TestUpgradeSegHeadersV2(t *testing.T) {
 	pairs := manyPairs()
 
