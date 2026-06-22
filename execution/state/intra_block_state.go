@@ -2047,12 +2047,12 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 // EIP161EmptyRemoval reports whether an empty account at addr is removed under
 // EIP-161 (SpuriousDragon). AuRa retains its SystemAddress even when empty, to
 // match the reference implementation.
-func EIP161EmptyRemoval(spuriousDragon, isAura bool, addr accounts.Address) bool {
-	return spuriousDragon && (!isAura || addr != params.SystemAddress)
+func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool {
+	return eip161Enabled && (!isAura || addr != params.SystemAddress)
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
-	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
+func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
+	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
@@ -2102,8 +2102,8 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	return nil
 }
 
-func printAccount(EIP161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
+func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
+	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		fmt.Printf("delete: %x\n", addr)
 	}
