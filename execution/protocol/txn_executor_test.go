@@ -384,8 +384,8 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 }
 
 // TestBlobGasPreservedOnReject verifies that a transaction rejected before it is
-// applied does not deplete the block blob-gas pool: blob gas is reserved only
-// after buyGas's validation checks pass.
+// applied does not deplete the block blob-gas pool: blob gas is reserved in
+// buyGas, which runs only after preCheck's validation passes.
 func TestBlobGasPreservedOnReject(t *testing.T) {
 	t.Parallel()
 
