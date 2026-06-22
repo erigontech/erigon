@@ -125,6 +125,11 @@ type parallelExecutor struct {
 	// after the blockExecutors map went empty mid-batch, with no preceding
 	// blockResult to trigger the install at the rotation site below).
 	currentChangeSetBlock uint64
+	// deliberateStop is set before executorCancel() is invoked from the
+	// apply loop on a deferred ErrWrongTrieRoot. The exec loop's
+	// completeness checks consult it to distinguish a silent miss from an
+	// intentional mid-batch stop, keeping the surfaced error deterministic.
+	deliberateStop atomic.Bool
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
@@ -391,14 +396,22 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 		// processCommit runs handleCommitResult and defers ErrWrongTrieRoot
 		// instead of returning it so a later applyResult carrying
-		// ErrInvalidBlock can supersede it (EEST error categorisation).
-		// Other commitment errors stay fast-fail. The first
-		// ErrWrongTrieRoot also cancels the executor so the exec loop
-		// stops dispatching further blocks on top of a state we already
-		// know is wrong — drain semantics are preserved by the apply
-		// loop continuing until applyResults closes.
+		// ErrInvalidBlock from the same block can supersede it (EEST error
+		// categorisation). Other commitment errors stay fast-fail. The first
+		// ErrWrongTrieRoot also cancels the executor so the exec loop stops
+		// dispatching further blocks on top of a state we already know is
+		// wrong; later blocks' verdicts may therefore never be produced
+		// (workers stopped), which is a semantic change from the pre-cancel
+		// behaviour where any block's validation error could supersede.
+		// deliberateStop is set before cancel so the exec-loop's pending-
+		// blocks completeness check can distinguish this intentional stop
+		// from a silent miss.
+		deliberateCancel := func() {
+			pe.deliberateStop.Store(true)
+			executorCancel()
+		}
 		processCommit := func(cr commitmentResult) error {
-			return processCommitErr(handleCommitResult(cr), executorCancel, &deferredRootErr)
+			return processCommitErr(handleCommitResult(cr), deliberateCancel, &deferredRootErr)
 		}
 
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
@@ -453,15 +466,20 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// lastBlockResult+1 in a follow-up call. Each block still executes
 					// exactly once across the two batches, so we deliberately do NOT
 					// flag maxBlockNum-not-applied here.
+					// Surface the deferred trie-root error before the
+					// missing-blocks completeness check: a deliberate cancel
+					// from processCommit manufactures a missing-block
+					// condition (workers stopped mid-block), which would
+					// otherwise mask ErrWrongTrieRoot behind a generic
+					// ErrInvalidBlock naming an innocent block. No
+					// block-validation error fired during the drain, so the
+					// wrong-root stands.
+					if deferredRootErr != nil {
+						return deferredRootErr
+					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
-					}
-					// Surface the deferred trie-root error here: no
-					// block-validation error fired during the drain, so
-					// the wrong-root stands.
-					if deferredRootErr != nil {
-						return deferredRootErr
 					}
 					if pe.reachedMaxBlock.Load() {
 						return nil
@@ -1327,6 +1345,9 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // triggered the check) so a failure log identifies the exit path
 // involved without needing a stack trace.
 func (pe *parallelExecutor) execLoopExitCheck(reason string) error {
+	if pe.deliberateStop.Load() {
+		return nil
+	}
 	pe.RLock()
 	pendingBlocks := len(pe.blockExecutors)
 	var pendingNums []uint64
