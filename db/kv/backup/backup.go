@@ -194,11 +194,6 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return i, nil
 }
 
-var (
-	clearChunkSize   = 1 * datasize.GB
-	clearCommitEvery = 20 * time.Second
-)
-
 // ClearTables empties each table with mdbx's native bulk range-delete instead of
 // dropping it, owning its own write transactions and committing roughly every
 // 20s so a single huge table can't blow up one transaction. When
@@ -245,6 +240,9 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	commitEvery := time.NewTicker(20 * time.Second)
+	defer commitEvery.Stop()
+
 	started := time.Now()
 	var deleted uint64
 
@@ -256,7 +254,7 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 				i = len(bounds) // no native range-delete: clear whole table once and stop
 				return ClearTableInTx(tx, table)
 			}
-			start := time.Now()
+
 			for i+1 < len(bounds) {
 				n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
 				if err != nil {
@@ -267,6 +265,7 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 				if i+1 < len(bounds) {
 					ra.SetPos(bounds[i]) // next chunk's lower bound (interior, non-nil)
 				}
+
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -278,10 +277,9 @@ func clearTable(ctx context.Context, db kv.RwDB, table string) error {
 						"size", common.ByteCount(size),
 						"keys/s", common.PrettyCounter(uint64(float64(deleted)/secs)),
 						"speed", common.ByteCount(uint64(frac*float64(size)/secs))+"/s")
-				default:
-				}
-				if time.Since(start) >= clearCommitEvery {
+				case <-commitEvery.C:
 					return nil // commit and reopen a fresh tx
+				default:
 				}
 			}
 			return nil
@@ -302,6 +300,8 @@ func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte
 			return nil
 		}
 		size, _ = tx.BucketSize(table)
+
+		const clearChunkSize = 1 * datasize.GB
 		b, err := s.SplitBucketByCount(table, nil, int(size/clearChunkSize.Bytes()))
 		if err != nil {
 			return err
