@@ -210,17 +210,35 @@ func TestFillTransactionBlobPreCancun(t *testing.T) {
 	require.Contains(t, err.Error(), "Cancun")
 }
 
-func TestFillTransactionPoolErrorFallsBackToOnChainNonce(t *testing.T) {
+func TestFillTransactionPoolErrorPropagates(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, errPoolClient{}, nil)
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
-	// Pool error must not surface as a FillTransaction error; on-chain nonce is used.
-	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{From: &from, To: &to})
-	require.NoError(t, err, "pool gRPC error must not propagate to the caller")
-	require.NotNil(t, result)
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{From: &from, To: &to})
+	require.Error(t, err, "pool gRPC error must propagate to the caller")
+	require.Contains(t, err.Error(), "pool unavailable")
+}
+
+func TestFillTransactionGasPriceWithAccessListIsTypeOne(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+	al := types.AccessList{{Address: to, StorageKeys: nil}}
+
+	// Erigon preserves an explicit accessList even when gasPrice is set (type 1),
+	// unlike Geth which silently drops it to a LegacyTx (type 0).
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:         &to,
+		Gas:        &gas,
+		GasPrice:   (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		AccessList: &al,
+	})
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(types.AccessListTxType), result.Tx.Type,
+		"gasPrice + explicit accessList must produce type-1 tx (Erigon diverges from Geth here)")
 }
 
 func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {

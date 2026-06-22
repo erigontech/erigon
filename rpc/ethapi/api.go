@@ -287,6 +287,8 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
+	// Deliberate divergence from Geth: an explicit accessList is preserved as type 1 even when gasPrice
+	// is also set; Geth silently drops the access list and returns a LegacyTx (type 0).
 	case args.AccessList != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {

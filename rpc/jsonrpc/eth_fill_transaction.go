@@ -23,8 +23,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"google.golang.org/grpc"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,8 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/gasprice"
@@ -71,23 +67,13 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if args.Nonce == nil {
 		var nonce uint64
 		if args.From != nil {
-			reply, err2 := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-				Address: gointerfaces.ConvertAddressToH160(*args.From),
-			}, &grpc.EmptyCallOption{})
-			if err2 == nil && reply.Found {
-				nonce = reply.Nonce + 1
-			} else {
-				if err2 != nil {
-					api.logger.Warn("eth_fillTransaction: txpool nonce lookup failed, falling back to on-chain nonce", "err", err2)
-				}
-				latestBlock := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-				count, err3 := api.GetTransactionCount(ctx, *args.From, &latestBlock)
-				if err3 != nil {
-					return nil, err3
-				}
-				if count != nil {
-					nonce = uint64(*count)
-				}
+			pendingBlock := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+			count, err := api.GetTransactionCount(ctx, *args.From, &pendingBlock)
+			if err != nil {
+				return nil, err
+			}
+			if count != nil {
+				nonce = uint64(*count)
 			}
 		}
 		args.Nonce = (*hexutil.Uint64)(&nonce)
