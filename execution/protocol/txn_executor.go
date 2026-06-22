@@ -305,12 +305,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
-	// EIP-7702: reject malformed SetCode transactions before buying gas, so a
-	// rejected tx leaves sender state untouched.
-	if err := checkSetCodeAuthorizations(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
-		return err
-	}
-
 	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGas, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution, st.msg.BlobGas()); err != nil {
 		return err
@@ -348,6 +342,12 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		} else if st.msg.Gas() > params.MaxTxnGasLimit {
 			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 		}
+	}
+
+	// EIP-7702: reject malformed SetCode transactions. Placed after the fee-cap
+	// checks and before the affordability/intrinsic checks, matching geth.
+	if err := checkSetCodeAuthorizations(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
+		return err
 	}
 
 	st.gasVal, overflow = u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
