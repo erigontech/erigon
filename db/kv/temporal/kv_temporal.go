@@ -331,9 +331,9 @@ func (tx *Tx) LockDBInRam() error {
 }
 
 // SplitBucketByCount forwards to the underlying engine so kv.ReadAhead's
-func (tx *Tx) SplitBucketByCount(table string, from []byte, n int) ([][]byte, error) {
+func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	if s, ok := tx.Tx.(kv.BucketSplitter); ok {
-		return s.SplitBucketByCount(table, from, n)
+		return s.DistributeCursors(table, from, n)
 	}
 	return [][]byte{from, nil}, nil
 }

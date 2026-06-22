@@ -32,11 +32,11 @@ import (
 )
 
 type BucketSplitter interface {
-	// SplitBucketByCount partitions bucket into n approximately equal-COUNT key
+	// DistributeCursors partitions table into n approximately equal-COUNT key
 	// ranges using mdbx's b-tree distribution.
-	// It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
-	// Returned keys  valid until tx end
-	SplitBucketByCount(table string, from []byte, n int) ([][]byte, error)
+	// It's fast on `Table >> RAM` case because touching only bran-nodes of b-tree
+	// Returned keys valid until tx end
+	DistributeCursors(table string, from []byte, n int) ([][]byte, error)
 }
 
 // ReadAhead keeps a bounded window of pages warm just ahead of a forward table scan
@@ -115,7 +115,7 @@ func (r *ReadAhead) plan(ctx context.Context, db RoDB, table string, from []byte
 			return nil
 		}
 		tableSize, _ = tx.BucketSize(table)
-		b, err := s.SplitBucketByCount(table, from, int(tableSize/chunkSize.Bytes()))
+		b, err := s.DistributeCursors(table, from, int(tableSize/chunkSize.Bytes()))
 		if err != nil {
 			return err
 		}

@@ -889,11 +889,11 @@ func rawCursor(c kv.Cursor) *mdbx.Cursor {
 	return c.(*MdbxCursor).c
 }
 
-// SplitBucketByCount partitions bucket into n approximately equal-COUNT key
+// DistributeCursors partitions bucket into n approximately equal-COUNT key
 // ranges using mdbx's b-tree distribution.
 // It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
 // Returned keys  valid until tx end
-func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byte, error) {
+func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	const maxChunks = 4096 // bound DistributeCursors' ~O(n^2) cost and the per-cursor leaf fault
 	if n > maxChunks {
 		n = maxChunks
@@ -902,7 +902,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byt
 		return [][]byte{from, nil}, nil
 	}
 
-	firstC, err := tx.Cursor(bucket)
+	firstC, err := tx.Cursor(table)
 	if err != nil {
 		return nil, err
 	}
@@ -922,7 +922,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byt
 
 	cursors := make([]*mdbx.Cursor, n)
 	for i := range cursors {
-		cw, err := tx.Cursor(bucket)
+		cw, err := tx.Cursor(table)
 		if err != nil {
 			return nil, err
 		}
@@ -934,7 +934,7 @@ func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byt
 	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
 	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
 	deepness := uint(42)
-	if st, err := tx.BucketStat(bucket); err == nil && st.Depth > 2 {
+	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
 		deepness = st.Depth - 2
 	}
 	if _, err := mdbx.DistributeCursors(first, nil, cursors, deepness); err != nil {

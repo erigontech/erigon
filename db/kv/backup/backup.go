@@ -302,7 +302,7 @@ func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte
 		size, _ = tx.BucketSize(table)
 
 		const clearChunkSize = 1 * datasize.GB
-		b, err := s.SplitBucketByCount(table, nil, int(size/clearChunkSize.Bytes()))
+		b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
 		if err != nil {
 			return err
 		}
