@@ -40,9 +40,7 @@ type BucketSplitter interface {
 	SplitBucketByCount(table string, from []byte, n int) ([][]byte, error)
 }
 
-// ReadAhead keeps a bounded window of pages warm just ahead of a forward table
-// scan, using `workers` parallel readers throttled to the consumer's SetPos
-// position so RAM stays bounded even on a >> RAM table.
+// ReadAhead keeps a bounded window of pages warm just ahead of a forward table scan
 type ReadAhead struct {
 	bounds        atomic.Pointer[[][]byte]
 	consumerChunk atomic.Int64
