@@ -114,7 +114,11 @@ func (r *ReadAhead) plan(ctx context.Context, db RoDB, table string, from []byte
 			log.Warn("[read-ahead] disabled: tx is not a DBWithDistributionSupport", "table", table, "tx", fmt.Sprintf("%T", tx))
 			return nil
 		}
-		tableSize, _ = tx.BucketSize(table)
+		var err error
+		tableSize, err = tx.BucketSize(table)
+		if err != nil {
+			return err
+		}
 		b, err := s.DistributeCursors(table, from, int(tableSize/chunkSize.Bytes()))
 		if err != nil {
 			return err

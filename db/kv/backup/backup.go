@@ -107,7 +107,10 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}
 	defer srcC.Close()
 	total, _ := srcTx.Count(table)
-	size, _ := srcTx.BucketSize(table)
+	size, err := srcTx.BucketSize(table)
+	if err != nil {
+		return 0, err
+	}
 	if total > 0 {
 		logger.Info("[mdbx_to_mdbx] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
 	}
@@ -299,7 +302,10 @@ func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte
 		if !ok {
 			return nil
 		}
-		size, _ = tx.BucketSize(table)
+		var sizeErr error
+		if size, sizeErr = tx.BucketSize(table); sizeErr != nil {
+			return sizeErr
+		}
 
 		const clearChunkSize = 1 * datasize.GB
 		b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
