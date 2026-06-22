@@ -218,7 +218,6 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
 	}
 
-	st.evm.BlobFee = st.blobGasVal
 	return nil
 }
 
@@ -716,7 +715,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				burnAmount = u256.Add(burnAmount, st.evm.BlobFee)
+				burnAmount = u256.Add(burnAmount, st.blobGasVal)
 			}
 
 			if !st.noFeeBurnAndTip {
