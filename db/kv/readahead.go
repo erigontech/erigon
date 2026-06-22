@@ -31,12 +31,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 )
 
-// BucketSplitter, when implemented by a Tx, partitions a table into n
-// approximately equal-COUNT key ranges via the storage engine's b-tree, staying
-// even when keys cluster. Returns n+1 boundaries with bounds[0]==from and a nil
-// last; the interior boundaries may be zero-copy and valid only until tx end, so
-// callers clone to retain them.
 type BucketSplitter interface {
+	// SplitBucketByCount partitions bucket into n approximately equal-COUNT key
+	// ranges using mdbx's b-tree distribution.
+	// It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
 	SplitBucketByCount(table string, from []byte, n int) ([][]byte, error)
 }
 
