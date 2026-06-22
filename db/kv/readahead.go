@@ -35,6 +35,7 @@ type BucketSplitter interface {
 	// SplitBucketByCount partitions bucket into n approximately equal-COUNT key
 	// ranges using mdbx's b-tree distribution.
 	// It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
+	// Returned keys  valid until tx end
 	SplitBucketByCount(table string, from []byte, n int) ([][]byte, error)
 }
 

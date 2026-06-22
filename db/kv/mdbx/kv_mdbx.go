@@ -890,10 +890,9 @@ func rawCursor(c kv.Cursor) *mdbx.Cursor {
 }
 
 // SplitBucketByCount partitions bucket into n approximately equal-COUNT key
-// ranges using mdbx's b-tree distribution, returning n+1 boundaries with
-// bounds[0]==from and a nil last. It stays even when keys cluster, where byte
-// interpolation collapses to a single range. The interior boundaries are
-// zero-copy and valid only until tx end; clone to retain.
+// ranges using mdbx's b-tree distribution.
+// It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
+// Returned keys  valid until tx end
 func (tx *MdbxTx) SplitBucketByCount(bucket string, from []byte, n int) ([][]byte, error) {
 	const maxChunks = 4096 // bound DistributeCursors' ~O(n^2) cost and the per-cursor leaf fault
 	if n > maxChunks {
