@@ -1427,3 +1427,54 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 
 	confirmDoesntExist(t, tmp)
 }
+
+func Test_removeAccessorsForRebuild(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	touch := func(path string) {
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	accessors := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.idx"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.idx"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.vi"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.efi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvei"),
+	}
+	dataFiles := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.seg"),
+		filepath.Join(dirs.SnapIdx, "v1.0-accounts.0-64.ef"),
+		filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv"),
+	}
+	for _, f := range accessors {
+		touch(f)
+		touch(f + ".torrent")
+	}
+	for _, f := range dataFiles {
+		touch(f)
+	}
+
+	orphanTorrent := filepath.Join(dirs.SnapDomain, "v1.0-storage.0-64.kvi.torrent")
+	touch(orphanTorrent)
+	dataTorrent := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg.torrent")
+	touch(dataTorrent)
+
+	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
+
+	for _, f := range accessors {
+		confirmDoesntExist(t, f)
+		confirmDoesntExist(t, f+".torrent")
+	}
+	confirmDoesntExist(t, orphanTorrent)
+	for _, f := range dataFiles {
+		confirmExist(t, f)
+	}
+	confirmExist(t, dataTorrent)
+}

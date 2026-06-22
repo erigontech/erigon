@@ -138,7 +138,7 @@ jobs:
           echo "Pruning docker system..."
           docker system prune -af --volumes
       - name: Checkout Erigon
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: erigon-full
 
@@ -147,7 +147,7 @@ jobs:
         run: echo "ref=$(jq -r .hive_ref erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # EXPERIMENT: pinned to erigontech/hive yperbasis/client-pool — the
           # upstream-PR-ready warm-daemon client pool (ethereum/hive#1449), which

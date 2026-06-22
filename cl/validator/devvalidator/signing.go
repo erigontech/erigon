@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -79,6 +80,75 @@ func signBlock(
 ) (common.Bytes96, error) {
 	epoch := slot / cfg.SlotsPerEpoch
 	return signObject(key, block, cfg.DomainBeaconProposer, epoch, cfg, genesisValidatorsRoot)
+}
+
+// signSelectionProof signs the slot with DOMAIN_SELECTION_PROOF, proving the
+// validator is selected as an aggregator for that slot.
+func signSelectionProof(
+	key *ValidatorKey,
+	slot uint64,
+	cfg *clparams.BeaconChainConfig,
+	genesisValidatorsRoot common.Hash,
+) (common.Bytes96, error) {
+	epoch := slot / cfg.SlotsPerEpoch
+	return signObject(key, epochSSZ(slot), cfg.DomainSelectionProof, epoch, cfg, genesisValidatorsRoot)
+}
+
+// signAggregateAndProof signs an AggregateAndProof with DOMAIN_AGGREGATE_AND_PROOF.
+func signAggregateAndProof(
+	key *ValidatorKey,
+	msg ssz.HashableSSZ,
+	slot uint64,
+	cfg *clparams.BeaconChainConfig,
+	genesisValidatorsRoot common.Hash,
+) (common.Bytes96, error) {
+	epoch := slot / cfg.SlotsPerEpoch
+	return signObject(key, msg, cfg.DomainAggregateAndProof, epoch, cfg, genesisValidatorsRoot)
+}
+
+// rootSSZ wraps a 32-byte root so it can be signed: the hash tree root of a
+// Root is the root itself.
+type rootSSZ common.Hash
+
+func (r rootSSZ) HashSSZ() ([32]byte, error) { return [32]byte(r), nil }
+
+func (r rootSSZ) EncodingSizeSSZ() int { return 32 }
+
+// signSyncCommitteeSelectionProof signs the SyncAggregatorSelectionData for a
+// slot+subcommittee with DOMAIN_SYNC_COMMITTEE_SELECTION_PROOF.
+func signSyncCommitteeSelectionProof(
+	key *ValidatorKey,
+	slot, subcommitteeIndex uint64,
+	cfg *clparams.BeaconChainConfig,
+	genesisValidatorsRoot common.Hash,
+) (common.Bytes96, error) {
+	epoch := slot / cfg.SlotsPerEpoch
+	data := &cltypes.SyncAggregatorSelectionData{Slot: slot, SubcommitteeIndex: subcommitteeIndex}
+	return signObject(key, data, cfg.DomainSyncCommitteeSelectionProof, epoch, cfg, genesisValidatorsRoot)
+}
+
+// signContributionAndProof signs a ContributionAndProof with DOMAIN_CONTRIBUTION_AND_PROOF.
+func signContributionAndProof(
+	key *ValidatorKey,
+	msg ssz.HashableSSZ,
+	slot uint64,
+	cfg *clparams.BeaconChainConfig,
+	genesisValidatorsRoot common.Hash,
+) (common.Bytes96, error) {
+	epoch := slot / cfg.SlotsPerEpoch
+	return signObject(key, msg, cfg.DomainContributionAndProof, epoch, cfg, genesisValidatorsRoot)
+}
+
+// signSyncCommitteeMessage signs a beacon block root with DOMAIN_SYNC_COMMITTEE.
+func signSyncCommitteeMessage(
+	key *ValidatorKey,
+	blockRoot common.Hash,
+	slot uint64,
+	cfg *clparams.BeaconChainConfig,
+	genesisValidatorsRoot common.Hash,
+) (common.Bytes96, error) {
+	epoch := slot / cfg.SlotsPerEpoch
+	return signObject(key, rootSSZ(blockRoot), cfg.DomainSyncCommittee, epoch, cfg, genesisValidatorsRoot)
 }
 
 // signAttestation signs attestation data with DOMAIN_BEACON_ATTESTER.
