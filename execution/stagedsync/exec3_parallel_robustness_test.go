@@ -189,7 +189,7 @@ func TestExecLoopExitCheck(t *testing.T) {
 	t.Run("empty map returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{}
-		if err := pe.execLoopExitCheck("test"); err != nil {
+		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
 			t.Fatalf("execLoopExitCheck on empty map should return nil, got: %v", err)
 		}
 	})
@@ -200,7 +200,7 @@ func TestExecLoopExitCheck(t *testing.T) {
 			3: {},
 			7: {},
 		}
-		err := pe.execLoopExitCheck("test-reason")
+		err := pe.execLoopExitCheck(context.Background(), "test-reason")
 		if err == nil {
 			t.Fatalf("execLoopExitCheck on non-empty map should return error, got nil")
 		}
@@ -219,7 +219,7 @@ func TestExecLoopExitCheck(t *testing.T) {
 	t.Run("nil map returns nil (defensive)", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		// pe.blockExecutors is nil
-		if err := pe.execLoopExitCheck("test"); err != nil {
+		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
 			t.Fatalf("execLoopExitCheck on nil map should return nil, got: %v", err)
 		}
 	})
@@ -428,7 +428,7 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for !stop.Load() {
-			_ = pe.execLoopExitCheck("concurrent")
+			_ = pe.execLoopExitCheck(context.Background(), "concurrent")
 		}
 	}()
 
@@ -1050,16 +1050,10 @@ func TestProcessCommitErr(t *testing.T) {
 	})
 }
 
-// TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing pins the apply
-// loop's close-branch precedence: when processCommit's cancel manufactures
-// an in-flight block missing its blockResult, the deferred ErrWrongTrieRoot
-// must surface ahead of the missing-blocks completeness error. Without the
-// reorder, the operator-visible failure is a generic ErrInvalidBlock naming
-// the in-flight block instead of the actual wrong-root block.
-//
-// IMPORTANT: this mirrors the apply-loop close-branch sequence around
-// exec3_parallel.go line 456-465. Keep the order here in lock-step with
-// production or the test will pass vacuously.
+// Pins the close-branch precedence: deferredRootErr must surface ahead of
+// the missing-blocks completeness error, otherwise a deliberate cancel masks
+// ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
+// production order — keep them in lock-step.
 func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 		if deferredRootErr != nil {
@@ -1104,28 +1098,33 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// TestExecLoopExitCheckDeliberateStop verifies execLoopExitCheck returns
-// nil when deliberateStop is set, so the exec loop's pending-block
-// completeness check does not generate ErrInvalidBlock noise that would
-// be joined with the apply loop's deferred ErrWrongTrieRoot.
+// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with
+// errDeliberateStop suppresses the pending-block ErrInvalidBlock noise.
 func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
-	t.Run("non-empty map but deliberateStop set returns nil", func(t *testing.T) {
+	t.Run("pending blocks but deliberate-stop cause returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{
-			3: {},
-			7: {},
-		}
-		pe.deliberateStop.Store(true)
-		if err := pe.execLoopExitCheck("post-cancel-drain"); err != nil {
-			t.Fatalf("deliberateStop must suppress pending-block error, got: %v", err)
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errDeliberateStop)
+		if err := pe.execLoopExitCheck(ctx, "post-cancel-drain"); err != nil {
+			t.Fatalf("deliberate-stop cause must suppress pending-block error, got: %v", err)
 		}
 	})
 
-	t.Run("non-empty map without deliberateStop still errors", func(t *testing.T) {
+	t.Run("pending blocks without deliberate-stop still errors", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
-		err := pe.execLoopExitCheck("silent-miss")
+		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
 		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
+	})
+
+	t.Run("pending blocks with unrelated cancel cause still errors", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errors.New("shutdown"))
+		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
+		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
 	})
 }
 
