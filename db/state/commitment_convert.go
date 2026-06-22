@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -1028,6 +1029,11 @@ func writeRestoreManifestAtomic(path string, entries []string) error {
 // entries inside it) to disk. Required on POSIX filesystems to make a rename
 // durable across power loss.
 func fsyncDir(path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows rejects Sync on a directory handle opened via os.Open;
+		// directory-entry fsync for rename durability is a POSIX-only concern.
+		return nil
+	}
 	d, err := os.Open(path)
 	if err != nil {
 		return err
