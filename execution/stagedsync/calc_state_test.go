@@ -533,6 +533,63 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
+// mockStorageEnum returns a fixed persisted-slot set per address.
+type mockStorageEnum struct {
+	slots map[accounts.Address][]accounts.StorageKey
+}
+
+func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
+	for _, k := range m.slots[addr] {
+		if err := fn(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TestSDOfPreExistingContract_DeletesUntouchedSlots checks that a self-destruct
+// deletes the whole persisted storage subtree, not just the EVM-touched slots.
+func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
+	// On-disk slots never read/written this block, so they never enter storageState.
+	untouched1 := accounts.InternKey(common.Hash{0x11})
+	untouched2 := accounts.InternKey(common.Hash{0x22})
+
+	cs := newTestCalcState()
+	cs.storageEnum = &mockStorageEnum{slots: map[accounts.Address][]accounts.StorageKey{
+		addr: {untouched1, untouched2},
+	}}
+
+	cs.ApplyWrites(state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: uint64(3)},
+		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}},
+	})
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+
+	addrBytes := addr.Value()
+	gotSlots := map[common.Hash]commitment.Update{}
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		if len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]) {
+			var h common.Hash
+			copy(h[:], k[20:])
+			gotSlots[h] = *u
+		}
+		return nil
+	}))
+
+	require.Len(t, gotSlots, 2,
+		"both untouched on-disk slots must be deleted on SD (matches serial's DomainDelPrefix)")
+	for _, sk := range []accounts.StorageKey{untouched1, untouched2} {
+		u, ok := gotSlots[sk.Value()]
+		require.True(t, ok, "untouched slot %x must emit a delete", sk.Value())
+		assert.Equal(t, commitment.DeleteUpdate, u.Flags,
+			"untouched slot %x must emit DeleteUpdate", sk.Value())
+	}
+}
+
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {
 	t.Helper()
 	var found *commitment.Update

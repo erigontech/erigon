@@ -360,12 +360,10 @@ func (cell *cell) setFromUpdate(update *Update) {
 	cell.Update.Merge(update)
 	if update.Flags&StorageUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadStorage)
-		mxTrieStateLoadRate.Inc()
 		hadToLoad.Add(1)
 	}
 	if update.Flags&BalanceUpdate != 0 || update.Flags&NonceUpdate != 0 || update.Flags&CodeUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadAccount)
-		mxTrieStateLoadRate.Inc()
 		hadToLoad.Add(1)
 	}
 }
@@ -881,7 +879,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
 			}
-			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
 				return res, storageRootHashIsSet, nil, err
@@ -971,7 +968,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 				hph.keccak.Reset()
 
-				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
@@ -1049,7 +1045,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
 			}
-			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
@@ -1125,7 +1120,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if cell.stateHashLen > 0 {
 				hph.keccak.Reset()
 
-				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
@@ -1373,6 +1367,43 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 	return fullNode, nil
 }
 
+// witnessMaterializeBranchChild decodes the branch at branchPrefix and verifies it
+// hashes to wantHash, returning a node a strict verifier can descend instead of a bare
+// HashNode. Same hash, so the witness root is unchanged.
+func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte, childDepth int16, wantHash []byte) (*trie.FullNode, error) {
+	branchNode, err := hph.witnessMaterializeBranch(branchPrefix, childDepth)
+	if err != nil {
+		return nil, err
+	}
+	subRoot := trie.NewInMemoryTrie(branchNode).Hash()
+	if !bytes.Equal(subRoot[:], wantHash) {
+		return nil, fmt.Errorf("[witness] materialized branch root mismatch at prefix %x: got %x want %x", branchPrefix, subRoot, wantHash)
+	}
+	return branchNode, nil
+}
+
+// witnessDivergedBranchChild is the node attached below a folded extension whose path
+// diverges from the witnessed key: the materialized branch in exclusion-proof mode (so a
+// strict verifier can descend it), otherwise its hash. depth is the cell's grid depth, used
+// to compute the hash when the cell carries no precomputed hash-ref.
+func (hph *HexPatriciaHashed) witnessDivergedBranchChild(produceExclusionProofs bool, cell *cell, branchPrefix []byte, depth int16) (trie.Node, error) {
+	if cell.hashLen > 0 {
+		wantHash := cell.hash[:cell.hashLen]
+		if produceExclusionProofs {
+			return hph.witnessMaterializeBranchChild(branchPrefix, int16(len(branchPrefix))+1, wantHash)
+		}
+		return trie.NewHashNode(common.Copy(wantHash)), nil
+	}
+	cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(cell, depth, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(cellHash) == length.Hash+1 { // strip the 0xa0 prefix
+		cellHash = cellHash[1:]
+	}
+	return trie.NewHashNode(common.Copy(cellHash)), nil
+}
+
 func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (*trie.Trie, error) {
 	var rootNode trie.Node = &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -1426,25 +1457,14 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				// the traversal can be stopped at this level
 				pathDivergenceFound = true
 				short := &trie.ShortNode{Key: common.Copy(hashedExtKey)}
-				// For an absent account or storage key diverging at a folded extension, a strict
-				// sparse-trie verifier needs the branch behind the extension
-				// materialized, not a bare HashNode. The branch hashes
-				// to the same value, so the witness root is unchanged.
-				if produceExclusionProofs && (len(hashedKey) == 64 || len(hashedKey) == 128) && cellToExpand.hashLen > 0 {
-					branchPrefix := make([]byte, 0, int(keyPos)+1+len(hashedExtKey))
-					branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
-					branchPrefix = append(branchPrefix, hashedExtKey...)
-					branchNode, err := hph.witnessMaterializeBranch(branchPrefix, int16(len(branchPrefix))+1)
-					if err != nil {
-						return nil, err
-					}
-					subRoot := trie.NewInMemoryTrie(branchNode).Hash()
-					if !bytes.Equal(subRoot[:], cellToExpand.hash[:cellToExpand.hashLen]) {
-						return nil, fmt.Errorf("[witness] materialized extension-child branch root mismatch at prefix %x: got %x want %x", branchPrefix, subRoot, cellToExpand.hash[:cellToExpand.hashLen])
-					}
-					short.Val = branchNode
+				branchPrefix := make([]byte, 0, int(keyPos)+1+len(hashedExtKey))
+				branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
+				branchPrefix = append(branchPrefix, hashedExtKey...)
+				child, cerr := hph.witnessDivergedBranchChild(produceExclusionProofs, cellToExpand, branchPrefix, hph.depths[row])
+				if cerr != nil {
+					return nil, cerr
 				}
-				// Otherwise Val is set to a HashNode of the branch it points to when the current node is processed.
+				short.Val = child
 				nextNode = short
 			} else {
 				keyPos += extKeyLength // jump ahead
@@ -1488,11 +1508,21 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 					} else if cellToExpand.hashLen > 0 && len(hashedKey) != 64 && len(hashedKey) != 128 {
-						// Intermediate key (not account or full storage) landing on extension → branch:
-						// extension key should NOT have a terminator, Val is the branch hash.
+						// Intermediate key landing on extension→branch; the extension key carries no
+						// terminator. In exclusion-proof mode materialize the branch (same hash, witness
+						// root unchanged) so a strict verifier collapsing the sibling can descend it.
+						var branchVal trie.Node = trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen]))
+						if produceExclusionProofs {
+							branchPrefix := common.Copy(hashedKey[:keyPos+1])
+							branchNode, err := hph.witnessMaterializeBranchChild(branchPrefix, int16(len(branchPrefix))+1, cellToExpand.hash[:cellToExpand.hashLen])
+							if err != nil {
+								return nil, err
+							}
+							branchVal = branchNode
+						}
 						nextNode = &trie.ShortNode{
 							Key: common.Copy(hashedExtKey),
-							Val: trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen])),
+							Val: branchVal,
 						}
 					}
 					if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 128 {
@@ -1566,15 +1596,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				}
 			}
 
-			// this deals with the edge case where the extension key in nextNode diverges from hashedKey
-			// and points to a branch node. In this case we just need to provide the hash of this branch node
-			// (unless the branch was already materialized for an absent-slot exclusion proof).
-			if pathDivergenceFound {
-				if sn, ok := nextNode.(*trie.ShortNode); ok && sn.Val == nil {
-					terminalCell := &hph.grid[row][currentNibble]
-					sn.Val = trie.NewHashNode(common.Copy(terminalCell.hash[:]))
-				}
-			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
 			if len(hashedKey) <= 64 { // no storage, stop here
@@ -1586,22 +1607,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			}
 
 			// there is storage so we need to expand further
-			if pathDivergenceFound {
-				// Same handling as FullNode divergence: set the ShortNode's Val to the
-				// cell's hash so the proof is complete even when the extension diverges.
-				if shortNode, ok := nextNode.(*trie.ShortNode); ok && shortNode.Val == nil {
-					terminalCell := &hph.grid[row][currentNibble]
-					if terminalCell.hashLen > 0 {
-						shortNode.Val = trie.NewHashNode(common.Copy(terminalCell.hash[:terminalCell.hashLen]))
-					} else {
-						cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(terminalCell, hph.depths[row], nil)
-						if len(cellHash) == length.Hash+1 { // +1 for the a0 prefix
-							cellHash = cellHash[1:] // strip the a0 prefix
-						}
-						shortNode.Val = trie.NewHashNode(common.Copy(cellHash))
-					}
-				}
-			}
 			accNode.Storage = nextNode
 			if hph.trace {
 				fmt.Printf("[witness] AccountNode (+storage) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), accNode)
@@ -1814,6 +1819,29 @@ var (
 	skippedLoad atomic.Uint64
 	hadToReset  atomic.Uint64
 )
+
+var (
+	rateFlushMu       sync.Mutex
+	loadRatePublished uint64
+	skipRatePublished uint64
+)
+
+// flushTrieStateRates publishes the cumulative load/skip atomics to their
+// prometheus counters once per Process, replacing the per-key .Inc() on the hot
+// path. The atomics are monotonic and the publish is delta-based, so the emitted
+// counter value is identical regardless of how often this is called.
+func flushTrieStateRates() {
+	rateFlushMu.Lock()
+	defer rateFlushMu.Unlock()
+	if l := hadToLoad.Load(); l > loadRatePublished {
+		mxTrieStateLoadRate.AddUint64(l - loadRatePublished)
+		loadRatePublished = l
+	}
+	if s := skippedLoad.Load(); s > skipRatePublished {
+		mxTrieStateSkipRate.AddUint64(s - skipRatePublished)
+		skipRatePublished = s
+	}
+}
 
 type skipStat struct {
 	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
@@ -2837,6 +2865,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		hph.branchEncoder.ClearDeferred()
 	}
+
+	flushTrieStateRates()
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)

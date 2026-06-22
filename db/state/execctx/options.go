@@ -34,3 +34,10 @@ func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
 }
+
+// WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless
+// of the experimental parallel/concurrent flags — for one-shot / empty-DB paths
+// (e.g. genesis) that wire no trie-context factory for the parallel trie.
+func WithSequentialCommitment() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+}
