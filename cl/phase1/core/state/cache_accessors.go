@@ -364,6 +364,9 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
+	if activeValidatorCount == 0 {
+		return nil, fmt.Errorf("cannot compute next sync committee: no active validators at epoch %d", epoch)
+	}
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.

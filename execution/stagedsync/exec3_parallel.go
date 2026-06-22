@@ -1702,7 +1702,7 @@ func (result *execResult) calcFees(
 	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
-	emptyRemoval := chainRules.IsEIP161Enabled()
+	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 	// nil pre-state must not short-circuit to empty=true: a worker may
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
@@ -1710,14 +1710,14 @@ func (result *execResult) calcFees(
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
-		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
+		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
 	var addWrites state.VersionedWrites
 	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
-			tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
-		if emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
+			tracing.BalanceIncreaseRewardTransactionFee, coinbaseEmptyRemoval)
+		if coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
 			addWrites = append(addWrites, &state.VersionedWrite{
 				Address: result.Coinbase,
 				Path:    state.SelfDestructPath,
@@ -1761,7 +1761,7 @@ func (result *execResult) calcFees(
 	if hasBurnt && newBurntBalance != oldBurntBalance {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, emptyRemoval)
+			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
 		addWrites = append(addWrites, &state.VersionedWrite{
 			Address:             burntAddr,
 			Path:                state.BalancePath,
@@ -2589,7 +2589,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						}
 						return keys
 					}
-					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum))
+					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
+					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
+					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -3042,7 +3044,7 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool) state.VersionedWrites {
+func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
@@ -3446,12 +3448,11 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// converting it to a delete here would diverge from serial's trie root
 	// (TestEIP161AccountRemoval block 1, pre-SpuriousDragon).
 	emptyAddrs := make(map[accounts.Address]bool)
-	if emptyRemoval {
-		for addr, s := range acctStates {
-			if s.hasBal && s.hasNonce && s.hasCode &&
-				s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
-				emptyAddrs[addr] = true
-			}
+	for addr, s := range acctStates {
+		if state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) &&
+			s.hasBal && s.hasNonce && s.hasCode &&
+			s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
+			emptyAddrs[addr] = true
 		}
 	}
 
