@@ -236,17 +236,23 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 // hold before the message is applied. It performs no state mutation: buyGas
 // (the gas-fee debit and block blob-gas reservation) runs separately, only
 // after preCheck passes, so a rejected tx leaves sender state untouched and
-// consumes no pool gas. The main rules, in order:
+// consumes no pool gas. The checks, in order:
 //
-//  1. there is no overflow when calculating intrinsic gas
-//  2. the sender nonce is correct
-//  3. the block has enough gas left for the tx
-//  4. the gas limit does not exceed the EIP-7825 cap (Osaka+)
-//  5. the sender can pay the gas fee (gaslimit * gasprice)
-//  6. the sender can cover the topmost call's value transfer
-//  7. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//  1. no overflow when calculating intrinsic gas
+//  2. the blob count is within the per-transaction limit (Osaka+)
+//  3. the sender nonce is correct
+//  4. the sender is an EOA (EIP-3607)
+//  5. the block has enough gas left for the tx (regular, state, and blob)
+//  6. the fee cap is at least the base fee, and the tip at most the fee cap (EIP-1559)
+//  7. the max fee per blob gas covers the blob gas price (EIP-4844)
+//  8. the gas limit does not exceed the EIP-7825 cap (Osaka+)
+//  9. the SetCode (type-4) transaction is well-formed (EIP-7702)
+//  10. the sender can pay the gas fee (gaslimit * gasprice)
+//  11. the sender can cover the topmost call's value transfer
+//  12. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
+//  13. contract-creation initcode is within the EIP-3860 limit
 //
-// Clauses 5 and 6 are the gas and value terms of one balance check. The computed
+// Clauses 10 and 11 are the gas and value terms of one balance check. The computed
 // intrinsic gas and gas fee are stored on the executor for buyGas and Execute's
 // accounting.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
@@ -407,6 +413,15 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasSum, st.intrinsicGas.FloorGasCost))
 	}
 
+	// EIP-3860/EIP-7907: reject oversized contract-creation initcode before
+	// buying gas, so a rejected tx leaves sender state untouched.
+	if st.msg.To().IsNil() {
+		vmConfig := st.evm.Config()
+		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), vmConfig.HasEip3860(rules), rules.IsAmsterdam); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -563,8 +578,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
-	isEIP3860 := vmConfig.HasEip3860(rules)
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
@@ -603,13 +616,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		if !msg.Value().IsZero() && !canTransfer {
 			bailout = true
-		}
-	}
-
-	// Check whether the init code size has been exceeded.
-	if contractCreation {
-		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
-			return nil, err
 		}
 	}
 

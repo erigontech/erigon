@@ -504,3 +504,43 @@ func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	require.NoError(t, bErr)
 	require.Equal(t, *initialBalance, bal, "balance must be untouched on a type-4 prerequisite rejection")
 }
+
+// TestMaxInitCodeSizeReject_NoStateMutation pins that a contract-creation
+// transaction rejected for oversized initcode (EIP-3860) — with enough gas to
+// clear the intrinsic check — leaves the sender's nonce and balance untouched,
+// because preCheck validates the initcode size before buying gas.
+func TestMaxInitCodeSizeReject_NoStateMutation(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	cfg := chain.TestChainOsakaConfig // Shanghai active -> EIP-3860 initcode limit
+
+	ibs := state.New(state.NewNoopReader())
+	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	gasPrice := uint256.NewInt(1)
+	// One byte over the EIP-3860 limit, with ample gas to clear intrinsic gas.
+	initcode := make([]byte, params.MaxInitCodeSize+1)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 1_000_000,
+		gasPrice, gasPrice, gasPrice,
+		initcode, nil,
+		false, false, true, false, nil,
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.ErrorIs(t, err, vm.ErrMaxInitCodeSizeExceeded)
+
+	nonce, nErr := ibs.GetNonce(sender)
+	require.NoError(t, nErr)
+	require.Zero(t, nonce, "nonce must be untouched on an oversized-initcode rejection")
+
+	bal, bErr := ibs.GetBalance(sender)
+	require.NoError(t, bErr)
+	require.Equal(t, *initialBalance, bal, "balance must be untouched on an oversized-initcode rejection")
+}
