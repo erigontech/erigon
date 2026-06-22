@@ -437,17 +437,18 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	intrinsicGasResult, overflow := st.calcIntrinsicGas()
+	var overflow bool
+	st.intrinsicGas, overflow = st.calcIntrinsicGas()
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	intrinsicGasSum, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	intrinsicGasSum, overflow := math.SafeAdd(st.intrinsicGas.RegularGas, st.intrinsicGas.StateGas)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
 	if st.msg.Gas() < intrinsicGasSum {
 		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
-			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGasSum)
+			ErrIntrinsicGas, st.msg.Gas(), st.intrinsicGas.RegularGas, st.intrinsicGas.StateGas, intrinsicGasSum)
 	}
 
 	// set code tx — verifyAuthorities mutates state (SetCode/SetNonce), so it
@@ -458,8 +459,8 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		return nil, err
 	}
 	imdGas := mdgas.MdGas{
-		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
+		Regular: st.intrinsicGas.RegularGas,
+		State:   st.intrinsicGas.StateGas,
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
 	// EIP-8037 × EIP-7702: authority-exists refund moves from intrinsic state
@@ -485,7 +486,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
-		IntrinsicGas:        intrinsicGasResult,
+		IntrinsicGas:        st.intrinsicGas,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -560,7 +561,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if err := st.buyGas(gasBailout); err != nil {
 		return nil, err
 	}
-	intrinsicGasResult := st.intrinsicGas
 
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -581,8 +581,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	imdGas := mdgas.MdGas{
-		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
+		Regular: st.intrinsicGas.RegularGas,
+		State:   st.intrinsicGas.StateGas,
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
 	if rules.IsAmsterdam && stateIgasRefund > 0 {
@@ -643,14 +643,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if rules.IsAmsterdam {
 			combined := gasUsed.PlusIntrinsic(imdGas)
 			st.blockStateGasUsed = combined.StateClamped()
-			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+			st.blockRegularGasUsed = max(combined.Regular, st.intrinsicGas.FloorGasCost)
 			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+			st.txnGasUsed = max(st.intrinsicGas.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+			st.txnGasUsed = max(st.intrinsicGas.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
 			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
@@ -662,9 +662,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else if rules.IsAmsterdam {
 		combined := gasUsed.PlusIntrinsic(imdGas)
 		st.blockStateGasUsed = combined.StateClamped()
-		st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+		st.blockRegularGasUsed = max(combined.Regular, st.intrinsicGas.FloorGasCost)
 		st.txnGasUsedB4Refunds = combined.Total()
-		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
+		st.txnGasUsed = max(st.txnGasUsedB4Refunds, st.intrinsicGas.FloorGasCost)
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
@@ -727,8 +727,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
-		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		IntrinsicGas:        intrinsicGasResult,
+		MaxGasUsed:          max(st.txnGasUsedB4Refunds, st.intrinsicGas.FloorGasCost),
+		IntrinsicGas:        st.intrinsicGas,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
