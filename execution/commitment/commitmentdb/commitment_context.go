@@ -63,7 +63,8 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
+	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
+	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
 	trace         bool
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
@@ -191,9 +192,14 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
+	variant := cfg.Variant
+	if variant == "" {
+		variant = commitment.VariantHexPatriciaTrie
+	}
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
+		variant:       variant,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
@@ -337,7 +343,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		if took > 0 {
 			keysPerSec = uint64(float64(updateCount) / took.Seconds())
 		}
-		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
+		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
@@ -391,6 +397,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			trieState, err = trie.EncodeCurrentState(nil)
 		case *commitment.ConcurrentPatriciaHashed:
 			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
+		case *commitment.ParallelPatriciaHashed:
+			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
 		}
 		if err != nil {
 			log.Warn("[commitment] failed to encode trie state for trace", "err", err)
@@ -435,9 +443,20 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig = sdc.warmupBase
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
-		if _, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok && sdc.updates.IsConcurrentCommitment() {
+		switch trie := sdc.patriciaTrie.(type) {
+		case *commitment.ConcurrentPatriciaHashed:
+			if sdc.updates.IsConcurrentCommitment() {
+				warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
+			} else {
+				warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
+			}
+		case *commitment.ParallelPatriciaHashed:
+			// Each worker writes its branch updates through a private collector
+			// so concurrent PutBranch calls never race; collectors are drained
+			// after Process and merged into the main writer below.
 			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
-		} else {
+			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
+		default:
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 	}
@@ -451,6 +470,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
 		hph.SetLeaveDeferredForCaller(true)
 		defer hph.SetLeaveDeferredForCaller(false)
+	} else if ptrie, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok && sdc.deferCommitmentUpdates {
+		ptrie.SetLeaveDeferredForCaller(true)
+		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
@@ -482,15 +504,25 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	// Handle deferred branch updates left by Process() on the branch encoder.
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.HasPendingDeferredUpdates() {
-		// Store deferred updates for later flushing (fork validation path).
-		// This path is reached only when deferCommitmentUpdates is true because
-		// Process() applies inline by default.
-		sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
-			BlockNum: blockNum,
-			TxNum:    txNum,
-			Deferred: hph.TakeDeferredUpdates(),
+	// Handle deferred branch updates left by Process() on the trie. Reached only
+	// when deferCommitmentUpdates is true (fork validation / parallel apply),
+	// since Process() applies inline by default.
+	switch trie := sdc.patriciaTrie.(type) {
+	case *commitment.HexPatriciaHashed:
+		if trie.HasPendingDeferredUpdates() {
+			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+				BlockNum: blockNum,
+				TxNum:    txNum,
+				Deferred: trie.TakeDeferredUpdates(),
+			}
+		}
+	case *commitment.ParallelPatriciaHashed:
+		if trie.HasPendingDeferredUpdates() {
+			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+				BlockNum: blockNum,
+				TxNum:    txNum,
+				Deferred: trie.TakeDeferredUpdates(),
+			}
 		}
 	}
 
@@ -631,7 +663,8 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
+	tv := sdc.patriciaTrie.Variant()
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantConcurrentHexPatricia && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -755,6 +788,11 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 		if err != nil {
 			return nil, err
 		}
+	case *commitment.ParallelPatriciaHashed:
+		state, err = trie.RootTrie().EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", sdc.patriciaTrie)
 	}
@@ -780,6 +818,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	tv := sdc.patriciaTrie.Variant()
 
 	var hext *commitment.HexPatriciaHashed
+	var ppht *commitment.ParallelPatriciaHashed
 	if tv == commitment.VariantHexPatriciaTrie {
 		var ok bool
 		hext, ok = sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
@@ -793,6 +832,14 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
 		hext = phext.RootTrie()
+	}
+	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
+		var ok bool
+		ppht, ok = sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
+		if !ok {
+			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
+		}
+		hext = ppht.RootTrie()
 	}
 	if hext == nil {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
