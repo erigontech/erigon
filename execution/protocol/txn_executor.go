@@ -231,29 +231,12 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 	return nil
 }
 
-// preCheck computes intrinsic gas and enforces the consensus rules that must
-// hold before the message is applied. It performs no state mutation: buyGas
-// (the gas-fee debit and block blob-gas reservation) runs separately, only
-// after preCheck passes, so a rejected tx leaves sender state untouched and
-// consumes no pool gas. The checks, in order:
-//
-//  1. no overflow when calculating intrinsic gas
-//  2. the blob count is within the per-transaction limit (Osaka+)
-//  3. the sender nonce is correct
-//  4. the sender is an EOA (EIP-3607)
-//  5. the block has enough gas left for the tx (regular, state, and blob)
-//  6. the fee cap is at least the base fee, and the tip at most the fee cap (EIP-1559)
-//  7. the max fee per blob gas covers the blob gas price (EIP-4844)
-//  8. the gas limit does not exceed the EIP-7825 cap (Osaka+)
-//  9. the SetCode (type-4) transaction is well-formed (EIP-7702)
-//  10. the sender can pay the gas fee (gaslimit * gasprice)
-//  11. the sender can cover the topmost call's value transfer
-//  12. the gas limit covers intrinsic usage (regular + EIP-8037 state, EIP-7623 floor)
-//  13. contract-creation initcode is within the EIP-3860 limit
-//
-// Clauses 10 and 11 are the gas and value terms of one balance check. The computed
-// intrinsic gas and gas fee are stored on the executor for buyGas and Execute's
-// accounting.
+// preCheck enforces the consensus rules that must hold before the message is
+// applied and computes the intrinsic gas and gas fee, caching them on the
+// executor for buyGas and Execute's accounting. It performs no state mutation:
+// buyGas (the gas-fee debit and block blob-gas reservation) runs separately,
+// only after preCheck passes, so a rejected tx leaves sender state untouched and
+// consumes no pool gas.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *TxnExecutor) preCheck(gasBailout bool) error {
 	rules := st.evm.ChainRules()
@@ -265,6 +248,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		return ErrGasUintOverflow
 	}
 
+	// Reject more blob hashes than the per-transaction limit (Osaka+).
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
 		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
@@ -310,12 +294,13 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
+	// The block must have enough regular, state, and blob gas left for the tx.
 	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), st.intrinsicGas, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution, st.msg.BlobGas()); err != nil {
 		return err
 	}
 
-	// Make sure the transaction feeCap is greater than the block's baseFee.
+	// EIP-1559: the fee cap must cover the base fee, and the tip must not exceed the fee cap.
 	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
@@ -325,6 +310,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 			}
 		}
 	}
+	// EIP-4844: the max fee per blob gas must cover the blob gas price.
 	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
@@ -369,7 +355,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
-	// Clauses 10 & 11: the sender can pay the gas fee and cover the value transfer.
+	// The sender must afford the gas fee plus the topmost call's value transfer.
 	if !gasBailout {
 		balanceCheck := st.gasVal
 		if st.feeCap != nil {
@@ -403,7 +389,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		}
 	}
 
-	// Clause 12. EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
+	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
 	// The tx must cover the sum, not just each component individually. Checked after
 	// the affordability check so insufficient-funds keeps precedence, as in geth.
 	intrinsicGasSum, overflow := math.SafeAdd(st.intrinsicGas.RegularGas, st.intrinsicGas.StateGas)
@@ -414,7 +400,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 		return fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasSum, st.intrinsicGas.FloorGasCost))
 	}
 
-	// Clause 13. EIP-3860: reject oversized contract-creation initcode before
+	// EIP-3860: reject oversized contract-creation initcode before
 	// buying gas, so a rejected tx leaves sender state untouched.
 	if st.msg.To().IsNil() {
 		vmConfig := st.evm.Config()
