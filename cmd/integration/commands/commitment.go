@@ -556,6 +556,7 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	agg.DisableAllDependencies()
+	defer agg.MadvNormal().DisableReadAhead()
 	// commitmentValTransformDomain (the squeeze path's value transformer)
 	// short-circuits to pass-through when the live runtime flag is false.
 	// Force-enable it for the duration of the converter run so --squeeze=true
