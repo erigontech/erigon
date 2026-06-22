@@ -94,13 +94,13 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 	return next(k, k[8:], k[:8])
 }
 
-func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
+func (w *BlockWriter) TruncateBodies(db kv.RwDB, tx kv.RwTx, from uint64) error {
 	fromB := hexutil.EncodeTs(from)
 	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
 
-	if err := backup.ClearTables(context.Background(), tx, kv.EthTx, kv.MaxTxNum); err != nil {
+	if err := backup.ClearTables(context.Background(), db, kv.EthTx, kv.MaxTxNum); err != nil {
 		return err
 	}
 	if err := tx.ResetSequence(kv.EthTx, 0); err != nil {
