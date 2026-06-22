@@ -381,7 +381,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
-			if rules.IsCancun {
+			if rules.IsCancun && st.msg.BlobGas() > 0 {
 				maxBlobFee, overflow := u256.MulOverflow(*st.msg.MaxFeePerBlobGas(), u256.U64(st.msg.BlobGas()))
 				if overflow {
 					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
