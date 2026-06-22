@@ -123,7 +123,7 @@ jobs:
 
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: "0"

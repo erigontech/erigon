@@ -17,7 +17,6 @@
 package rpctest
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strings"
@@ -179,8 +178,7 @@ func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account com
 
 func (g *RequestGenerator) accountRange(bn uint64, page []byte, num int) string { //nolint
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false], "id":%d}`
-	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, num, g.reqID.Add(1))
+	return fmt.Sprintf(template, bn, hexutil.Encode(page), num, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getProof(bn uint64, account common.Address, storageList []common.Hash) string {

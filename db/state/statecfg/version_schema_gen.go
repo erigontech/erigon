@@ -5,7 +5,7 @@ package statecfg
 import "github.com/erigontech/erigon/db/version"
 
 func InitSchemasGen() {
-	Schema.AccountsDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.AccountsDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.AccountsDomain.FileVersion.DataKV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.AccountsDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.AccountsDomain.Hist.FileVersion.DataV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
@@ -14,7 +14,7 @@ func InitSchemasGen() {
 	Schema.AccountsDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.BodiesBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.BodiesBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.CodeDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.CodeDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.DataKV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.CodeDomain.Hist.FileVersion.DataV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
@@ -39,14 +39,14 @@ func InitSchemasGen() {
 	Schema.RCacheDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.RCacheDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.ReceiptDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
+	Schema.ReceiptDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.FileVersion.DataKV = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 3}, version.Version{1, 0}}
 	Schema.ReceiptDomain.Hist.FileVersion.DataV = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.ReceiptDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{3, 0}, version.Version{1, 0}}
 	Schema.ReceiptDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
-	Schema.StorageDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
+	Schema.StorageDomain.FileVersion.AccessorBT = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.StorageDomain.FileVersion.DataKV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.StorageDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
 	Schema.StorageDomain.Hist.FileVersion.DataV = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
