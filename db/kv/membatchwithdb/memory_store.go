@@ -26,11 +26,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	btree2 "github.com/tidwall/btree"
 )
 
 // Compile-time check that memStore implements kv.RwTx.
@@ -431,13 +432,12 @@ func (db *memStoreDB) UpdateNosync(_ context.Context, f func(tx kv.RwTx) error) 
 func (db *memStoreDB) View(_ context.Context, f func(tx kv.Tx) error) error {
 	return f(db.store)
 }
-func (db *memStoreDB) Close()                                        {}
-func (db *memStoreDB) AllTables() kv.TableCfg                        { return kv.ChaindataTablesCfg }
-func (db *memStoreDB) PageSize() datasize.ByteSize                   { return 4096 }
-func (db *memStoreDB) WarmupTable(ctx context.Context, table string) {}
-func (db *memStoreDB) ReadOnly() bool                                { return false }
-func (db *memStoreDB) CHandle() unsafe.Pointer                       { return nil }
-func (db *memStoreDB) Path() string                                  { return "<mem>" }
+func (db *memStoreDB) Close()                      {}
+func (db *memStoreDB) AllTables() kv.TableCfg      { return kv.ChaindataTablesCfg }
+func (db *memStoreDB) PageSize() datasize.ByteSize { return 4096 }
+func (db *memStoreDB) ReadOnly() bool              { return false }
+func (db *memStoreDB) CHandle() unsafe.Pointer     { return nil }
+func (db *memStoreDB) Path() string                { return "<mem>" }
 
 // --- Cursor ---
 //

@@ -118,8 +118,7 @@ func DefaultStages(
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				_, err := PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
-				return err
+				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
 			},
 		},
 		//{

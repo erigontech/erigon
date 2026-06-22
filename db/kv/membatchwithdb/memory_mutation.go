@@ -1272,8 +1272,4 @@ func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) 
 	return f(td.memoryMutation)
 }
 
-func (td temporaldb) Warmup(ctx context.Context, force bool) error { return nil }
-
-func (td temporaldb) WarmupTable(ctx context.Context, table string) {}
-
 func (td temporaldb) Path() string { return "<mem>" }

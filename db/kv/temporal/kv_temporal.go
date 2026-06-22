@@ -138,12 +138,6 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *DB) Warmup(ctx context.Context, force bool) error {
-	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		return tx.(*Tx).WarmupDB(force)
-	})
-}
-
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()

@@ -38,8 +38,6 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	// WarmupTableWorkers bounds the parallel scans of a single WarmupTable call;
-	// 0 (the default) disables table warmup entirely.
 	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
 
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)

@@ -711,7 +711,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		_, err = stagedsync.PruneExecutionStage(ctx, p, tx, cfg, 0, logger)
+		err = stagedsync.PruneExecutionStage(ctx, p, tx, cfg, 0, logger)
 		if err != nil {
 			return err
 		}
@@ -771,7 +771,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err != nil {
 				return err
 			}
-			if _, err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
 				return err
 			}
 
@@ -824,27 +824,19 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
-		// Prune in bounded, committed batches so a long prune survives Ctrl-C:
-		// prune progress is durable, so a restart only repeats the last batch.
-		for {
-			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, false)
-			if err != nil {
+		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
+		if err != nil {
+			return err
+		}
+		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, time.Hour, logger); err != nil {
+			return err
+		}
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
 				return err
 			}
-			hasMore, err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, time.Minute, logger)
-			if err != nil {
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
-			}
-			if !noCommit {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
-			}
-			if !hasMore {
-				break
 			}
 		}
 

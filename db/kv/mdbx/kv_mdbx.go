@@ -882,14 +882,6 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
-func (db *MdbxKV) WarmupTable(ctx context.Context, bucket string) {
-	workers := int(dbg.WarmupTableWorkers)
-	if workers <= 0 {
-		return
-	}
-	kv.WarmupTable(ctx, db, bucket, workers)
-}
-
 func rawCursor(c kv.Cursor) *mdbx.Cursor {
 	if dc, ok := c.(*MdbxDupSortCursor); ok {
 		return dc.c

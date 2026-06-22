@@ -78,7 +78,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
@@ -3582,10 +3581,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		}
 	}
 
-	if err := pruneExecChangesets(ctx, db, cliCtx, logger); err != nil {
-		return err
-	}
-
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
 
@@ -3596,39 +3591,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	return nil
-}
-
-// pruneExecChangesets trims the block-keyed Execution-stage tables (ChangeSets3,
-// BlockAccessList); the aggregator prune that retire already runs does not cover them.
-func pruneExecChangesets(ctx context.Context, db kv.RwDB, cliCtx *cli.Context, logger log.Logger) error {
-	syncCfg := ethconfig.Defaults.Sync
-	if cliCtx.IsSet(utils.AlwaysGenerateChangesetsFlag.Name) {
-		syncCfg.AlwaysGenerateChangesets = cliCtx.Bool(utils.AlwaysGenerateChangesetsFlag.Name)
-	}
-
-	var execProgress uint64
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		execProgress, err = stages.GetStageProgress(tx, stages.Execution)
-		return err
-	}); err != nil {
-		return err
-	}
-	if execProgress <= syncCfg.MaxReorgDepth {
-		return nil
-	}
-
-	logger.Info("pruning execution changesets", "to", execProgress-syncCfg.MaxReorgDepth)
-	for hasMore := true; hasMore; {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			var err error
-			hasMore, err = stagedsync.PruneExecutionBlockHistory(ctx, tx, db, syncCfg, execProgress, 1_000_000, 1_000_000, 10*time.Minute, logger, "retire")
-			return err
-		}); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
