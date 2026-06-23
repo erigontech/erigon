@@ -801,6 +801,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
+		agg.BuildFilesInBackground(agg.EndTxNumMinimax() + agg.StepSize())
 		if execProgress >= block {
 			break
 		}
