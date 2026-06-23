@@ -204,14 +204,14 @@ func (ba *BlockAssembler) AddTransactions(
 	// SharedDomains become stale when system calls revert storage slots.
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
-	recordTxIO := func(balIO *state.VersionedIO) {
-		if balIO != nil {
+	recordTxIO := func() {
+		if ba.HasBAL() {
 			ibs.MergeTxIOInto(ba.balIO)
 		}
 		ibs.ResetVersionedIO()
 	}
-	clearTxIO := func(balIO *state.VersionedIO) {
-		if balIO == nil {
+	clearTxIO := func() {
+		if !ba.HasBAL() {
 			return
 		}
 		ibs.AccessedAddresses()
@@ -350,9 +350,9 @@ LOOP:
 		// Start executing the transaction
 		logs, err := commitTx(txn, coinbase, vmConfig, ba.cfg.ChainConfig, ibs, ba.AssembledBlock)
 		if err == nil {
-			recordTxIO(ba.balIO)
+			recordTxIO()
 		} else {
-			clearTxIO(ba.balIO)
+			clearTxIO()
 		}
 		if errors.Is(err, protocol.ErrGasLimitReached) {
 			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
