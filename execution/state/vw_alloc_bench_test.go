@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -42,13 +43,14 @@ func BenchmarkSetNonce(b *testing.B) {
 func BenchmarkSetCode(b *testing.B) {
 	addr := accounts.InternAddress([20]byte{0x03})
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	var s WriteSet
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s.SetCode(addr, &VersionedWrite[accounts.Code]{
 			WriteHeader: WriteHeader{Address: addr, Path: CodePath},
-			Val:         accounts.Code{Bytes: code},
+			Val:         accounts.Code{Hash: codeHash, Bytes: code},
 		})
 	}
 }
