@@ -58,9 +58,9 @@ type pendingRegenState struct {
 // ensureCommitmentAtBlockCompute's recompute result — the same trie
 // state ensureCommitmentAtBlockApply writes to the writable shadow.
 //
-// AsOfLookup is wired to tx.HistorySeek, which returns the value at
-// the most recent history entry at or before lastTxNum. Phase 4
-// pins the precise semantic against forward-exec read behavior.
+// AsOfLookup is wired to tx.GetAsOf at ts=lastTxNum+1, so a key whose
+// last write predates lastTxNum but has no history entry at/after
+// lastTxNum falls through to GetLatest and is kept (not dropped).
 //
 // Returns a *pendingRegenState (or nil if no boundary-step files
 // existed for any domain — defensive; in practice every domain has
@@ -93,8 +93,19 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, fmt.Errorf("encode commitment anchor: %w", err)
 	}
 
+	// tx.GetAsOf (not tx.HistorySeek) so the lookup falls through to
+	// GetLatest when history has no change at or after ts. For a key
+	// last written before the unwind target and never modified since,
+	// HistorySeek returns NOT FOUND (no entry at ts) — the regen would
+	// drop the key from the rebuilt boundary file and downstream reads
+	// at lastTxNum would return zero, surfacing as wrong-state gas-
+	// mismatch in catchup. GetAsOf treats history NOT FOUND as "no
+	// change since some past write" and reads the surviving current
+	// value via GetLatest. ts is lastTxNum+1 so a change at exactly
+	// lastTxNum is included in the answer (matching the wipe path's
+	// GetAsOf(_, _, lastTxNum+1) convention).
 	lookup := func(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
-		return tx.HistorySeek(domain, key, ts)
+		return tx.GetAsOf(domain, key, ts+1)
 	}
 
 	pairs := make([]regenPair, 0, len(snapshot.AllDomains))

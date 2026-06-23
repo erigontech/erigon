@@ -647,6 +647,80 @@ func TestAssertWritableShadowConsistentAt_DetectsDriftAcrossDomains(t *testing.T
 		"storage-domain drift must surface in the error (not just accounts)")
 }
 
+// TestGetAsOf_FallsThroughForUnchangedKey pins the temporal-API
+// semantic the boundary-step regen relies on: a key whose only write
+// predates lastTxNum and has no history entry at or after lastTxNum
+// MUST survive an as-of lookup.
+//
+// HistorySeek returns NOT FOUND for that case — the cursor finds no
+// entry at txnum >= ts so the seek lands past the key and reports
+// "no value". The regen previously used HistorySeek directly and
+// dropped every such key from the regenerated boundary file,
+// surfacing later as wrong-state gas-mismatch in catchup once the
+// trie tried to read the slot. GetAsOf treats that same case as
+// "no change since the past write" and falls through to GetLatest,
+// returning the surviving value.
+//
+// Setup (stepSize=8 → boundary step 0 covers txnums 0..7):
+//   - acc1 written at txnum 3 with nonce=1
+//   - no further writes to acc1 anywhere up through lastTxNum=10
+//
+// Assertion:
+//   - tx.HistorySeek(acc1, 10) returns NOT FOUND (this is what made
+//     the regen drop unchanged keys)
+//   - tx.GetAsOf(acc1, 11) returns acc1's nonce=1 value (this is what
+//     the regen lookup now does — ts=lastTxNum+1 matches the wipe
+//     path's convention)
+func TestGetAsOf_FallsThroughForUnchangedKey(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	const lastTxNum uint64 = 10
+	db, _ := newWipeTestDB(t, stepSize)
+
+	acc1Addr := [20]byte{1}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+
+		acc := accounts.Account{
+			Nonce:    1,
+			Balance:  *uint256.NewInt(100),
+			CodeHash: accounts.EmptyCodeHash,
+		}
+		buf := accounts.SerialiseV3(&acc)
+		domains.SetTxNum(3)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, acc1Addr[:], buf, 3, nil))
+
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	hsVal, hsFound, err := roTx.HistorySeek(kv.AccountsDomain, acc1Addr[:], lastTxNum)
+	require.NoError(t, err)
+	require.False(t, hsFound,
+		"HistorySeek(lastTxNum=%d) must report NOT FOUND for a key with no history entry at or after that ts — this is the misbehavior the regen used to hit (drops the key)",
+		lastTxNum)
+	require.Empty(t, hsVal)
+
+	gaVal, gaFound, err := roTx.GetAsOf(kv.AccountsDomain, acc1Addr[:], lastTxNum+1)
+	require.NoError(t, err)
+	require.True(t, gaFound,
+		"GetAsOf(lastTxNum+1=%d) must return the still-current value — it falls through to GetLatest when history has no entry, which is the semantic the regen now relies on",
+		lastTxNum+1)
+	require.NotEmpty(t, gaVal)
+}
+
 // newWipeTestDB constructs a temporal DB + aggregator sized for fast
 // wipe tests. Mirrors testDbAndAggregatorv3 from squeeze_test.go but
 // exported in this file so wipe tests have a self-contained fixture.
