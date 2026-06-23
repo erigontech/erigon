@@ -54,12 +54,15 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 }
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
-	defer insertBlocksDuration.ObserveDuration(time.Now())
-	if !e.semaphore.TryAcquire(1) {
-		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
-		return ExecutionStatusBusy, nil
+	// Serialize behind any in-flight exec-module op, blocking rather than failing fast with Busy.
+	start := time.Now()
+	// Timed across the whole call so the metric includes semaphore wait.
+	defer insertBlocksDuration.ObserveDuration(start)
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
 	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 

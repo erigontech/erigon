@@ -17,17 +17,28 @@
 package trie
 
 import (
-	"bytes"
-	"fmt"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// requireValue asserts that key resolves to want; nil want means the key must be absent.
+func requireValue(t *testing.T, tr *Trie, key, want []byte) {
+	t.Helper()
+	v, ok := tr.Get(key)
+	if want == nil {
+		require.Nil(t, v)
+		return
+	}
+	require.True(t, ok)
+	require.Equal(t, want, v)
+}
 
 func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 	trie := newEmpty()
@@ -35,24 +46,15 @@ func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 	val := []byte("1")
 
 	trie.Update(key, val)
-	v, ok := trie.Get(key)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
-	//remove unknown
+	requireValue(t, trie, key, val)
+
+	// remove unknown
 	trie.DeleteSubtree([]byte{uint8(2)})
-	v, ok = trie.Get(key)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
+	requireValue(t, trie, key, val)
 
-	//remove by key
+	// remove by key
 	trie.DeleteSubtree(key)
-
-	v, _ = trie.Get(key)
-	if v != nil {
-		t.Fatal("must be false")
-	}
+	requireValue(t, trie, key, nil)
 }
 
 func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
@@ -64,43 +66,23 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	val := []byte{uint8(1)}
 
 	keyHash, err := common.HashData(key)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	addrHash1, err := common.HashData(addr1[:])
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	addrHash2, err := common.HashData(addr2[:])
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	key1 := GenerateCompositeTrieKey(addrHash1, keyHash)
-	key2 := GenerateCompositeTrieKey(addrHash2, keyHash)
+	key1 := dbutils.GenerateCompositeTrieKey(addrHash1, keyHash)
+	key2 := dbutils.GenerateCompositeTrieKey(addrHash2, keyHash)
 	trie.Update(key1, val)
 	trie.Update(key2, val)
 
 	trie.DeleteSubtree(addrHash1[:])
 
-	v, ok := trie.Get(key2)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
-
-	v, _ = trie.Get(key1)
-	if v != nil {
-		t.Fatal("must be nil")
-	}
-}
-
-func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, length.Hash+length.Hash)
-	compositeKey = append(compositeKey, addressHash[:]...)
-	compositeKey = append(compositeKey, seckey[:]...)
-	return compositeKey
+	requireValue(t, trie, key2, val)
+	requireValue(t, trie, key1, nil)
 }
 
 func TestTrieDeleteSubtree_ShortNode_LongPrefix(t *testing.T) {
@@ -110,24 +92,15 @@ func TestTrieDeleteSubtree_ShortNode_LongPrefix(t *testing.T) {
 	val := []byte("1")
 
 	trie.Update(key, val)
-	v, ok := trie.Get(key)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
-	//remove unknown
-	trie.Delete([]byte{uint8(2)})
-	v, ok = trie.Get(key)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
+	requireValue(t, trie, key, val)
 
-	//remove by key
+	// remove unknown
+	trie.Delete([]byte{uint8(2)})
+	requireValue(t, trie, key, val)
+
+	// remove by prefix
 	trie.DeleteSubtree(prefix)
-	v, _ = trie.Get(key)
-	t.Log(v)
-	if v != nil {
-		t.Fatal("must be false")
-	}
+	requireValue(t, trie, key, nil)
 }
 
 func TestTrieDeleteSubtree_DuoNode(t *testing.T) {
@@ -139,21 +112,12 @@ func TestTrieDeleteSubtree_DuoNode(t *testing.T) {
 
 	trie.Update(key, val)
 	trie.Update(keyExist, valExist)
-	v, ok := trie.Get(key)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
+	requireValue(t, trie, key, val)
 
 	trie.DeleteSubtree(key)
 
-	v, _ = trie.Get(key)
-	if v != nil {
-		t.Fatal("must be nil")
-	}
-	v, _ = trie.Get(keyExist)
-	if bytes.Equal(v, valExist) == false {
-		t.Fatal("must be false")
-	}
+	requireValue(t, trie, key, nil)
+	requireValue(t, trie, keyExist, valExist)
 }
 
 func TestTrieDeleteSubtree_TwoDuoNode_FullMatch(t *testing.T) {
@@ -173,20 +137,9 @@ func TestTrieDeleteSubtree_TwoDuoNode_FullMatch(t *testing.T) {
 	trie.DeleteSubtree(key1)
 	trie.DeleteSubtree(key2)
 
-	v, _ := trie.Get(key1)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key2)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key3)
-	if bytes.Equal(v, val3) != true {
-		t.Fatal("must be equals", v)
-	}
+	requireValue(t, trie, key1, nil)
+	requireValue(t, trie, key2, nil)
+	requireValue(t, trie, key3, val3)
 }
 
 func TestTrieDeleteSubtree_DuoNode_PartialMatch(t *testing.T) {
@@ -206,20 +159,10 @@ func TestTrieDeleteSubtree_DuoNode_PartialMatch(t *testing.T) {
 	trie.Update(key3, val3)
 
 	trie.DeleteSubtree(partialKey)
-	v, _ := trie.Get(key1)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
 
-	v, _ = trie.Get(key2)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key3)
-	if bytes.Equal(v, val3) != true {
-		t.Fatal("must be equals", v)
-	}
+	requireValue(t, trie, key1, nil)
+	requireValue(t, trie, key2, nil)
+	requireValue(t, trie, key3, val3)
 }
 
 func TestTrieDeleteSubtree_FromFullNode_PartialMatch(t *testing.T) {
@@ -242,25 +185,10 @@ func TestTrieDeleteSubtree_FromFullNode_PartialMatch(t *testing.T) {
 
 	trie.DeleteSubtree(partialKey)
 
-	v, _ := trie.Get(key1)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key2)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key3)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key4)
-	if bytes.Equal(v, val4) != true {
-		t.Fatal("must be equals", v)
-	}
+	requireValue(t, trie, key1, nil)
+	requireValue(t, trie, key2, nil)
+	requireValue(t, trie, key3, nil)
+	requireValue(t, trie, key4, val4)
 }
 
 func TestTrieDeleteSubtree_RemoveFullNode_PartialMatch(t *testing.T) {
@@ -283,25 +211,10 @@ func TestTrieDeleteSubtree_RemoveFullNode_PartialMatch(t *testing.T) {
 
 	trie.DeleteSubtree(partialKey)
 
-	v, _ := trie.Get(key1)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key2)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key3)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key4)
-	if bytes.Equal(v, val4) != true {
-		t.Fatal("must be equals", v)
-	}
+	requireValue(t, trie, key1, nil)
+	requireValue(t, trie, key2, nil)
+	requireValue(t, trie, key3, nil)
+	requireValue(t, trie, key4, val4)
 }
 
 func TestTrieDeleteSubtree_FullNode_FullMatch(t *testing.T) {
@@ -324,20 +237,9 @@ func TestTrieDeleteSubtree_FullNode_FullMatch(t *testing.T) {
 	trie.DeleteSubtree(key1)
 	trie.DeleteSubtree(key2)
 
-	v, _ := trie.Get(key1)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key2)
-	if v != nil {
-		t.Fatal("must be nil", v)
-	}
-
-	v, _ = trie.Get(key3)
-	if bytes.Equal(v, val3) != true {
-		t.Fatal("must be equals", v)
-	}
+	requireValue(t, trie, key1, nil)
+	requireValue(t, trie, key2, nil)
+	requireValue(t, trie, key3, val3)
 }
 
 func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
@@ -346,21 +248,15 @@ func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
 	val := []byte{uint8(1)}
 	keyExist := []byte{uint8(2)}
 	valExist := []byte{uint8(2)}
+
 	trie.Update(key, val)
 	trie.Update(keyExist, valExist)
-	v, ok := trie.Get(key)
-	if ok == false || bytes.Equal(v, val) == false {
-		t.Fatal("incorrect")
-	}
+	requireValue(t, trie, key, val)
+
 	trie.DeleteSubtree(key)
-	v, _ = trie.Get(key)
-	if v != nil {
-		t.Fatal("must be empty")
-	}
-	v, ok = trie.Get(keyExist)
-	if ok == false || bytes.Equal(v, valExist) == false {
-		t.Fatal("must be true")
-	}
+
+	requireValue(t, trie, key, nil)
+	requireValue(t, trie, keyExist, valExist)
 }
 
 func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
@@ -374,44 +270,28 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 
 	trie := newEmpty()
 	key, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	pubAddr := crypto.PubkeyToAddress(key.PublicKey)
 	addrHash, err := common.HashData(pubAddr[:])
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	trie.UpdateAccount(addrHash[:], acc)
 
 	accRes1, _ := trie.GetAccount(addrHash[:])
-	if reflect.DeepEqual(acc, accRes1) == false {
-		t.Fatal("not equal", addrHash)
-	}
+	require.Equal(t, acc, accRes1)
 
 	val1 := []byte("1")
 	dataKey1, err := common.HashData([]byte("1"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	val2 := []byte("2")
 	dataKey2, err := common.HashData([]byte("2"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	fmt.Println("=============================")
-	ck1 := GenerateCompositeTrieKey(addrHash, dataKey1)
-	ck2 := GenerateCompositeTrieKey(addrHash, dataKey2)
-	trie.Update(ck1, val1)
-	trie.Update(ck2, val2)
+	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey1), val1)
+	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey2), val2)
 
 	trie.DeleteSubtree(addrHash[:])
 
 	accRes2, _ := trie.GetAccount(addrHash[:])
-	if reflect.DeepEqual(acc, accRes2) == false {
-		t.Fatal("account was deleted", addrHash)
-	}
-
+	require.Equal(t, acc, accRes2, "account must survive deletion of its storage subtrie")
 }

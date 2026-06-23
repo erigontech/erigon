@@ -164,7 +164,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	tip := req.ValidateChainTip
-	err = e.chainRW.InsertBlockAndWait(ctx, tip, nil)
+	err = e.chainRW.InsertBlock(ctx, tip, nil)
 	if err != nil {
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
@@ -237,7 +237,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		default:
 			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
 		}
-		err := e.chainRW.InsertBlocksAndWait(ctx, blocks, batch.BALs)
+		err := e.chainRW.InsertBlocks(ctx, blocks, batch.BALs)
 		if err != nil {
 			return err
 		}

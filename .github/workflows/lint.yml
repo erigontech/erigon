@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -75,8 +75,10 @@ jobs:
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
+      # Skip in merge-queue runs: a cache saved on the ephemeral merge-queue
+      # ref can't be restored by any later run (matches cleanup-erigon).
       - name: Save golangci-lint cache
-        if: always()
+        if: ${{ always() && github.event_name != 'merge_group' }}
         uses: actions/cache/save@v5
         with:
           path: ~/.cache/golangci-lint

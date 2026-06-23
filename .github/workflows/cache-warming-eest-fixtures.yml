@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -60,10 +60,12 @@ jobs:
           lookup-only: true
 
       # Download all four tarballs in one invocation so the single cached entry
-      # is complete (a shard run only fetches the subset it needs).
+      # is complete (a shard run only extracts the set it needs). Download-only:
+      # the cache stores just the tarballs, and extracting all corpora (20G+)
+      # doesn't fit on the smaller hosted runners.
       - name: Download EEST tarballs
         if: steps.probe.outputs.cache-hit != 'true'
-        run: bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark eest_zkevm
+        run: bash tools/test-fixtures.sh --download-only test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark eest_zkevm
 
       - name: Save EEST cache
         if: steps.probe.outputs.cache-hit != 'true'

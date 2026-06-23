@@ -71,7 +71,7 @@ func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, c
 
 func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
-func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, [][]byte, bool) error {
+func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {
 	return nil
 }
 

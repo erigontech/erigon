@@ -56,6 +56,16 @@ import (
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
+// orLatest resolves an optional block selector, defaulting to the latest block
+// when the caller omitted the parameter (nil). Used by the state-reading methods
+// whose Block parameter is optional per execution-apis (default 'latest').
+func orLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+	if blockNrOrHash != nil {
+		return *blockNrOrHash
+	}
+	return latestNumOrHash
+}
+
 const (
 	// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
 	// allowed to produce in order to speed up calculations.
@@ -398,7 +408,8 @@ type StorageKeysInfo struct {
 }
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
@@ -460,7 +471,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +507,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx.TouchKey(kv.AccountsDomain, string(address[:]), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof")
+	proofTrie, calculatedAccountProofRoot, err := sdCtx.Witness(ctx, nil, "eth_getProof", false)
 	if err != nil {
 		return nil, err
 	}
@@ -552,7 +563,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched key
 		var storageProofRoot []byte
-		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof")
+		proofTrie, storageProofRoot, err = sdCtx.Witness(ctx, nil, "eth_getProof", false)
 		if err != nil {
 			return nil, err
 		}
@@ -710,7 +721,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer txBatch2.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New(), execctx.WithoutDeferredBranchUpdates())
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
@@ -751,7 +762,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, "computeWitness")
+	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, "computeWitness", false)
 	if err != nil {
 		return nil, err
 	}

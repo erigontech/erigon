@@ -312,10 +312,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		// Use a non-cancelable context: if ctx was cancelled the caller cares
 		// about stopping, but skipping cleanup would leave already-inserted
 		// rows in place and the next Flush would re-read and re-insert them.
-		cutoff := minInsertableBlockNumber
-		if lastCommittedHeight+1 > cutoff {
-			cutoff = lastCommittedHeight + 1
-		}
+		cutoff := max(lastCommittedHeight+1, minInsertableBlockNumber)
 		if err := p.db.Update(context.Background(), func(tx kv.RwTx) error {
 			cursor, err := tx.RwCursor(kv.Headers)
 			if err != nil {
@@ -437,7 +434,7 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 		bals[i] = bal
 	}
 
-	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals, true); err != nil {
+	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to insert blocks", "err", err)
 		return err
 	}
