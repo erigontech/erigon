@@ -75,6 +75,12 @@ func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRw
 	}
 	defer domains.Close()
 
+	// NewSharedDomains' SeekCommitment restored the LATEST commitment state from the shared
+	// aggregator's files (the datadir's newest range), which is not the state we want and whose
+	// branches don't resolve as-of this range. Drop it so the root is loaded purely from this
+	// range's files via the FilesOnlyStateReader below.
+	domains.GetCommitmentCtx().Trie().Reset()
+
 	domains.DiscardWrites(kv.AccountsDomain)
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
