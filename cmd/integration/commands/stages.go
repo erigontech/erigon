@@ -738,58 +738,36 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	if chainTipMode {
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-		if err != nil {
-			return err
-		}
-		doms.SetInMemHistoryReads(false)
-		for bn := execProgress; bn < block; bn++ {
-			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
-				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-					return err
-				}
-			}
-			if err := doms.Commit(ctx, tx); err != nil {
-				return err
-			}
-			doms.Close()
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
+	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 
+	// Both modes run each batch in its own rwtx + SharedDomains (execBlocksBatch),
+	// then collate+prune (which also kicks background file building). Release the
+	// read tx first — MDBX allows one writer.
+	tx.Rollback()
+	tx = nil
+
+	collateAndPrune := func() error {
+		return agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
 				return err
 			}
-			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-				return err
-			}
+			return stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+		}, logger)
+	}
 
-			if err := tx.Commit(); err != nil {
+	if chainTipMode {
+		for bn := execProgress; bn < block; bn++ {
+			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, logger); err != nil {
 				return err
 			}
-			if bn+1 >= block { // last block committed; nothing more to run
-				break
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+			if err := collateAndPrune(); err != nil {
 				return err
 			}
-			// Fresh SD for the next block: a committed SD is never reused.
-			if doms, err = execctx.NewSharedDomains(ctx, tx, logger); err != nil {
-				return err
-			}
-			doms.SetInMemHistoryReads(false)
 		}
-		doms.Close()
 		return nil
 	}
-	// Non-chaintip: run each batch in its own rwtx + SharedDomains via
-	// execBlocksBatch. Release the read tx first — MDBX allows one writer.
-	tx.Rollback()
-	tx = nil
 
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.PresetOfflineExecution()
@@ -797,23 +775,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg.LockWorkersEditing()
 
 	for {
-		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, logger)
+		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, logger)
 		if err != nil {
 			return err
 		}
-		if err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
-			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
-			if err != nil {
-				return err
-			}
-			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-				return err
-			}
-			return nil
-		}, logger); err != nil {
+		if err := collateAndPrune(); err != nil {
 			return err
 		}
-
 		if execProgress >= block {
 			break
 		}
@@ -822,12 +790,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 }
 
 // execBlocksBatch runs one stage_exec batch in its own rwtx and SharedDomains:
-// exec up to toBlock (or the batch limit), prune, then doms.Commit. Commit (not
-// Flush) refreshes the aggregator BranchCache to match committed state — a stale
-// cache makes the next batch compute a wrong trie root — and commits the tx. A
-// fresh SharedDomains per call avoids reusing a committed (spent) one. Returns
-// the Execution stage progress after the batch.
-func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, logger log.Logger) (uint64, error) {
+// exec up to toBlock (or the batch limit), then doms.Commit. Commit (not Flush)
+// refreshes the aggregator BranchCache to match committed state — a stale cache
+// makes the next batch compute a wrong trie root — and commits the tx. A fresh
+// SharedDomains per call avoids reusing a committed (spent) one. Pruning and
+// file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
+// stage progress after the batch.
+func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, logger log.Logger) (uint64, error) {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return 0, err
@@ -841,7 +810,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
 
-	s, err := st.StageState(stages.Execution, tx, true, false)
+	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {
 		return 0, err
 	}
