@@ -301,6 +301,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	// The merged file is read-only for the duration of this transformer, so
 	// (key → offset) is invariant within the closure. Both maps live only
 	// for the merge of one range; no cross-merge state.
+	const cacheMaxEntries = 100_000
 	storageKeyCache := make(map[string]uint64)
 	accountKeyCache := make(map[string]uint64)
 
@@ -371,6 +372,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 						return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 					}
+					if len(storageKeyCache) >= cacheMaxEntries {
+						clear(storageKeyCache)
+					}
 					storageKeyCache[string(auxBuf)] = shortenedKeyOffset
 				}
 				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
@@ -406,6 +410,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
 						"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
 					return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+				}
+				if len(accountKeyCache) >= cacheMaxEntries {
+					clear(accountKeyCache)
 				}
 				accountKeyCache[string(auxBuf)] = shortenedKeyOffset
 			}
