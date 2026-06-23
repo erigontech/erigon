@@ -4,7 +4,7 @@ env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   APP_REPO: "erigontech/erigon"
   LIGHTHOUSE_IMAGE: "sigp/lighthouse:v7.0.1"
-  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
+  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.1.2"
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
