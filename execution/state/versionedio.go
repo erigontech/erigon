@@ -1373,41 +1373,30 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	return merged
 }
 
-// MergeInPlace folds other into io, mutating io. Unlike Merge it does not
-// reallocate io's existing per-tx entries, so accumulating per-transaction IO
-// across a block (e.g. the block builder folding each tx's IO into the block
-// BAL) is linear in total entries rather than O(n^2). Only the non-empty
-// entries of other are touched; the result is identical to io.Merge(other).
-func (io *VersionedIO) MergeInPlace(other *VersionedIO) {
-	if other == nil {
-		return
-	}
-	if n := len(other.inputs); n > len(io.inputs) {
+// mergeTx folds a single transaction's reads, writes and accesses (recorded at
+// version.TxIndex) into io at that index, accumulating into the slot rather
+// than overwriting it the way RecordReads does. The three per-tx slices grow in
+// lockstep so they stay equal length.
+func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes VersionedWrites, accesses AccessSet) {
+	idx := version.TxIndex + 1
+	n := idx + 1
+	if n > len(io.inputs) {
 		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
 	}
-	for i := range other.inputs {
-		if len(other.inputs[i].readSet) == 0 {
-			continue
-		}
-		io.inputs[i] = io.inputs[i].Merge(other.inputs[i])
-	}
-	if n := len(other.outputs); n > len(io.outputs) {
+	if n > len(io.outputs) {
 		io.outputs = append(io.outputs, make([]VersionedWrites, n-len(io.outputs))...)
 	}
-	for i := range other.outputs {
-		if len(other.outputs[i]) == 0 {
-			continue
-		}
-		io.outputs[i] = io.outputs[i].Merge(other.outputs[i])
-	}
-	if n := len(other.accessed); n > len(io.accessed) {
+	if n > len(io.accessed) {
 		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
 	}
-	for i := range other.accessed {
-		if len(other.accessed[i]) == 0 {
-			continue
-		}
-		io.accessed[i] = io.accessed[i].Merge(other.accessed[i])
+	if len(reads) > 0 {
+		io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
+	}
+	if len(writes) > 0 {
+		io.outputs[idx] = io.outputs[idx].Merge(writes)
+	}
+	if len(accesses) > 0 {
+		io.accessed[idx] = io.accessed[idx].Merge(accesses)
 	}
 }
 
