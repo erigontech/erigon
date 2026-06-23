@@ -23,7 +23,6 @@
 package discover
 
 import (
-	"fmt"
 	"net"
 	"slices"
 	"time"
@@ -44,7 +43,7 @@ func checkClockDrift() {
 		return
 	}
 	if drift < -driftThreshold || drift > driftThreshold {
-		log.Warn(fmt.Sprintf("[p2p] System clock seems off by %v, which can prevent network connectivity", drift))
+		log.Warn("[p2p] System clock seems off, which can prevent network connectivity", "drift", drift)
 		log.Warn("[p2p] Please enable network time synchronisation in system settings.")
 	} else {
 		log.Trace("[p2p] NTP sanity check done", "drift", drift)
