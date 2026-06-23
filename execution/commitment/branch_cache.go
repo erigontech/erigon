@@ -44,9 +44,9 @@ type BranchCache struct {
 	// read path.
 	root atomic.Pointer[branchCacheEntry]
 
-	// LRU tail — bounded entries, evicts oldest when full. maphash.LRU
-	// wraps hashicorp/golang-lru/v2 which is thread-safe internally.
-	tail *maphash.LRU[*branchCacheEntry]
+	// LRU tail — bounded entries, evicts oldest when full. Sharded so the many
+	// concurrent commitment warmup workers don't serialize on one LRU mutex.
+	tail *maphash.ShardedLRU[*branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().
 	rootHits, rootMisses atomic.Uint64
@@ -73,6 +73,11 @@ type branchCacheEntry struct {
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
 
+// branchCacheTailShards spreads tail lock traffic; sized for the default
+// commitment warmup pool (dbg.TipTrieWarmupers ≈ NumCPU*8) so warmup workers
+// rarely collide on a shard.
+const branchCacheTailShards = 256
+
 // Implemented by *db/state.AggregatorRoTx via duck typing to avoid an execctx→db/state import cycle. Nil means caching is disabled.
 type BranchCacheProvider interface {
 	BranchCache() *BranchCache
@@ -84,9 +89,9 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
-	tail, err := maphash.NewLRU[*branchCacheEntry](tailCapacity)
+	tail, err := maphash.NewShardedLRU[*branchCacheEntry](tailCapacity, branchCacheTailShards)
 	if err != nil {
-		panic(fmt.Sprintf("BranchCache: NewLRU: %s", err))
+		panic(fmt.Sprintf("BranchCache: NewShardedLRU: %s", err))
 	}
 	return &BranchCache{
 		tail: tail,
