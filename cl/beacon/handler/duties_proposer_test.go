@@ -103,6 +103,67 @@ func TestEpochSlotOverflows(t *testing.T) {
 	require.False(t, epochSlotOverflows(0, 0))
 }
 
+func TestComputeDependentRootSlot(t *testing.T) {
+	const spe = uint64(32)
+	// Epoch 0 always maps to the genesis slot.
+	require.Equal(t, uint64(0), computeDependentRootSlot(0, spe, false))
+	require.Equal(t, uint64(0), computeDependentRootSlot(0, spe, true))
+	// Attester (v2 from Fulu) epoch <= 1 maps to genesis, avoiding the (epoch-1) underflow.
+	require.Equal(t, uint64(0), computeDependentRootSlot(1, spe, true))
+	// Proposer / v1 style: epoch*spe - 1.
+	require.Equal(t, spe-1, computeDependentRootSlot(1, spe, false))
+	require.Equal(t, 5*spe-1, computeDependentRootSlot(5, spe, false))
+	// Attester / v2 style diverges by one epoch: (epoch-1)*spe - 1.
+	require.Equal(t, 4*spe-1, computeDependentRootSlot(5, spe, true))
+}
+
+func TestGetHistoricalProposerDependentRootV2Fulu(t *testing.T) {
+	db, _, _, preState, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.CapellaForkEpoch = 1
+	handler.beaconChainCfg.DenebForkEpoch = 1
+	handler.beaconChainCfg.ElectraForkEpoch = 1
+	handler.beaconChainCfg.FuluForkEpoch = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
+	spe := handler.beaconChainCfg.SlotsPerEpoch
+
+	genesisRoot, err := preState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+
+	// A high epoch whose dependent-root slots lie beyond the antiquated chain, so the
+	// canonical-root fallback resolves deterministically to the marked roots below.
+	const epoch = uint64(100)
+	require.GreaterOrEqual(t, handler.beaconChainCfg.GetCurrentStateVersion(epoch), clparams.FuluVersion)
+	v2Root := common.Hash{0xa1}
+	v1Root := common.Hash{0xb2}
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, 0, genesisRoot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, (epoch-1)*spe-1, v2Root))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, epoch*spe-1, v1Root))
+	require.NoError(t, tx.Commit())
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	getter := state_accessors.GetValFnTxAndSnapshot(roTx, nil)
+
+	// Epoch <= 1 under v2+Fulu resolves to the genesis root rather than underflowing.
+	earlyRoot, err := handler.getHistoricalProposerDependentRoot(roTx, getter, 1, true)
+	require.NoError(t, err)
+	require.Equal(t, genesisRoot, earlyRoot)
+
+	// v2 uses the previous epoch's dependent root; v1 uses the target epoch's. They diverge.
+	gotV2, err := handler.getHistoricalProposerDependentRoot(roTx, getter, epoch, true)
+	require.NoError(t, err)
+	require.Equal(t, v2Root, gotV2)
+	gotV1, err := handler.getHistoricalProposerDependentRoot(roTx, getter, epoch, false)
+	require.NoError(t, err)
+	require.Equal(t, v1Root, gotV1)
+	require.NotEqual(t, gotV1, gotV2)
+}
+
 func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
 	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
