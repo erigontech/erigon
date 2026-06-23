@@ -103,6 +103,8 @@ func TestBlockNumberOrHash_UnmarshalJSON(t *testing.T) {
 		25: {`{"blockNumber":"0x1", "blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000"}`, true, BlockNumberOrHash{}},
 		26: {`{}`, true, BlockNumberOrHash{}},
 		27: {`{"jsonrpc":"2.0","result":{"code":418,"message":"blabla"},"id":""}]`, true, BlockNumberOrHash{}},
+		28: {`"3"`, false, BlockNumberOrHashWithNumber(3)},
+		29: {`"12"`, false, BlockNumberOrHashWithNumber(12)},
 	}
 
 	for i, test := range tests {
