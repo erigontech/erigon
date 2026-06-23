@@ -37,15 +37,15 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// Pins that a Worker's chain reader (rw.chain) sees headers staged in the
-// SharedDomains BlockOverlay even when they have NOT been flushed to MDBX.
-// This is the path AuRa.Initialize takes via verifyGasLimitOverride →
-// chain.GetHeaderByHash; an overlay-blind worker tx returns nil and the
-// consensus engine reports ErrUnknownAncestor, wedging tip-tracking on the
-// first FCU whose parent block lives only in the overlay.
+// Pins that a Worker's chain reader (rw.chain) resolves an overlay-staged
+// header via GetHeaderByHash — the exact path the wedge takes:
+// AuRa.Initialize → verifyGasLimitOverride → chain.GetHeaderByHash(parentHash).
+// GetHeaderByHash goes hash → HeaderNumber → Headers, so both overlay
+// entries must be visible through the worker's chainTx.
 //
-// Red-first verified locally: removing the BlockOverlay wrap in Worker.resetTx
-// makes the require.NotNil for GetHeader fail (parent header invisible).
+// Red-first verified locally: removing the BlockOverlay wrap in
+// Worker.resetTx makes the require.NotNil here fail (HeaderNumber lookup
+// misses → parent header invisible → consensus reports ErrUnknownAncestor).
 func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	t.Parallel()
 
@@ -104,9 +104,9 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	})
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
-	got := rw.chain.GetHeader(hash, number)
+	got := rw.chain.GetHeaderByHash(hash)
 	require.NotNil(t, got,
-		"chain reader must see headers staged in the BlockOverlay; raw MDBX would return nil because the header was never flushed")
+		"chain reader must resolve an overlay-staged header by hash; AuRa.verifyGasLimitOverride takes this exact path")
 	require.Equal(t, number, got.Number.Uint64())
 	require.Equal(t, hash, got.Hash())
 }
@@ -175,61 +175,7 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	})
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
-	got := rw.chain.GetHeader(hash, number)
+	got := rw.chain.GetHeaderByHash(hash)
 	require.NotNil(t, got, "committed-MDBX header must still resolve when no overlay is active")
 	require.Equal(t, number, got.Number.Uint64())
-}
-
-// Pins that overlay-staged data is invisible without the wrap — the
-// regression guard for the gnosis tip-tracking 'unknown ancestor' wedge.
-// This test builds a Worker WITHOUT the overlay wrap on its chainTx (the
-// pre-fix shape) and verifies the chain reader returns nil for an
-// overlay-only header, then builds one WITH the wrap and verifies it
-// resolves. Any future change that drops the wrap from Worker.resetTx
-// turns this red.
-func TestWorker_ChainReader_OverlayWrapIsLoadBearing(t *testing.T) {
-	t.Parallel()
-
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
-		GrowthStep(32 * datasize.MB).
-		MapSize(2 * datasize.GB).
-		MustOpen()
-	t.Cleanup(rawDB.Close)
-
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
-	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
-
-	db, err := temporal.New(rawDB, agg, nil)
-	require.NoError(t, err)
-
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	doms, err := execctx.NewSharedDomains(t.Context(), roTx, logger)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(roTx, dirs.Tmp))
-
-	header := &types.Header{
-		Number:     *uint256.NewInt(46_827_710),
-		ParentHash: empty.RootHash,
-		Difficulty: *uint256.NewInt(0),
-	}
-	hash, number := header.Hash(), header.Number.Uint64()
-	require.NoError(t, rawdb.WriteHeader(doms.BlockOverlay(), header))
-
-	rawWorkerTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer rawWorkerTx.Rollback()
-
-	require.Nil(t, rawdb.ReadHeader(rawWorkerTx, hash, number),
-		"raw MDBX tx must NOT see an overlay-staged header — the wedge condition")
-
-	overlayTx := doms.BlockOverlay().NewReadView(rawWorkerTx)
-	require.NotNil(t, rawdb.ReadHeader(overlayTx, hash, number),
-		"BlockOverlay.NewReadView wrap must surface the staged header — the fix path")
 }
