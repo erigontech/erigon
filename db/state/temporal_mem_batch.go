@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -844,8 +845,14 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if w == nil {
 			continue
 		}
+		flushStart := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
+		}
+		if kv.Domain(di) == kv.CommitmentDomain {
+			aggTx.d[di].d.logger.Warn("[dbg] domain flush", "domain", kv.Domain(di).String(),
+				"entries", w.lastFlushEntries, "keys", w.lastFlushKeys,
+				"hist", w.lastFlushHist, "vals", w.lastFlushVals, "total", time.Since(flushStart))
 		}
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
