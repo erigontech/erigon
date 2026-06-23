@@ -801,7 +801,19 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		agg.BuildFilesInBackground(agg.EndTxNumMinimax() + agg.StepSize())
+		if err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
+			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+			if err != nil {
+				return err
+			}
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return err
+			}
+			return nil
+		}, logger); err != nil {
+			return err
+		}
+
 		if execProgress >= block {
 			break
 		}
@@ -839,23 +851,11 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 			return 0, err
 		}
 	}
-
-	pruneStage, err := st.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
-	if err != nil {
-		return 0, err
-	}
-	if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-		return 0, err
-	}
-
 	progress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return 0, err
 	}
 	if err := doms.Commit(ctx, tx); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return progress, nil
