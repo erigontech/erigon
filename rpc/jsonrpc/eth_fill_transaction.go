@@ -108,16 +108,18 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, err
 	}
 
-	if args.BlobVersionedHashes != nil && args.MaxFeePerBlobGas == nil {
+	if args.BlobVersionedHashes != nil {
 		if head.ExcessBlobGas == nil {
 			return nil, errors.New("blob transactions not supported before Cancun")
 		}
-		nextBlockTime := head.Time + cc.SecondsPerSlot()
-		blobFee, err := misc.GetBlobGasPrice(cc, *head.ExcessBlobGas, nextBlockTime)
-		if err != nil {
-			return nil, err
+		if args.MaxFeePerBlobGas == nil {
+			nextBlockTime := head.Time + cc.SecondsPerSlot()
+			blobFee, err := misc.GetBlobGasPrice(cc, *head.ExcessBlobGas, nextBlockTime)
+			if err != nil {
+				return nil, err
+			}
+			args.MaxFeePerBlobGas = (*hexutil.Big)(new(big.Int).Lsh(blobFee.ToBig(), 1))
 		}
-		args.MaxFeePerBlobGas = (*hexutil.Big)(new(big.Int).Lsh(blobFee.ToBig(), 1))
 	}
 
 	chainIDBig := cc.ChainID.ToBig()

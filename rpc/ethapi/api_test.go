@@ -176,6 +176,12 @@ func TestSignTransactionResultMarshalJSON_Legacy(t *testing.T) {
 	require.Equal(t, `"0x0"`, string(fields["s"]))
 }
 
+func TestSignTransactionResultMarshalJSON_NilTx(t *testing.T) {
+	_, err := json.Marshal(SignTransactionResult{Tx: nil})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nil transaction")
+}
+
 func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	chainID := uint256.NewInt(1)

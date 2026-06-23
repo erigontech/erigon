@@ -528,6 +528,9 @@ type signedTxJSON struct {
 }
 
 func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
+	if r.Tx == nil {
+		return nil, errors.New("nil transaction")
+	}
 	zero := (*hexutil.Big)(new(big.Int))
 	vv, rv, sv := r.Tx.V, r.Tx.R, r.Tx.S
 	if vv == nil {

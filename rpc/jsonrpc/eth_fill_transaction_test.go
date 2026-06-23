@@ -163,7 +163,7 @@ func TestFillTransactionExplicitNoncePreserved(t *testing.T) {
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	nonce := hexutil.Uint64(42)
+	nonce := hexutil.Uint64(7)
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		From:  &from,
@@ -210,6 +210,27 @@ func TestFillTransactionBlobPreCancun(t *testing.T) {
 	require.Contains(t, err.Error(), "Cancun")
 }
 
+func TestFillTransactionBlobPreCancunExplicitBlobFee(t *testing.T) {
+	// Even with an explicit maxFeePerBlobGas, blob txs on a pre-Cancun chain must error.
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
+	gas := hexutil.Uint64(21000)
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		From:                &from,
+		To:                  &to,
+		Gas:                 &gas,
+		BlobVersionedHashes: []common.Hash{blobHash},
+		MaxFeePerBlobGas:    (*hexutil.Big)(big.NewInt(1e9)),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Cancun")
+}
+
 func TestFillTransactionPoolErrorPropagates(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, errPoolClient{}, nil)
@@ -247,7 +268,7 @@ func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	// GasCap in newEthApiForTest is 5_000_000; pass double to trigger the cap.
+	// FillTransaction passes globalGasCap=0 to ToTransaction, so no capping occurs.
 	userGas := hexutil.Uint64(10_000_000)
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
