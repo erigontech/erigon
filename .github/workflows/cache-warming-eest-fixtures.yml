@@ -49,7 +49,7 @@ jobs:
       # miss even when an older entry still matches the restore-key prefix.
       - name: Probe EEST cache
         id: probe
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             test-fixtures-cache/eest_stable.tar.gz
@@ -69,7 +69,7 @@ jobs:
 
       - name: Save EEST cache
         if: steps.probe.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             test-fixtures-cache/eest_stable.tar.gz
