@@ -1846,7 +1846,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
 	}
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false)
 
 	var gotHash *accounts.CodeHash
 	var gotCode []byte
@@ -1894,7 +1894,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true)
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true, false)
 
 	require.Equal(t, 1, countPath(result, state.CodeHashPath),
 		"codeHash is filled from committed state for the modified account")
@@ -1939,7 +1939,7 @@ func TestNormalizeWriteSet_CodePathRecoveredForCreatedContract(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false)
 
 	var gotCode []byte
 	var gotHash *accounts.CodeHash
@@ -1989,7 +1989,7 @@ func TestNormalizeWriteSet_CodePathRecoveryRejectsHashMismatch(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true)
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false)
 
 	require.Equal(t, 0, countPath(result, state.CodePath),
 		"code whose keccak != the recovered codeHash must not be emitted")
