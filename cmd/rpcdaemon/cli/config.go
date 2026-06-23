@@ -730,6 +730,8 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
+	cfg.InProcServer = srv
+
 	info := []any{
 		"grpc", cfg.GRPCServerEnabled,
 		"http", cfg.HttpServerEnabled,
