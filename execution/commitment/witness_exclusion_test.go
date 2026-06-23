@@ -54,3 +54,43 @@ func witnessResolvesAbsence(n trie.Node, key []byte, pos int) bool {
 		return false
 	}
 }
+
+// witnessNodeAtPath returns the witness node reached after consuming the whole
+// hashed path, descending account→storage and through extension/branch nodes
+// (terminator-aware). It is used to assert what a strict verifier finds at a
+// collapse sibling's prefix — a materialized branch rather than a bare HashNode.
+func witnessNodeAtPath(n trie.Node, key []byte, pos int) trie.Node {
+	if pos == len(key) {
+		return n
+	}
+	switch x := n.(type) {
+	case *trie.AccountNode:
+		return witnessNodeAtPath(x.Storage, key, pos)
+	case *trie.ShortNode:
+		k := x.Key
+		if len(k) > 0 && k[len(k)-1] == 16 {
+			k = k[:len(k)-1]
+		}
+		if len(key)-pos < len(k) || nibbles.CommonPrefixLen(key[pos:], k) < len(k) {
+			return nil
+		}
+		return witnessNodeAtPath(x.Val, key, pos+len(k))
+	case *trie.FullNode:
+		return witnessNodeAtPath(x.Children[key[pos]], key, pos+1)
+	default:
+		return n
+	}
+}
+
+// witnessMaterializesNodeAt reports whether the witness holds a materialized
+// (present, non-blinded) node at the end of the hashed path. A strict verifier
+// descending to a collapse sibling's prefix must find a real branch/leaf there,
+// not a bare HashNode it cannot re-form the collapsing branch from.
+func witnessMaterializesNodeAt(root trie.Node, key []byte) bool {
+	n := witnessNodeAtPath(root, key, 0)
+	if n == nil {
+		return false
+	}
+	_, blinded := n.(*trie.HashNode)
+	return !blinded
+}

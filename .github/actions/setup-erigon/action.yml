@@ -130,7 +130,7 @@ runs:
     - name: Restore submodule git objects cache
       id: restore-submodules
       if: ${{ inputs.submodules == 'true' }}
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: |
           .git/modules
