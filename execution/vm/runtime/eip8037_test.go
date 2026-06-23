@@ -365,6 +365,23 @@ func TestCreatePreexistingTarget(t *testing.T) {
 		"CREATE to pre-existing target must charge only code deposit, not account creation")
 }
 
+// EIP-8037 Gas accounting for new accounts: CREATE onto an address that already
+// has nonce > 0 triggers a collision. The unconditional state-gas charge is
+// refunded because no new account was created.
+func TestCreateAddressCollisionRefill(t *testing.T) {
+	t.Parallel()
+	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
+	setup := func(db *state.IntraBlockState, _ accounts.Address) {
+		// Derive the CREATE target and give it nonce=1 to trigger collision.
+		derived := accounts.InternAddress(types.CreateAddress(self.Value(), 0))
+		db.SetNonce(derived, 1, tracing.NonceChangeUnspecified)
+	}
+	_, res, err := run8037(t, deployCode(deploy3Init, 0), hugeBudget(), uint256.Int{}, setup)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), res.State,
+		"CREATE address collision must refund state gas (no account created)")
+}
+
 // Ensures CREATE2 charges account creation plus code deposit identically to
 // CREATE. EIP-8037 applies the same unconditional-charge-with-refill model to
 // both opcodes.
