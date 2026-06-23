@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -847,11 +846,16 @@ func (sd *SharedDomains) Close() {
 // (population, invalidation, commit-gating) is owned entirely here.
 
 // Flush writes the in-memory batch into tx without committing. It deliberately
-// does NOT touch the caches: a cache entry may only ever reflect committed
-// state, and plain Flush leaves the commit to the caller (who may still roll
-// back). Cache population is owned by Commit, which applies it only after a
-// successful commit. Callers that flush a tx they commit themselves get a
-// cache-safe (cold-but-correct) result; use Commit to also keep the cache warm.
+// does NOT touch the caches: plain Flush leaves the commit to the caller (who
+// may still roll back), so it must not warm a cache with state that could be
+// rolled back. Cache entries are populated elsewhere — by Commit after a
+// successful commit, and by reads (GetLatest) — each stamped with a
+// conservative upper-bound txNum. It is that txNum stamp, not population
+// timing, that keeps the cache correct: an unwind lowers the floor so every
+// entry reflecting a now-dead fork is evicted, and mem-first masking means a
+// later in-memory write shadows a stale cached read. Callers that flush a tx
+// they commit themselves get a cache-safe (cold-but-correct) result; use
+// Commit to also keep the cache warm.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)
@@ -1135,17 +1139,6 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			// the bounded read in that case; the Put below refreshes the entry.
 			cStep := kv.Step(cTxNum / sd.StepSize())
 			if cStep <= maxStep {
-				if dbg.EnvBool("DBG_BC", false) {
-					var vDB []byte
-					if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-						vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
-					} else {
-						vDB, _, _ = tx.GetLatest(domain, k)
-					}
-					if !bytes.Equal(cv, vDB) {
-						fmt.Fprintf(os.Stderr, "[BC-DIVERGE] key=%x cStep=%d maxStep=%d cTxNum=%d sdTxNum=%d cached=%x db=%x\n", k, cStep, maxStep, cTxNum, sd.txNum, cv, vDB)
-					}
-				}
 				return cv, cStep, nil
 			}
 		}

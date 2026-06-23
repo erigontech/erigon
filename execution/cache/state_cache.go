@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	// DefaultAccountCacheBytes is the byte limit for account cache (100 MB — investigation knob; permanent default returns to 1 GB)
-	DefaultAccountCacheBytes = 100 * datasize.MB
+	// DefaultAccountCacheBytes is the byte limit for the account cache.
+	DefaultAccountCacheBytes = 1 * datasize.GB
 	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB: the
 	// measured mainnet-tip storage working set is ~106 MB for 95% of reads
 	// (top 1% of keys = 48%, ~10 MB for 80%); 150 MB leaves headroom over the
