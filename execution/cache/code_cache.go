@@ -33,6 +33,13 @@ func uint64AsBytes(v *uint64) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(v)), 8)
 }
 
+// hash32 copies a codeHash slice into a fixed [32]byte for storage/compare.
+func hash32(b []byte) [32]byte {
+	var h [32]byte
+	copy(h[:], b)
+	return h
+}
+
 const (
 	// DefaultCodeCacheBytes is the byte limit for the code cache.
 	DefaultCodeCacheBytes = 512 * datasize.MB
@@ -82,8 +89,12 @@ const (
 // keeps stale code out of the cache.
 type versionedAddressID struct {
 	addrID uint64
-	txNum  uint64
-	epoch  uint32
+	// codeHash is the addr's keccak codeHash, used to reject a hashToCode
+	// maphash collision (a different contract whose code collides on the
+	// 64-bit maphash key). Zero when populated without a known codeHash.
+	codeHash [32]byte
+	txNum    uint64
+	epoch    uint32
 }
 
 type addrCodeHashEntry struct {
@@ -93,15 +104,22 @@ type addrCodeHashEntry struct {
 }
 
 type codeEntry struct {
-	code  []byte
-	txNum uint64
-	epoch uint32
+	code []byte
+	// keyHash is the keccak codeHash this entry is keyed under. maphash.Map
+	// collapses the key to a 64-bit hash and discards the bytes, so Get must
+	// compare keyHash against the requested key to reject a collision serving
+	// a different contract's code.
+	keyHash [32]byte
+	txNum   uint64
+	epoch   uint32
 }
 
 type codeSizeEntry struct {
-	size  int
-	txNum uint64
-	epoch uint32
+	size int
+	// keyHash — see codeEntry.keyHash.
+	keyHash [32]byte
+	txNum   uint64
+	epoch   uint32
 }
 
 type CodeCache struct {
@@ -241,6 +259,13 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 		c.codeMisses.Add(1)
 		return nil, false
 	}
+	// Reject a 64-bit maphash collision: the stored code belongs to a different
+	// contract than addr's. Verifiable only when the addr entry carries a
+	// codeHash (always for PutWithCodeHash-populated code; the EVM read path).
+	if vID.codeHash != ([32]byte{}) && ce.keyHash != vID.codeHash {
+		c.codeMisses.Add(1)
+		return nil, false
+	}
 	c.codeHits.Add(1)
 	return ce.code, true
 }
@@ -250,20 +275,31 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 // hashToCode bytes are content-addressed (immutable for a hash) but carry a
 // (txNum, epoch) stamp so an unwound deployment's code stops being discoverable.
 func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
+	// No codeHash in hand here, so the entry is left unverified against maphash
+	// collisions. The EVM read path uses PutWithCodeHash, which records it.
+	c.putCode(addr, code, [32]byte{}, txNum)
+}
+
+// putCode populates the addr→codeID and codeID→code layers. keyHash is the
+// code's keccak codeHash when known (zero otherwise), stored so Get can reject
+// a 64-bit maphash collision. Size is accounted only on the goroutine that
+// actually inserts (LoadOrStore is atomic), so concurrent Puts of the same
+// cold code can't both Add and permanently inflate codeSize.
+func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64) {
 	if len(code) == 0 {
 		return
 	}
 	ep := c.epoch.Load()
-	codeHash := maphash.Hash(code)
+	codeID := maphash.Hash(code)
 
-	c.addrToHash.Add(addrKey(addr), versionedAddressID{addrID: codeHash, txNum: txNum, epoch: ep})
+	c.addrToHash.Add(addrKey(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 
-	hashKey := uint64AsBytes(&codeHash)
+	hashKey := uint64AsBytes(&codeID)
 	if existing, exists := c.hashToCode.Get(hashKey); exists {
 		// Bytes are immutable, but revive an entry stranded stale by a prior
 		// unwind when the same code is re-deployed on the live fork.
 		if c.isStale(existing.txNum, existing.epoch) {
-			c.hashToCode.Set(hashKey, codeEntry{code: existing.code, txNum: txNum, epoch: ep})
+			c.hashToCode.Set(hashKey, codeEntry{code: existing.code, keyHash: existing.keyHash, txNum: txNum, epoch: ep})
 		}
 		return
 	}
@@ -271,8 +307,10 @@ func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
 	if c.codeSize.Load()+codeEntrySize > int64(c.codeCapacityB) {
 		return
 	}
-	c.hashToCode.Set(hashKey, codeEntry{code: code, txNum: txNum, epoch: ep})
-	c.codeSize.Add(codeEntrySize)
+	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
+	if _, loaded := c.hashToCode.LoadOrStore(hashKey, entry); !loaded {
+		c.codeSize.Add(codeEntrySize)
+	}
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached.
@@ -320,6 +358,12 @@ func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 		c.codeHashMisses.Add(1)
 		return nil, false
 	}
+	// Reject a 64-bit maphash collision: a different codeHash collapsed to the
+	// same bucket would otherwise serve the wrong contract's code.
+	if ce.keyHash != hash32(codeHash) {
+		c.codeHashMisses.Add(1)
+		return nil, false
+	}
 	if c.isStale(ce.txNum, ce.epoch) {
 		c.codeHashToCode.Delete(codeHash)
 		c.codeHashCodeSize.Add(-int64(len(codeHash) + len(ce.code)))
@@ -343,9 +387,10 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 		return
 	}
 	ep := c.epoch.Load()
+	kh := hash32(codeHash)
 
 	if len(addr) > 0 {
-		c.Put(addr, code, txNum)
+		c.putCode(addr, code, kh, txNum)
 	}
 
 	// Populate the size-only layer alongside the bytes layer — every time
@@ -356,7 +401,7 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 		// Immutable bytes; revive an entry stranded stale by a prior unwind when
 		// the same code is re-deployed on the live fork.
 		if c.isStale(existing.txNum, existing.epoch) {
-			c.codeHashToCode.Set(codeHash, codeEntry{code: existing.code, txNum: txNum, epoch: ep})
+			c.codeHashToCode.Set(codeHash, codeEntry{code: existing.code, keyHash: existing.keyHash, txNum: txNum, epoch: ep})
 		}
 		return
 	}
@@ -364,8 +409,10 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	if c.codeHashCodeSize.Load()+entrySize > int64(c.codeCapacityB) {
 		return
 	}
-	c.codeHashToCode.Set(codeHash, codeEntry{code: code, txNum: txNum, epoch: ep})
-	c.codeHashCodeSize.Add(entrySize)
+	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
+	if _, loaded := c.codeHashToCode.LoadOrStore(codeHash, entry); !loaded {
+		c.codeHashCodeSize.Add(entrySize)
+	}
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -378,6 +425,11 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 	e, ok := c.codeSizeByCodeHash.Get(codeHash)
 	if !ok {
+		c.codeSizeMisses.Add(1)
+		return 0, false
+	}
+	// Reject a 64-bit maphash collision (see GetByCodeHash).
+	if e.keyHash != hash32(codeHash) {
 		c.codeSizeMisses.Add(1)
 		return 0, false
 	}
@@ -399,17 +451,20 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 		return
 	}
 	ep := c.epoch.Load()
+	kh := hash32(codeHash)
 	if existing, exists := c.codeSizeByCodeHash.Get(codeHash); exists {
 		if c.isStale(existing.txNum, existing.epoch) {
-			c.codeSizeByCodeHash.Set(codeHash, codeSizeEntry{size: existing.size, txNum: txNum, epoch: ep})
+			c.codeSizeByCodeHash.Set(codeHash, codeSizeEntry{size: existing.size, keyHash: existing.keyHash, txNum: txNum, epoch: ep})
 		}
 		return
 	}
 	if c.codeSizeEntries.Load() >= c.codeSizeCapEntries {
 		return
 	}
-	c.codeSizeByCodeHash.Set(codeHash, codeSizeEntry{size: size, txNum: txNum, epoch: ep})
-	c.codeSizeEntries.Add(1)
+	entry := codeSizeEntry{size: size, keyHash: kh, txNum: txNum, epoch: ep}
+	if _, loaded := c.codeSizeByCodeHash.LoadOrStore(codeHash, entry); !loaded {
+		c.codeSizeEntries.Add(1)
+	}
 }
 
 // Delete removes the address → code mapping for addr.

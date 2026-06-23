@@ -1,0 +1,91 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package cache
+
+import (
+	"sync"
+	"testing"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/crypto"
+)
+
+// TestCodeCache_ConcurrentPutSameCode_NoSizeDrift guards against the size
+// accounting drift that the pre-LoadOrStore code had: parallel workers Putting
+// the same cold code all missed the membership check, all passed the cap gate,
+// and all added to the byte counter, leaving a permanent positive surplus that
+// eventually wedged the cap. With the atomic LoadOrStore insert, only the
+// goroutine that actually inserts accounts the size, so the counters must equal
+// exactly one entry regardless of how many concurrent Puts raced.
+func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
+	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xab
+	code := []byte("some non-trivial contract bytecode payload xyz")
+	codeHash := crypto.Keccak256(code)
+
+	const workers = 64
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			cc.PutWithCodeHash(addr, code, codeHash, 1)
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, int64(8+len(code)), cc.codeSize.Load(),
+		"hashToCode size must reflect exactly one insert after concurrent same-code Puts")
+	require.Equal(t, int64(len(codeHash)+len(code)), cc.codeHashCodeSize.Load(),
+		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
+	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),
+		"codeSizeByCodeHash must hold exactly one entry after concurrent same-code Puts")
+
+	got, ok := cc.GetByCodeHash(codeHash)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+}
+
+// TestCodeCache_ByteCheckRejectsForeignKeyHash verifies the collision guard:
+// an entry whose stored keyHash differs from the requested codeHash is treated
+// as a miss, so a 64-bit maphash collision can never serve the wrong code.
+func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
+	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+
+	code := []byte("contract A bytecode")
+	realHash := crypto.Keccak256(code)
+	cc.PutWithCodeHash(nil, code, realHash, 1)
+
+	// Sanity: the real hash hits.
+	_, ok := cc.GetByCodeHash(realHash)
+	require.True(t, ok)
+
+	// Simulate a foreign 32-byte codeHash that collapses to the same maphash
+	// bucket by storing a colliding entry directly under a different keyHash.
+	foreign := make([]byte, 32)
+	copy(foreign, realHash)
+	foreign[0] ^= 0xff // different 32-byte key
+	cc.codeHashToCode.Set(foreign, codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.epoch.Load()})
+
+	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
+	_, ok = cc.GetByCodeHash(foreign)
+	require.False(t, ok, "byte-check must reject an entry whose keyHash differs from the requested codeHash")
+}
