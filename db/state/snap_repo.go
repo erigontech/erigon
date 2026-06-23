@@ -405,7 +405,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 			fPath, err := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
 			if err != nil {
 				f.logger.Error("SnapshotRepo.openDirtyFiles existence path", "err", err, "f", fPath)
-			} else if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+			} else if item.existence, err = existence.OpenFilter(fPath); err != nil {
 				_, fName := filepath.Split(fPath)
 				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 				// don't interrupt on error. other files maybe good

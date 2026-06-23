@@ -111,6 +111,22 @@ type Index struct {
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
+// newIndexFromMemory creates an Index backed by an in-memory slice.
+// The caller owns data and must keep it valid for the Index lifetime.
+// Close is a no-op (no file or mmap to release).
+func newIndexFromMemory(data []byte, fileName string) (*Index, error) {
+	idx := &Index{
+		data:     data,
+		size:     int64(len(data)),
+		fileName: fileName,
+	}
+	if err := idx.init(); err != nil {
+		return nil, err
+	}
+	idx.readers = &sync.Pool{New: func() any { return NewIndexReader(idx) }}
+	return idx, nil
+}
+
 func MustOpen(indexFile string) *Index {
 	idx, err := OpenIndex(indexFile)
 	if err != nil {
@@ -435,9 +451,6 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
-	if idx.keyCount == 1 {
-		return 0, true
-	}
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
 		case 1:
@@ -449,6 +462,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 				return 0, false
 			}
 		}
+	}
+	if idx.keyCount == 1 {
+		if !idx.enums {
+			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+		}
+		return 0, true
 	}
 
 	var gr GolombRiceReader

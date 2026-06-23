@@ -847,6 +847,8 @@ func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 	return nil
 }
 
+var saisBufPool = sync.Pool{New: func() any { return new([]int32) }}
+
 // extractPatternsInSuperstrings is the worker that processes one superstring and puts results
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
@@ -856,7 +858,9 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
-	var lcp, sa, inv, saisBuf []int32
+	saisBuf := saisBufPool.Get().(*[]int32)
+	defer saisBufPool.Put(saisBuf)
+	var lcp, sa, inv []int32
 	for {
 		var (
 			superstring []byte
@@ -878,7 +882,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
-		if err := sais.Sais(superstring, sa, &saisBuf); err != nil {
+		if err := sais.Sais(superstring, sa, saisBuf); err != nil {
 			panic(err)
 		}
 		//log.Info("Suffix array built", "in", time.Since(start))
@@ -1034,7 +1038,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	t := time.Now()
-	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.LargeSortableBuffers, logger)
+	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.SmallSortableBuffers, logger)
 	defer dictCollector.Close()
 	dictCollector.SortAndFlushInBackground(false)
 	dictCollector.LogLvl(lvl)
