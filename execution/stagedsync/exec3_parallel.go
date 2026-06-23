@@ -566,7 +566,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						// Spawn per-block validation in a goroutine — the result is
 						// joined via Wait() below, after the other per-result work
 						// has had a chance to run in parallel with validation.
-						blockValidatorWaiter = newBlockValidator(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
+						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
 						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {

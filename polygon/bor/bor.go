@@ -1330,6 +1330,12 @@ func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return AddFeeTransferLog
 }
 
+func (c *Bor) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+}
+
 func (c *Bor) TxDependencies(h *types.Header) [][]int {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()

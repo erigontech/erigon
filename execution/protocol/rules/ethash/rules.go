@@ -447,6 +447,12 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 	return types.NewBlock(header, txs, uncles, r, withdrawals), nil, nil
 }
 
+func (ethash *Ethash) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+}
+
 // SealHash returns the hash of a block prior to it being sealed.
 func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	hasher := keccak.NewFastKeccak()

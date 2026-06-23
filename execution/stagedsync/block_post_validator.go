@@ -5,12 +5,11 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// blockValidator runs BlockPostValidation in a goroutine for a SINGLE block.
+// blockValidator runs ValidateBlockPostExecution in a goroutine for a SINGLE block.
 // One instance per block — no shared state across blocks. The previous
 // shared-across-blocks validator carried v.err and v.wg between blocks,
 // which was prone to leaking wg counters on early-return and to "sticky
@@ -26,12 +25,12 @@ type blockValidator struct {
 
 // newBlockValidator starts validation in a goroutine. The caller must
 // eventually call Wait() to surface the result and to drain the goroutine.
-func newBlockValidator(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
+func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) *blockValidator {
 	bv := &blockValidator{done: make(chan error, 1)}
 	go func() {
-		bv.done <- protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, header, txns, chainConfig, logger)
+		bv.done <- engine.ValidateBlockPostExecution(chainConfig, header, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 	}()
 	return bv
 }

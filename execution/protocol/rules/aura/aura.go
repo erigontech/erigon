@@ -1206,6 +1206,12 @@ func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
 }
 
+func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+}
+
 /*
 // extracts the empty steps from the header seal. should only be called when there are 3 fields in the seal
 // (i.e. header.number() >= self.empty_steps_transition).
