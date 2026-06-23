@@ -352,28 +352,21 @@ func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, fi
 	return res
 }
 
-func deleteMergeFile(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) {
+// retireMergeFiles removes garbage files from dirtyFiles and returns them so the
+// caller can attach them to the outgoing visible generation. Physical deletion
+// (closeFilesAndRemove) is the reclaimer's job once that generation drains — so
+// readers still pinning these files are never surprised. Returns outs unchanged.
+func retireMergeFiles(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) []*FilesItem {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
 		dirtyFiles.Delete(out)
-		out.canDelete.Store(true)
-
-		// if merged file not visible for any alive reader (even for us): can remove it immediately
-		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
-		if out.refcount.Load() == 0 {
-			out.closeFilesAndRemove()
-
-			if filenameBase == traceFileLife && out.decompressor != nil {
-				logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
-			}
-		} else {
-			if filenameBase == traceFileLife && out.decompressor != nil {
-				logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
-			}
+		if filenameBase == traceFileLife && out.decompressor != nil {
+			logger.Warn("[agg.dbg] retireMergeFiles: retire", "f", out.decompressor.FileName())
 		}
 	}
+	return outs
 }
 
 func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
@@ -423,7 +416,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
-				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				if item.index, err = d.openHashMapAccessor(fPath); err != nil {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -455,7 +448,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			if ok {
 				fName := filepath.Base(fPath)
 				d.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
-				if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+				if item.existence, err = d.openExistenceFilter(fPath); err != nil {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -529,7 +522,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 			if ok {
 				fName := filepath.Base(fPath)
 				h.FileVersion.AccessorVI.MustSupport(fileVer, fName)
-				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				if item.index, err = h.openHashMapAccessor(fPath); err != nil {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -592,7 +585,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 			if ok {
 				fName := filepath.Base(fPath)
 				ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
-				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
@@ -743,33 +736,6 @@ func (files visibleFiles) EnableReadAhead() {
 func (files visibleFiles) DisableReadAhead() {
 	for _, f := range files {
 		f.src.DisableReadAhead()
-	}
-}
-
-// refcntIncrement pins every non-frozen file by incrementing its refcount.
-// Callers must pair this with a matching decrement in RoTx.Close.
-func (files visibleFiles) refcntIncrement() {
-	for i := range files {
-		if files[i].src.frozen {
-			continue
-		}
-		files[i].src.refcount.Add(1)
-	}
-}
-
-func (files visibleFiles) refcntDecrement(filenameBase string, logger log.Logger) {
-	traceActive := traceFileLife != "" && filenameBase == traceFileLife
-	for i := range files {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		if src.refcount.Add(-1) == 0 && src.canDelete.Load() {
-			if traceActive {
-				logger.Warn("[agg.dbg] real remove at RoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
 	}
 }
 

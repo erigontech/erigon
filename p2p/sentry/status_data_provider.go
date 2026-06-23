@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 
@@ -93,18 +92,6 @@ func NewStatusDataProvider(
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
 
 	return s
-}
-
-func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
-	if num == nil {
-		num = new(big.Int)
-	}
-	num256 := new(uint256.Int)
-	overflow := num256.SetFromBig(num)
-	if overflow {
-		return nil, errors.New("uint256FromBigInt: big.Int greater than 2^256-1")
-	}
-	return num256, nil
 }
 
 func makeGenesisChainHead(genesis *types.Block) ChainHead {
@@ -240,12 +227,11 @@ func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	if err != nil {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: ReadTd error at height %d and hash %s: %w", height, hash, err)
 	}
-	td256, err := uint256FromBigInt(td)
-	if err != nil {
-		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
+	if td == nil {
+		td = new(uint256.Int)
 	}
 
-	return ChainHead{height, time, hash, minimumBlock, td256}, nil
+	return ChainHead{height, time, hash, minimumBlock, td}, nil
 }
 
 func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainHead, error) {

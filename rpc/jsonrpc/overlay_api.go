@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -529,7 +530,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 					log.Error(err.Error())
 					return nil, err
 				}
-				err = statedb.SetNonce(msg.From(), nonce+1)
+				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
 				if err != nil {
 					log.Error(err.Error())
 					return nil, err

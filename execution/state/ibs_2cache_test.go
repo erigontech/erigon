@@ -79,9 +79,9 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	// addr1: balance + nonce + code + two storage slots
 	err := ibs.SetBalance(addr1, *uint256.NewInt(100), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibs.SetNonce(addr1, 7)
+	err = ibs.SetNonce(addr1, 7, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibs.SetCode(addr1, code1)
+	err = ibs.SetCode(addr1, code1, tracing.CodeChangeUnspecified)
 	require.NoError(t, err)
 	err = ibs.SetState(addr1, key1, *uint256.NewInt(42))
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	// Pre-snapshot state
 	err := ibs.SetBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibs.SetNonce(addr, 3)
+	err = ibs.SetNonce(addr, 3, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibs.SetState(addr, key, *uint256.NewInt(11))
 	require.NoError(t, err)
@@ -172,7 +172,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	// Post-snapshot modifications
 	err = ibs.SetBalance(addr, *uint256.NewInt(999), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibs.SetNonce(addr, 42)
+	err = ibs.SetNonce(addr, 42, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibs.SetState(addr, key, *uint256.NewInt(77))
 	require.NoError(t, err)
@@ -292,7 +292,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 
 		err := ibsN.SetBalance(addr, *wantBalance, tracing.BalanceChangeUnspecified)
 		require.NoError(t, err)
-		err = ibsN.SetNonce(addr, wantNonce)
+		err = ibsN.SetNonce(addr, wantNonce, tracing.NonceChangeUnspecified)
 		require.NoError(t, err)
 		err = ibsN.SetState(addr, key, wantStorage)
 		require.NoError(t, err)
@@ -343,7 +343,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	err := ibsTx.SetBalance(addr, wantBalance, tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibsTx.SetNonce(addr, wantNonce)
+	err = ibsTx.SetNonce(addr, wantNonce, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibsTx.SetState(addr, key, wantStorage)
 	require.NoError(t, err)

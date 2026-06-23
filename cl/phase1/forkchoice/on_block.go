@@ -80,9 +80,8 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	return misc.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
-func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
-	currSlot := ethClock.GetCurrentSlot()
-	if slot != currSlot {
+func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, currentSlotOnEntry uint64) {
+	if slot != currentSlotOnEntry {
 		return
 	}
 	initialSlotTime := ethClock.GetSlotTime(slot)
@@ -127,11 +126,22 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
 		return ErrNotFinalizedDescendant
 	}
+	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	isGloas := blockVersion >= clparams.GloasVersion
+	headBeforeBlock := common.Hash{}
+	if isGloas && f.Slot() == block.Block.Slot {
+		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		head, _, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+		if err != nil {
+			return err
+		}
+		headBeforeBlock = head.Root
+	}
 	if isGloas {
 		if err := f.validateParentPayloadPath(block.Block); err != nil {
 			return err
@@ -192,9 +202,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					}
 					return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
 				}
-				if f.highestSeen.Load() < block.Block.Slot {
-					collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
-				}
 			}
 		}
 
@@ -219,9 +226,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			monitor.ObserveNewPayloadTime(timeStartExec)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 
-			// Track payload status by execution block hash for GLOAS parent payload validation
+			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
 			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+			f.executionPayloadGasLimit.Add(executionBlockHash, block.Block.Body.ExecutionPayload.GasLimit)
 
 			switch payloadStatus {
 			case execution_client.PayloadStatusNone:
@@ -255,11 +263,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
+
 	// Update highestSeen early so aggregate/attestation acceptance uses the
 	// latest slot even if AddChainSegment returns PreValidated.
 	if block.Block.Slot > f.highestSeen.Load() {
 		f.highestSeen.Store(block.Block.Slot)
 		f.highestSeenRoot.Store(common.Hash(blockRoot))
+		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot, currentSlotOnEntry)
 	}
 	startStateProcess := time.Now()
 
@@ -313,15 +323,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
 	f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
 	// update_proposer_boost_root: conditionally set proposer boost root.
-	// Separated from recordBlockTimeliness per spec: checks timeliness + proposer index.
-	f.updateProposerBoostRoot(block.Block, common.Hash(blockRoot))
+	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot))
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
 	if blockVersion >= clparams.GloasVersion {
 		// Initialize payload timeliness and data availability votes for this block
-		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
-		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
+		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
+		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
 
 		// Notify PTC messages from payload attestations in the block.
 		// Skip during forward sync (newPayload=false) — PTC votes only matter
@@ -412,24 +421,33 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	)
 	f.operationsPool.NotifyBlock(block.Block)
 
-	// Eagerly compute unrealized justification and finality
+	// Eagerly compute unrealized justification and finality (spec: compute_pulled_up_tip)
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
+	// Capture post-pull-up values BEFORE restoring lastProcessedState so the
+	// prior-epoch updateCheckpoints below can use them per spec
+	// (compute_pulled_up_tip uses state.current_justified_checkpoint AFTER
+	// process_justification_and_finalization, not before).
+	postPullupJustified := lastProcessedState.CurrentJustifiedCheckpoint()
+	postPullupFinalized := lastProcessedState.FinalizedCheckpoint()
 	// Store per-block unrealized checkpoints (spec: store.unrealized_justifications[block_root])
-	f.unrealizedJustifications.Store(common.Hash(blockRoot), lastProcessedState.CurrentJustifiedCheckpoint())
-	f.unrealizedFinalizations.Store(common.Hash(blockRoot), lastProcessedState.FinalizedCheckpoint())
-	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+	f.unrealizedJustifications.Store(common.Hash(blockRoot), postPullupJustified)
+	f.unrealizedFinalizations.Store(common.Hash(blockRoot), postPullupFinalized)
+	f.updateUnrealizedCheckpoints(postPullupJustified, postPullupFinalized)
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
 	lastProcessedState.SetFinalizedCheckpoint(stateFinalized)
 	lastProcessedState.SetJustificationBits(justificationBits)
 
-	// If the block is from a prior epoch, apply the realized values
+	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the
+	// post-pull-up checkpoints to the store. Previously this used the restored
+	// pre-pull-up values, which meant store.justified/finalized lagged what
+	// the spec would have for late-arriving prior-epoch blocks.
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
 	f.emitters.State().SendBlock(&beaconevents.BlockData{
 		Slot:                block.Block.Slot,

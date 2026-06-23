@@ -119,8 +119,8 @@ func Compare(a, b interface{}) int {
 	if va.IsValid() && vb.IsValid() {
 		ka := va.Kind()
 		kb := vb.Kind()
-		if (ka == reflect.Ptr || ka == reflect.Chan || ka == reflect.Map || ka == reflect.Func || ka == reflect.Slice || ka == reflect.UnsafePointer) &&
-			(kb == reflect.Ptr || kb == reflect.Chan || kb == reflect.Map || kb == reflect.Func || kb == reflect.Slice || kb == reflect.UnsafePointer) {
+		if (ka == reflect.Pointer || ka == reflect.Chan || ka == reflect.Map || ka == reflect.Func || ka == reflect.Slice || ka == reflect.UnsafePointer) &&
+			(kb == reflect.Pointer || kb == reflect.Chan || kb == reflect.Map || kb == reflect.Func || kb == reflect.Slice || kb == reflect.UnsafePointer) {
 			pa := va.Pointer()
 			pb := vb.Pointer()
 			if pa < pb {

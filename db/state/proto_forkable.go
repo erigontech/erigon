@@ -349,7 +349,7 @@ func (a *ProtoForkableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 
 	r := a.readers[i]
 	if r == nil {
-		r = a.files[i].src.index.GetReaderFromPool()
+		r = a.files[i].src.index.Reader()
 		a.readers[i] = r
 	}
 

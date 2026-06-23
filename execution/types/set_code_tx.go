@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -176,25 +175,16 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(SetCodeTxType, []any{
-		&tx.ChainID,
-		tx.Nonce,
-		&tx.TipCap,
-		&tx.FeeCap,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.Authorizations,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	hash := prefixedPayloadHash(SetCodeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type setCodeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -206,7 +196,7 @@ type setCodeTxSigHash struct {
 	AuthList   []Authorization
 }
 
-func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *SetCodeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		SetCodeTxType,
 		&setCodeTxSigHash{

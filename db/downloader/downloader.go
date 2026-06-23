@@ -884,6 +884,8 @@ func (d *Downloader) decDownloadRequests() {
 // Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
 // the name from there.
 func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	for name, t := range d.torrentsByName {
 		ret = append(ret, snapshot{
 			Name:     name,

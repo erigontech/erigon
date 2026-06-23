@@ -27,6 +27,8 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -102,11 +104,20 @@ func translateJSON(v any) any {
 		return uint64(v)
 	case string:
 		if len(v) > 0 && v[0] == '#' { // # starts a faux big int.
-			big, ok := new(big.Int).SetString(v[1:], 10)
+			b, ok := new(big.Int).SetString(v[1:], 10)
 			if !ok {
 				panic(fmt.Errorf("bad test: bad big int: %q", v))
 			}
-			return big
+			// Erigon's RLP layer only supports integers up to 2^256-1, which
+			// covers every value Ethereum encodes on-chain (EIP-7702 caps
+			// chainID at < 2^256, EIP-2294 (stagnant) proposes ~2^63 for
+			// chainID). Test vectors with larger values are filtered out at
+			// the test-runner level.
+			u, overflow := uint256.FromBig(b)
+			if overflow {
+				panic(fmt.Errorf("test value %q exceeds 2^256-1; skip via TestMatcher", v))
+			}
+			return u
 		}
 		return []byte(v)
 	case []any:
@@ -134,13 +145,13 @@ func checkDecodeFromJSON(s *rlp.Stream, exp any) error {
 		if i != exp {
 			return addStack("Uint", exp, fmt.Errorf("result mismatch: got %d", i))
 		}
-	case *big.Int:
-		big := new(big.Int)
-		if err := s.Decode(&big); err != nil {
-			return addStack("Big", exp, err)
+	case *uint256.Int:
+		u := new(uint256.Int)
+		if err := s.Decode(&u); err != nil {
+			return addStack("Uint256", exp, err)
 		}
-		if big.Cmp(exp) != 0 {
-			return addStack("Big", exp, fmt.Errorf("result mismatch: got %d", big))
+		if u.Cmp(exp) != 0 {
+			return addStack("Uint256", exp, fmt.Errorf("result mismatch: got %d", u))
 		}
 	case []byte:
 		b, err := s.Bytes()

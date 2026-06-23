@@ -21,7 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -410,7 +411,7 @@ func (e *ExecModule) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	return h, nil
 }
 
-func (e *ExecModule) GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*big.Int, error) {
+func (e *ExecModule) GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*uint256.Int, error) {
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: could not begin database tx %w", err)

@@ -165,7 +165,7 @@ func generateChain(
 		address1 = addresses.address1
 		address2 = addresses.address2
 		theAddr  = common.Address{1}
-		chainId  = big.NewInt(1337)
+		chainId  = uint256.NewInt(1337)
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)

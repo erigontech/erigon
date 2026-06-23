@@ -45,6 +45,7 @@ rules:
       - qa-rpc-integration-tests.yml
       - qa-sync-from-scratch.yml
       - test-kurtosis-assertoor.yml
+      - test-kurtosis-gloas.yml
 
   # Workflows missing explicit permissions: blocks — needs a cleanup pass
   # to add least-privilege permissions to each workflow; tracked in #21132.

@@ -22,7 +22,6 @@ package types
 import (
 	"errors"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -317,24 +316,16 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []any{
-		&tx.ChainID,
-		tx.Nonce,
-		&tx.TipCap,
-		&tx.FeeCap,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen := tx.payloadSize()
+	hash := prefixedPayloadHash(DynamicFeeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type dynamicFeeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -345,7 +336,7 @@ type dynamicFeeTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *DynamicFeeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{

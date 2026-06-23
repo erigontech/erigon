@@ -27,6 +27,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/metrics"
 )
@@ -201,8 +202,8 @@ func SetupLogger(filePrefix string) log.Logger {
 		dirLevel = log.LvlInfo
 	}
 
-	if logDirPrefix != nil && len(*logDirPrefix) > 0 {
-		filePrefix = *logDirPrefix
+	if prefix := common.Deref(logDirPrefix); prefix != "" {
+		filePrefix = prefix
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)

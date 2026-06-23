@@ -310,7 +310,7 @@ func (r *preBlockReader) TracePrefix() string                                   
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
 //	  → those land in blockIO.WriteSet → rawWrites
-//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader)
+//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader, nil, true, false)
 //	  → calcState.ApplyWrites(normalized)
 //	  → calcState.FlushToUpdates(updates)
 //
@@ -378,7 +378,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
 
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
 	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
@@ -420,7 +420,8 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
-	got := lookupKeyUpdate(t, updates, string(addr.Value().Bytes()))
+	addrVal := addr.Value()
+	got := lookupKeyUpdate(t, updates, string(addrVal[:]))
 
 	// EIP-161-style DeleteUpdate (matches serial's DomainDel for a pure SD).
 	assert.Equal(t, commitment.DeleteUpdate, got.Flags,
@@ -487,7 +488,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	}
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
 
 	// Sanity: normalizeWriteSet should have appended one StoragePath=0
 	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing
@@ -532,6 +533,63 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
+// mockStorageEnum returns a fixed persisted-slot set per address.
+type mockStorageEnum struct {
+	slots map[accounts.Address][]accounts.StorageKey
+}
+
+func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
+	for _, k := range m.slots[addr] {
+		if err := fn(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TestSDOfPreExistingContract_DeletesUntouchedSlots checks that a self-destruct
+// deletes the whole persisted storage subtree, not just the EVM-touched slots.
+func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
+	// On-disk slots never read/written this block, so they never enter storageState.
+	untouched1 := accounts.InternKey(common.Hash{0x11})
+	untouched2 := accounts.InternKey(common.Hash{0x22})
+
+	cs := newTestCalcState()
+	cs.storageEnum = &mockStorageEnum{slots: map[accounts.Address][]accounts.StorageKey{
+		addr: {untouched1, untouched2},
+	}}
+
+	cs.ApplyWrites(state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: uint64(3)},
+		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true},
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}},
+	})
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+
+	addrBytes := addr.Value()
+	gotSlots := map[common.Hash]commitment.Update{}
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		if len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]) {
+			var h common.Hash
+			copy(h[:], k[20:])
+			gotSlots[h] = *u
+		}
+		return nil
+	}))
+
+	require.Len(t, gotSlots, 2,
+		"both untouched on-disk slots must be deleted on SD (matches serial's DomainDelPrefix)")
+	for _, sk := range []accounts.StorageKey{untouched1, untouched2} {
+		u, ok := gotSlots[sk.Value()]
+		require.True(t, ok, "untouched slot %x must emit a delete", sk.Value())
+		assert.Equal(t, commitment.DeleteUpdate, u.Flags,
+			"untouched slot %x must emit DeleteUpdate", sk.Value())
+	}
+}
+
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {
 	t.Helper()
 	var found *commitment.Update
@@ -544,4 +602,84 @@ func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string)
 	}))
 	require.NotNil(t, found, "no Update emitted for plainKey %x", plainKey)
 	return found
+}
+
+// TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount pins that emptyRemoval=false
+// retains an empty account as a full UPDATE rather than emitting SelfDestructPath.
+func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
+	zeroAddr := accounts.InternAddress([20]byte{})
+
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := state.VersionedWrites{
+		&state.VersionedWrite{Address: zeroAddr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: zeroAddr, Path: state.NoncePath, Val: uint64(0), Version: ver},
+		&state.VersionedWrite{Address: zeroAddr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+	}
+	vm := state.NewVersionMap(nil)
+	for _, w := range rawWrites {
+		vm.Write(w.Address, w.Path, accounts.NilKey, ver, w.Val, true)
+	}
+
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false, false)
+
+	for _, w := range normalized {
+		assert.NotEqual(t, state.SelfDestructPath, w.Path,
+			"emptyRemoval=false must suppress SelfDestructPath emission for empty accounts")
+	}
+
+	cs := newTestCalcState()
+	cs.ApplyWrites(normalized)
+	acc, ok := cs.accounts[zeroAddr]
+	require.True(t, ok)
+	assert.False(t, acc.Deleted)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	keyVal := zeroAddr.Value()
+	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
+	assert.Equal(t,
+		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
+		got.Flags,
+		"empty account at genesis must emit full UPDATE, matching serial's TrieContext.Account")
+}
+
+// TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161 pins that emptyRemoval=true
+// emits SelfDestructPath for an empty account and flushes as DeleteUpdate.
+func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xab, 0xcd})
+
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: uint64(0), Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+	}
+	vm := state.NewVersionMap(nil)
+	for _, w := range rawWrites {
+		vm.Write(w.Address, w.Path, accounts.NilKey, ver, w.Val, true)
+	}
+
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true, false)
+
+	sdSeen := false
+	for _, w := range normalized {
+		if w.Path == state.SelfDestructPath && w.Address == addr {
+			v, _ := w.Val.(bool)
+			sdSeen = sdSeen || v
+		}
+	}
+	require.True(t, sdSeen, "emptyRemoval=true must emit SelfDestructPath=true for empty account")
+
+	cs := newTestCalcState()
+	cs.ApplyWrites(normalized)
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.True(t, acc.Deleted)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	keyVal := addr.Value()
+	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
+	assert.Equal(t, commitment.DeleteUpdate, got.Flags,
+		"empty account with emptyRemoval=true must emit DeleteUpdate (EIP-161)")
 }

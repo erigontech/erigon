@@ -22,7 +22,6 @@ package types
 import (
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -354,14 +353,9 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := RlpHash([]any{
-		tx.Nonce,
-		&tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.V, tx.R, tx.S,
+	payloadSize := tx.payloadSize()
+	hash := rlpPayloadHash(func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize)
 	})
 	tx.hash.Store(&hash)
 	return hash
@@ -374,12 +368,12 @@ type legacyTxSigHash struct {
 	To       *common.Address `rlp:"nil"`
 	Value    *uint256.Int
 	Data     []byte
-	ChainID  *big.Int
+	ChainID  *uint256.Int
 	V        uint
 	R        uint
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *LegacyTx) SigningHash(chainID *uint256.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
 		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,

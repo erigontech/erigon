@@ -20,11 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
@@ -192,7 +192,11 @@ type ExecModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db               kv.TemporalRwDB // main database
+	db kv.TemporalRwDB // main database
+	// semaphore is the module's single mutual-exclusion domain: it guards the
+	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
+	// (retried by the CL) or block, and the background FCU commit/prune
+	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
@@ -217,8 +221,10 @@ type ExecModule struct {
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
-	// metrics for average mgas/sec
-	avgMgasSec float64
+	nextForkActivated       bool
+	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
+	accumGasMgas float64
+	accumTimeSec float64
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
@@ -294,6 +300,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	e.semaphore.Release(1)
 }
 
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
+}
+
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
@@ -311,9 +330,8 @@ func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.H
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*uint256.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
-
 }
 
 func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
@@ -383,7 +401,20 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	return nil
 }
 
+const nextForkBanner = `
+:'######:::'##::::::::::'###::::'##::::'##::'######::'########:'########:'########::'########:::::'###::::'##::::'##:
+'##... ##:: ##:::::::::'## ##::: ###::'###:'##... ##:... ##..:: ##.....:: ##.... ##: ##.... ##:::'## ##::: ###::'###:
+ ##:::..::: ##::::::::'##:. ##:: ####'####: ##:::..::::: ##:::: ##::::::: ##:::: ##: ##:::: ##::'##:. ##:: ####'####:
+ ##::'####: ##:::::::'##:::. ##: ## ### ##:. ######::::: ##:::: ######::: ########:: ##:::: ##:'##:::. ##: ## ### ##:
+ ##::: ##:: ##::::::: #########: ##. #: ##::..... ##:::: ##:::: ##...:::: ##.. ##::: ##:::: ##: #########: ##. #: ##:
+ ##::: ##:: ##::::::: ##.... ##: ##:.:: ##:'##::: ##:::: ##:::: ##::::::: ##::. ##:: ##:::: ##: ##.... ##: ##:.:: ##:
+. ######::: ########: ##:::: ##: ##:::: ##:. ######::::: ##:::: ########: ##:::. ##: ########:: ##:::: ##: ##:::: ##:
+:......::::........::..:::::..::..:::::..:::......::::::..:::::........::..:::::..::........:::..:::::..::..:::::..::
+=============================================== GLAMSTERDAM ACTIVATED ===============================================
+`
+
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
@@ -485,6 +516,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
+	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+	if e.currentContext != nil {
+		doms.SetParent(e.currentContext)
+	}
+
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
 	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
 	// and the parallel exec goroutine via NewReadView — see this block data.
@@ -553,6 +589,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, err
 		}
 	}
+	if !e.nextForkActivated && validationStatus == ExecutionStatusSuccess && e.config.IsAmsterdam(header.Time) {
+		e.nextForkActivated = true
+		e.logger.Info(nextForkBanner)
+	}
+
 	result := ValidationResult{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,

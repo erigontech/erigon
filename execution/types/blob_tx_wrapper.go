@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -312,7 +311,7 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 
 func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
 
-func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
+func (txw *BlobTxWrapper) SigningHash(chainID *uint256.Int) common.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
 

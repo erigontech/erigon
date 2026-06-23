@@ -122,7 +122,7 @@ func TestCall(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	})
+	}, tracing.CodeChangeUnspecified)
 
 	ret, _, err := Call(address, nil, &Config{State: state})
 	if err != nil {
@@ -189,7 +189,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	)
 
 	statedb.CreateAccount(sender, true)
-	statedb.SetCode(receiver, common.FromHex(code))
+	statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified)
 	runtimeConfig := Config{
 		Origin:      sender,
 		State:       statedb,
@@ -199,7 +199,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),
@@ -257,7 +257,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 			b.ReportAllocs()
 
 			contractCode := returnContract(n)
-			statedb.SetCode(contractAddr, contractCode)
+			statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
 			for b.Loop() {
 				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
@@ -313,10 +313,12 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool  { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
-func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
+func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
+	return nil
+}
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64    { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64 { return 0 }
 
 type dummyChain struct {
 	counter int
@@ -456,7 +458,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	eoa := accounts.InternAddress(common.HexToAddress("E0"))
 	{
 		cfg.State.CreateAccount(eoa, true)
-		cfg.State.SetNonce(eoa, 100)
+		cfg.State.SetNonce(eoa, 100, tracing.NonceChangeUnspecified)
 	}
 	reverting := accounts.InternAddress(common.HexToAddress("EE"))
 	{
@@ -465,12 +467,12 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 			byte(vm.PUSH1), 0x00,
 			byte(vm.PUSH1), 0x00,
 			byte(vm.REVERT),
-		})
+		}, tracing.CodeChangeUnspecified)
 	}
 
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(destination, code)
+	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
 	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 
 	b.Run(name, func(b *testing.B) {
@@ -695,7 +697,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 	b.Run("10k", func(b *testing.B) {
 		contractCode := swapContract(10_000)
-		state.SetCode(contractAddr, contractCode)
+		state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
 		for b.Loop() {
 			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
@@ -735,7 +737,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
 	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode)
+	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
 
 	// Build a factory contract that executes CREATE2 with the initcode and salt=0.
 	// The factory is placed at factoryAddr.
@@ -745,7 +747,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	factory.Push(0).Op(vm.SSTORE)
 
 	statedb.CreateAccount(accounts.InternAddress(factoryAddr), true)
-	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes())
+	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes(), tracing.CodeChangeUnspecified)
 
 	cfg := &Config{
 		State:  statedb,
@@ -804,7 +806,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
 	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode)
+	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
 
 	// Build a factory that executes CREATE with the initcode.
 	factory := program.New()
@@ -816,7 +818,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	factory.Push(0).Op(vm.SSTORE) // store result in slot 0
 
 	statedb.CreateAccount(factoryAcct, true)
-	statedb.SetCode(factoryAcct, factory.Bytes())
+	statedb.SetCode(factoryAcct, factory.Bytes(), tracing.CodeChangeUnspecified)
 
 	cfg := &Config{
 		State:  statedb,
@@ -920,7 +922,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	})
+	}, tracing.CodeChangeUnspecified)
 
 	// Track balance-change events on SYSTEM_ADDRESS.
 	type balChange struct {
@@ -951,7 +953,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil, nil)
 
-	ret, _, err := vmenv.Call(
+	ret, _, _, err := vmenv.Call(
 		systemAddr,
 		target,
 		nil,

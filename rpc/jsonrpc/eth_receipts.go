@@ -23,6 +23,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -42,10 +42,13 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// ErrBlockRangeIntoFuture is the eth_getLogs message for a range past the
+// executed head, exported so other packages can match on the condition.
+const ErrBlockRangeIntoFuture = "block range extends beyond current head block"
+
 var (
 	errInvalidBlockRange               = "invalid block range params"
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
-	errBlockRangeIntoFuture            = "block range extends beyond current head block"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
 	errExceedMaxTopics                 = "exceed max topics"
 	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
@@ -67,7 +70,11 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 		return nil, err
 	}
 
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
+	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
@@ -143,7 +150,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if begin > latest {
-				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 		end = latest
@@ -160,7 +167,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 
 			if end > latest {
-				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 	}
@@ -446,7 +453,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 		var topicsUnion stream.U64
 		for _, topic := range sub {
-			it, err := tx.IndexRange(kv.LogTopicIdx, topic.Bytes(), int(from), int(to), asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.LogTopicIdx, topic[:], int(from), int(to), asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}
@@ -565,7 +572,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed for historical state.
-	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
 	}

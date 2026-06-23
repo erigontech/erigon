@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
+	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -412,7 +413,7 @@ type ExecutionPayloadEnvelope struct {
 
 func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
 	return &ExecutionPayloadEnvelope{
-		Payload:               NewEth1Block(clparams.BellatrixVersion, cfg),
+		Payload:               NewEth1Block(clparams.GloasVersion, cfg),
 		ExecutionRequests:     NewExecutionRequests(cfg),
 		BuilderIndex:          0,
 		BeaconBlockRoot:       common.Hash{},
@@ -468,14 +469,20 @@ func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
-	return &ExecutionPayloadEnvelope{
-		Payload:               e.Payload,
-		ExecutionRequests:     e.ExecutionRequests,
-		BuilderIndex:          e.BuilderIndex,
-		BeaconBlockRoot:       e.BeaconBlockRoot,
-		ParentBeaconBlockRoot: e.ParentBeaconBlockRoot,
-		beaconCfg:             e.beaconCfg,
+	cloned := NewExecutionPayloadEnvelope(e.beaconCfg)
+	if e.Payload == nil {
+		return cloned
 	}
+	encoded, err := e.EncodeSSZ(nil)
+	if err != nil {
+		log.Error("ExecutionPayloadEnvelope.Clone: EncodeSSZ failed", "err", err)
+		return cloned
+	}
+	if err := cloned.DecodeSSZ(encoded, int(e.Payload.Version())); err != nil {
+		log.Error("ExecutionPayloadEnvelope.Clone: DecodeSSZ failed", "err", err)
+		return cloned
+	}
+	return cloned
 }
 
 // SignedExecutionPayloadEnvelope represents a signed execution payload envelope.
@@ -510,8 +517,12 @@ func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 }
 
 func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
+	var message *ExecutionPayloadEnvelope
+	if s.Message != nil {
+		message = s.Message.Clone().(*ExecutionPayloadEnvelope)
+	}
 	return &SignedExecutionPayloadEnvelope{
-		Message:   s.Message.Clone().(*ExecutionPayloadEnvelope),
+		Message:   message,
 		Signature: s.Signature,
 		beaconCfg: s.beaconCfg,
 	}

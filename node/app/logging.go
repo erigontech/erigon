@@ -102,7 +102,7 @@ func LogInstance(value interface{}) string {
 		return s.String()
 	}
 	t := v.Type()
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return fmt.Sprintf("%s(%p)", t.Name(), value)

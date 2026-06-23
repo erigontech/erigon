@@ -232,7 +232,7 @@ func UnexpectedTypeError(expected interface{}, actual interface{}, message ...st
 	switch expectedType := expected.(type) {
 	case reflect.Type:
 
-		if expectedType.Kind() == reflect.Ptr && expectedType.Elem().Kind() == reflect.Interface {
+		if expectedType.Kind() == reflect.Pointer && expectedType.Elem().Kind() == reflect.Interface {
 			expectedType = expectedType.Elem()
 		}
 
@@ -244,7 +244,7 @@ func UnexpectedTypeError(expected interface{}, actual interface{}, message ...st
 		} else {
 			expectedType := reflect.TypeOf(expected)
 
-			if expectedType.Kind() == reflect.Ptr && expectedType.Elem().Kind() == reflect.Interface {
+			if expectedType.Kind() == reflect.Pointer && expectedType.Elem().Kind() == reflect.Interface {
 				expectedType = expectedType.Elem()
 			}
 
@@ -255,7 +255,7 @@ func UnexpectedTypeError(expected interface{}, actual interface{}, message ...st
 	switch actualType := actual.(type) {
 	case reflect.Type:
 
-		if actualType.Kind() == reflect.Ptr && actualType.Elem().Kind() == reflect.Interface {
+		if actualType.Kind() == reflect.Pointer && actualType.Elem().Kind() == reflect.Interface {
 			actualType = actualType.Elem()
 		}
 
@@ -267,7 +267,7 @@ func UnexpectedTypeError(expected interface{}, actual interface{}, message ...st
 		} else {
 			actualType := reflect.TypeOf(actual)
 
-			if actualType.Kind() == reflect.Ptr && actualType.Elem().Kind() == reflect.Interface {
+			if actualType.Kind() == reflect.Pointer && actualType.Elem().Kind() == reflect.Interface {
 				actualType = actualType.Elem()
 			}
 

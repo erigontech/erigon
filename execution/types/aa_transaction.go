@@ -162,26 +162,15 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
-		tx.ChainID,
-		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress, tx.SenderValidationData,
-		tx.Deployer, tx.DeployerData,
-		tx.Paymaster, tx.PaymasterData,
-		tx.ExecutionData,
-		tx.BuilderFee,
-		tx.Tip, tx.FeeCap,
-		tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.PostOpGasLimit,
-		tx.GasLimit,
-		tx.AccessList,
-		tx.Authorizations,
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	hash := prefixedPayloadHash(AccountAbstractionTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
 	})
-
 	tx.hash.Store(&hash)
 	return hash
 }
 
-func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *AccountAbstractionTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
 		chainID,
 		tx.NonceKey, tx.Nonce,
@@ -559,7 +548,7 @@ func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Message, error) {
+func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *uint256.Int) (*Message, error) {
 	zeroAddress := common.Address{}
 	if tx.Paymaster == nil || bytes.Equal(zeroAddress[:], tx.Paymaster[:]) {
 		return nil, nil
@@ -589,7 +578,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *uint256.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
 	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {

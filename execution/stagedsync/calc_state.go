@@ -67,6 +67,11 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	return val, true, nil
 }
 
+// storageEnumerator lists every persisted storage slot under an address.
+type storageEnumerator interface {
+	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
+}
+
 // calcState is the commitment calculator's local state accumulator.
 // It maintains the current state for every account/storage key that has been
 // touched. On first touch, values are lazy-loaded from the domain via the
@@ -82,6 +87,10 @@ type calcState struct {
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
+	// storageEnum enumerates an account's persisted storage subtree for
+	// self-destruct; nil disables the on-disk subtree wipe.
+	storageEnum storageEnumerator
+
 	// lazyLoadErr captures the first error encountered during ensureAccount /
 	// ensureStorage. Sticky — never cleared — so the calculator can fail the
 	// next compute instead of silently producing wrong updates from a missing
@@ -92,8 +101,8 @@ type calcState struct {
 	logPrefix string
 }
 
-// LazyLoadErr returns the first error encountered during ensureAccount /
-// ensureStorage lazy-loads, or nil. The calculator must check this before
+// LazyLoadErr returns the first error encountered during ensureAccount
+// lazy-loads, or nil. The calculator must check this before
 // computing — a missing baseline yields a wrong trie root that is hard to
 // attribute back to the original I/O error.
 func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
@@ -104,6 +113,7 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
+		storageEnum:  &asOfStorageEnumerator{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
 	}
@@ -137,36 +147,6 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	}
 	cs.accounts[addr] = acc
 	return acc
-}
-
-// ensureStorage returns the storage value, lazy-loading from domain on first touch.
-func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKey) uint256.Int {
-	slots, ok := cs.storageState[addr]
-	if !ok {
-		slots = make(map[accounts.StorageKey]uint256.Int)
-		cs.storageState[addr] = slots
-	}
-	if val, ok := slots[key]; ok {
-		return val
-	}
-
-	var val uint256.Int
-	if cs.domainReader != nil {
-		v, found, err := cs.domainReader.ReadAccountStorage(addr, key)
-		if err != nil {
-			// See ensureAccount: sticky so the next compute fails fast.
-			if cs.lazyLoadErr == nil {
-				cs.lazyLoadErr = fmt.Errorf("ensureStorage(%x/%x): %w", addr.Value(), key.Value(), err)
-			}
-			if cs.logger != nil {
-				cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: lazy-load ReadAccountStorage failed", "addr", addr, "key", key, "err", err)
-			}
-		} else if found {
-			val = v
-		}
-	}
-	slots[key] = val
-	return val
 }
 
 // ApplyWrites updates the local state with all writes from a TX result.
@@ -211,6 +191,30 @@ func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKe
 // also relies on this — but blocks aren't single txs; the SD-then-recreate
 // pattern there spans txs, and last-write-wins on acc.Deleted still holds.)
 func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
+	// Pre-scan: which addresses are self-destructed BY THIS tx's writeset.
+	// For those, the trailing zero account-field writes that IBS emits as
+	// part of the SELFDESTRUCT (BalancePath=0, etc. — when not stripped by
+	// normalizeWriteSet) must NOT clear Deleted. For any OTHER address, an
+	// account-field write — even a zero one — means the address is alive at
+	// the end of this tx (e.g. a 0-value transfer that re-creates a
+	// previously-destroyed address as an empty account on a pre-EIP-161
+	// fork — EEST frontier/opcodes/test_double_kill under EXEC3_PARALLEL),
+	// so it must clear Deleted.
+	sdThisCall := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		if w.Path == state.SelfDestructPath {
+			if destructed, ok := w.Val.(bool); ok {
+				// Last SelfDestructPath entry wins (matches normalizeWriteSet /
+				// applyVersionedWrites): a SELFDESTRUCT followed by a same-tx
+				// CREATE2-recreate ends ALIVE, so the recreate's writes must
+				// clear Deleted.
+				sdThisCall[w.Address] = destructed
+			}
+		}
+	}
+	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
+		return nonZero || !sdThisCall[addr]
+	}
 	for _, w := range writes {
 		if w.Val == nil {
 			continue
@@ -221,17 +225,14 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc := cs.ensureAccount(w.Address)
 			acc.Balance = w.Val.(uint256.Int)
 			acc.dirty = true
-			if !acc.Balance.IsZero() {
-				// Only a non-zero balance reflects real recreate or
-				// transfer-in. Zero is part of the SD emission (see
-				// invariant 1) and must not clear Deleted.
+			if clearsDeleted(w.Address, !acc.Balance.IsZero()) {
 				acc.Deleted = false
 			}
 		case state.NoncePath:
 			acc := cs.ensureAccount(w.Address)
 			acc.Nonce = w.Val.(uint64)
 			acc.dirty = true
-			if acc.Nonce != 0 {
+			if clearsDeleted(w.Address, acc.Nonce != 0) {
 				acc.Deleted = false
 			}
 		case state.CodeHashPath:
@@ -239,7 +240,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			v := w.Val.(accounts.CodeHash)
 			acc.CodeHash = v.Value()
 			acc.dirty = true
-			if v.Value() != empty.CodeHash {
+			if clearsDeleted(w.Address, v.Value() != empty.CodeHash) {
 				acc.Deleted = false
 			}
 		case state.CodePath:
@@ -247,7 +248,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			code := w.Val.([]byte)
 			acc.CodeHash = crypto.Keccak256Hash(code)
 			acc.dirty = true
-			if len(code) > 0 {
+			if clearsDeleted(w.Address, len(code) > 0) {
 				acc.Deleted = false
 			}
 		case state.SelfDestructPath:
@@ -261,22 +262,19 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				acc.Nonce = 0
 				acc.CodeHash = empty.CodeHash
 				acc.Incarnation = 0
-				// Zero every tracked storage slot and mark dirty so
-				// FlushToUpdates emits DeleteUpdate per slot.
-				if slots, ok := cs.storageState[w.Address]; ok {
-					if cs.storageDirty[w.Address] == nil {
-						cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
-					}
-					for key := range slots {
-						slots[key] = uint256.Int{}
-						cs.storageDirty[w.Address][key] = true
-					}
-				}
+				cs.deleteStorageSubtree(w.Address)
 			}
 		case state.StoragePath:
 			v := w.Val.(uint256.Int)
-			cs.ensureStorage(w.Address, w.Key) // lazy-load if needed
-			cs.storageState[w.Address][w.Key] = v
+			// Skip lazy-loading the prior slot value: the only downstream
+			// consumer (FlushToUpdates) reads exactly the value set below, so
+			// the cold GetAsOf seek it would cost is wasted.
+			slots := cs.storageState[w.Address]
+			if slots == nil {
+				slots = make(map[accounts.StorageKey]uint256.Int)
+				cs.storageState[w.Address] = slots
+			}
+			slots[w.Key] = v
 			if cs.storageDirty[w.Address] == nil {
 				cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
 			}
@@ -285,6 +283,45 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc := cs.ensureAccount(w.Address)
 			acc.Incarnation = w.Val.(uint64)
 			acc.dirty = true
+		}
+	}
+}
+
+// deleteStorageSubtree zeroes and dirties every storage slot under a
+// self-destructed account, including untouched on-disk slots pulled via
+// storageEnum, so FlushToUpdates emits a DeleteUpdate for each.
+func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
+	slots := cs.storageState[addr]
+	if slots == nil {
+		slots = make(map[accounts.StorageKey]uint256.Int)
+		cs.storageState[addr] = slots
+	}
+	dirty := cs.storageDirty[addr]
+	if dirty == nil {
+		dirty = make(map[accounts.StorageKey]bool)
+		cs.storageDirty[addr] = dirty
+	}
+	for key := range slots {
+		slots[key] = uint256.Int{}
+		dirty[key] = true
+	}
+	if cs.storageEnum == nil {
+		return
+	}
+	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
+		if _, ok := slots[key]; !ok {
+			slots[key] = uint256.Int{}
+			dirty[key] = true
+		}
+		return nil
+	}); err != nil {
+		// Sticky — a partial subtree wipe yields a wrong root, so fail the
+		// next compute rather than silently leaving stale slots.
+		if cs.lazyLoadErr == nil {
+			cs.lazyLoadErr = fmt.Errorf("deleteStorageSubtree(%x): %w", addr.Value(), err)
+		}
+		if cs.logger != nil {
+			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
 		}
 	}
 }

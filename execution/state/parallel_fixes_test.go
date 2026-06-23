@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -170,6 +171,26 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 	assert.False(t, ibs.AddressInAccessList(testAddr), "Address should be cold after Reset")
 }
 
+// TestAddressAccessResetInIBSReset verifies that IBS.Reset() clears BAL
+// address-access recording. An aborted incarnation never harvests
+// AccessedAddresses, and only regular txs call Prepare (which re-inits
+// recording) — a worker next assigned a system block-start/block-end
+// transaction never calls Prepare, so it would harvest the leftovers into
+// its own block's access list as phantom entries.
+func TestAddressAccessResetInIBSReset(t *testing.T) {
+	ibs := New(nil)
+	sender := accounts.InternAddress([20]byte{0x01})
+	coinbase := accounts.InternAddress([20]byte{0x02})
+	leaked := accounts.InternAddress([20]byte{0x42})
+	// Prepare enables access recording at tx start.
+	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.MarkAddressAccess(leaked, false)
+	// Tx aborts: AccessedAddresses is never harvested. The worker resets
+	// the shared IBS before the next task.
+	ibs.Reset()
+	assert.Empty(t, ibs.AccessedAddresses(), "no recorded accesses should survive Reset")
+}
+
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears
 // transient storage (EIP-1153).
 func TestTransientStorageResetInIBSReset(t *testing.T) {
@@ -237,6 +258,24 @@ func TestTouchUpdates_Account(t *testing.T) {
 	writes.TouchUpdates(updates)
 
 	// All 4 fields merge into 1 key (same address)
+	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
+}
+
+// TestTouchUpdates_AccountModeParallel: ModeParallel must merge per-field
+// touches of one address additively, like ModeUpdate.
+func TestTouchUpdates_AccountModeParallel(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x42})
+
+	writes := VersionedWrites{
+		{Address: addr, Path: BalancePath, Val: *uint256.NewInt(1000)},
+		{Address: addr, Path: NoncePath, Val: uint64(5)},
+		{Address: addr, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
+	}
+
+	updates := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), func(k []byte) []byte { return k })
+	defer updates.Close()
+	writes.TouchUpdates(updates)
+
 	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
 }
 
@@ -358,58 +397,105 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
 }
 
-// TestSelfDestructRecordsStorageDeletes verifies that when an account
-// self-destructs and versionMap is active, the IBS records storage DELETE
-// entries via versionWritten for each dirty storage slot. This ensures
-// the parallel commitment calculator knows which storage keys to delete.
-func TestSelfDestructRecordsStorageDeletes(t *testing.T) {
+// Pins that a second DeleteAccount in the same block is a writeLog no-op —
+// Flush must emit exactly one DomainDel per address (matching serial's IBS
+// short-circuit). Without this dedup the redundant nil-history entry feeds
+// into commitment-cache step keys and produces a non-deterministic state
+// root between parallel-exec nodes validating each other's blocks.
+func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x77})
+
+	cache.DeleteAccount(addr, 1)
+	cache.DeleteAccount(addr, 2)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
+
+	enc, present := cache.GetCurrentAccount(addr)
+	assert.True(t, present, "current view must still report addr as present-and-empty")
+	assert.Nil(t, enc, "current view value must remain nil")
+}
+
+// Pins the recreate-then-redelete pattern: an intervening WriteAccount
+// resets the dedup so the next DeleteAccount IS recorded — only the
+// "no write in between" duplicate is collapsed.
+func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x88})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	enc := accounts.SerialiseV3(&acc)
+
+	cache.DeleteAccount(addr, 1)
+	cache.WriteAccount(addr, enc, 2)
+	cache.DeleteAccount(addr, 3)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 2, deletes, "delete after recreate must be recorded; only no-op duplicates are collapsed")
+}
+
+// TestSelfDestructKeepsDirtyStorageReadableSameTx verifies that after an
+// account self-destructs (versionMap active), a subsequent same-tx GetState
+// still returns the dirty value written before the SELFDESTRUCT. Pre-Cancun
+// (and for CALL-based SELFDESTRUCT generally) the account stays alive until
+// end-of-tx, so re-entered code must see the real storage — not zero.
+//
+// Regression: IBS.Selfdestruct used to versionWritten(StoragePath, key, 0)
+// for every dirty slot to feed the parallel commitment calculator. Because
+// versionedRead consults versionedWrites before the stateObject, those
+// spurious zero writes made same-tx re-reads return 0 — wrong gas
+// (SSTORE_SET vs dirty-update, +19900) and a wrong written value
+// (EEST cancun/eip6780_selfdestruct/* under EXEC3_PARALLEL). The calc now
+// gets per-slot DELETEs from normalizeWriteSet's SD cascade instead.
+func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAA})
 	slot0 := accounts.InternKey([32]byte{0x00})
 	slot1 := accounts.InternKey([32]byte{0x01})
 
 	vm := NewVersionMap(nil)
 
-	// Create an IBS with versionMap
 	ibs := New(&emptyReader{})
 	ibs.SetVersionMap(vm)
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
 
-	// Create the account and write storage
 	ibs.CreateAccount(addr, true)
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 
-	// Now self-destruct
 	_, err := ibs.Selfdestruct(addr)
 	require.NoError(t, err)
 
-	// Flush the IBS writes to the versionMap (simulates what FlushVersionedWrites does)
-	writes := ibs.VersionedWrites(false)
-	t.Logf("VersionedWrites count: %d", len(writes))
-	for _, w := range writes {
-		t.Logf("  write: addr=%x path=%d key=%x val=%v", w.Address.Value(), w.Path, w.Key.Value(), w.Val)
-	}
-	vm.FlushVersionedWrites(writes, true, "")
+	// After SELFDESTRUCT, same-tx reads must still see the dirty values.
+	got0, err := ibs.GetState(addr, slot0)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(42), got0.Uint64(), "slot0 must read back as 42, not 0, after SELFDESTRUCT")
+	got1, err := ibs.GetState(addr, slot1)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(99), got1.Uint64(), "slot1 must read back as 99, not 0, after SELFDESTRUCT")
 
-	// Check versionMap has storage DELETE entries (value = zero)
-	t.Logf("Reading slot0=%x slot1=%x", slot0.Value(), slot1.Value())
-	rr0 := vm.Read(addr, StoragePath, slot0, 1)
-	t.Logf("slot0 read: status=%d value=%v", rr0.Status(), rr0.Value())
-	assert.Equal(t, MVReadResultDone, rr0.Status(), "slot0 should have versionMap entry")
-	if rr0.Value() != nil {
-		v := rr0.Value().(uint256.Int)
-		assert.True(t, v.IsZero(), "slot0 should be zero (deleted)")
-	}
+	// SelfDestructPath is still recorded.
+	destructed, err := ibs.HasSelfdestructed(addr)
+	require.NoError(t, err)
+	assert.True(t, destructed)
 
-	rr1 := vm.Read(addr, StoragePath, slot1, 1)
-	assert.Equal(t, MVReadResultDone, rr1.Status(), "slot1 should have versionMap entry")
-	if rr1.Value() != nil {
-		v := rr1.Value().(uint256.Int)
-		assert.True(t, v.IsZero(), "slot1 should be zero (deleted)")
+	// And it must NOT have emitted spurious StoragePath=0 writes.
+	for _, w := range ibs.VersionedWrites(false) {
+		if w.Address == addr && w.Path == StoragePath {
+			v := w.Val.(uint256.Int)
+			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Key.Value())
+		}
 	}
-
-	// SelfDestructPath should also be recorded
-	rrSD := vm.Read(addr, SelfDestructPath, accounts.NilKey, 1)
-	assert.Equal(t, MVReadResultDone, rrSD.Status(), "SelfDestructPath should be in versionMap")
 }

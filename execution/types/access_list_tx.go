@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -409,23 +408,16 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []any{
-		&tx.ChainID,
-		tx.Nonce,
-		&tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen := tx.payloadSize()
+	hash := prefixedPayloadHash(AccessListTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type accessListTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasPrice   *uint256.Int
 	Gas        uint64
@@ -435,7 +427,7 @@ type accessListTxSigHash struct {
 	AccessList AccessList
 }
 
-func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *AccessListTx) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
 		&accessListTxSigHash{

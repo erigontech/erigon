@@ -21,7 +21,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"math/big"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -115,7 +114,7 @@ func TestMiningBenchmark(t *testing.T) {
 		Genesis:     &genesis,
 		Config: &chain.Config{
 			ChainName: "mining_benchmark",
-			ChainID:   big.NewInt(1338),
+			ChainID:   uint256.NewInt(1338),
 			Bor:       nil,
 			BorJSON:   nil,
 			AllowAA:   false,

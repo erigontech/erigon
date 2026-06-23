@@ -212,7 +212,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context, fullTx *bool) (*
 					if t != nil {
 						var err error
 						if fullTx != nil && *fullTx {
-							err = notifier.Notify(rpcSub.ID, t)
+							err = notifier.Notify(rpcSub.ID, newRPCPendingTransaction(t, nil, nil))
 						} else {
 							err = notifier.Notify(rpcSub.ID, t.Hash())
 						}
@@ -257,7 +257,7 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 			case txs, ok := <-txsCh:
 				for _, t := range txs {
 					if t != nil {
-						err := notifier.Notify(rpcSub.ID, t)
+						err := notifier.Notify(rpcSub.ID, newRPCPendingTransaction(t, nil, nil))
 						if err != nil {
 							log.Warn("[rpc] error while notifying subscription", "err", err)
 						}

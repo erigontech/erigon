@@ -22,13 +22,15 @@ Each test group has its own dedicated skill for drill-down on failures. Use thos
 | unit | `erigon-test-unit` | `make test-short` | ~5 min | Pre-push gate |
 | all | `erigon-test-all` | `GOGC=80 make test-all` | ~30 min | Before PR review |
 | race | `erigon-test-race` | `make test-all-race` | ~60 min | Concurrency changes |
-| eest-spec | *(inline)* | `make eest-spec-<suite>-<fixtures>` | varies | EEST state/blockchain/engine-x changes |
+| eest-spec | *(inline)* | `make eest-spec-<suite>-<fixtures>[-{sequential,parallel}]` | varies | EEST state/blockchain/engine-x changes (most shards split into `-sequential` / `-parallel` pairs that pin `ERIGON_EXEC3_PARALLEL`; see `tools/eest-spec-shards.yml`) |
 | caplin spec | *(inline)* | `cd cl/spectest && make tests && make mainnet` | ~15 min | CL/consensus changes |
 | hive | `erigon-test-hive` | `make test-hive` | ~20 min | EL/CL interop changes |
 | rpc | `erigon-test-rpc` | *(requires synced DB)* | ~10 min | RPC API changes |
 | assertoor | *(remote only)* | dispatch only | — | Kurtosis network test |
 
 `make test-all` no longer covers the EEST spec tests or the `cl/spectest` consensus spec test — run those via their dedicated targets above when relevant.
+
+**Pitfall:** prefer `make eest-spec-<shard>` over `bash tools/run-eest-spec-test.sh <shard>`. The make target lists `evm` / `evm.race` as a prereq so stale binaries get rebuilt; the script invoked directly does not, and a stale binary against current fixtures will inflate failures or hide regressions.
 
 ### Lint (run first — non-deterministic, may need multiple runs)
 ```bash
