@@ -198,6 +198,17 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_1
 }
 
+// ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
+// (commitment.ModeParallel + VariantParallelHexPatricia). Default false.
+// Takes precedence over ExperimentalConcurrentCommitment when both are set.
+var ExperimentalParallelCommitment = false
+
+// ExperimentalStreamingCommitment toggles the StreamingCommitter trie path
+// (commitment.ModeParallel + VariantStreamingHexPatricia), which overlaps
+// commitment folding with execution. Default false. Takes precedence over
+// ExperimentalParallelCommitment and ExperimentalConcurrentCommitment.
+var ExperimentalStreamingCommitment = false
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,

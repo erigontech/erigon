@@ -175,7 +175,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Conditional Docker Login
         if: |

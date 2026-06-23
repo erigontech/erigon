@@ -12,7 +12,7 @@ This page covers the *what* and *where* of Erigon's data. For the *why* — flat
 
 ## The datadir at a glance
 
-```
+```text
 datadir/
 ├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
 ├── snapshots/        # Historical data as immutable .seg files. Large, cold.

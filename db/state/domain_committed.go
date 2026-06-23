@@ -96,7 +96,9 @@ func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version
 }
 
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
-// by looking them up in the account and storage domain files.
+// by looking them up in the account and storage domain files. It guards the call to
+// ExpandShortenedKeysInBranch with the read-path preconditions (empty branch, KeyCommitmentState
+// carve-out, files-not-empty) and the per-file version gate (referenced iff version < v2.1 and range >= threshold).
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
@@ -124,48 +126,12 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := sto.dataReader(storageItem.decompressor)
-	accountGetter := acc.dataReader(accountItem.decompressor)
 
-	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) == length.Addr+length.Hash {
-				return nil, nil // save storage key as is
-			}
-			if dbg.KVReadLevelledMetrics {
-				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
-			}
-			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
-			if !found {
-				s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
-				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
-					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
-				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
-			}
-			return storagePlainKey, nil
-		}
-
-		if len(key) == length.Addr {
-			return nil, nil // save account key as is
-		}
-
-		if dbg.KVReadLevelledMetrics {
-			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
-		}
-		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
-		if !found {
-			s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
-			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
-				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
-			return nil, fmt.Errorf("replace back lost account full key: %x", key)
-		}
-		return apkBuf, nil
-	})
-	if err != nil {
-		return nil, err
+	if dbg.KVReadLevelledMetrics {
+		defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
 	}
-	return result, nil
+
+	return ExpandShortenedKeysInBranch(branch, acc, sto, accountItem, storageItem, fStartTxNum, fEndTxNum)
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
@@ -354,8 +320,10 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	// input expansion below is keyed off each input file's own version+range instead.
 	reshorten := refsEnabled && ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to)
 
-	// Per-merge caches for findShortenedKey results, invariant within this read-only
-	// transformer; hot contracts recur across many branches in the same merge range.
+	// Per-merge caches for findShortenedKey (key → offset): the merged file is read-only here and
+	// hot contracts recur across many branches in the same range, so caching avoids repeat B-tree
+	// descents (findShortenedKey → BtIndex.Get dominated merge CPU). Bounded; live only for this merge.
+	const cacheMaxEntries = 100_000
 	storageKeyCache := make(map[string]uint64)
 	accountKeyCache := make(map[string]uint64)
 	// The referenced verdict recurs across every branch of an input file (same from,to) and each
@@ -448,6 +416,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 						return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 					}
+					if len(storageKeyCache) >= cacheMaxEntries {
+						clear(storageKeyCache)
+					}
 					storageKeyCache[string(auxBuf)] = shortenedKeyOffset
 				}
 				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
@@ -490,6 +461,9 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
 						"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
 					return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+				}
+				if len(accountKeyCache) >= cacheMaxEntries {
+					clear(accountKeyCache)
 				}
 				accountKeyCache[string(auxBuf)] = shortenedKeyOffset
 			}
