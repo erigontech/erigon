@@ -855,6 +855,9 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	if err := doms.Commit(ctx, tx); err != nil {
 		return 0, err
 	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return progress, nil
 }
 
