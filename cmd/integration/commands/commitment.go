@@ -93,6 +93,7 @@ var (
 	commitmentRangeOutput   string
 	commitmentRangeStepFrom uint64
 	commitmentRangeStepTo   uint64
+	commitmentStateKeyOnly  bool
 )
 
 // bench-history-lookup command flags
@@ -138,6 +139,7 @@ func init() {
 	cmdCommitmentRebuildRange.Flags().StringVar(&commitmentRangeOutput, "output", "", "output datadir for regenerated commitment files (required); source datadir is left untouched")
 	cmdCommitmentRebuildRange.Flags().Uint64Var(&commitmentRangeStepFrom, "step.from", 0, "start step of the commitment file range to regenerate (inclusive)")
 	cmdCommitmentRebuildRange.Flags().Uint64Var(&commitmentRangeStepTo, "step.to", 0, "end step of the commitment file range to regenerate (exclusive)")
+	cmdCommitmentRebuildRange.Flags().BoolVar(&commitmentStateKeyOnly, "state-key-only", false, "fast path: stream the existing commitment file and only add the missing state-root key, instead of recomputing the trie")
 	commitmentCmd.AddCommand(cmdCommitmentRebuildRange)
 
 	// commitment print
@@ -475,7 +477,13 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 	outDirs.SnapHistory = outDirs.DataDir
 	outDirs.SnapAccessors = outDirs.DataDir
 
-	if err := dbstate.LinkCommitmentRebuildInputs(srcDirs, outDirs, kv.Step(commitmentRangeStepFrom), logger); err != nil {
+	// --state-key-only doesn't recompute the trie; it streams the existing branch data and
+	// only adds back the stripped KeyCommitmentState. No prior commitment files are needed.
+	priorEndStep := kv.Step(commitmentRangeStepFrom)
+	if commitmentStateKeyOnly {
+		priorEndStep = 0
+	}
+	if err := dbstate.LinkCommitmentRebuildInputs(srcDirs, outDirs, priorEndStep, logger); err != nil {
 		return fmt.Errorf("linking rebuild inputs into output dir: %w", err)
 	}
 
@@ -498,6 +506,26 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 	outAgg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	outAgg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	outAgg.PresetOfflineMerge()
+
+	if commitmentStateKeyOnly {
+		// Read the source commitment file via the source DB's aggregator, stream it into the
+		// output dir with the state key added, then build the new file's accessors.
+		dstPath, root, err := dbstate.RegenerateCommitmentFileWithStateKey(ctx, db, &txNumsReader,
+			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), outDirs.SnapDomain, logger)
+		if err != nil {
+			return err
+		}
+		if err := outAgg.OpenFolder(); err != nil {
+			return fmt.Errorf("reopening output aggregator: %w", err)
+		}
+		if err := outAgg.BuildMissedAccessors(ctx, runtime.NumCPU()); err != nil {
+			return fmt.Errorf("building accessors for %s: %w", dstPath, err)
+		}
+		logger.Info("[commitment_rebuild] state key added (no recompute)",
+			"steps", fmt.Sprintf("%d-%d", commitmentRangeStepFrom, commitmentRangeStepTo),
+			"root", hex.EncodeToString(root), "file", dstPath)
+		return nil
+	}
 
 	outDB, err := temporal.New(rawDB, outAgg)
 	if err != nil {
