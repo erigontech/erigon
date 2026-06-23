@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -182,17 +183,29 @@ func streamCommitmentWithStateKey(ctx context.Context, a *Aggregator, srcPath, d
 	defer comp.Close()
 	w := seg.NewWriter(comp, compression)
 
+	totalKV := uint64(decomp.Count()) // keys + values
 	stateKey := commitmentdb.KeyCommitmentState
 	inserted := false
+	var processed uint64
 	emit := func(k, v []byte) error {
 		if _, err := w.Write(k); err != nil {
 			return err
 		}
 		_, err := w.Write(v)
+		processed += 2
 		return err
 	}
 
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	start := time.Now()
 	for r.HasNext() {
+		select {
+		case <-logEvery.C:
+			logger.Info("[commitment_state_key] streaming branches", "dst", filepath.Base(dstPath),
+				"at", fmt.Sprintf("%d/%d", processed, totalKV))
+		default:
+		}
 		k, _ := r.Next(nil)
 		if !r.HasNext() {
 			return fmt.Errorf("dangling key %x in %s", k, srcPath)
@@ -222,9 +235,11 @@ func streamCommitmentWithStateKey(ctx context.Context, a *Aggregator, srcPath, d
 			return err
 		}
 	}
+	logger.Info("[commitment_state_key] branches streamed, compressing", "dst", filepath.Base(dstPath),
+		"words", processed, "spent", time.Since(start))
 	if err := comp.Compress(); err != nil {
 		return err
 	}
-	logger.Info("[commitment_state_key] wrote file with state key", "dst", dstPath)
+	logger.Info("[commitment_state_key] wrote file with state key", "dst", dstPath, "spent", time.Since(start))
 	return nil
 }
