@@ -98,7 +98,6 @@ func setSlot(slot, val byte) func(*state.IntraBlockState, accounts.Address) {
 	}
 }
 
-
 // fundSelf adds balance to the executing contract.
 func fundSelf(wei uint64) func(*state.IntraBlockState, accounts.Address) {
 	return func(db *state.IntraBlockState, self accounts.Address) {
@@ -401,6 +400,78 @@ func TestCreateCodeDepositChargedSeparately(t *testing.T) {
 		"code-deposit delta (3-byte vs 0-byte) must equal 3 × CPSB")
 }
 
+// ========================= SELFDESTRUCT state-gas =========================
+
+// EIP-8037 Gas accounting for new accounts: SELFDESTRUCT to an empty
+// beneficiary with non-zero self-balance charges STATE_BYTES_PER_NEW_ACCOUNT
+// × CPSB.
+func TestSelfdestructCreatesNewAccount(t *testing.T) {
+	t.Parallel()
+	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
+	addrVal := freshAddr.Value()
+	code := append([]byte{byte(vm.PUSH20)}, addrVal[:]...)
+	code = append(code, byte(vm.SELFDESTRUCT))
+	setup := func(db *state.IntraBlockState, _ accounts.Address) {
+		db.AddBalance(self, *uint256.NewInt(10), tracing.BalanceChangeUnspecified)
+	}
+	_, res, err := run8037(t, code, hugeBudget(), uint256.Int{}, setup)
+	require.NoError(t, err)
+	require.Equal(t, stateGasNewAccount, res.State,
+		"selfdestruct to fresh beneficiary must charge account creation")
+}
+
+// EIP-8037 Gas accounting for new accounts: SELFDESTRUCT to an existing
+// (non-empty) beneficiary does not charge state gas — no new account leaf is
+// created.
+func TestSelfdestructToExistingAccount(t *testing.T) {
+	t.Parallel()
+	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
+	addrVal := existAddr.Value()
+	code := append([]byte{byte(vm.PUSH20)}, addrVal[:]...)
+	code = append(code, byte(vm.SELFDESTRUCT))
+	setup := func(db *state.IntraBlockState, _ accounts.Address) {
+		db.AddBalance(existAddr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+		db.AddBalance(self, *uint256.NewInt(10), tracing.BalanceChangeUnspecified)
+	}
+	_, res, err := run8037(t, code, hugeBudget(), uint256.Int{}, setup)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), res.State,
+		"selfdestruct to existing beneficiary must not charge state gas")
+}
+
+// EIP-8037 Gas refills for SELFDESTRUCT: "this operation does not produce
+// any state-gas refills." A contract created and self-destructed in the same
+// tx keeps the account-creation charge.
+func TestSelfdestructSameTxAccountNoRefill(t *testing.T) {
+	t.Parallel()
+	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
+	// init code selfdestructs to self (existing), so only the create charges.
+	selfVal := self.Value()
+	init := append([]byte{byte(vm.PUSH20)}, selfVal[:]...)
+	init = append(init, byte(vm.SELFDESTRUCT))
+	_, res, err := run8037(t, deployCode(init, 0), hugeBudget(), uint256.Int{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, stateGasNewAccount, res.State,
+		"same-tx selfdestruct must keep account-creation charge")
+}
+
+// EIP-8037 Gas refills for SELFDESTRUCT: "no state-gas refill applies and
+// no changes to execution_state_gas_used." A pre-existing account is not
+// removed by SELFDESTRUCT, so no state growth or shrinkage occurs.
+func TestSelfdestructPreexistingNoRefill(t *testing.T) {
+	t.Parallel()
+	addrVal := existAddr.Value()
+	code := append([]byte{byte(vm.PUSH20)}, addrVal[:]...)
+	code = append(code, byte(vm.SELFDESTRUCT))
+	setup := func(db *state.IntraBlockState, _ accounts.Address) {
+		db.AddBalance(existAddr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+	}
+	_, res, err := run8037(t, code, hugeBudget(), uint256.Int{}, setup)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), res.State,
+		"selfdestruct of pre-existing account must not charge state gas")
+}
+
 // ===================== Reservoir / gas_left mechanics =====================
 
 // Ensures state gas is drawn from the reservoir first: a charge within reservoir
@@ -434,10 +505,10 @@ func TestHaltFrameTerminalState(t *testing.T) {
 	// Top frame: new slot, then calls a child that halts, then INVALID itself.
 	haltChild := accounts.InternAddress(common.BytesToAddress([]byte("halt-child")))
 	top := concat(
-		sstore(0, 1),                  // self: new slot
-		callCode(haltChild, 0, nil),   // child halts (contained)
-		callCode(freshAddr, 1, nil),   // new-account charge
-		[]byte{byte(vm.INVALID)},      // this frame halts
+		sstore(0, 1),                // self: new slot
+		callCode(haltChild, 0, nil), // child halts (contained)
+		callCode(freshAddr, 1, nil), // new-account charge
+		[]byte{byte(vm.INVALID)},    // this frame halts
 	)
 	initial := mdgas.MdGas{Regular: 2_000_000, State: 300_000}
 
@@ -496,8 +567,8 @@ func TestGasOpcodeExcludesReservoir(t *testing.T) {
 	// Bytecode: GAS; PUSH1 0; MSTORE; PUSH1 0x20; PUSH1 0; RETURN
 	// Reads gas_left, stores it in memory, returns the 32-byte word.
 	code := []byte{
-		byte(vm.GAS),                                           // push gas_left
-		byte(vm.PUSH1), 0x00, byte(vm.MSTORE),                  // MSTORE at 0
+		byte(vm.GAS),                          // push gas_left
+		byte(vm.PUSH1), 0x00, byte(vm.MSTORE), // MSTORE at 0
 		byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x00, byte(vm.RETURN), // RETURN 32 bytes
 	}
 	regular := uint64(1_000_000)
@@ -566,8 +637,8 @@ func TestHaltFrameTerminalStateFuzz(t *testing.T) {
 	t.Parallel()
 	rng := rand.New(rand.NewSource(80371))
 	steps := [][]byte{
-		sstore(1, 1),                  // new slot charge
-		callCode(haltOKChild, 0, nil), // child success (with grandchild)
+		sstore(1, 1),                   // new slot charge
+		callCode(haltOKChild, 0, nil),  // child success (with grandchild)
 		callCode(haltBadChild, 0, nil), // descendant halts (contained)
 		callCode(freshAddr, 1, nil),    // new-account charge
 	}

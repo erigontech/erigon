@@ -315,7 +315,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
-	if typ == CALL {
+	switch typ {
+	case CALL:
 		exist, err := evm.intraBlockState.Exist(addr)
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -347,7 +348,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 		}
-	} else if typ == STATICCALL {
+	case STATICCALL:
 		// Trigger a touch on the callee so EIP-161 state clearing applies to
 		// empty accounts (matters on test networks; on Mainnet all empties are
 		// gone by Byzantium). Use TouchAccount rather than AddBalance(0): the
@@ -379,7 +380,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		var contract Contract
-		if typ == CALLCODE {
+		switch typ {
+		case CALLCODE:
 			contract = Contract{
 				caller:   caller,
 				addr:     caller,
@@ -387,7 +389,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Code:     code,
 				CodeHash: codeHash,
 			}
-		} else if typ == DELEGATECALL {
+		case DELEGATECALL:
 			contract = Contract{
 				caller:   callerAddress,
 				addr:     caller,
@@ -395,7 +397,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Code:     code,
 				CodeHash: codeHash,
 			}
-		} else {
+		default:
 			contract = Contract{
 				caller:   caller,
 				addr:     addr,
@@ -639,25 +641,21 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	// be stored due to not enough gas, set an error when we're in Homestead and let it be handled
 	// by the error checking condition below.
 	if err == nil {
-		// EIP-8037: GAS_CODE_DEPOSIT = cpsb/byte (state) + 6*ceil(len/32) (regular)
+		// EIP-8037: GAS_CODE_DEPOSIT = 6*ceil(len/32) (regular) + cpsb/byte (state)
 		// Pre-Amsterdam: GAS_CODE_DEPOSIT = 200/byte (regular only)
 		preDepositGas := gasRemaining
 
-		// Charge state gas (Amsterdam only).
-		stateGasOk := true
-		var stateGas uint64
-		if evm.chainRules.IsAmsterdam {
-			stateGas = uint64(len(ret)) * params.CostPerStateByte
-			gasRemaining, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
-		}
-
-		// Charge regular gas.
+		// Regular gas (hash cost) is charged before state gas (per-byte
+		// storage cost). The ordering has no behavioral
+		// impact: both costs are deterministic from len(ret), and on any
+		// failure both charges are rolled back via preDepositGas below.
 		var regularGasOk bool
-		if stateGasOk {
+		var stateGas uint64
+		{
 			var regularGas uint64
 			if evm.chainRules.IsAmsterdam {
-				// EIP-8037 "Contract deployment cost calculation", success path:
-				// HASH_COST(L) = 6*ceil(L/32); the state component (cpsb*L) is charged above.
+				// EIP-8037 parameter changes: GAS_CODE_DEPOSIT regular component
+				// HASH_COST(L) = 6*ceil(L/32)
 				regularGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret)))
 			} else {
 				regularGas = uint64(len(ret)) * params.CreateDataGas
@@ -665,16 +663,22 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 			gasRemaining, regularGasOk = useMdGas(gasRemaining, regularGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
 
-		if stateGasOk && regularGasOk {
+		// Charge state gas (Amsterdam only) after regular gas.
+		stateGasOk := true
+		if regularGasOk && evm.chainRules.IsAmsterdam {
+			stateGas = uint64(len(ret)) * params.CostPerStateByte
+			gasRemaining, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+		}
+
+		if regularGasOk && stateGasOk {
 			evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation)
 			// EIP-8037: post-Run code-deposit state charge counts toward this
 			// frame's state-gas usage.
 			gasUsed.State += int64(stateGas)
 		} else {
 			if evm.chainRules.IsAmsterdam {
-				// Code deposit failed: per EIP-8037 the failure cost is
-				// GAS_CREATE + initcode_execution_cost only; code deposit
-				// gas (both state and regular) is excluded.
+				// Code deposit OOG: roll back both the regular and state
+				// charges so the frame pays only for initcode execution.
 				gasRemaining = preDepositGas
 			}
 			// If we run out of gas, we do not store the code: the returned code must be empty.
