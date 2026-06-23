@@ -464,18 +464,45 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	defer valuesCursor.Close()
 	valsStart := time.Now()
-	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		w.lastFlushEntries++
-		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
+	// Within a flush the same key is re-written every block (commitment branches
+	// especially), but the latest-values DupSort table only needs the final value
+	// per (key, ^step). The collector is sorted by key with insertion order
+	// preserved, so a (key, ^step) group is contiguous and its last entry is that
+	// step's final value; collapse it to a single SeekBothRange+Put instead of one
+	// per rewrite.
+	var grpKey, grpVal []byte
+	hasGroup := false
+	writeGroup := func() error {
+		if !hasGroup {
+			return nil
+		}
+		foundVal, err := valuesCursor.SeekBothRange(grpKey, grpVal[:8])
 		if err != nil {
 			return err
 		}
-		w.lastFlushKeys++
-		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
-			return valuesCursor.Put(k, v)
+		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], grpVal[:8]) {
+			return valuesCursor.Put(grpKey, grpVal)
 		}
-		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
+		return valuesCursor.PutCurrent(grpKey, grpVal) // DeleteCurrent+Put
+	}
+	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		w.lastFlushEntries++
+		if hasGroup && bytes.Equal(k, grpKey) && bytes.Equal(v[:8], grpVal[:8]) {
+			grpVal = append(grpVal[:0], v...) // same (key, step): keep the later value
+			return nil
+		}
+		if err := writeGroup(); err != nil { // emit the previous group's final value
+			return err
+		}
+		w.lastFlushKeys++
+		grpKey = append(grpKey[:0], k...)
+		grpVal = append(grpVal[:0], v...)
+		hasGroup = true
+		return nil
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+		return err
+	}
+	if err := writeGroup(); err != nil {
 		return err
 	}
 	w.lastFlushVals = time.Since(valsStart)
