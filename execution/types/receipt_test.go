@@ -39,7 +39,10 @@ func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	input := []byte{0x80}
 	var r Receipt
 	err := rlp.DecodeBytes(input, &r)
-	if !errors.Is(err, rlp.EOL) {
+	// An empty typed receipt is invalid and must surface a real error.
+	// It must NOT return rlp.EOL: as a slice element that sentinel would be
+	// read as end-of-list and silently drop the receipt (see FuzzRLP).
+	if !errors.Is(err, errShortTypedReceipt) {
 		t.Fatal("wrong error:", err)
 	}
 }

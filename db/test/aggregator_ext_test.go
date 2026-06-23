@@ -17,7 +17,6 @@
 package test
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -79,7 +78,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
-	hph := commitment.NewHexPatriciaHashed(1, nil)
+	hph := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig())
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
@@ -767,180 +766,6 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	// blocks up to 13 (incl) are outside the reorg depth, which adds to 13 txns, which is 6 steps
 	require.Equal(t, uint64(12), agg.EndTxNumMinimax())
 	require.Equal(t, kv.Step(6), kv.Step(agg.EndTxNumMinimax()/agg.StepSize()))
-}
-
-// With txnsPerBlock=1, fakeFrozenBlocks(N) yields capTxNum=N.
-type fakeFrozenBlocks uint64
-
-func (f fakeFrozenBlocks) FrozenBlocks() uint64 { return uint64(f) }
-
-// Regression for #20701: cap must clamp the loop, not just early-return.
-func TestAggregatorV3_BuildFiles_RespectsMaxCollatableTxNumCap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	ctx := t.Context()
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
-	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
-
-	// Cap at 4 steps; write 9 steps' worth into the DB.
-	const capTxNum = uint64(8)
-	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(capTxNum))
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	tx, err := tdb.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	doms, err := execctx.NewSharedDomains(context.Background(), tx, logger)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-
-	const txnNums = uint64(18)
-	const txnsPerBlock = uint64(1)
-	for i := uint64(0); i < txnNums/txnsPerBlock; i++ {
-		require.NoError(t, rawdbv3.TxNums.Append(tx, i+1, (i+1)*txnsPerBlock))
-	}
-	generateSharedDomainsUpdates(t, doms, tx, txnNums, newRnd(0), length.Addr, 10, txnsPerBlock)
-	require.NoError(t, doms.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-
-	require.NoError(t, agg.BuildFiles(txnNums))
-
-	require.Equal(t, capTxNum, agg.EndTxNumMinimax(),
-		"EndTxNumMinimax must be clamped to cap (%d), not driven by lastInDB", capTxNum)
-	require.Equal(t, kv.Step(capTxNum/agg.StepSize()), kv.Step(agg.EndTxNumMinimax()/agg.StepSize()))
-}
-
-// nil provider = no cap; behavior unchanged.
-func TestAggregatorV3_BuildFiles_NoCapHookBuildsAll(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	ctx := t.Context()
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
-	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	tx, err := tdb.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	doms, err := execctx.NewSharedDomains(context.Background(), tx, logger)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-
-	const txnNums = uint64(18)
-	const txnsPerBlock = uint64(1)
-	for i := uint64(0); i < txnNums/txnsPerBlock; i++ {
-		require.NoError(t, rawdbv3.TxNums.Append(tx, i+1, (i+1)*txnsPerBlock))
-	}
-	generateSharedDomainsUpdates(t, doms, tx, txnNums, newRnd(0), length.Addr, 10, txnsPerBlock)
-	require.NoError(t, doms.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-
-	require.NoError(t, agg.BuildFiles(txnNums))
-
-	// reorg-depth=1 holds the last block back; cap unset.
-	require.Equal(t, uint64(16), agg.EndTxNumMinimax())
-}
-
-// BuildFiles2 path (stage_custom_trace, squeeze) must honor the cap too.
-func TestAggregatorV3_BuildFiles2_RespectsMaxCollatableTxNumCap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	ctx := t.Context()
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
-	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
-
-	const capTxNum = uint64(8)
-	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(capTxNum))
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	tx, err := tdb.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	doms, err := execctx.NewSharedDomains(context.Background(), tx, logger)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-
-	const txnNums = uint64(18)
-	for i := uint64(0); i < txnNums; i++ {
-		require.NoError(t, rawdbv3.TxNums.Append(tx, i+1, i+1))
-	}
-	generateSharedDomainsUpdates(t, doms, tx, txnNums, newRnd(0), length.Addr, 10, 1)
-	require.NoError(t, doms.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-
-	require.NoError(t, agg.BuildFiles2(ctx, 0, kv.Step(txnNums/agg.StepSize()), false))
-	agg.WaitForFiles()
-
-	require.Equal(t, capTxNum, agg.EndTxNumMinimax(),
-		"BuildFiles2 must clamp to cap (%d), not toStep", capTxNum)
-}
-
-// Cap below visibleFilesMinimaxTxNum: defensive only — no rollback.
-func TestAggregatorV3_BuildFiles_CapBelowVisibleIsNoop(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	ctx := t.Context()
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(1).StepSize(2).Logger(logger).MustOpen(ctx, db)
-	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
-
-	tdb, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	t.Cleanup(tdb.Close)
-	tx, err := tdb.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	doms, err := execctx.NewSharedDomains(context.Background(), tx, logger)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-
-	const txnNums = uint64(18)
-	const txnsPerBlock = uint64(1)
-	for i := uint64(0); i < txnNums/txnsPerBlock; i++ {
-		require.NoError(t, rawdbv3.TxNums.Append(tx, i+1, (i+1)*txnsPerBlock))
-	}
-	generateSharedDomainsUpdates(t, doms, tx, txnNums, newRnd(0), length.Addr, 10, txnsPerBlock)
-	require.NoError(t, doms.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-
-	// build state up to txNum 8.
-	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(8))
-	require.NoError(t, agg.BuildFiles(txnNums))
-	require.Equal(t, uint64(8), agg.EndTxNumMinimax())
-
-	// lower cap below current visible — must be a no-op, no rollback.
-	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(4))
-	require.NoError(t, agg.BuildFiles(txnNums))
-	require.Equal(t, uint64(8), agg.EndTxNumMinimax())
 }
 
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {

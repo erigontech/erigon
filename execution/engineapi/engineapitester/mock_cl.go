@@ -98,9 +98,10 @@ func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuilding
 	return clPayload, nil
 }
 
-// BuildNewPayload builds a new payload on top of the lastNode canonical block. To help with testing forking, the parent
-// block can be overridden by passing an option.
-func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
+// StartBuilding issues a block-building forkChoiceUpdated on top of the lastNode canonical block (the
+// parent can be overridden via an option) and returns the resulting payload id and the payload
+// attributes used. It is the first half of BuildNewPayload.
+func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption) (hexutil.Bytes, enginetypes.PayloadAttributes, error) {
 	options := cl.applyBlockBuildingOptions(opts...)
 	forkChoiceState := enginetypes.ForkChoiceState{
 		HeadHash:           cl.state.ParentElBlock,
@@ -118,7 +119,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		cl.logger.Debug("[mock-cl] waiting until", "time", timestamp, "duration", waitDuration)
 		err := common.Sleep(ctx, waitDuration)
 		if err != nil {
-			return nil, fmt.Errorf("build new payload: wait error: %w", err)
+			return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: wait error: %w", err)
 		}
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
@@ -156,29 +157,46 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 			return r, r.PayloadStatus.Status, err
 		})
 	if err != nil {
-		return nil, fmt.Errorf("build new payload: fcu error: %w", err)
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: fcu error: %w", err)
 	}
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
-	// get the newly built block
-	newPayload, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
+	if fcuRes.PayloadId == nil {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("forkchoiceUpdated for block building returned no payload id")
+	}
+	return *fcuRes.PayloadId, payloadAttributes, nil
+}
+
+// GetBuiltPayload fetches the payload being built under the given id using the fork-appropriate
+// engine_getPayload version. It is the second half of BuildNewPayload.
+func (cl *MockCl) GetBuiltPayload(ctx context.Context, payloadId hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
+	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
 			var r *enginetypes.GetPayloadResponse
 			var err error
 			if cl.chainConfig.AmsterdamTime != nil {
-				r, err = cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
+				r, err = cl.engineApiClient.GetPayloadV6(ctx, payloadId)
 			} else if cl.chainConfig.OsakaTime != nil {
-				r, err = cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+				r, err = cl.engineApiClient.GetPayloadV5(ctx, payloadId)
 			} else {
-				r, err = cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
+				r, err = cl.engineApiClient.GetPayloadV4(ctx, payloadId)
 			}
 			if err != nil {
 				return nil, "", err
 			}
 			return r, "", err
 		})
+}
 
+// BuildNewPayload builds a new payload on top of the lastNode canonical block. To help with testing forking, the parent
+// block can be overridden by passing an option.
+func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
+	payloadId, payloadAttributes, err := cl.StartBuilding(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	newPayload, err := cl.GetBuiltPayload(ctx, payloadId)
 	if err != nil {
 		return nil, fmt.Errorf("build new payload: get payload error: %w", err)
 	}
@@ -310,9 +328,9 @@ func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineS
 	// Honour the caller's deadline if it has one (test contexts carry
 	// the -timeout flag). Without this, slow CI environments — especially
 	// -race + GOMAXPROCS<=2 on the 4-vCPU GHA runner — hit the cap on
-	// high-mgas blocks (TestInvalidReceiptHashHighMgas) before the engine
-	// returns Valid. Absent any caller deadline, cap at 30 min so a stuck
-	// engine still fails the test rather than hanging.
+	// high-mgas blocks before the engine returns Valid. Absent any caller
+	// deadline, cap at 30 min so a stuck engine still fails the test
+	// rather than hanging.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Minute)

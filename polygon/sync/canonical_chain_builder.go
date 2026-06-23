@@ -223,7 +223,7 @@ func compareForkTreeNodes(node1 *forkTreeNode, node2 *forkTreeNode) int {
 	if blockNumDiff != 0 {
 		return -blockNumDiff
 	}
-	return bytes.Compare(node1.headerHash.Bytes(), node2.headerHash.Bytes())
+	return bytes.Compare(node1.headerHash[:], node2.headerHash[:])
 }
 
 func (ccb *CanonicalChainBuilder) updateTipIfNeeded(tipCandidate *forkTreeNode) {

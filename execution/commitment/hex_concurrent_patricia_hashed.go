@@ -54,6 +54,12 @@ func NewConcurrentPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *
 
 	for i := range p.mounts {
 		p.mounts[i] = p.root.SpawnSubTrie(ctx, i)
+		// Mounts fold into the root, so their fold/load stats must land in the
+		// single metrics object Process writes to CSV.
+		if p.root.metrics.writeCommitmentMetrics {
+			p.mounts[i].metrics = p.root.metrics
+			p.mounts[i].branchEncoder.setMetrics(p.root.metrics)
+		}
 	}
 	return p
 }
@@ -165,12 +171,7 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
-func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
-	p.root.EnableWarmupCache(b)
-	for i := range p.mounts {
-		p.mounts[i].EnableWarmupCache(b)
-	}
-}
+
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {
@@ -193,6 +194,7 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
 		p.mounts[i].metrics = p.root.metrics
+		p.mounts[i].branchEncoder.setMetrics(p.root.metrics)
 	}
 }
 

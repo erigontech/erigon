@@ -71,22 +71,25 @@ func realisticHeader(blockNum uint64) *types.Header {
 		}
 		return
 	}
+	coinbaseBytes := fill32(1)
+	extraBytes := fill32(4)
+	bloomBytes := fill32(6)
 	h := &types.Header{
 		Number:      *uint256.NewInt(blockNum),
 		ParentHash:  fill32(0),
 		UncleHash:   fill32(7),
-		Coinbase:    common.BytesToAddress(fill32(1).Bytes()),
+		Coinbase:    common.BytesToAddress(coinbaseBytes[:]),
 		Root:        fill32(2),
 		TxHash:      fill32(8),
 		ReceiptHash: fill32(3),
 		GasLimit:    30_000_000,
 		GasUsed:     seed % 30_000_000,
 		Time:        1_700_000_000 + seed,
-		Extra:       fill32(4).Bytes(),
+		Extra:       extraBytes[:],
 		MixDigest:   fill32(5),
 		BaseFee:     uint256.NewInt(seed % 1_000_000_000),
 	}
-	copy(h.Bloom[:], fill32(6).Bytes())
+	copy(h.Bloom[:], bloomBytes[:])
 	return h
 }
 

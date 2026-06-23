@@ -128,7 +128,7 @@ func withYes(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", false, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withClearCommitment(cmd *cobra.Command) {
@@ -166,6 +166,8 @@ func withDataDir(cmd *cobra.Command) {
 
 func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, utils.ExperimentalParallelCommitmentFlag.Value, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalStreamingCommitment, utils.ExperimentalStreamingCommitmentFlag.Name, utils.ExperimentalStreamingCommitmentFlag.Value, utils.ExperimentalStreamingCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

@@ -691,7 +691,7 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 			arg.Clear()
 			return pc, nil, err
 		}
-		arg.SetBytes(hash.Bytes())
+		arg.SetBytes(hash[:])
 	} else {
 		arg.Clear()
 	}
@@ -736,7 +736,7 @@ func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v.SetBytes32(evm.Context.PrevRanDao.Bytes())
+		v.SetBytes32(evm.Context.PrevRanDao[:])
 	} else {
 		v = evm.Context.Difficulty
 	}

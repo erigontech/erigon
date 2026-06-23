@@ -431,6 +431,49 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 	require.True(t, found, "burn target address must appear in BAL")
 }
 
+// TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL verifies the
+// EIP-7928 rule that, for a slot written multiple times in a block, a write
+// storing the value an earlier write already set is a no-op and must be
+// excluded from storage_changes — only value-changing writes are recorded.
+func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	valA := *uint256.NewInt(0x111)
+	valB := *uint256.NewInt(0x222)
+
+	io := NewVersionedIO(4)
+	write := func(txIndex int, v uint256.Int) {
+		io.RecordWrites(Version{TxIndex: txIndex}, VersionedWrites{
+			&VersionedWrite{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: txIndex}, Val: v},
+		})
+	}
+	write(0, valA) // slot: 0 -> A  (real change)
+	write(1, valB) // slot: A -> B  (real change)
+	write(2, valB) // slot: B -> B  (no-op)
+	write(3, valB) // slot: B -> B  (no-op)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address != addr {
+			continue
+		}
+		found = true
+		require.Lenf(t, ac.StorageChanges, 1, "one slot expected\n%s", bal.DebugString())
+		changes := ac.StorageChanges[0].Changes
+		require.Lenf(t, changes, 2,
+			"no-op repeated-value writes (idx 3,4) must be excluded from storage_changes\n%s", bal.DebugString())
+		require.Equal(t, uint32(1), changes[0].Index)
+		require.True(t, changes[0].Value.Eq(&valA))
+		require.Equal(t, uint32(2), changes[1].Index)
+		require.True(t, changes[1].Value.Eq(&valB))
+	}
+	require.True(t, found, "contract must appear in BAL")
+}
+
 // fallthroughStateReader returns a fixed account and a fixed storage value, so
 // a test can observe whether a versionedRead fell through to the underlying
 // state (vs. returning a version-map value or aborting).
@@ -1112,4 +1155,283 @@ func findRead(reads ReadSet, addr accounts.Address, path AccountPath) *Versioned
 		}
 	}
 	return nil
+}
+
+// When a prior tx wrote a sub-field (e.g. BalancePath via AddBalance) without
+// writing AddressPath, refreshVersionedAccount promotes the sub-field version
+// onto accountRead's AddressPath stamp. The validator's vm.Read(AddressPath)
+// must not invalidate that stamp — otherwise OCC re-execution races
+// identically until the retry budget exhausts.
+func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB19A240E"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(50_000_000_000_000_000)
+
+	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
+	vm := NewVersionMap(nil)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0},
+		postWithdrawalBalance, true)
+
+	ibs := New(NewVersionedStateReader(1, nil, vm, reader))
+	ibs.SetTxContext(0, 1)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	// Simulate refreshVersionedAccount's promoted return value:
+	// BalancePath at (0,0) bumped (source, version) above the
+	// account-record's own.
+	acc := accounts.NewAccount()
+	acc.Balance = postWithdrawalBalance
+	acc.CodeHash = accounts.EmptyCodeHash
+	ibs.accountRead(addr, &acc, MapRead, Version{TxIndex: 0, Incarnation: 0})
+
+	// Same call the parallel-exec scheduler makes between worker
+	// completion and apply.
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := vm.ValidateVersion(1, io, checkVersionEqual, true, "TestAccountRead_BalancePathPromotion")
+
+	require.Equal(t, VersionValid, valid,
+		"tx 1's account read should validate against a versionMap with only "+
+			"a BalancePath write at TxIdx=0 — promoting the sub-field's "+
+			"version onto an AddressPath cell that does not exist is what "+
+			"makes validation fail and produces the cross-chain OCC livelock")
+}
+
+// When CreateAccount runs on an address whose only versionMap entry is a
+// sub-field (e.g. BalancePath from a prior credit), the synthetic
+// IncarnationPath read must default to (StorageRead, UnknownVersion), not
+// the outer (MapRead, V_bal) promotion — same livelock class as the
+// accountRead path.
+func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB19A240E"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(50_000_000_000_000_000)
+
+	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
+	vm := NewVersionMap(nil)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0},
+		postWithdrawalBalance, true)
+
+	ibs := New(NewVersionedStateReader(1, nil, vm, reader))
+	ibs.SetTxContext(0, 1)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	require.NoError(t, ibs.CreateAccount(addr, false))
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := vm.ValidateVersion(1, io, checkVersionEqual, true, "TestCreateAccount_SyntheticIncarnationStamp")
+
+	require.Equal(t, VersionValid, valid,
+		"CreateAccount on an address with only a BalancePath cell must not "+
+			"stamp the synthetic IncarnationPath read with the promoted "+
+			"BalancePath version")
+}
+
+// getVersionedAccount must honour a prior tx's SelfDestructPath cell even
+// when stateReader (which doesn't consult the versionMap) returns the pre-SD
+// record. Without this gate Empty() returns false and a CALL-with-value to
+// the SD'd address misses CallNewAccountGas.
+func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xF1F5555B"))
+	reader := newAccountStateReader(addr)
+	// Pre-SD record: a deployed contract with nonce=1 and a real codeHash.
+	reader.accounts[addr].Nonce = 1
+	codeHash := accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
+	reader.accounts[addr].CodeHash = codeHash
+
+	vm := NewVersionMap(nil)
+	// Tx 3 self-destructs: SelfDestructPath=true only — SD doesn't write
+	// Nonce/CodeHash into the versionMap.
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, true, true)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint256.Int{}, true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
+
+	// Tx 4's worker IBS. The reader (analogous to CachedReaderV3) returns
+	// the pre-SD account directly — no versionMap-aware wrapper short-circuits
+	// the SD case. Only getVersionedAccount's versionMap check should convert
+	// that to nil.
+	ibs := New(reader)
+	ibs.SetTxContext(0, 4)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, account,
+		"getVersionedAccount must return nil for an address self-destructed "+
+			"by a prior tx with no revival, even when the underlying "+
+			"stateReader still surfaces the pre-SD record")
+}
+
+// Metamorphic SD+CREATE2 in one tx: SelfDestructPath=true and a fresh
+// AddressPath land at the SAME TxIdx. A strict hi > destructTxIndex
+// revival check would miss this; getVersionedAccount must recognise
+// AddressPath at TxIdx >= destructTxIndex as revival.
+func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x140DA4236"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Nonce = 1
+	reader.accounts[addr].CodeHash = accounts.InternCodeHash(common.HexToHash("0xc8c04ce6368db80967fe4c88faa37d1a3d3becb3b9e442a62a5dc8c1df6e14ee"))
+
+	// Tx 3: SD + CREATE2 re-deploy. All writes land at (TxIdx=3, Inc=0).
+	vm := NewVersionMap(nil)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, true, true)
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint256.Int{}, true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint64(2), true)
+	// Fresh AddressPath at the same TxIdx as the SD.
+	recreatedAcc := &accounts.Account{
+		Nonce:       1,
+		Incarnation: 2,
+		CodeHash:    accounts.InternCodeHash(common.HexToHash("0xdeadbeefcafebabe1111111111111111111111111111111111111111111111ff")),
+	}
+	vm.Write(addr, AddressPath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, recreatedAcc, true)
+
+	// Tx 4 reads addr. Strict-greater on subfields wouldn't see the
+	// same-TxIdx Balance/Nonce/CodeHash; the AddressPath >= destructTxIndex
+	// branch is what surfaces the re-created account.
+	ibs := New(NewVersionedStateReader(4, nil, vm, reader))
+	ibs.SetTxContext(0, 4)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+
+	account, _, _, err := ibs.getVersionedAccount(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, account,
+		"same-tx SD+CREATE2 (metamorphic) re-creates the contract; "+
+			"getVersionedAccount must surface the re-created account, not nil")
+	require.Equal(t, uint64(2), account.Incarnation,
+		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
+}
+
+// TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero verifies the
+// EIP-7928 rule for in-transaction SELFDESTRUCT: an account destroyed within a
+// transaction that had a positive pre-transaction balance MUST record a balance
+// change to zero — even when a later same-tx transfer (which burns with the
+// account at end of tx) leaves a non-zero value as the tx's final balance write.
+func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x9e1989c1ba17e9b8fdae0b5d43a2b0c676a2070f"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Val:     *uint256.NewInt(100000),
+	})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{
+			Address: addr,
+			Path:    BalancePath,
+			Version: Version{TxIndex: 0},
+			Val:     *uint256.NewInt(1),
+		},
+		&VersionedWrite{
+			Address: addr,
+			Path:    SelfDestructPath,
+			Version: Version{TxIndex: 0},
+			Val:     true,
+		},
+	})
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Equal(t, addr, bal[0].Address)
+	require.Len(t, bal[0].BalanceChanges, 1,
+		"destroyed account with positive pre-tx balance must record a balance change to zero")
+	require.Equal(t, uint32(1), bal[0].BalanceChanges[0].Index)
+	require.True(t, bal[0].BalanceChanges[0].Value.IsZero(),
+		"recorded post-balance must be zero for an account destroyed in-tx")
+}
+
+// TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange verifies the
+// EIP-7928 counterpart rule: same-tx SELFDESTRUCT of an account with a zero
+// pre-transaction balance must NOT produce a balance change entry.
+func TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x2222"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Val:     *uint256.NewInt(0),
+	})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{
+			Address: addr,
+			Path:    BalancePath,
+			Version: Version{TxIndex: 0},
+			Val:     *uint256.NewInt(1),
+		},
+		&VersionedWrite{
+			Address: addr,
+			Path:    SelfDestructPath,
+			Version: Version{TxIndex: 0},
+			Val:     true,
+		},
+	})
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Equal(t, addr, bal[0].Address)
+	require.Empty(t, bal[0].BalanceChanges,
+		"destroyed account with zero pre-tx balance must not record a balance change")
+}
+
+func TestEIP161EmptyRemoval(t *testing.T) {
+	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
+
+	tests := []struct {
+		name           string
+		spuriousDragon bool
+		isAura         bool
+		addr           accounts.Address
+		want           bool
+	}{
+		{"pre-spurious-dragon user", false, false, userAddr, false},
+		{"pre-spurious-dragon aura system address", false, true, params.SystemAddress, false},
+		{"non-aura user", true, false, userAddr, true},
+		{"non-aura system address removed", true, false, params.SystemAddress, true},
+		{"aura user", true, true, userAddr, true},
+		{"aura system address retained", true, true, params.SystemAddress, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.spuriousDragon, tc.isAura, tc.addr))
+		})
+	}
 }

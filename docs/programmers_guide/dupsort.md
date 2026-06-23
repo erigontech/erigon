@@ -150,8 +150,7 @@ It means in 1 db call you can Get/Put up to 4Kb of sub-table keys.
 Erigon
 ---------
 
-This article target is to show tricky concepts on examples. Future
-reading [here](./db_walkthrough.MD#table-history-of-accounts)
+This article target is to show tricky concepts on examples.
 
 Erigon supports multiple typed cursors, see the [KV
 Readme.md](https://github.com/erigontech/erigon/tree/main/db/kv)
