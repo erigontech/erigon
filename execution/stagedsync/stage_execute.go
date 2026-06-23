@@ -400,10 +400,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		if err != nil {
 			return err
 		}
-		// Discard deferred commitment updates from the failed execution, same as
-		// the disk-unwind path below — otherwise they'd be flushed later against
-		// the rewound overlay.
-		doms.ResetPendingUpdates()
+		// NB: do NOT ResetPendingUpdates here. Unlike the disk-unwind path below
+		// (which discards then rebuilds commitment state via unwindExec3 +
+		// SeekCommitment), this early return only rewinds the in-RAM overlay and
+		// returns — the overlay and its deferred commitment updates are reused by
+		// the in-loop re-execution, so discarding them strands the commitment
+		// context and stalls the next block.
 		doms.Unwind(txNum, nil)
 		doms.SetTxNum(txNum)
 		return nil
