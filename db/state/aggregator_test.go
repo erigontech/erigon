@@ -661,28 +661,29 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 // TestCommitmentMergeInputsReferenced covers the resolved-inputs predicate that gates merge
 // transformer creation. With the write flag off, this predicate alone decides whether the merge
 // expands referenced inputs (creating the transformer) or takes the plain fast path (no transformer).
-// The referenced-ness now comes from each input's sampled FilesItem.referenced, not its version/range.
 func TestCommitmentMergeInputsReferenced(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(10)
-	fi := func(fromStep, toStep uint64, referenced bool) *FilesItem {
-		return &FilesItem{startTxNum: fromStep * stepSize, endTxNum: toStep * stepSize, referenced: referenced}
+	fi := func(fromStep, toStep uint64, v version.Version) *FilesItem {
+		return &FilesItem{startTxNum: fromStep * stepSize, endTxNum: toStep * stepSize, version: v}
 	}
 	cases := []struct {
 		name   string
 		inputs []*FilesItem
 		want   bool
 	}{
-		{"single referenced input", []*FilesItem{fi(0, 2, true)}, true},
-		{"single plain input", []*FilesItem{fi(0, 2, false)}, false},
-		{"all plain inputs", []*FilesItem{fi(0, 2, false), fi(2, 4, false)}, false},
+		{"v2.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_0)}, true},
+		{"v1.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V1_0)}, true},
+		{"v2.1 is always plain", []*FilesItem{fi(0, 2, version.V2_1)}, false},
+		{"v2.0 below threshold is plain", []*FilesItem{fi(0, 1, version.V2_0)}, false},
+		{"hypothetical v2.2 is plain", []*FilesItem{fi(0, 2, version.Version{Major: 2, Minor: 2})}, false},
 		{"empty inputs", nil, false},
 		{"nil entries skipped", []*FilesItem{nil}, false},
-		{"any referenced input wins", []*FilesItem{fi(0, 2, false), fi(2, 4, true)}, true},
+		{"any referenced input wins", []*FilesItem{fi(0, 2, version.V2_1), fi(2, 4, version.V2_0)}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, commitmentMergeInputsReferenced(tc.inputs))
+			require.Equal(t, tc.want, commitmentMergeInputsReferenced(tc.inputs, stepSize))
 		})
 	}
 }
@@ -694,8 +695,8 @@ func TestCommitmentMergeInputsReferenced(t *testing.T) {
 func TestCommitmentMergeNeedsTransform(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(10)
-	in := func(referenced bool) []*FilesItem {
-		return []*FilesItem{{startTxNum: 0, endTxNum: 2 * stepSize, referenced: referenced}}
+	in := func(v version.Version) []*FilesItem {
+		return []*FilesItem{{startTxNum: 0, endTxNum: 2 * stepSize, version: v}}
 	}
 	const fromAbove, toAbove = uint64(0), uint64(20) // 2 steps -> threshold reached
 	const fromBelow, toBelow = uint64(0), uint64(10) // 1 step  -> below threshold
@@ -706,11 +707,11 @@ func TestCommitmentMergeNeedsTransform(t *testing.T) {
 		from, to    uint64
 		want        bool
 	}{
-		{"plain inputs, flag off -> no transform, no block", in(false), false, fromAbove, toAbove, false},
-		{"plain inputs, flag on, below threshold -> no transform, no block", in(false), true, fromBelow, toBelow, false},
-		{"plain inputs, flag on, at threshold -> reshorten, block", in(false), true, fromAbove, toAbove, true},
-		{"referenced input, flag off -> expand, block", in(true), false, fromAbove, toAbove, true},
-		{"referenced input, flag on -> block", in(true), true, fromAbove, toAbove, true},
+		{"plain inputs, flag off -> no transform, no block", in(version.V2_1), false, fromAbove, toAbove, false},
+		{"plain inputs, flag on, below threshold -> no transform, no block", in(version.V2_1), true, fromBelow, toBelow, false},
+		{"plain inputs, flag on, at threshold -> reshorten, block", in(version.V2_1), true, fromAbove, toAbove, true},
+		{"referenced input, flag off -> expand, block", in(version.V2_0), false, fromAbove, toAbove, true},
+		{"referenced input, flag on -> block", in(version.V2_0), true, fromAbove, toAbove, true},
 		{"no inputs -> no transform", nil, true, fromBelow, toBelow, false},
 	}
 	for _, tc := range cases {
@@ -721,10 +722,10 @@ func TestCommitmentMergeNeedsTransform(t *testing.T) {
 }
 
 // TestCommitmentVisibleFilesReferenced covers the planning-time over-approximation that gates the
-// range-alignment hold. It reads each file's sampled referenced flag through the visible-files
-// layer and must report referencing independently of the live write flag (set off here on purpose).
+// range-alignment hold. It reads each file's version through the visible-files layer and must
+// report referencing independently of the live write flag (set off here on purpose).
 func TestCommitmentVisibleFilesReferenced(t *testing.T) {
-	check := func(t *testing.T, referenced, want bool) {
+	check := func(t *testing.T, ver version.Version, want bool) {
 		t.Helper()
 		stepSize := uint64(10)
 		_, agg := testDbAndAggregatorv3(t, stepSize)
@@ -737,11 +738,11 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 		generateCommitmentFile(t, dirs, ranges)
 		require.NoError(t, agg.OpenFolder())
 
-		// generateCommitmentFile writes dummy content sampled as plain; set the regime directly on the
-		// dirty FilesItem (visibleFile.Referenced reads it live through src) to exercise both verdicts.
+		// Drive the verdict by version+range: set the version directly on the dirty FilesItem
+		// (visibleFile.Version reads it live through src), independent of the generated file name.
 		var found int
 		agg.d[kv.CommitmentDomain].dirtyFiles.Scan(func(it *FilesItem) bool {
-			it.referenced = referenced
+			it.version = ver
 			found++
 			return true
 		})
@@ -753,11 +754,11 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 		require.Equal(t, want, got)
 	}
 
-	t.Run("referenced file reports referencing with flag off", func(t *testing.T) {
-		check(t, true, true)
+	t.Run("v2.0 at-threshold file reports referencing with flag off", func(t *testing.T) {
+		check(t, version.V2_0, true)
 	})
-	t.Run("plain file does not report referencing", func(t *testing.T) {
-		check(t, false, false)
+	t.Run("v2.1 file does not report referencing", func(t *testing.T) {
+		check(t, version.V2_1, false)
 	})
 }
 

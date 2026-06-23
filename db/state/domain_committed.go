@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -41,59 +42,17 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 	return (to-from)/stepSize >= commitment.DefaultKeyReferencingMinSteps
 }
 
-// commitmentReferenceSampleCount bounds how many evenly-spread branch values are inspected
-// when sampling a commitment file for shortened (referenced) keys at open time.
-const commitmentReferenceSampleCount = 200
-
-func branchHasShortenedKey(branch commitment.BranchData) bool {
-	return branch.HasShortenedKeys()
-}
-
-// commitmentFileReferenced reports whether a commitment .kv carries shortened (referenced) keys,
-// sampling commitmentReferenceSampleCount evenly-spread branch values: a hit is authoritative, no
-// hit reads as plain.
-func commitmentFileReferenced(r *seg.Reader, totalPairs uint64) (referenced bool) {
-	if r == nil || totalPairs == 0 {
-		return false
-	}
-	defer func() {
-		if rec := recover(); rec != nil {
-			referenced = true // corrupt word stream: treat as referenced rather than mis-sampling plain
-		}
-	}()
-	stride := totalPairs / commitmentReferenceSampleCount
-	if stride == 0 {
-		stride = 1
-	}
-	var keyBuf, valBuf []byte
-	for pair := uint64(0); r.HasNext(); pair++ {
-		if pair%stride != 0 {
-			r.Skip() // key
-			if !r.HasNext() {
-				break
-			}
-			r.Skip() // value
-			continue
-		}
-		keyBuf, _ = r.Next(keyBuf[:0])
-		if !r.HasNext() {
-			break
-		}
-		valBuf, _ = r.Next(valBuf[:0])
-		if bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) {
-			continue
-		}
-		if branchHasShortenedKey(valBuf) {
-			return true
-		}
-	}
-	return false
+// CommitmentBranchReferenced reports whether a commitment file at fileVersion over from..to carries
+// shortened key references — a property of the file (version+range), independent of the live write flag.
+func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to uint64) bool {
+	return fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
 }
 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
+	stepSize := at.StepSize()
 	for _, f := range at.d[kv.CommitmentDomain].files {
-		if f.Referenced() {
+		if CommitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
 	}
@@ -101,9 +60,12 @@ func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
 }
 
 // commitmentMergeInputsReferenced reports whether any commitment merge input is referenced.
-func commitmentMergeInputsReferenced(inputs []*FilesItem) bool {
+func commitmentMergeInputsReferenced(inputs []*FilesItem, stepSize uint64) bool {
 	for _, f := range inputs {
-		if f != nil && f.referenced {
+		if f == nil {
+			continue
+		}
+		if CommitmentBranchReferenced(f.version, stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
 	}
@@ -116,21 +78,21 @@ func commitmentMergeInputsReferenced(inputs []*FilesItem) bool {
 // inputs merged without re-shortening need neither, so they run in parallel with account/storage.
 func commitmentMergeNeedsTransform(inputs []*FilesItem, refsEnabled bool, stepSize, from, to uint64) bool {
 	reshorten := refsEnabled && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
-	return reshorten || commitmentMergeInputsReferenced(inputs)
+	return reshorten || commitmentMergeInputsReferenced(inputs, stepSize)
 }
 
-// commitmentFileReferencedByRange reports whether the commitment file covering from..to is
-// referenced (missing => referenced, the safe default) and its metric bucket index.
-func (at *AggregatorRoTx) commitmentFileReferencedByRange(from, to uint64) (bool, int) {
+// commitmentFileVersionByRange returns the version of the commitment file covering from..to
+// (zero if missing, treated as referenced) and its metric bucket index.
+func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version.Version, int) {
 	for i, f := range at.d[kv.CommitmentDomain].files {
 		if f.startTxNum == from && f.endTxNum == to {
 			if i > 5 {
-				return f.Referenced(), 5
+				return f.Version(), 5
 			}
-			return f.Referenced(), i
+			return f.Version(), i
 		}
 	}
-	return true, 0
+	return version.Version{}, 0
 }
 
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
@@ -145,11 +107,9 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		return branch, nil // do not transform, return as is
 	}
 
-	referenced, metricI := aggTx.commitmentFileReferencedByRange(fStartTxNum, fEndTxNum)
-	if !referenced && !branchHasShortenedKey(branch) {
-		// Per-branch guard against a sampled-plain false negative: the file sampled plain, but if this
-		// branch carries a shortened key, deref it anyway. Truly-plain branches keep the fast path.
-		return branch, nil
+	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
+	if !CommitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
+		return branch, nil // input file was written plain (v2.1) or below the referencing threshold
 	}
 
 	sto := aggTx.d[kv.StorageDomain]
@@ -289,15 +249,14 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return 0, false
 }
 
-// fileReferencedByRange reports whether the visible file covering from..to is referenced
-// (missing => referenced, the safe default).
-func (dt *DomainRoTx) fileReferencedByRange(from, to uint64) bool {
+// fileVersionByRange returns the version of the visible file covering from..to (zero if missing, treated as referenced).
+func (dt *DomainRoTx) fileVersionByRange(from, to uint64) version.Version {
 	for _, f := range dt.files {
 		if f.startTxNum == from && f.endTxNum == to {
-			return f.Referenced()
+			return f.Version()
 		}
 	}
-	return true
+	return version.Version{}
 }
 
 // lookupVisibleFileByRange searches only among visible files (those in the RoTx snapshot).
@@ -399,8 +358,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	// transformer; hot contracts recur across many branches in the same merge range.
 	storageKeyCache := make(map[string]uint64)
 	accountKeyCache := make(map[string]uint64)
-	// fileReferencedByRange is a linear scan and the same (from,to) recurs across every branch of an
-	// input file, so cache the verdict per range.
+	// The referenced verdict recurs across every branch of an input file (same from,to) and each
+	// lookup is a linear scan over visible files, so cache the verdict per range.
 	referencedByRange := make(map[[2]uint64]bool)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
@@ -413,7 +372,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		rngKey := [2]uint64{keyFromTxNum, keyEndTxNum}
 		inputReferenced, cached := referencedByRange[rngKey]
 		if !cached {
-			inputReferenced = dt.fileReferencedByRange(keyFromTxNum, keyEndTxNum)
+			inputReferenced = CommitmentBranchReferenced(dt.fileVersionByRange(keyFromTxNum, keyEndTxNum), dt.d.stepSize, keyFromTxNum, keyEndTxNum)
 			referencedByRange[rngKey] = inputReferenced
 		}
 		if !inputReferenced && !reshorten {

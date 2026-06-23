@@ -189,6 +189,15 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
 
+// commitmentKVWriteVersion stamps v2.0 on referenced commitment files and v2.1 on plain ones;
+// the read ceiling (DataKV.Current = v2.1) accepts both.
+func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.ReferencesInCommitmentBranches {
+		return version.V2_0
+	}
+	return version.V2_1
+}
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
@@ -260,6 +269,7 @@ var Schema = SchemaGen{
 
 		Accessors:                      AccessorHashMap,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
+		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,

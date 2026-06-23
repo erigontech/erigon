@@ -507,8 +507,8 @@ func checkDerefBranch(
 }
 
 // commitmentFileReferencing reports whether a commitment file carries shortened key references.
-// The integrity tool full-scans (not the runtime sampled flag) to catch a file sampling missed; any
-// read error returns true rather than under-report as plain.
+// The integrity tool full-scans the content (not the file's version stamp) to catch a mis-stamped
+// file; any read error returns true rather than under-report as plain.
 func commitmentFileReferencing(file state.VisibleFile) bool {
 	decomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {

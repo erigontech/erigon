@@ -104,10 +104,10 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	require.Equal(t, f3, fileItems[0])
 }
 
-func TestVisibleFileReferenced(t *testing.T) {
+func TestVisibleFileVersion(t *testing.T) {
 	t.Parallel()
-	require.True(t, visibleFile{src: &FilesItem{referenced: true}}.Referenced())
-	require.False(t, visibleFile{src: &FilesItem{referenced: false}}.Referenced())
+	vf := visibleFile{src: &FilesItem{version: version.V2_1}}
+	require.Equal(t, version.V2_1, vf.Version())
 }
 
 // openDirtyFiles must accept a mixed-version file set (v1.0/v2.0/v2.1) without tripping the

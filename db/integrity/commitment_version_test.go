@@ -28,19 +28,20 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type fakeVisibleFile struct {
 	path                 string
 	startTxNum, endTxNum uint64
-	referenced           bool
+	version              version.Version
 }
 
-func (f fakeVisibleFile) Fullpath() string     { return f.path }
-func (f fakeVisibleFile) StartRootNum() uint64 { return f.startTxNum }
-func (f fakeVisibleFile) EndRootNum() uint64   { return f.endTxNum }
-func (f fakeVisibleFile) Referenced() bool     { return f.referenced }
+func (f fakeVisibleFile) Fullpath() string         { return f.path }
+func (f fakeVisibleFile) StartRootNum() uint64     { return f.startTxNum }
+func (f fakeVisibleFile) EndRootNum() uint64       { return f.endTxNum }
+func (f fakeVisibleFile) Version() version.Version { return f.version }
 
 // accountBranch builds a single-cell BranchData carrying one account-addr key: touchMap=afterMap=1,
 // fieldBits=fieldAccountAddr(2), then uvarint(len)+addr. A 20-byte addr is plain; a shorter one is a
@@ -82,15 +83,15 @@ func writeCommitmentKV(t *testing.T, referencedContent bool) string {
 }
 
 // TestCommitmentFileReferencing pins that the integrity referencing decision is taken from a FULL
-// content scan of the file, independent of the runtime open-time sampled flag — so it catches a file
-// that runtime sampling misclassified as plain (referenced=false below, yet content is referenced).
+// content scan of the file, independent of the file's version stamp — so it catches a file whose
+// version says plain (v2.1 below) yet whose content carries shortened keys.
 func TestCommitmentFileReferencing(t *testing.T) {
-	t.Run("referenced content is referencing even when sampled plain", func(t *testing.T) {
-		f := fakeVisibleFile{path: writeCommitmentKV(t, true), endTxNum: 20, referenced: false}
+	t.Run("referenced content is referencing even when version says plain", func(t *testing.T) {
+		f := fakeVisibleFile{path: writeCommitmentKV(t, true), endTxNum: 20, version: version.V2_1}
 		require.True(t, commitmentFileReferencing(f))
 	})
-	t.Run("plain content is not referencing even when sampled referenced", func(t *testing.T) {
-		f := fakeVisibleFile{path: writeCommitmentKV(t, false), endTxNum: 20, referenced: true}
+	t.Run("plain content is not referencing even when version says referenced", func(t *testing.T) {
+		f := fakeVisibleFile{path: writeCommitmentKV(t, false), endTxNum: 20, version: version.V2_0}
 		require.False(t, commitmentFileReferencing(f))
 	})
 }

@@ -70,13 +70,13 @@ func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool) {
 	writeAndBuild(t, ctx, db, agg, txs)
 	require.NoError(t, agg.MergeLoop(ctx))
 
-	// Reopen so the commitment file's referenced regime is re-sampled from on-disk content,
-	// exercising the content-sampling path independently of the in-memory flag used during merge.
+	// Reopen so the commitment file's referenced regime is re-derived from the on-disk version,
+	// exercising the version-based path independently of the in-memory flag used during merge.
 	db = reopenAgg(t, db, agg, dirs, stepSize, logger)
 
-	gotReferenced, gotSpan := largestCommitmentFile(t, ctx, db)
+	gotReferenced, gotSpan := largestCommitmentFile(t, ctx, db, stepSize)
 	require.GreaterOrEqual(t, gotSpan, 2*stepSize, "expected a merged commitment file spanning >= 2 steps")
-	require.Equal(t, referencesInCommitmentBranches, gotReferenced, "merged commitment file's sampled regime must match the write flag")
+	require.Equal(t, referencesInCommitmentBranches, gotReferenced, "merged commitment file's version regime must match the write flag")
 
 	require.NoError(t, integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger))
 
@@ -132,9 +132,9 @@ func reopenAgg(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs dat
 	return newDB
 }
 
-// largestCommitmentFile returns the sampled referenced regime and txNum span of the widest-range
-// commitment .kv file visible after reopen (the merged one).
-func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (bool, uint64) {
+// largestCommitmentFile returns the version-derived referenced regime and txNum span of the
+// widest-range commitment .kv file visible after reopen (the merged one).
+func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB, stepSize uint64) (bool, uint64) {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func largestCommitmentFile(t *testing.T, ctx context.Context, db kv.TemporalRoDB
 			continue
 		}
 		if span := f.EndRootNum() - f.StartRootNum(); span >= bestSpan {
-			referenced, bestSpan, found = f.Referenced(), span, true
+			referenced, bestSpan, found = state.CommitmentBranchReferenced(f.Version(), stepSize, f.StartRootNum(), f.EndRootNum()), span, true
 		}
 	}
 	require.True(t, found, "expected at least one commitment .kv file")

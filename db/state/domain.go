@@ -147,8 +147,16 @@ func (d *Domain) BranchCache() *commitment.BranchCache {
 	return d.branchCache
 }
 
+// kvWriteVersion is the version stamped on a new .kv file: the domain's KVWriteVersion hook if set, else DataKV.Current.
+func (d *Domain) kvWriteVersion() version.Version {
+	if d.KVWriteVersion != nil {
+		return d.KVWriteVersion(&d.DomainCfg)
+	}
+	return d.FileVersion.DataKV.Current
+}
+
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.FileVersion.DataKV.Current.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.FileVersion.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))
@@ -1242,10 +1250,8 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.stepsInFrozenFile)
 	fi.frozen = false
+	fi.version, _ = version.ParseVersion(filepath.Base(sf.valuesDecomp.FilePath()))
 	fi.decompressor = sf.valuesDecomp
-	if d.Name == kv.CommitmentDomain {
-		fi.referenced = commitmentFileReferenced(d.dataReader(fi.decompressor), uint64(fi.decompressor.Count())/2)
-	}
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.existenceFilter
