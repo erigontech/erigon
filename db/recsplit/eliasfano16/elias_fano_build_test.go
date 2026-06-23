@@ -4,8 +4,7 @@ import "testing"
 
 // oversparseEF builds an EliasFano whose first superQ block spans more than
 // 1<<16 bits: with minDelta=0 and l=0 element c lands at bit 5*c, so the jump
-// offset overflows 16 bits near c=13108. This is the OSS-Fuzz fuzz_ef16_single
-// input class that previously made Build panic.
+// offset first exceeds the 16-bit slot at the q=256 boundary c=13312.
 func oversparseEF(n int) *EliasFano {
 	keys := make([]uint64, n+1)
 	var minDelta uint64

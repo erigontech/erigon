@@ -229,11 +229,13 @@ func (ef *EliasFano) ResetForWrite(count, maxOffset uint64) {
 	clear(ef.data)
 }
 
+const jumpOffsetOverflowMsg = "eliasfano32: superQ-block span exceeds the 32-bit jump offset"
+
 // Build constructs the Elias-Fano jump table; it panics if the sequence is too
 // sparse for the 32-bit jump offsets (unreachable for any realistic universe).
 func (ef *EliasFano) Build() {
 	if !ef.build() {
-		panic("eliasfano32: superQ-block span exceeds the 32-bit jump offset")
+		panic(jumpOffsetOverflowMsg)
 	}
 }
 
@@ -877,7 +879,7 @@ func (ef *DoubleEliasFano) deriveFields() (int, int) {
 // sequence is too sparse for the 32-bit jump offsets (unreachable in practice).
 func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	if !ef.build(cumKeys, position) {
-		panic("eliasfano32: superQ-block span exceeds the 32-bit jump offset")
+		panic(jumpOffsetOverflowMsg)
 	}
 }
 

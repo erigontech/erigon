@@ -117,11 +117,13 @@ func (ef *EliasFano) deriveFields() int {
 	return wordsUpperBits
 }
 
+const jumpOffsetOverflowMsg = "eliasfano16: superQ-block span exceeds the 16-bit jump offset; sequence too sparse for the compact variant, use eliasfano32"
+
 // Build constructs the Elias-Fano jump table; it panics if the sequence is too
 // sparse for this variant's 16-bit jump offsets (encode such data with eliasfano32).
 func (ef *EliasFano) Build() {
 	if !ef.build() {
-		panic("eliasfano16: superQ-block span exceeds the 16-bit jump offset; sequence too sparse for the compact variant, use eliasfano32")
+		panic(jumpOffsetOverflowMsg)
 	}
 }
 
@@ -288,7 +290,7 @@ func (ef *DoubleEliasFano) deriveFields() (int, int) {
 // sequence is too sparse for this variant's 16-bit jump offsets (use eliasfano32).
 func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	if !ef.build(cumKeys, position) {
-		panic("eliasfano16: superQ-block span exceeds the 16-bit jump offset; sequence too sparse for the compact variant, use eliasfano32")
+		panic(jumpOffsetOverflowMsg)
 	}
 }
 
