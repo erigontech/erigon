@@ -1454,7 +1454,7 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	}
 	reads := func(x txIO) ReadSet {
 		rs := ReadSet{}
-		rs.Set(VersionedRead{Address: x.addr, Path: BalancePath, Version: Version{TxIndex: x.txIdx}, Val: x.bal})
+		rs.Set(VersionedRead{Address: x.addr, Path: BalancePath, Version: Version{TxIndex: x.txIdx}, Val: *uint256.NewInt(x.bal)})
 		return rs
 	}
 	writes := func(x txIO) VersionedWrites {
