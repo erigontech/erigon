@@ -510,12 +510,24 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 	if commitmentStateKeyOnly {
 		// Fail fast (before the long stream/compress) if the recovered root doesn't match the
 		// canonical block header — that would mean the source file's branches are inconsistent.
+		// A file boundary often falls mid-block (partial block); a partial-block root is not the
+		// full-block header root, so skip the comparison then (same as the integrity check).
+		txNum := commitmentRangeStepTo*settings.StepSize - 1
 		verify := func(blockNum uint64, root []byte) error {
 			roTx, err := db.BeginTemporalRo(ctx)
 			if err != nil {
 				return err
 			}
 			defer roTx.Rollback()
+			blockMaxTxNum, err := txNumsReader.Max(ctx, roTx, blockNum)
+			if err != nil {
+				return err
+			}
+			if txNum < blockMaxTxNum {
+				logger.Info("[commitment_rebuild] file boundary is a partial block; root is not header-comparable, skipping header check",
+					"block", blockNum, "txNum", txNum, "blockMaxTxNum", blockMaxTxNum, "root", hex.EncodeToString(root))
+				return nil
+			}
 			h, err := br.HeaderByNumber(ctx, roTx, blockNum)
 			if err != nil {
 				return err
