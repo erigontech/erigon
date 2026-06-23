@@ -23,12 +23,17 @@ tests:
     compare:
       expr: "actual_code == 400"
 
-  - name: proposer duties not synced
+  - name: proposer duties early epoch
     actual:
       handler: i
       path: /eth/v1/validator/duties/proposer/1
     compare:
-      expr: "actual_code == 503"
+      exprs:
+       - actual_code == 200
+       - size(actual.data) == 32
+       - has(actual.data[0].pubkey)
+       - has(actual.data[0].validator_index)
+       - has(actual.data[0].slot)
   - name: fcu historical
     actual:
       handler: i
