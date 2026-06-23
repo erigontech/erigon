@@ -285,6 +285,11 @@ type Config struct {
 	// cost. Tests that don't need the trusted setup loaded leave this false
 	// to avoid the extra work.
 	WarmupKzgCtxOnInit bool
+
+	// ExtraGenesisAlloc is merged into Genesis.Alloc before computing the
+	// genesis hash. Embedding applications use this to inject contracts at
+	// genesis without modifying the core chain specification.
+	ExtraGenesisAlloc types.GenesisAlloc `toml:"-"`
 }
 
 type Sync struct {
