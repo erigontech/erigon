@@ -36,27 +36,27 @@ func init() {
 }
 
 var (
-	chaindata                     string
-	databaseVerbosity             int
-	referenceChaindata            string
-	block, pruneTo, unwind        uint64
-	unwindEvery                   uint64
-	batchSizeStr                  string
-	domain                        string
-	reset, noCommit, squeeze, yes bool
-	bucket                        string
-	datadirCli, toChaindata       string
-	migration                     string
-	integrityFast, integritySlow  bool
-	file                          string
-	HeimdallURL                   string
-	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
-	chain                         string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                 string
-	decodedStateEnabledCli        bool
-	decodedStateFullModeCli       bool
-	decodedStateWhitelistCli      []string
-	decodedStateStartBlockCli     uint64
+	chaindata                    string
+	databaseVerbosity            int
+	referenceChaindata           string
+	block, pruneTo, unwind       uint64
+	unwindEvery                  uint64
+	batchSizeStr                 string
+	domain                       string
+	reset, squeeze, yes          bool
+	bucket                       string
+	datadirCli, toChaindata      string
+	migration                    string
+	integrityFast, integritySlow bool
+	file                         string
+	HeimdallURL                  string
+	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                        string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                string
+	decodedStateEnabledCli       bool
+	decodedStateFullModeCli      bool
+	decodedStateWhitelistCli     []string
+	decodedStateStartBlockCli    uint64
 
 	startTxNum uint64
 
@@ -68,6 +68,11 @@ var (
 	noHistory                       bool
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
+
+	convertSqueeze   bool
+	convertNibblesV2 bool
+	convertRestore   bool
+	convertContinue  bool
 )
 
 func must(err error) {
@@ -111,10 +116,6 @@ func withBlock(cmd *cobra.Command) {
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withNoCommit(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
-}
-
 func withPruneTo(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
 }
@@ -133,6 +134,13 @@ func withYes(cmd *cobra.Command) {
 
 func withSqueeze(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&squeeze, "squeeze", false, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withConvertFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&convertSqueeze, "squeeze", false, "target state for the value squeeze axis: true = squeezed (offsets), false = unsqueezed (plain keys inline)")
+	cmd.Flags().BoolVar(&convertNibblesV2, "nibbles.v2", false, "target state for the key encoding axis: true = V2 (prefix-sort trie locality), false = V1 (compact bytes)")
+	cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")
+	cmd.Flags().BoolVar(&convertContinue, "continue", false, "Resume a prior interrupted conversion. Skips files whose converted shard already exists in <datadir>/snap/rebuild/domain/. Flags --squeeze and --nibbles.v2 MUST match the original interrupted run; mismatch produces mixed-encoding output. Mutually exclusive with --restore.")
 }
 
 func withClearCommitment(cmd *cobra.Command) {
@@ -170,6 +178,8 @@ func withDataDir(cmd *cobra.Command) {
 
 func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, utils.ExperimentalParallelCommitmentFlag.Value, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalStreamingCommitment, utils.ExperimentalStreamingCommitmentFlag.Name, utils.ExperimentalStreamingCommitmentFlag.Value, utils.ExperimentalStreamingCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -236,7 +246,6 @@ func withStageBase(cmd *cobra.Command) {
 
 // withTraceFlags applies flags shared by exec-style tracing commands.
 func withTraceFlags(cmd *cobra.Command) {
-	withNoCommit(cmd)
 	withBatchSize(cmd)
 	withTxTrace(cmd)
 	withWorkers(cmd)

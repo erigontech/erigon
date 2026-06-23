@@ -203,11 +203,12 @@ func populateSnapshotFile(t *testing.T, dirs datadir.Dirs, file string) {
 		defer func() { require.NoError(t, dir.RemoveFile(sampleFile)) }()
 
 		reader := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
-		index, err := btindex.CreateBtreeIndexWithDecompressor(file, 128, reader, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+		kveiFile := strings.TrimSuffix(file, ".bt") + ".kvei"
+		index, err := btindex.CreateBtreeIndexWithDecompressor(file, kveiFile, 128, reader, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 		require.NoError(t, err)
 		index.Close()
 	case strings.HasSuffix(file, ".kvei"):
-		filter, err := existence.NewFilter(0, file, false)
+		filter, err := existence.NewFilter(0, file)
 		require.NoError(t, err)
 		defer filter.Close()
 		filter.DisableFsync()
@@ -235,27 +236,28 @@ func populateSnapshotFile(t *testing.T, dirs datadir.Dirs, file string) {
 func populateSchemaFiles(t *testing.T, dirs datadir.Dirs, schema *state.E3SnapSchema, stepSize uint64, ranges []decodedFileRange) {
 	t.Helper()
 
+	v := version.V1_0
 	for _, rng := range ranges {
 		from := state.RootNum(rng.fromStep * stepSize)
 		to := state.RootNum(rng.toStep * stepSize)
 
-		file, err := schema.DataFile(version.ZeroVersion, from, to)
+		file, err := schema.DataFile(v, from, to)
 		require.NoError(t, err)
 		populateSnapshotFile(t, dirs, file)
 
 		accessors := schema.AccessorList()
 		if accessors.Has(statecfg.AccessorBTree) {
-			file, err = schema.BtIdxFile(version.ZeroVersion, from, to)
+			file, err = schema.BtIdxFile(v, from, to)
 			require.NoError(t, err)
 			populateSnapshotFile(t, dirs, file)
 		}
 		if accessors.Has(statecfg.AccessorExistence) {
-			file, err = schema.ExistenceFile(version.ZeroVersion, from, to)
+			file, err = schema.ExistenceFile(v, from, to)
 			require.NoError(t, err)
 			populateSnapshotFile(t, dirs, file)
 		}
 		if accessors.Has(statecfg.AccessorHashMap) {
-			file, err = schema.AccessorIdxFile(version.ZeroVersion, from, to, 0)
+			file, err = schema.AccessorIdxFile(v, from, to, 0)
 			require.NoError(t, err)
 			populateSnapshotFile(t, dirs, file)
 		}

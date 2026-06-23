@@ -400,69 +400,86 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
-	if u.UnwindPoint >= s.BlockNumber {
-		return nil
-	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
-
-	// Discard any pending deferred commitment updates from the previous
-	// (failed) execution. If left in place, the next ComputeCommitment
-	// would flush stale branch data that doesn't match the unwound state.
+	// Discard deferred commitment updates from the previous (failed) execution;
+	// otherwise the next ComputeCommitment flushes stale branch data. Runs on both
+	// unwind paths (the pre-refactor early return skipped it on the no-op path).
 	doms.ResetPendingUpdates()
 
-	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
-	}
+	if u.UnwindPoint < s.BlockNumber {
+		// Execution committed past the unwind point: roll the committed blocks back
+		// on disk (unwindExec3 also prunes the in-RAM overlay), and u.Done lowers the
+		// stage progress so re-execution resumes from u.UnwindPoint+1.
+		logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	var accumulator *shards.Accumulator
-	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
-		accumulator = cfg.notifications.Accumulator
-
-		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
-		if err != nil {
-			return fmt.Errorf("read canonical hash of unwind point: %w", err)
-		}
-		if !ok {
-			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
-		}
-		header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
-		if err != nil {
-			return fmt.Errorf("read canonical header of unwind point: %w", err)
-		}
-		if header == nil {
-			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
-		}
-		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
+		unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 		if err != nil {
 			return err
 		}
-		accumulator.StartChange(header, txs, true)
-	}
+		if !ok {
+			return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+		}
 
-	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
-		return err
-	}
+		var accumulator *shards.Accumulator
+		if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+			accumulator = cfg.notifications.Accumulator
 
-	if cfg.decodedStateEnabled {
-		unwindTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, u.UnwindPoint)
+			hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+			if err != nil {
+				return fmt.Errorf("read canonical hash of unwind point: %w", err)
+			}
+			if !ok {
+				return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
+			}
+			header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
+			if err != nil {
+				return fmt.Errorf("read canonical header of unwind point: %w", err)
+			}
+			if header == nil {
+				return fmt.Errorf("canonical header for unwind point not found: %s", hash)
+			}
+			txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
+			if err != nil {
+				return err
+			}
+			accumulator.StartChange(header, txs, true)
+		}
+
+		if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
+			return err
+		}
+
+		if err = u.Done(rwTx); err != nil {
+			return err
+		}
+
+		if cfg.decodedStateEnabled {
+			unwindTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, u.UnwindPoint)
+			if err != nil {
+				return fmt.Errorf("resolve decoded unwind point block %d to txNum: %w", u.UnwindPoint, err)
+			}
+			if err := decodedstate.UnwindDecodedStateToTxNum(rwTx, unwindTxNum); err != nil {
+				return fmt.Errorf("unwind decoded state: %w", err)
+			}
+		}
+	} else {
+		// Nothing above the unwind point was committed, so there's no disk rollback
+		// and u.Done must NOT run — it would raise stage progress to u.UnwindPoint and
+		// mark uncommitted blocks executed. Re-execution resumes from the committed
+		// block, so prune the in-RAM overlay to that boundary (Min(s.BlockNumber+1)),
+		// not u.UnwindPoint+1.
+		committedTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
 		if err != nil {
-			return fmt.Errorf("resolve decoded unwind point block %d to txNum: %w", u.UnwindPoint, err)
+			return err
 		}
-		if err := decodedstate.UnwindDecodedStateToTxNum(rwTx, unwindTxNum); err != nil {
-			return fmt.Errorf("unwind decoded state: %w", err)
-		}
+		doms.Unwind(committedTxNum, nil)
 	}
 
-	if err = u.Done(rwTx); err != nil {
+	// Re-establish doms' position at the committed state for re-execution.
+	_, _, err = doms.SeekCommitment(ctx, rwTx)
+	if err != nil {
 		return err
 	}
-
-	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
@@ -486,20 +503,43 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	// that defers to FCU when work is pending — out of scope here.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	quickPruneTimeout := baseTimeout
+	stagePruneTimeout := baseTimeout
 	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
 			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
 			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			quickPruneTimeout = baseTimeout + extra
-			if quickPruneTimeout > maxTimeout {
-				quickPruneTimeout = maxTimeout
+			stagePruneTimeout = baseTimeout + extra
+			if stagePruneTimeout > maxTimeout {
+				stagePruneTimeout = maxTimeout
 			}
 		}
 	}
+	if timeout > 0 && timeout > stagePruneTimeout {
+		stagePruneTimeout = timeout
+	}
 
-	if timeout > 0 && timeout > quickPruneTimeout {
-		quickPruneTimeout = timeout
+	pruneDiffsLimit := 200_000
+	pruneBalLimit := 10_000
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneDiffsLimit = math.MaxInt
+		pruneBalLimit = math.MaxInt
+		stagePruneTimeout = 12 * time.Hour
+	}
+
+	stagePruneStartTime := time.Now()
+	remainingPruneTimeout := func() time.Duration {
+		// Initial-cycle pruning is aggressive: there is no FCU to leave time for, so
+		// each prune step gets the full long budget instead of sharing it. Sharing
+		// here would let earlier steps eat into the budget and drop PruneSmallBatches
+		// below the furious-prune threshold (>5h) or skip it entirely.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return stagePruneTimeout
+		}
+		remaining := stagePruneTimeout - time.Since(stagePruneStartTime)
+		if remaining <= 0 {
+			return 0
+		}
+		return remaining
 	}
 
 	// AlwaysGenerateChangesets disables this prune so the node retains
@@ -510,52 +550,45 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 200_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
-			tx,
-			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneDiffsLimitOnChainTip,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
-		}
-		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
+		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+			pruneChangeSetsStartTime := time.Now()
+			if err := rawdb.PruneTable(
+				tx,
+				kv.ChangeSets3,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneDiffsLimit,
+				pruneChangeSetsTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
+			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+				logger.Debug(
+					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+					"duration", duration,
+					"timeout", pruneChangeSetsTimeout,
+					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				)
+			}
 		}
 	}
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		pruneBalLimit := 10_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		if err := rawdb.PruneTable(
-			tx,
-			kv.BlockAccessList,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneBalLimit,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
+		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+			if err := rawdb.PruneTable(
+				tx,
+				kv.BlockAccessList,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneBalLimit,
+				pruneTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -573,19 +606,16 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
-	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+			return err
+		}
 	}
-
-	pruneSmallBatchesStartTime := time.Now()
-	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
-		return err
-	}
-	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
+	if duration := time.Since(stagePruneStartTime); duration > stagePruneTimeout {
 		logger.Debug(
-			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
+			fmt.Sprintf("[%s] prune execution timing", s.LogPrefix()),
 			"duration", duration,
+			"timeout", stagePruneTimeout,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}

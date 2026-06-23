@@ -170,7 +170,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	if err != nil {
 		return err
 	}
-	defer sd.Close()
+	defer func() { sd.Close() }() // closes whichever SD is current after the commit loop swaps it
 	sd.SetInMemHistoryReads(false)
 
 	var batchSize datasize.ByteSize
@@ -284,18 +284,20 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 				return err
 			}
 
-			if err = sd.Flush(ctx, tx); err != nil {
+			if err = sd.Commit(ctx, tx); err != nil {
 				return err
 			}
-			sd.ClearRam(true)
-			if err = tx.Commit(); err != nil {
-				return err
-			}
+			sd.Close()
 
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
 			defer tx.Rollback()
+			// Fresh SD: a committed SD is never reused.
+			if sd, err = execctx.NewSharedDomains(ctx, tx, logger1); err != nil {
+				return err
+			}
+			sd.SetInMemHistoryReads(false)
 		}
 
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)

@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.6.0] 
+
+### Breaking Changes
+
+#### `eth_simulateV1`: base fee too low error code corrected to `-38012`
+
+Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth/nethermind#11412](https://github.com/NethermindEth/nethermind/issues/11412)).
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| `ErrFeeCapTooLow` error code | `-32602` (generic "Invalid params") | `-38012` (spec-mandated "baseFeePerGas is too low") |
+
+**Migration:**
+
+- If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
+
+---
+
 ## [3.5.0] "Tidal Tails" – TBD
 
 Erigon 3.5.0 is a major release headlined by **parallel block execution becoming the default** and **initial support for Ethereum's upcoming Glamsterdam hardfork**. It is a drop-in upgrade for 3.4.x users — no re-sync required; existing datadirs upgrade their prune configuration automatically (see Breaking Changes).
@@ -175,7 +195,20 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 - `--ethstats` credentials are redacted from the startup command log (#20890) — by @MysticRyuujin
 - DoS-resistance limits on inbound P2P message volume (#20577, #21557) and bounded RPC/stream buffers (#20446, #20783) — by @yperbasis, @lupin012
 
-**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.5.0
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.4...v3.5.0
+
+---
+
+## [3.4.4] "Splashing Saga" – 2026-06-18
+
+v3.4.4 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- execution/stagedsync: prune in-RAM overlay when execution unwind is a no-op (#21824, #21847) by @JkLondon  — third fix for the post-reorg `gas used mismatch`.
+- caplin: serialize uint64 beacon API fields as JSON strings (#21805) by @BitWonka - Per the beacon-APIs spec, Uint64/Gwei fields must be serialized as JSON strings. Several Caplin response types were emitting them as JSON numbers, breaking spec-compliant clients. Fixes #20562.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.4.4
 
 ---
 

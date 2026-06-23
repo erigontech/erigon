@@ -100,8 +100,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
-	EnableWarmupCache(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -146,8 +144,11 @@ const (
 	// VariantHexPatriciaTrie used as default commitment approach
 	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
+	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
+	VariantStreamingHexPatricia  TrieVariant = "hex-streaming-patricia-hashed"
 )
 
+// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantConcurrentHexPatricia:
@@ -155,6 +156,18 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		trie := NewConcurrentPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
+		return trie, tree
+	case VariantParallelHexPatricia:
+		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
+		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
+		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
+		return trie, tree
+	case VariantStreamingHexPatricia:
+		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
+		sc := NewStreamingCommitter(nil, length.Addr, cfg)
+		trie.SetStreamingCommitter(sc)
+		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
+		tree.SetStreamingCommitter(sc)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -342,7 +355,6 @@ type BranchEncoder struct {
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache              *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -549,31 +561,24 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-func (be *BranchEncoder) SetCache(cache *WarmupCache) {
-	be.cache = cache
-}
-
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	var prev []byte
-	var foundInCache bool
 	var err error
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
-		}
-	}
-	if !foundInCache {
+	if !isNew {
 		prev, _, err = ctx.Branch(prefix)
 		if err != nil {
 			return err
 		}
+	}
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -596,9 +601,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.cache != nil {
-		be.cache.PutBranch(prefixCopy, updateCopy)
-	}
+	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -616,6 +619,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
+	isNew bool,
 ) error {
 	// Flush if duplicate prefix or too many deferred updates
 	limit := be.maxDeferredUpdates
@@ -634,24 +638,17 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// try to get previous data from cache
-	var (
-		prev         []byte
-		foundInCache bool
-		err          error
-	)
+	var prev []byte
+	var err error
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
+	if !isNew {
+		prev, _, err = ctx.Branch(prefix)
+		if err != nil {
+			return err
 		}
 	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-	}
-	if err != nil {
-		return err
+	if prev == nil {
+		prev = []byte{}
 	}
 
 	// Track this prefix as pending
@@ -1248,6 +1245,8 @@ func ParseTrieVariant(s string) TrieVariant {
 	switch s {
 	case "hex-parallel":
 		trieVariant = VariantConcurrentHexPatricia
+	case "parallel":
+		trieVariant = VariantParallelHexPatricia
 	case "hex":
 		fallthrough
 	default:
@@ -1410,7 +1409,14 @@ const (
 	ModeDisabled Mode = 0
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
+	ModeParallel Mode = 3
 )
+
+// streamingSink receives touched keys for a StreamingCommitter's fold; plainKey
+// and update must stay valid until the committer's Process call.
+type streamingSink interface {
+	TouchKey(hashedKey, plainKey []byte, update *Update)
+}
 
 func (m Mode) String() string {
 	switch m {
@@ -1420,6 +1426,8 @@ func (m Mode) String() string {
 		return "direct"
 	case ModeUpdate:
 		return "update"
+	case ModeParallel:
+		return "parallel"
 	default:
 		return "unknown"
 	}
@@ -1443,6 +1451,13 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
+
+	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
+	parallel *parallelUpdate
+
+	// streaming (ModeParallel only) forwards every touched key to streamer.
+	streaming bool
+	streamer  streamingSink
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
 
@@ -1494,19 +1509,22 @@ func (t *Updates) SetConcurrentCommitment(b bool) {
 	t.initCollector()
 }
 
-// SetConcurrentCommitment returns true if updates are sorted per nibble
+// IsConcurrentCommitment reports whether the configuration allows concurrent commitment processing.
 func (t *Updates) IsConcurrentCommitment() bool {
-	return t.sortPerNibble
+	return t.mode == ModeParallel || t.sortPerNibble
 }
 
 type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
-// NewEmpty creates a fresh Updates with the same mode, tmpdir, and hasher
-// as the receiver. Used by SwapUpdates to replace the buffer atomically.
+// NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
+// carry over, or a buffer rotated mid-stream silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
-	return NewUpdates(t.mode, t.tmpdir, t.hasher)
+	n := NewUpdates(t.mode, t.tmpdir, t.hasher)
+	n.streamer = t.streamer
+	n.streaming = t.streaming
+	return n
 }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
@@ -1515,24 +1533,40 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		tmpdir: tmpdir,
 		mode:   m,
 	}
-	if t.mode == ModeDirect {
+	switch t.mode {
+	case ModeDirect:
 		t.keys = make(map[string]struct{})
 		t.initCollector()
-	} else if t.mode == ModeUpdate {
+	case ModeUpdate:
 		t.tree = btree.NewG(64, keyUpdateLessFn)
 		t.treeIdx = make(map[string]*KeyUpdate)
+	case ModeParallel:
+		t.keys = make(map[string]struct{})
+		t.parallel = newParallelUpdate()
 	}
 	return t
 }
 
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
-	if t.mode == ModeDirect && t.keys == nil {
-		t.keys = make(map[string]struct{})
-		t.initCollector()
-	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG(64, keyUpdateLessFn)
-		t.treeIdx = make(map[string]*KeyUpdate)
+	switch t.mode {
+	case ModeDirect:
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+			t.initCollector()
+		}
+	case ModeUpdate:
+		if t.tree == nil {
+			t.tree = btree.NewG(64, keyUpdateLessFn)
+			t.treeIdx = make(map[string]*KeyUpdate)
+		}
+	case ModeParallel:
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		}
+		if t.parallel == nil {
+			t.parallel = newParallelUpdate()
+		}
 	}
 	t.Reset()
 }
@@ -1565,10 +1599,19 @@ func (t *Updates) initCollector() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
+// SetStreamingCommitter forwards ModeParallel touches to sink; nil disables streaming.
+func (t *Updates) SetStreamingCommitter(sink streamingSink) {
+	t.streamer = sink
+	t.streaming = sink != nil
+}
+
+// Streaming reports whether touches are being forwarded to a StreamingCommitter.
+func (t *Updates) Streaming() bool { return t.streaming }
+
 // PlainKeys returns a copy of the set of plain keys that have been touched.
-// Only meaningful in ModeDirect; returns nil otherwise.
+// Meaningful only in ModeDirect and ModeParallel; nil otherwise.
 func (t *Updates) PlainKeys() map[string]struct{} {
-	if t.mode != ModeDirect || t.keys == nil {
+	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
 		return nil
 	}
 	cp := make(map[string]struct{}, len(t.keys))
@@ -1580,7 +1623,7 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
-	case ModeDirect:
+	case ModeDirect, ModeParallel:
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
@@ -1619,6 +1662,17 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			}
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+			t.keys[key] = struct{}{}
+		}
+	case ModeParallel:
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := common.ToBytesZeroCopy(key)
+			hashedKey := t.hasher(keyBytes)
+			ik := t.parallel.internKey(keyBytes)
+			t.parallel.Insert(hashedKey, ik, nil)
+			if t.streaming && t.streamer != nil {
+				t.streamer.TouchKey(hashedKey, ik, nil)
 			}
 			t.keys[key] = struct{}{}
 		}
@@ -1688,6 +1742,21 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			}
 			t.keys[key] = struct{}{}
 		}
+	case ModeParallel:
+		keyBytes := common.ToBytesZeroCopy(key)
+		hashedKey := t.hasher(keyBytes)
+		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
+		u := new(Update)
+		*u = *update
+		ik := keyBytes
+		if _, ok := t.keys[key]; !ok {
+			ik = t.parallel.internKey(keyBytes)
+			t.keys[key] = struct{}{}
+		}
+		t.parallel.Insert(hashedKey, ik, u)
+		if t.streaming && t.streamer != nil {
+			t.streamer.TouchKey(hashedKey, ik, u)
+		}
 	default:
 	}
 }
@@ -1711,6 +1780,16 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 			if err != nil {
 				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
 			}
+			t.keys[dedupKey] = struct{}{}
+		}
+	case ModeParallel:
+		if len(hashedKey) == 0 {
+			return
+		}
+		dedupKey := string(hashedKey)
+		if _, ok := t.keys[dedupKey]; !ok {
+			// Hashed-only touch has no plainKey; the parallel fold rejects such a terminator.
+			t.parallel.Insert(hashedKey, nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
@@ -1793,6 +1872,10 @@ func (t *Updates) Close() {
 			}
 		}
 	}
+	if t.parallel != nil {
+		t.parallel.Close()
+		t.parallel = nil
+	}
 }
 
 const hashSortBatchSize = 10_000
@@ -1820,9 +1903,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if warmuper != nil && warmuper.Cache() != nil {
-				warmuper.Cache().EvictPlainKey(v)
-			}
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)
@@ -1986,6 +2066,15 @@ func (t *Updates) Reset() {
 	case ModeUpdate:
 		t.tree.Clear(true)
 		clear(t.treeIdx)
+	case ModeParallel:
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
+		if t.parallel != nil {
+			t.parallel.Reset()
+		}
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]

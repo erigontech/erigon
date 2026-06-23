@@ -62,6 +62,7 @@ const (
 	seenEnvelopeCacheSize        = 1000
 	pendingEnvelopeExpiry        = 30 * time.Second
 	pendingEnvelopeCheckInterval = 100 * time.Millisecond
+	maxPendingEnvelopes          = 1024
 )
 
 type executionPayloadService struct {
@@ -199,9 +200,15 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	if s.pendingCount.Add(1) > maxPendingEnvelopes {
+		s.pendingCount.Add(-1)
+		return
+	}
+
 	// Compute envelope hash to allow multiple candidates per block
 	envelopeHash, err := envelope.HashSSZ()
 	if err != nil {
+		s.pendingCount.Add(-1)
 		log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
 		return
 	}
@@ -211,13 +218,15 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 		envelopeHash: envelopeHash,
 	}
 
-	// Only add if not already present (avoid duplicate count)
 	if _, loaded := s.pendingEnvelopes.LoadOrStore(key, &envelopeJob{
 		envelope:     envelope,
 		creationTime: time.Now(),
-	}); !loaded {
-		s.pendingCount.Add(1)
-		s.pendingCond.Signal() // Wake up the loop
+	}); loaded {
+		s.pendingCount.Add(-1)
+	} else {
+		s.pendingCond.L.Lock()
+		s.pendingCond.Signal()
+		s.pendingCond.L.Unlock()
 	}
 }
 
@@ -226,7 +235,9 @@ func (s *executionPayloadService) loop(ctx context.Context) {
 	// Wake any blocked Wait() on context cancellation to prevent deadlock.
 	go func() {
 		<-ctx.Done()
+		s.pendingCond.L.Lock()
 		s.pendingCond.Broadcast()
+		s.pendingCond.L.Unlock()
 	}()
 
 	for {

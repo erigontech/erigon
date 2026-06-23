@@ -307,6 +307,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalConcurrentCommitment {
 			statecfg.ExperimentalConcurrentCommitment = true
 		}
+		if config.ExperimentalParallelCommitment {
+			statecfg.ExperimentalParallelCommitment = true
+		}
+		if config.ExperimentalStreamingCommitment {
+			statecfg.ExperimentalStreamingCommitment = true
+		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
@@ -1543,6 +1549,15 @@ func (s *Ethereum) Stop() error {
 		case <-time.After(30 * time.Second):
 			s.logger.Warn("KZG warmup goroutine still running at shutdown")
 		}
+	}
+
+	// Drain the fire-and-forget background block-snapshot merge goroutine for
+	// shutdown hygiene; the merge itself touches neither chainDB nor snapshots,
+	// so the wait is bounded.
+	if s.components != nil && s.components.Storage != nil && s.components.Storage.BlockRetire != nil {
+		mergeCtx, mergeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		s.components.Storage.BlockRetire.WaitForMerges(mergeCtx)
+		mergeCancel()
 	}
 
 	s.chainDB.Close()

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -196,7 +196,7 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
@@ -204,9 +204,23 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
 			return fmt.Errorf("clearing exec state tables: %w", err)
 		}
-		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
+		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.
+	if hasAgg, ok := db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			aggTx := agg.BeginFilesRo()
+			defer aggTx.Close()
+			if bc := aggTx.BranchCache(); bc != nil {
+				bc.Clear()
+			}
+		}
+	}
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
@@ -285,7 +299,6 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 }
 
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
-	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -352,14 +365,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-						Stage: diaglib.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   header.Number.Uint64(),
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
 					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
 						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
@@ -394,14 +399,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-						Stage: diaglib.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   blockNum,
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
 					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
@@ -432,16 +429,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 			}
-
-		default:
-			diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-				Stage: diaglib.SnapshotFillDBStage{
-					StageName: string(stage),
-					Current:   blocksAvailable, // as we are done with other stages
-					Total:     blocksAvailable,
-				},
-				TimeElapsed: time.Since(startTime).Seconds(),
-			})
 		}
 	}
 	return nil

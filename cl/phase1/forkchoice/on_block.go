@@ -80,9 +80,8 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	return misc.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
-func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
-	currSlot := ethClock.GetCurrentSlot()
-	if slot != currSlot {
+func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, currentSlotOnEntry uint64) {
+	if slot != currentSlotOnEntry {
 		return
 	}
 	initialSlotTime := ethClock.GetSlotTime(slot)
@@ -127,11 +126,22 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
 		return ErrNotFinalizedDescendant
 	}
+	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	isGloas := blockVersion >= clparams.GloasVersion
+	headBeforeBlock := common.Hash{}
+	if isGloas && f.Slot() == block.Block.Slot {
+		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		head, _, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+		if err != nil {
+			return err
+		}
+		headBeforeBlock = head.Root
+	}
 	if isGloas {
 		if err := f.validateParentPayloadPath(block.Block); err != nil {
 			return err
@@ -191,9 +201,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 						return err
 					}
 					return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
-				}
-				if f.highestSeen.Load() < block.Block.Slot {
-					collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
 				}
 			}
 		}
@@ -256,11 +263,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
+
 	// Update highestSeen early so aggregate/attestation acceptance uses the
 	// latest slot even if AddChainSegment returns PreValidated.
 	if block.Block.Slot > f.highestSeen.Load() {
 		f.highestSeen.Store(block.Block.Slot)
 		f.highestSeenRoot.Store(common.Hash(blockRoot))
+		collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot, currentSlotOnEntry)
 	}
 	startStateProcess := time.Now()
 
@@ -314,8 +323,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
 	f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
 	// update_proposer_boost_root: conditionally set proposer boost root.
-	// Separated from recordBlockTimeliness per spec: checks timeliness + proposer index.
-	f.updateProposerBoostRoot(block.Block, common.Hash(blockRoot))
+	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot))
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
