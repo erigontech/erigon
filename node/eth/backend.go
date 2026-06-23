@@ -1285,7 +1285,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

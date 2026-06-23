@@ -56,6 +56,13 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 //  3. Fresh datadir (neither file present): returns default settings without writing,
 //     so the downloader can provide the real erigondb.toml during header-chain phase.
 func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader bool) (*ErigonDBSettings, error) {
+	return ResolveErigonDBSettingsWithRefsDefault(dirs, logger, noDownloader, nil)
+}
+
+// ResolveErigonDBSettingsWithRefsDefault is ResolveErigonDBSettings with an optional first-start
+// override: when refsFirstStart is non-nil and erigondb.toml is being created, it sets the initial
+// references_in_commitment_branches; an existing or downloader-delivered toml wins (override logged, ignored).
+func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger, noDownloader bool, refsFirstStart *bool) (*ErigonDBSettings, error) {
 	settingsPath := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
 
 	settingsExists, err := dir.FileExist(settingsPath)
@@ -70,11 +77,20 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 		if err != nil {
 			return nil, err
 		}
+		if refsFirstStart != nil {
+			logger.Info("--commitment.plainValues ignored: erigondb.toml already exists",
+				"references_in_commitment_branches", settings.RefsInCommitmentBranches())
+		}
 		// An absent field is resolved through RefsInCommitmentBranches(); the file is synced
 		// snapshot metadata and must not be rewritten.
 		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
 			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
 		return settings, nil
+	}
+
+	refs := config3.DefaultReferencesInCommitmentBranches
+	if refsFirstStart != nil {
+		refs = *refsFirstStart
 	}
 
 	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
@@ -84,7 +100,6 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 
 	// Legacy datadir (Erigon <= 3.3): write legacy settings so erigondb.toml exists on disk.
 	if preverifiedExists {
-		refs := config3.DefaultReferencesInCommitmentBranches
 		settings := &ErigonDBSettings{
 			StepSize:                       config3.LegacyStepSize,
 			StepsInFrozenFile:              config3.LegacyStepsInFrozenFile,
@@ -100,7 +115,6 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 	}
 
 	// Fresh datadir, no preverified.toml: use default settings.
-	refs := config3.DefaultReferencesInCommitmentBranches
 	settings := &ErigonDBSettings{
 		StepSize:                       config3.DefaultStepSize,
 		StepsInFrozenFile:              config3.DefaultStepsInFrozenFile,
@@ -116,6 +130,10 @@ func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 		}
 	} else {
 		// Downloader will provide the real erigondb.toml during header-chain phase.
+		if refsFirstStart != nil {
+			logger.Info("--commitment.plainValues set but a downloader will deliver erigondb.toml; the downloaded file wins",
+				"requested_references_in_commitment_branches", refs)
+		}
 		logger.Info("erigondb.toml not found, using defaults (downloader will provide real settings)",
 			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
 	}

@@ -158,3 +158,76 @@ func TestResolveErigonDBSettingsFreshWithDownloaderDoesNotWrite(t *testing.T) {
 	_, err = os.Stat(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
 	require.True(t, os.IsNotExist(err), "fresh+downloader must leave erigondb.toml for the downloader")
 }
+
+func TestResolveErigonDBSettingsWithRefsDefaultFreshNoDownloader(t *testing.T) {
+	t.Parallel()
+	tr, fa := true, false
+	for _, tc := range []struct {
+		name           string
+		refsFirstStart *bool
+		want           bool
+	}{
+		{"plain_writes_false", &fa, false},
+		{"referenced_writes_true", &tr, true},
+		{"unset_uses_config_default", nil, config3.DefaultReferencesInCommitmentBranches},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dirs := datadir.New(t.TempDir())
+			settings, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), true, tc.refsFirstStart)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, settings.RefsInCommitmentBranches())
+
+			written, err := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+			require.NoError(t, err)
+			require.NotNil(t, written.ReferencesInCommitmentBranches)
+			require.Equal(t, tc.want, *written.ReferencesInCommitmentBranches)
+		})
+	}
+}
+
+func TestResolveErigonDBSettingsWithRefsDefaultLegacyWritesChosen(t *testing.T) {
+	t.Parallel()
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
+
+	fa := false
+	settings, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), false, &fa)
+	require.NoError(t, err)
+	require.False(t, settings.RefsInCommitmentBranches())
+
+	written, err := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+	require.NoError(t, err)
+	require.NotNil(t, written.ReferencesInCommitmentBranches)
+	require.False(t, *written.ReferencesInCommitmentBranches)
+}
+
+func TestResolveErigonDBSettingsWithRefsDefaultExistingFileIgnoresFlag(t *testing.T) {
+	t.Parallel()
+	dirs := datadir.New(t.TempDir())
+	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
+	content := []byte("step_size = 390625\nsteps_in_frozen_file = 256\nreferences_in_commitment_branches = true\n")
+	require.NoError(t, os.WriteFile(path, content, 0644))
+
+	fa := false
+	settings, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), false, &fa)
+	require.NoError(t, err)
+	require.True(t, settings.RefsInCommitmentBranches(), "existing file wins over the first-start flag")
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, content, after)
+}
+
+func TestResolveErigonDBSettingsWithRefsDefaultFreshWithDownloaderDoesNotWrite(t *testing.T) {
+	t.Parallel()
+	dirs := datadir.New(t.TempDir())
+
+	fa := false
+	settings, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), false, &fa)
+	require.NoError(t, err)
+	require.False(t, settings.RefsInCommitmentBranches(), "in-memory value reflects the flag until the downloader delivers the file")
+
+	_, err = os.Stat(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+	require.True(t, os.IsNotExist(err), "fresh+downloader must leave erigondb.toml for the downloader")
+}
