@@ -8,7 +8,7 @@ require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
 	github.com/erigontech/go-libdeflate v0.1.0
-	github.com/erigontech/mdbx-go v0.40.1
+	github.com/erigontech/mdbx-go v0.40.3-0.20260623123705-744fccaa7a33
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 )
 
@@ -270,7 +270,7 @@ require (
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hexops/gotextdiff v1.0.3 // indirect
-	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
+	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20260504013507-f4b012c11129 // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ipfs/go-cid v0.5.0 // indirect
