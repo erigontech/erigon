@@ -43,12 +43,32 @@ func (a *ApiHandler) isProposerDutyInLookaheadVector(s *state.CachingBeaconState
 }
 
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return a.getDutiesProposerForVersion(w, r, false)
+}
+
+func (a *ApiHandler) getDutiesProposerV2(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return a.getDutiesProposerForVersion(w, r, true)
+}
+
+// getProposerDependentRoot returns the attester-style dependent root for v2 from Fulu onwards,
+// and the original proposer-style root for v1 and all pre-Fulu epochs.
+func (a *ApiHandler) getProposerDependentRoot(epoch uint64, v2 bool) (common.Hash, error) {
+	if v2 && a.beaconChainCfg.GetCurrentStateVersion(epoch) >= clparams.FuluVersion {
+		return a.getDependentRoot(epoch, true)
+	}
+	return a.getDependentRoot(epoch, false)
+}
+
+func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.Request, v2 bool) (*beaconhttp.BeaconResponse, error) {
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
+	}
 
-	dependentRoot, err := a.getDependentRoot(epoch, false)
+	dependentRoot, err := a.getProposerDependentRoot(epoch, v2)
 	if err != nil {
 		return nil, err
 	}
