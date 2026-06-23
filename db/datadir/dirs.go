@@ -135,6 +135,12 @@ func Open(datadir string) Dirs {
 	return dirs
 }
 
+// ForChain returns a Dirs rooted at <parentDataDir>/chains/<chainID>.
+// Used when running multiple chains in the same process.
+func ForChain(parentDataDir string, chainID uint64) Dirs {
+	return New(filepath.Join(parentDataDir, "chains", fmt.Sprintf("%d", chainID)))
+}
+
 var (
 	ErrDataDirLocked = errors.New("datadir already used by another process")
 
