@@ -33,9 +33,9 @@ type Cache interface {
 	Clear()
 
 	// Unwind invalidates entries that reflect state above unwindToTxNum on a
-	// now-dead fork. Diffset-free: GenericCache bumps an epoch and lowers a
-	// floor (lazy evict on read); CodeCache clears its small mutable addr
-	// layers. Immutable content-addressed code layers are untouched.
+	// now-dead fork. Diffset-free and lazy: both GenericCache and CodeCache
+	// bump an epoch and lower a floor, so stale entries (including code and
+	// size) are evicted on the next read rather than walked eagerly.
 	Unwind(unwindToTxNum uint64)
 
 	// Len returns the number of entries in the cache.

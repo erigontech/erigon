@@ -842,7 +842,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		hext = ppht.RootTrie()
 	}
 	if hext == nil {
-		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+		return 0, 0, errors.New("unsupported trie variant: state restore requires a hex patricia trie")
 	}
 
 	if err := hext.SetState(cs.trieState); err != nil {
