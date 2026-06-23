@@ -81,8 +81,6 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
-
-	postApplyHook func(blockNum uint64, computedRoot common.Hash) (skipValidation bool)
 }
 
 func StageExecuteBlocksCfg(
@@ -102,7 +100,6 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
 	readAheader *exec.BlockReadAheader,
-	postApplyHook func(blockNum uint64, computedRoot common.Hash) (skipValidation bool),
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -125,7 +122,6 @@ func StageExecuteBlocksCfg(
 		syncCfg:         syncCfg,
 		experimentalBAL: experimentalBAL,
 		readAheader:     readAheader,
-		postApplyHook:   postApplyHook,
 	}
 }
 

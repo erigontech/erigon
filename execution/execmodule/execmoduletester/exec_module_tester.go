@@ -641,7 +641,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			cfg.Sync,
 			false, /*experimentalBAL*/
 			readAheader,
-			nil,
 		),
 		nil, /*notifier*/
 		&vm.Config{},
@@ -679,7 +678,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.Sync,
 				false, /*experimentalBAL*/
 				readAheader,
-				nil,
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(),
