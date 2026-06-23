@@ -49,14 +49,14 @@ import (
 // UnwindExecutionStage takes the no-disk-rollback branch. That branch does not
 // call u.Done, so re-execution resumes from the committed block (SeekCommitment
 // returns s.BlockNumber; re-execution resumes at s.BlockNumber+1) — NOT from
-// u.UnwindPoint+1. The overlay must therefore be pruned to that committed
-// boundary (Min(s.BlockNumber+1)): every uncommitted write
-// above s.BlockNumber is dropped (the failed block's, AND a block in
-// (s.BlockNumber, u.UnwindPoint] that is itself re-executed), while a write
-// at/below the committed progress survives (no over-pruning). Otherwise the
-// retry re-reads a stale value (Hoodi: ca5daf64 slot0 kept tx19's first-write,
-// the contract took the "already initialised" branch, skipped an SSTORE_SET,
-// came up 21045 gas short, and the node spun in an unwind/retry loop).
+// u.UnwindPoint+1. The overlay must therefore be pruned to the last committed
+// txNum, Max(s.BlockNumber): every write of a re-executed block is dropped —
+// the failed block's, a block in (s.BlockNumber, u.UnwindPoint], AND the first
+// re-executed block's system tx at Min(s.BlockNumber+1) (one past the boundary)
+// — while a write at/below the last committed txNum survives (no over-pruning).
+// Otherwise the retry re-reads a stale value (Hoodi: ca5daf64 slot0 kept tx19's
+// first-write, the contract took the "already initialised" branch, skipped an
+// SSTORE_SET, came up 21045 gas short, and the node spun in an unwind/retry loop).
 func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	t.Parallel()
 
@@ -86,7 +86,8 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	defer tx.Rollback()
 
 	// txNum layout: block b owns txNums [perBlock*b, perBlock*b+perBlock-1], so
-	// TxnumReader().Min(b) == perBlock*b (the block's first/system txNum).
+	// TxnumReader().Max(b) == perBlock*b+perBlock-1 (the block's last txNum) and
+	// Min(b) == perBlock*b (its first/system txNum).
 	const perBlock = uint64(10)
 	for b := uint64(0); b <= 8; b++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, b, b*perBlock+perBlock-1))
@@ -103,10 +104,15 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 		failedBlock    = uint64(8) // block whose post-exec gas check failed mid-batch
 	)
 	// Re-execution resumes from the committed progress, so the overlay is pruned
-	// to Min(committedBlock+1) — NOT Min(unwindPoint+1).
-	boundaryTxNum, err := br.TxnumReader().Min(ctx, tx, committedBlock+1)
+	// to the last committed txNum, Max(committedBlock) — NOT Min(committedBlock+1)
+	// (which would leak the first re-executed block's system tx) and NOT
+	// Min(unwindPoint+1).
+	lastCommittedTxNum, err := br.TxnumReader().Max(ctx, tx, committedBlock)
 	require.NoError(t, err)
-	require.Equal(t, (committedBlock+1)*perBlock, boundaryTxNum, "sanity: prune boundary == first txNum past the committed block")
+	require.Equal(t, committedBlock*perBlock+perBlock-1, lastCommittedTxNum, "sanity: prune boundary == last committed txNum")
+	firstReExecTxNum, err := br.TxnumReader().Min(ctx, tx, committedBlock+1)
+	require.NoError(t, err)
+	require.Equal(t, lastCommittedTxNum+1, firstReExecTxNum, "sanity: first re-executed txNum is one past the boundary")
 
 	put := func(hexAddr string, slot byte, val []byte, txNum uint64) []byte {
 		addr := common.HexToAddress(hexAddr)
@@ -117,9 +123,17 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 		return key
 	}
 
-	// survivorKey: committed block, at/below the prune boundary → must survive.
+	// survivorKey: committed block, below the prune boundary → must survive.
 	survivorVal := []byte{0xbe, 0xef}
 	survivorKey := put("0x00000000000000000000000000000000000000aa", 0x01, survivorVal, committedBlock*perBlock)
+	// boundaryKey: exactly at the last committed txNum → must survive (no over-prune).
+	boundaryVal := []byte{0xb0, 0x0d}
+	boundaryKey := put("0x00000000000000000000000000000000000000cc", 0x03, boundaryVal, lastCommittedTxNum)
+	// firstReExecKey: exactly Min(committedBlock+1), the first re-executed block's
+	// system tx (one past the boundary) — the extra txNum the old Min(resumeBlock)
+	// boundary leaked → must be pruned.
+	firstReExecVal := []byte{0x33, 0x44}
+	firstReExecKey := put("0x00000000000000000000000000000000000000dd", 0x04, firstReExecVal, firstReExecTxNum)
 	// midKey: a block in (committedBlock, unwindPoint]. Kept by the old
 	// Min(unwindPoint+1) boundary, but must be dropped — that block is re-executed
 	// from the committed progress and would otherwise re-read its own stale write.
@@ -130,11 +144,17 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	staleVal := staleValHash[:]
 	staleKey := put("0xca5daf6473971693b760cc65d726f72c6849d615", 0x00, staleVal, failedBlock*perBlock+5)
 
-	// Sanity: all three visible through the overlay before the unwind.
+	// Sanity: all visible through the overlay before the unwind.
 	for _, c := range []struct {
 		key, val []byte
 		name     string
-	}{{survivorKey, survivorVal, "survivor"}, {midKey, midVal, "mid"}, {staleKey, staleVal, "stale"}} {
+	}{
+		{survivorKey, survivorVal, "survivor"},
+		{boundaryKey, boundaryVal, "boundary"},
+		{firstReExecKey, firstReExecVal, "first-re-exec"},
+		{midKey, midVal, "mid"},
+		{staleKey, staleVal, "stale"},
+	} {
 		got, _, err := doms.GetLatest(kv.StorageDomain, tx, c.key)
 		require.NoError(t, err)
 		require.Equal(t, c.val, got, "precondition: %s write must be visible pre-unwind", c.name)
@@ -147,13 +167,18 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 
 	require.NoError(t, UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger))
 
-	// Both the failed-block write AND the (committedBlock, unwindPoint] write must
-	// be gone: re-execution resumes from the committed boundary and would re-read
-	// either as a stale value.
+	// Every write of a re-executed block must be gone: the failed block's, a block
+	// in (committedBlock, unwindPoint], AND the first re-executed block's system tx
+	// at exactly Min(committedBlock+1) — re-execution resumes from the committed
+	// boundary and would re-read any of them as a stale value.
 	for _, c := range []struct {
 		key  []byte
 		name string
-	}{{staleKey, "failed-block (above unwindPoint)"}, {midKey, "(committedBlock, unwindPoint]"}} {
+	}{
+		{staleKey, "failed-block (above unwindPoint)"},
+		{midKey, "(committedBlock, unwindPoint]"},
+		{firstReExecKey, "first re-executed block system tx (Min(committedBlock+1))"},
+	} {
 		got, _, err := doms.GetLatest(kv.StorageDomain, tx, c.key)
 		require.NoError(t, err)
 		require.Empty(t, got,
@@ -161,8 +186,16 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 			committedBlock, unwindPoint, c.name, got)
 	}
 
-	// The committed write must be untouched (no over-pruning below committed).
-	got, _, err := doms.GetLatest(kv.StorageDomain, tx, survivorKey)
-	require.NoError(t, err)
-	require.Equal(t, survivorVal, got, "write at/below the committed progress must survive the prune")
+	// Writes at or below the last committed txNum must be untouched (no over-pruning).
+	for _, c := range []struct {
+		key, val []byte
+		name     string
+	}{
+		{survivorKey, survivorVal, "below committed"},
+		{boundaryKey, boundaryVal, "at last committed txNum"},
+	} {
+		got, _, err := doms.GetLatest(kv.StorageDomain, tx, c.key)
+		require.NoError(t, err)
+		require.Equal(t, c.val, got, "%s write must survive the prune", c.name)
+	}
 }

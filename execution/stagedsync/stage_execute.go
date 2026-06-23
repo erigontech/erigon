@@ -147,12 +147,19 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
+// overlayPruneToTxNum returns the overlay-prune boundary on unwind: the last
+// committed txNum, so TemporalMemBatch.Unwind (which keeps txNum <= boundary)
+// drops every write of a block that will be re-executed.
+func overlayPruneToTxNum(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tx, committedBlock uint64) (uint64, error) {
+	return cfg.blockReader.TxnumReader().Max(ctx, tx, committedBlock)
+}
+
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-	txNumsReader := br.TxnumReader()
 
-	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(ctx, rwTx, u.UnwindPoint+1)
+	// Boundary = last committed txNum (block u.UnwindPoint); re-execution still
+	// resumes at u.UnwindPoint+1.
+	txNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, u.UnwindPoint)
 	if err != nil {
 		return err
 	}
@@ -448,9 +455,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		// Nothing above the unwind point was committed, so there's no disk rollback
 		// and u.Done must NOT run — it would raise stage progress to u.UnwindPoint and
 		// mark uncommitted blocks executed. Re-execution resumes from the committed
-		// block, so prune the in-RAM overlay to that boundary (Min(s.BlockNumber+1)),
-		// not u.UnwindPoint+1.
-		committedTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
+		// block, so prune the in-RAM overlay to the last committed txNum.
+		committedTxNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, s.BlockNumber)
 		if err != nil {
 			return err
 		}
