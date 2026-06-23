@@ -19,6 +19,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -29,6 +30,10 @@ import (
 )
 
 const maxEpochsLookaheadForDuties = 32
+
+func epochSlotOverflows(epoch, slotsPerEpoch uint64) bool {
+	return slotsPerEpoch > 0 && epoch > math.MaxUint64/slotsPerEpoch-1
+}
 
 type attesterDutyResponse struct {
 	Pubkey                  common.Bytes48 `json:"pubkey"`
@@ -75,6 +80,9 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
+	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
 
 	dependentRoot, err := a.getDependentRoot(epoch, true)

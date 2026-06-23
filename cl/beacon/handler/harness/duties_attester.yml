@@ -43,3 +43,13 @@ tests:
     compare:
       exprs:
        - "actual_code == 400"
+  - name: attester duties overflow epoch
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/attester/576460752303423488
+      method: post
+      body:
+       data: ["0","1","2","3","4","5","6","7","8","9"]
+    compare:
+      exprs:
+       - "actual_code == 400"

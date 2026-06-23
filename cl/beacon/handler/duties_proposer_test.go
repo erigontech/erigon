@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -88,9 +89,18 @@ func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testin
 	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	dependentRoot, err := handler.getHistoricalProposerDependentRoot(roTx, state_accessors.GetValFnTxAndSnapshot(roTx, nil), 0)
+	dependentRoot, err := handler.getHistoricalProposerDependentRoot(roTx, state_accessors.GetValFnTxAndSnapshot(roTx, nil), 0, false)
 	require.NoError(t, err)
 	require.Equal(t, genesisRoot, dependentRoot)
+}
+
+func TestEpochSlotOverflows(t *testing.T) {
+	require.False(t, epochSlotOverflows(0, 32))
+	require.False(t, epochSlotOverflows(1000, 32))
+	require.False(t, epochSlotOverflows(math.MaxUint64/32-1, 32))
+	require.True(t, epochSlotOverflows(math.MaxUint64/32, 32))
+	require.True(t, epochSlotOverflows(math.MaxUint64, 32))
+	require.False(t, epochSlotOverflows(0, 0))
 }
 
 func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
