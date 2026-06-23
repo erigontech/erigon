@@ -36,23 +36,23 @@ func init() {
 }
 
 var (
-	chaindata                     string
-	databaseVerbosity             int
-	referenceChaindata            string
-	block, pruneTo, unwind        uint64
-	unwindEvery                   uint64
-	batchSizeStr                  string
-	domain                        string
-	reset, noCommit, squeeze, yes bool
-	bucket                        string
-	datadirCli, toChaindata       string
-	migration                     string
-	integrityFast, integritySlow  bool
-	file                          string
-	HeimdallURL                   string
-	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
-	chain                         string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                 string
+	chaindata                    string
+	databaseVerbosity            int
+	referenceChaindata           string
+	block, pruneTo, unwind       uint64
+	unwindEvery                  uint64
+	batchSizeStr                 string
+	domain                       string
+	reset, squeeze, yes          bool
+	bucket                       string
+	datadirCli, toChaindata      string
+	migration                    string
+	integrityFast, integritySlow bool
+	file                         string
+	HeimdallURL                  string
+	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                        string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                string
 
 	startTxNum uint64
 
@@ -107,10 +107,6 @@ func withBlock(cmd *cobra.Command) {
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withNoCommit(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
-}
-
 func withPruneTo(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
 }
@@ -234,7 +230,6 @@ func withStageBase(cmd *cobra.Command) {
 
 // withTraceFlags applies flags shared by exec-style tracing commands.
 func withTraceFlags(cmd *cobra.Command) {
-	withNoCommit(cmd)
 	withBatchSize(cmd)
 	withTxTrace(cmd)
 	withWorkers(cmd)
