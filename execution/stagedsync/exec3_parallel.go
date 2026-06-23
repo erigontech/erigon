@@ -3442,8 +3442,8 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			Val:     code,
 			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 		})
-		log.Warn("[codepath-recovery] re-emitted dropped CodePath",
-			"addr", common.Address(addr.Value()), "txIndex", txIndex, "incarnation", incarnation)
+		log.Debug("[codepath-recovery] re-emitted dropped CodePath",
+			"addr", addr.Value(), "txIndex", txIndex, "incarnation", incarnation)
 		return true
 	}
 	for addr, h := range codeHashInOutput {

@@ -1873,7 +1873,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 // Pins that recovery does NOT fire when the raw writeset has no
 // CodePath/CodeHashPath entry: the committed designator is already in
 // CodeDomain, so re-emitting CodePath would be redundant write-amplification.
-func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
+func TestNormalizeWriteSet_NoCodePathRecoveryWithoutRawCodeWrite(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	authority := accounts.InternAddress([20]byte{0x42})
 	designator := types.AddressToDelegation(accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02}))
@@ -1991,6 +1991,10 @@ func TestNormalizeWriteSet_CodePathRecoveryRejectsHashMismatch(t *testing.T) {
 
 	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false)
 
+	// Recovery was eligible (a CodeHashPath is present with no CodePath), so the
+	// 0 below is a genuine rejection, not a case where recovery never ran.
+	require.Equal(t, 1, countPath(result, state.CodeHashPath),
+		"CodeHashPath must be present so recovery is eligible to run")
 	require.Equal(t, 0, countPath(result, state.CodePath),
 		"code whose keccak != the recovered codeHash must not be emitted")
 }
