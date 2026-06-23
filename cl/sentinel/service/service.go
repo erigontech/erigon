@@ -17,7 +17,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -27,7 +26,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -51,6 +49,10 @@ type SentinelServer struct {
 
 	logger log.Logger
 }
+
+type HTTPError = httpreqresp.HTTPError
+type PeerResponseError = httpreqresp.PeerResponseError
+type ResponseCode = httpreqresp.ResponseCode
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
@@ -110,7 +112,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
-		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
+		errorMessage := &HTTPError{
+			StatusCode: resp.StatusCode,
+			Body:       string(errBody),
+		}
 		//if strings.Contains(errorMessage.Error(), "Read Code: EOF") {
 		// don't ban the peer.
 		//	return nil, errorMessage
@@ -131,12 +136,24 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// known error codes, just remove the peer
 	responseCode := ResponseCode(code)
 	if !responseCode.Success() {
-		if shouldBanOnFail {
+		errorMessage, err := responseCode.ErrorMessage(resp)
+		if err != nil {
+			if shouldBanOnFail {
+				s.sentinel.Peers().RemovePeer(pid)
+				s.sentinel.Host().Peerstore().RemovePeer(pid)
+				s.sentinel.Host().Network().ClosePeer(pid)
+			}
+			return nil, err
+		}
+		if shouldBanOnFail && responseCode != httpreqresp.ResponseCodeResourceUnavailable {
 			s.sentinel.Peers().RemovePeer(pid)
 			s.sentinel.Host().Peerstore().RemovePeer(pid)
 			s.sentinel.Host().Network().ClosePeer(pid)
 		}
-		return nil, fmt.Errorf("peer error code: %d (%s). Error message: %s", code, responseCode.String(), responseCode.ErrorMessage(resp))
+		return nil, &PeerResponseError{
+			Code:    responseCode,
+			Message: errorMessage,
+		}
 	}
 
 	// read the body from the response
@@ -272,53 +289,4 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersIn
 
 func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
 	panic("do not call this")
-}
-
-type ResponseCode int
-
-func (r ResponseCode) String() string {
-	switch r {
-	case 0:
-		return "success"
-	case 1:
-		return "invalid request"
-	case 2:
-		return "server error"
-	case 3:
-		return "resource unavailable"
-	}
-	return "unknown"
-}
-
-func (r ResponseCode) Success() bool {
-	return r == 0
-}
-
-func (r ResponseCode) ErrorMessage(resp *http.Response) string {
-	if r == 0 || r == 1 {
-		return ""
-	}
-	// Error response bodies are Snappy-compressed per the ETH2 req/resp spec.
-	// First read the varint-encoded length prefix, then decompress the payload.
-	rawReader := bufio.NewReader(resp.Body)
-	// Read and discard the varint length prefix (uncompressed length).
-	for {
-		b, err := rawReader.ReadByte()
-		if err != nil {
-			// Fallback: read raw body if varint parsing fails.
-			remaining, _ := io.ReadAll(rawReader)
-			return string(remaining)
-		}
-		if b&0x80 == 0 {
-			break // last byte of varint
-		}
-	}
-	sr := snappy.NewReader(rawReader)
-	decoded, err := io.ReadAll(sr)
-	if err != nil {
-		// Fallback: if snappy decode fails, read raw remaining bytes.
-		remaining, _ := io.ReadAll(rawReader)
-		return string(remaining)
-	}
-	return string(decoded)
 }
