@@ -228,9 +228,8 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 	require.NotEmpty(t, newKVPath)
 
 	// Squeezed values contain at least one embedded plain-key field shorter than
-	// binary.MaxVarintLen64 (10 bytes) — the marker the read-side detector
-	// (detectSqueezeState) keys off. Walk every non-state branch in the new
-	// file and assert at least one such short field exists.
+	// 10 bytes (a varint file offset, vs a 20- or 52-byte plain key). Walk every
+	// non-state branch in the new file and assert at least one such short field exists.
 	newKeys, newVals := readKVFile(t, agg, newKVPath)
 	require.NotEmpty(t, newVals)
 	foundShort := false
