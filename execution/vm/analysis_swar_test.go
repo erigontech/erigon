@@ -109,8 +109,7 @@ func BenchmarkJumpdestAnalysisJumpdest24k(b *testing.B) {
 	for i := range code {
 		code[i] = 0x5b
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		codeBitmap(code)
 	}
 }
