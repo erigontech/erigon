@@ -37,16 +37,13 @@ const (
 	// (top 1% of keys = 48%, ~10 MB for 80%); 150 MB leaves headroom over the
 	// 95% set so eviction pressure doesn't push the hot set out.
 	DefaultStorageCacheBytes = 150 * datasize.MB
-	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
-	DefaultCommitmentCacheBytes = 128 * datasize.MB
 
 	// Per-domain avg entry size used to translate the byte budget into the
 	// entry-count cap the underlying sharded LRU is sized against. Account
 	// and storage are near-fixed: addr + record or addr+slot + value plus
-	// entry overhead. Commitment values are smaller branch nodes.
-	avgAccountEntryBytes    = 96 // 20 addr + ~50 account record + 24 overhead
-	avgStorageEntryBytes    = 88 // 52 addr+slot + ~12 value + 24 overhead
-	avgCommitmentEntryBytes = 80
+	// entry overhead.
+	avgAccountEntryBytes = 96 // 20 addr + ~50 account record + 24 overhead
+	avgStorageEntryBytes = 88 // 52 addr+slot + ~12 value + 24 overhead
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -60,16 +57,15 @@ type StateCache struct {
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
-// Mode for the byte-budget DomainCaches (Account/Storage/Commitment) is
-// read once from STATE_CACHE_MODE (evict|noop, default evict). CodeCache
-// has its own LRU and is not gated by this knob.
-func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentBytes datasize.ByteSize) *StateCache {
+// Mode for the byte-budget DomainCaches (Account/Storage) is read once from
+// STATE_CACHE_MODE (evict|noop, default evict). CodeCache has its own LRU and
+// is not gated by this knob.
+func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	//sc.caches[kv.CommitmentDomain] = newDomainCacheBytes(commitmentBytes, avgCommitmentEntryBytes, mode)
 	return sc
 }
 
@@ -112,14 +108,13 @@ var (
 )
 
 // NewDefaultStateCache creates a new StateCache with the default byte budgets
-// (Account 100MB, Storage 150MB, Code 100MB, Addr 16MB).
+// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB).
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
 		defaultAccountCacheBytes,
 		defaultStorageCacheBytes,
 		defaultCodeCacheBytes,
 		defaultAddrCacheBytes,
-		DefaultCommitmentCacheBytes,
 	)
 }
 
@@ -293,9 +288,6 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 	if stor, ok := c.caches[kv.StorageDomain].(*DomainCache); ok {
 		stor.PrintStatsAndReset("Storage")
-	}
-	if commit, ok := c.caches[kv.CommitmentDomain].(*DomainCache); ok {
-		commit.PrintStatsAndReset("Commitment")
 	}
 	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
 		code.PrintStatsAndReset()

@@ -45,16 +45,8 @@ const (
 	DefaultCodeCacheBytes = 512 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
 	DefaultAddrCacheBytes = 16 * datasize.MB
-	// DefaultAddrCacheEntries derives from DefaultAddrCacheBytes assuming
-	// ~28 bytes per entry (20-byte addr + 8-byte maphash codeID). Used as
-	// the LRU entry cap so the cache evicts oldest entries instead of
-	// silently dropping new ones when full — fresh-address workloads
-	// (e.g. mainnet thousands of new addrs per block) actually warm up
-	// over time, matching geth's lru.Cache pattern in
-	// core/state/database_code.go.
-	DefaultAddrCacheEntries = int(DefaultAddrCacheBytes) / 28
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
-	// cache (geth-style: code size answers without loading bytes for
+	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
 	DefaultCodeSizeCacheEntries int64 = 1_000_000
 )
@@ -80,7 +72,7 @@ const (
 // modifications to existing entries and deletions are still allowed.
 
 // Every cached layer carries (txNum, epoch) so an unwind invalidates code the
-// same way as the account/storage/branch caches (#21752): a contract's code
+// same way as the account/storage/branch caches: a contract's code
 // value never changes for a given hash, but its EXISTENCE does — code deployed
 // on a fork that is later unwound must no longer be discoverable, even by
 // codeHash. So the content-addressed layers are NOT treated as immutable; they
@@ -125,8 +117,7 @@ type codeSizeEntry struct {
 type CodeCache struct {
 	// addrToHash maps a 20-byte Ethereum address to the maphash-derived
 	// codeID for the code at that address. An LRU so fresh-address workloads
-	// evict oldest entries and warm up the working set, matching geth's
-	// lru.Cache pattern at core/state/database_code.go.
+	// evict oldest entries and warm up the working set.
 	addrToHash *lru.Cache[[20]byte, versionedAddressID]
 	hashToCode *maphash.Map[codeEntry] // maphash(code) → code, concurrent
 	codeSize   atomic.Int64            // current size in bytes (code only, hash is fixed 8 bytes)
@@ -135,7 +126,7 @@ type CodeCache struct {
 	// (keccak), separately from addrToHash (which uses the cheap maphash
 	// for bytes-lookup chaining). Used by SharedDomains.codeHashForAddr to
 	// skip a cold account-domain read when the EVM-known codeHash is
-	// already in cache. Nethermind-style addr → codeHash LRU.
+	// already in cache. An addr → codeHash LRU.
 	addrToCodeHash *lru.Cache[[20]byte, addrCodeHashEntry]
 
 	// codeHashToCode: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
@@ -147,10 +138,9 @@ type CodeCache struct {
 	codeHashCodeSize atomic.Int64            // current size in bytes (codeHash layer)
 
 	// Size-only layer: ethCodeHash → int (length in bytes). Answers
-	// EXTCODESIZE / EXTCODEHASH without loading the bytes. Geth has the
-	// equivalent at core/state/database_code.go (1 M-entry LRU). Tiny
-	// per-entry footprint (32B key + 8B value) so the same memory budget
-	// gives ~1000x the hit surface vs the bytes cache.
+	// EXTCODESIZE / EXTCODEHASH without loading the bytes. Tiny per-entry
+	// footprint (32B key + 8B value) so the same memory budget gives ~1000x
+	// the hit surface vs the bytes cache.
 	codeSizeByCodeHash *maphash.Map[codeSizeEntry]
 	codeSizeEntries    atomic.Int64
 	codeSizeCapEntries int64
@@ -313,10 +303,10 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	}
 }
 
-// GetAddrCodeHash returns the Ethereum codeHash for addr if cached.
-// Nethermind-style lookup that lets SharedDomains.codeHashForAddr skip a
-// cold AccountsDomain read when the EVM-known codeHash is already known.
-// Eviction is LRU; freshly seen addrs replace coldest entries.
+// GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
+// SharedDomains.codeHashForAddr skip a cold AccountsDomain read when the
+// EVM-known codeHash is already known. Eviction is LRU; freshly seen addrs
+// replace coldest entries.
 func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	k := addrKey(addr)
 	e, ok := c.addrToCodeHash.Get(k)
@@ -420,8 +410,7 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 //
 // Designed for EXTCODESIZE / EXTCODEHASH which only need the length; on a
 // cache hit the caller answers a 4-instruction map probe instead of paying
-// the file-accessor + decompression stack for the full bytes. Geth has the
-// equivalent at core/state/database_code.go.
+// the file-accessor + decompression stack for the full bytes.
 func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 	e, ok := c.codeSizeByCodeHash.Get(codeHash)
 	if !ok {
@@ -444,8 +433,8 @@ func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 }
 
 // PutCodeSizeByCodeHash stores the size of code keyed by its Ethereum
-// codeHash. No-op when full (limitation; addrToHash-style LRU is queued as
-// a separate surgical change). txNum stamps the entry for unwind invalidation.
+// codeHash. No-op when the entry cap is reached. txNum stamps the entry for
+// unwind invalidation.
 func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint64) {
 	if len(codeHash) == 0 || size < 0 {
 		return
@@ -490,7 +479,7 @@ func (c *CodeCache) Clear() {
 // Unwind invalidates entries reflecting dead-fork state. Code deployed on the
 // rolled-back fork must stop being discoverable — even by codeHash — because
 // although a hash → bytes value is invariant, the code's EXISTENCE is not
-// (#21752). O(1) and scan-free: bump the epoch and lower the floor to
+// . O(1) and scan-free: bump the epoch and lower the floor to
 // unwindToTxNum; every layer's entries at/above the floor from a superseded
 // epoch drop lazily on their next Get (re-fetching code shared with a
 // still-live deployment, an accepted multiplicity cost).

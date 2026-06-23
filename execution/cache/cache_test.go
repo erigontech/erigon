@@ -54,7 +54,7 @@ func makeValue(i int) []byte {
 // =============================================================================
 
 func TestDomainCache_NewWithByteCapacity(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB) // 1MB
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU) // 1MB
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
 	assert.Equal(t, int64(0), c.SizeBytes())
@@ -62,7 +62,7 @@ func TestDomainCache_NewWithByteCapacity(t *testing.T) {
 }
 
 func TestDomainCache_GetPut(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -81,7 +81,7 @@ func TestDomainCache_GetPut(t *testing.T) {
 }
 
 func TestDomainCache_PutUpdateValue(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	addr := makeAddr(1)
 	value1 := []byte{1, 2, 3, 4, 5, 6, 7, 8} // 8 bytes
@@ -153,7 +153,7 @@ func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
 }
 
 func TestDomainCache_Delete(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	addr := makeAddr(1)
 	c.Put(addr, makeValue(1), 0)
@@ -167,7 +167,7 @@ func TestDomainCache_Delete(t *testing.T) {
 }
 
 func TestDomainCache_Clear(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
@@ -178,7 +178,7 @@ func TestDomainCache_Clear(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	// Generate some hits and misses
 	c.Put(makeAddr(1), makeValue(1), 0)
@@ -194,7 +194,7 @@ func TestDomainCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset("test")
 }
@@ -409,7 +409,7 @@ func TestCodeCache_ImplementsInterface(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_NewStateCache(t *testing.T) {
-	c := NewStateCache(10, 20, 30, 40, 40)
+	c := NewStateCache(10, 20, 30, 40)
 	require.NotNil(t, c)
 
 	// Account, Storage, Code, Commitment should be initialized
@@ -432,7 +432,7 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -450,7 +450,7 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
@@ -464,7 +464,7 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -476,7 +476,7 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	// ReceiptDomain is not supported
 	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
@@ -486,7 +486,7 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 }
 
 func TestStateCache_Delete(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	addr := makeAddr(1)
 	c.Put(kv.AccountsDomain, addr, makeValue(1), 0)
@@ -500,7 +500,7 @@ func TestStateCache_Delete(t *testing.T) {
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
 // the caller unnecessarily falls through to the DB on every read.
 func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	key[0] = 0x1d
@@ -515,7 +515,7 @@ func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 
 // Same test for []byte{} (zero-length but non-nil).
 func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	key := make([]byte, 52)
 	key[0] = 0x1d
@@ -529,14 +529,14 @@ func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	// Should not panic
 	c.Delete(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
 	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
@@ -554,7 +554,7 @@ func TestStateCache_Clear(t *testing.T) {
 }
 
 func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	// Domain >= DomainLen should return nil
 	cache := c.GetCache(kv.DomainLen)
@@ -569,7 +569,7 @@ func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
 // =============================================================================
 
 func TestDomainCache_ConcurrentAccess(t *testing.T) {
-	c := NewDomainCache(10000)
+	c := NewDomainCacheMode(10000, ModeEvictLRU)
 
 	done := make(chan bool)
 
@@ -623,7 +623,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_DomainIsolation(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	accountData := []byte("account")
@@ -684,7 +684,7 @@ func makeDiffKey(baseKey []byte, step uint64) string {
 // Entries stamped at/below the unwind point survive (warm hot set kept); entries
 // above it from the now-dead epoch are dropped lazily on read.
 func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	below := makeAddr(1)
 	above := makeAddr(2)
 	c.Put(below, makeValue(1), 50)  // predates the unwind
@@ -709,7 +709,7 @@ func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
 // block's first txNum; when that block is the first unwound one, txNum==floor and
 // a strict `>` left the dead-fork value served stale.
 func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	atFloor := makeAddr(1)
 	belowFloor := makeAddr(2)
 	c.Put(atFloor, makeValue(1), 100)   // first txNum of the first unwound block
@@ -729,7 +729,7 @@ func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
 // SAME txNum as the dead fork's write. The epoch — not the txNum — distinguishes
 // them, so the dead entry reads stale and the re-written one reads valid.
 func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	k := makeAddr(1)
 	c.Put(k, makeValue(1), 150) // dead fork, epoch 0
 
@@ -748,7 +748,7 @@ func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
 // dead epoch above the floor and reads stale no matter how far execution
 // advances afterwards (there is no rising high-water mark to re-validate it).
 func TestUnwind_StragglerNeverResurrects(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	straggler := makeAddr(1)
 	c.Put(straggler, makeValue(1), 150) // epoch 0
 
@@ -765,7 +765,7 @@ func TestUnwind_StragglerNeverResurrects(t *testing.T) {
 // A second, shallower unwind must not resurrect entries a deeper earlier unwind
 // invalidated (floor only moves down).
 func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	k := makeAddr(1)
 	c.Put(k, makeValue(1), 70) // epoch 0
 

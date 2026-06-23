@@ -129,12 +129,6 @@ type DomainCache struct {
 	*GenericCache[[]byte]
 }
 
-// NewDomainCache creates a new cache for domain data. Defaults to
-// ModeEvictLRU; use NewDomainCacheMode to override.
-func NewDomainCache(capacityBytes datasize.ByteSize) *DomainCache {
-	return NewDomainCacheMode(capacityBytes, ModeEvictLRU)
-}
-
 // NewDomainCacheMode creates a new domain cache with the given mode.
 func NewDomainCacheMode(capacityBytes datasize.ByteSize, mode Mode) *DomainCache {
 	return &DomainCache{
@@ -274,11 +268,6 @@ func (c *GenericCache[T]) SizeBytes() int64 {
 // CapacityBytes returns the capacity of the cache in bytes.
 func (c *GenericCache[T]) CapacityBytes() datasize.ByteSize {
 	return c.capacityB
-}
-
-// Mode returns the eviction mode this cache was constructed with.
-func (c *GenericCache[T]) Mode() Mode {
-	return c.mode
 }
 
 // PrintStatsAndReset prints cache statistics and resets counters.
