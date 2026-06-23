@@ -854,6 +854,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			config.ExperimentalBAL,
 			backend.readAheader,
+			config.PostApplyHook,
 		),
 		backend.notifications.Events,
 		&vm.Config{},

@@ -290,6 +290,14 @@ type Config struct {
 	// genesis hash. Embedding applications use this to inject contracts at
 	// genesis without modifying the core chain specification.
 	ExtraGenesisAlloc types.GenesisAlloc `toml:"-"`
+
+	// PostApplyHook is called after the execution pipeline computes the
+	// state root for a block batch. If non-nil and it returns true, the
+	// normal state-root-vs-header validation is skipped. Embedding
+	// applications use this to observe state roots or to accept blocks
+	// whose root was not known at insertion time (e.g. derived rollup
+	// blocks).
+	PostApplyHook func(blockNum uint64, computedRoot common.Hash) (skipValidation bool) `toml:"-"`
 }
 
 type Sync struct {

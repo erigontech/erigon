@@ -174,6 +174,7 @@ func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModule
 		emt.cfg.Sync,
 		false, /*experimentalBAL*/
 		exec.NewBlockReadAheader(),
+		nil,
 	)
 
 	// Lock the offline-execution writers like the integration tool does so
