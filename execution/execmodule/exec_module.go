@@ -250,6 +250,7 @@ func NewExecModule(
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
+	domainStateCache *cache.StateCache,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
@@ -259,7 +260,14 @@ func NewExecModule(
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
 ) *ExecModule {
-	domainCache := cache.NewDefaultStateCache()
+	// Production passes nil → full-size default cache. Test/CLI harnesses pass a
+	// small cache so building one ExecModule per fixture doesn't allocate
+	// hundreds of MB of LRU tables each (which stalled the parallel eest
+	// blocktest). Per-instance, so it never mutates the process-wide default.
+	domainCache := domainStateCache
+	if domainCache == nil {
+		domainCache = cache.NewDefaultStateCache()
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{

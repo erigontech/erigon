@@ -244,8 +244,11 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 		return nil, false
 	}
 	if c.isStale(ce.txNum, ce.epoch) {
-		c.hashToCode.Delete(hashKey)
-		c.codeSize.Add(-int64(8 + len(ce.code)))
+		// Only the goroutine that actually removes the entry adjusts the byte
+		// counter, so concurrent stale readers can't double-subtract.
+		if old, removed := c.hashToCode.LoadAndDelete(hashKey); removed {
+			c.codeSize.Add(-int64(8 + len(old.code)))
+		}
 		c.codeMisses.Add(1)
 		return nil, false
 	}
@@ -355,8 +358,9 @@ func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 		return nil, false
 	}
 	if c.isStale(ce.txNum, ce.epoch) {
-		c.codeHashToCode.Delete(codeHash)
-		c.codeHashCodeSize.Add(-int64(len(codeHash) + len(ce.code)))
+		if old, removed := c.codeHashToCode.LoadAndDelete(codeHash); removed {
+			c.codeHashCodeSize.Add(-int64(len(codeHash) + len(old.code)))
+		}
 		c.codeHashMisses.Add(1)
 		return nil, false
 	}
@@ -423,8 +427,9 @@ func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 		return 0, false
 	}
 	if c.isStale(e.txNum, e.epoch) {
-		c.codeSizeByCodeHash.Delete(codeHash)
-		c.codeSizeEntries.Add(-1)
+		if _, removed := c.codeSizeByCodeHash.LoadAndDelete(codeHash); removed {
+			c.codeSizeEntries.Add(-1)
+		}
 		c.codeSizeMisses.Add(1)
 		return 0, false
 	}

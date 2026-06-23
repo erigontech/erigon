@@ -975,6 +975,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
+		nil, // domainStateCache: nil → full-size production default
 		logger,
 		backend.engine,
 		config.Sync,

@@ -61,6 +61,15 @@ func (m *Map[V]) Delete(key []byte) {
 	m.m.Delete(h)
 }
 
+// LoadAndDelete deletes the value for a key, returning the previous value if
+// present. loaded is true only for the caller that actually removed it, so
+// concurrent callers that adjust external accounting (e.g. byte-size counters)
+// must act only when loaded is true.
+func (m *Map[V]) LoadAndDelete(key []byte) (value V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadAndDelete(h)
+}
+
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
 	return m.m.Size()

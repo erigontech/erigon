@@ -409,16 +409,6 @@ func applyOptions(opts []Option) options {
 	return opt
 }
 
-func init() {
-	// Every ExecModuleTester builds its own ExecModule, which allocates a
-	// default state cache. Go tests and the `evm blocktest` runner create one
-	// per fixture (thousands of them, run in parallel); at production cache
-	// sizes each allocates hundreds of MB of sharded-LRU tables, exhausting
-	// memory and stalling the run. A tiny cache is correct (it is an LRU) and
-	// sufficient for the few blocks a fixture imports.
-	cache.SetDefaultStateCacheSizesForTesting(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
-}
-
 // New creates an ExecModuleTester. When called with no options, it uses
 // sensible defaults (TestChainBerlinConfig, 1 Ether alloc, ethash.NewFaker, etc.).
 // Use With* options to customise.
@@ -738,6 +728,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
+		// Small per-instance domain cache: the harness builds one ExecModule per
+		// fixture, so production-size caches would allocate hundreds of MB each.
+		cache.NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB),
 		logger,
 		engine,
 		cfg.Sync,
