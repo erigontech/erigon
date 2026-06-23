@@ -660,6 +660,12 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return nil
 	}
 
+	// Output .kv version encodes the squeeze target for the version-gated reader (v2.0 squeezed,
+	// v2.1 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
+	prevRefs := at.a.referencesInCommitmentBranches()
+	at.a.applyReferencesInCommitmentBranches(opts.TargetSqueeze)
+	defer at.a.applyReferencesInCommitmentBranches(prevRefs)
+
 	dirs := at.Dirs()
 	rebuildDir := filepath.Join(dirs.Snap, "rebuild", "domain")
 	backupDir := filepath.Join(dirs.Snap, "backup", "domains")

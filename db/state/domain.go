@@ -156,7 +156,7 @@ func (d *Domain) kvWriteVersion() version.Version {
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
+	return d.kvNewFilePathIn("", fromStep, toStep)
 }
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kviAccessorNewFilePathIn("", fromStep, toStep)
@@ -173,7 +173,7 @@ func (d *Domain) kvNewFilePathIn(baseDir string, fromStep, toStep kv.Step) strin
 	if baseDir == "" {
 		baseDir = d.dirs.SnapDomain
 	}
-	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.kv", d.FileVersion.DataKV.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kviAccessorNewFilePathIn(baseDir string, fromStep, toStep kv.Step) string {
 	if baseDir == "" {
