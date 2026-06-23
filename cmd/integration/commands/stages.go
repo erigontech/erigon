@@ -626,9 +626,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if chainTipMode && noCommit {
-		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
-	}
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -714,9 +711,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		if noCommit {
-			return nil
-		}
 		return tx.Commit()
 	}
 
@@ -751,7 +745,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	doms.SetInMemHistoryReads(false)
 
 	if chainTipMode {
-		//if chainTip = true, forced noCommit = false
 		for bn := execProgress; bn < block; bn++ {
 			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
 				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
@@ -819,13 +812,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 
-		if !noCommit {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		if tx, err = db.BeginTemporalRw(ctx); err != nil {
+			return err
 		}
 
 		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
@@ -1197,7 +1188,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	if chainTipMode {
 		syncCfg.LoopBlockLimit = 1
 		syncCfg.AlwaysGenerateChangesets = true
-		noCommit = false
 	}
 
 	if !dbg.BatchCommitments {
