@@ -1379,7 +1379,7 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 // lockstep so they stay equal length.
 func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes VersionedWrites, accesses AccessSet) {
 	idx := version.TxIndex + 1
-	n := idx + 1
+	n := max(idx+1, len(io.inputs), len(io.outputs), len(io.accessed))
 	if n > len(io.inputs) {
 		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
 	}
