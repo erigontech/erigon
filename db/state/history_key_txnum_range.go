@@ -140,8 +140,8 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 		}
 
 		top := hi.h[0]
-		hi.curKey = top.key // stable: mmap slice (uncompressed) or fresh alloc (compressed)
-		idxVal := top.val   // stable: same reason
+		hi.curKey = top.key
+		idxVal := top.val
 
 		if top.g.HasNext() {
 			top.key, _ = top.g.Next(nil)
@@ -191,8 +191,6 @@ type HistoryKeyTxNumIterDB struct {
 
 	nextKey   []byte
 	nextTxNum uint64
-	k         []byte
-	txNum     uint64
 	err       error
 }
 
@@ -359,9 +357,9 @@ func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k, hi.txNum = hi.nextKey, hi.nextTxNum
+	k, txNum := hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return hi.k, hi.txNum, nil
+	return k, txNum, nil
 }
