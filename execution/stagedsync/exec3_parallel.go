@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -3404,6 +3405,60 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 							Version: ver,
 						})
 					}
+				}
+			}
+		}
+	}
+
+	// CodePath must travel with CodeHashPath; gated on raw-writeset
+	// CodePath/CodeHashPath presence to skip the fill-missing-loop case where
+	// the code is already in CodeDomain.
+	codeAddrInRaw := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		switch w.Path {
+		case state.CodePath, state.CodeHashPath:
+			codeAddrInRaw[w.Address] = true
+		}
+	}
+	codeInOutput := make(map[accounts.Address]bool)
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	for _, w := range filtered {
+		switch w.Path {
+		case state.CodePath:
+			codeInOutput[w.Address] = true
+		case state.CodeHashPath:
+			if h, ok := w.Val.(accounts.CodeHash); ok {
+				codeHashInOutput[w.Address] = h
+			}
+		}
+	}
+	emit := func(addr accounts.Address, code []byte, want accounts.CodeHash) bool {
+		if crypto.Keccak256Hash(code) != want.Value() {
+			return false
+		}
+		filtered = append(filtered, &state.VersionedWrite{
+			Address: addr,
+			Path:    state.CodePath,
+			Val:     code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
+		})
+		log.Warn("[codepath-recovery] re-emitted dropped CodePath",
+			"addr", common.Address(addr.Value()), "txIndex", txIndex, "incarnation", incarnation)
+		return true
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] || !codeAddrInRaw[addr] {
+			continue
+		}
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok && len(c) > 0 && emit(addr, c, h) {
+				continue
+			}
+		}
+		if stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				if _, ok := types.ParseDelegation(c); ok {
+					emit(addr, c, h)
 				}
 			}
 		}
