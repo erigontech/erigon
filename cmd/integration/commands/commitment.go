@@ -508,10 +508,28 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 	outAgg.PresetOfflineMerge()
 
 	if commitmentStateKeyOnly {
+		// Fail fast (before the long stream/compress) if the recovered root doesn't match the
+		// canonical block header — that would mean the source file's branches are inconsistent.
+		verify := func(blockNum uint64, root []byte) error {
+			roTx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer roTx.Rollback()
+			h, err := br.HeaderByNumber(ctx, roTx, blockNum)
+			if err != nil {
+				return err
+			}
+			if h != nil && h.Root != common.BytesToHash(root) {
+				return fmt.Errorf("recovered root %x does not match header root %x for block %d (source branches inconsistent?)", root, h.Root, blockNum)
+			}
+			logger.Info("[commitment_rebuild] root verified against header", "block", blockNum, "root", hex.EncodeToString(root))
+			return nil
+		}
 		// Read the source commitment file via the source DB's aggregator, stream it into the
 		// output dir with the state key added, then build the new file's accessors.
 		dstPath, root, err := dbstate.RegenerateCommitmentFileWithStateKey(ctx, db, &txNumsReader,
-			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), outDirs.SnapDomain, logger)
+			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), outDirs.SnapDomain, logger, verify)
 		if err != nil {
 			return err
 		}

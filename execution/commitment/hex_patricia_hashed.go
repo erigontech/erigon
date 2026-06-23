@@ -3378,6 +3378,25 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
+// HexTrieEncodeRootState builds the encoded trie state stored under the commitment "state"
+// key for a trie whose root hash is rootHash. Only the root cell's hash is recorded; the full
+// branch structure is read from the file's branches on restore. Used to recreate the state
+// entry for a commitment file that kept its branches but lost the state key (purification).
+func HexTrieEncodeRootState(rootHash []byte) ([]byte, error) {
+	if len(rootHash) != length.Hash {
+		return nil, fmt.Errorf("root hash must be %d bytes, got %d", length.Hash, len(rootHash))
+	}
+	var rc cell
+	rc.hashLen = length.Hash
+	copy(rc.hash[:], rootHash)
+	s := state{
+		Root:        rc.Encode(),
+		RootChecked: true,
+		RootPresent: true,
+	}
+	return s.Encode(nil)
+}
+
 func HexTrieExtractStateRoot(enc []byte) ([]byte, uint64, uint64, error) {
 	if len(enc) < 18 { // 8*2+2
 		return nil, 0, 0, fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)

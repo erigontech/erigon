@@ -100,7 +100,7 @@ func TestComputeCommitmentStateValueForRange(t *testing.T) {
 		wantRoot, ok := readCommitmentStateRoot(t, dirs, r.from, r.to)
 		require.True(t, ok, "source file %d-%d must have state key", r.from, r.to)
 
-		stateVal, gotRoot, err := state.ComputeCommitmentStateValueForRange(ctx, db, &rawdbv3.TxNums,
+		stateVal, gotRoot, _, err := state.ComputeCommitmentStateValueForRange(ctx, db, &rawdbv3.TxNums,
 			kv.Step(r.from), kv.Step(r.to), log.New())
 		require.NoError(t, err, "range %d-%d", r.from, r.to)
 		require.Equal(t, wantRoot, common.BytesToHash(gotRoot), "root mismatch for %d-%d", r.from, r.to)
@@ -119,7 +119,7 @@ func TestComputeCommitmentStateValueForRange(t *testing.T) {
 		srcKV := readAllCommitmentKV(t, dirs, r.from, r.to)
 		outDir := t.TempDir()
 		dstPath, _, err := state.RegenerateCommitmentFileWithStateKey(ctx, db, &rawdbv3.TxNums,
-			kv.Step(r.from), kv.Step(r.to), outDir, log.New())
+			kv.Step(r.from), kv.Step(r.to), outDir, log.New(), nil)
 		require.NoError(t, err)
 		dstKV := readAllCommitmentKVFile(t, dstPath, r.from, r.to)
 
