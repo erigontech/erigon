@@ -18,7 +18,6 @@ package eliasfano16
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
 	"math/bits"
@@ -118,8 +117,18 @@ func (ef *EliasFano) deriveFields() int {
 	return wordsUpperBits
 }
 
-// Build construct Elias Fano index for a given sequences
+// Build constructs the Elias-Fano jump table; it panics if the sequence is too
+// sparse for this variant's 16-bit jump offsets (encode such data with eliasfano32).
 func (ef *EliasFano) Build() {
+	if !ef.build() {
+		panic("eliasfano16: superQ-block span exceeds the 16-bit jump offset; sequence too sparse for the compact variant, use eliasfano32")
+	}
+}
+
+// build fills the jump table, returning false (with the table left partial, so
+// the result must be discarded) when a jump offset exceeds 16 bits, so callers
+// can reject out-of-range sequences instead of panicking.
+func (ef *EliasFano) build() bool {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
 		for word := ef.upperBits[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
 			b := uint64(bits.TrailingZeros64(word))
@@ -130,16 +139,9 @@ func (ef *EliasFano) Build() {
 			}
 			if (c & qMask) == 0 {
 				// When c is multiple of 2^8 (256)
-				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-				// offset needs to be encoded as 16-bit integer, therefore the following check
-				if offset >= (1 << 16) {
-					fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
-					fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
-					fmt.Printf("ef.minDelta=%x\n", ef.minDelta)
-					//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
-					//fmt.Printf("ef.lowerBits=%x\n", ef.lowerBits)
-					//fmt.Printf("ef.wordsUpperBits=%b\n", ef.wordsUpperBits)
-					panic("")
+				offset := i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+				if offset >= (1 << 16) {        // must fit the 16-bit jump slot
+					return false
 				}
 				// c % superQ is the bit index inside the group of 4096 bits
 				jumpSuperQ := (c / superQ) * superQSize
@@ -152,6 +154,7 @@ func (ef *EliasFano) Build() {
 			c++
 		}
 	}
+	return true
 }
 
 func (ef *EliasFano) get(i uint64) (val, window uint64, sel int, currWord, lower, delta uint64) {
@@ -281,9 +284,17 @@ func (ef *DoubleEliasFano) deriveFields() (int, int) {
 	return r.WordsCumKeys, r.WordsPosition
 }
 
-// Build construct double Elias Fano index for two given sequences
+// Build constructs the double Elias-Fano jump table; it panics if either
+// sequence is too sparse for this variant's 16-bit jump offsets (use eliasfano32).
 func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
-	//fmt.Printf("cumKeys = %d\nposition = %d\n", cumKeys, position)
+	if !ef.build(cumKeys, position) {
+		panic("eliasfano16: superQ-block span exceeds the 16-bit jump offset; sequence too sparse for the compact variant, use eliasfano32")
+	}
+}
+
+// build mirrors (*EliasFano).build: it returns false (jump table left partial)
+// on a jump offset exceeding 16 bits instead of panicking.
+func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 	if len(cumKeys) != len(position) {
 		panic("len(cumKeys) != len(position)")
 	}
@@ -346,10 +357,9 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 			}
 			if (c & qMask) == 0 {
 				// When c is multiple of 2^8 (256)
-				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-				// offset needs to be encoded as 16-bit integer, therefore the following check
-				if offset >= (1 << 16) {
-					panic("")
+				offset := i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+				if offset >= (1 << 16) {        // must fit the 16-bit jump slot
+					return false
 				}
 				// c % superQ is the bit index inside the group of 4096 bits
 				jumpSuperQ := (c / superQ) * (superQSize * 2)
@@ -371,9 +381,9 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 				ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
 			}
 			if (c & qMask) == 0 {
-				var offset = i*64 + b - lastSuperQ
-				if offset >= (1 << 16) {
-					panic("")
+				offset := i*64 + b - lastSuperQ
+				if offset >= (1 << 16) { // must fit the 16-bit jump slot
+					return false
 				}
 				jumpSuperQ := (c / superQ) * (superQSize * 2)
 				jumpInsideSuperQ := 2*((c%superQ)/q) + 1
@@ -385,7 +395,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 			c++
 		}
 	}
-	//fmt.Printf("jump: %x\n", ef.jump)
+	return true
 }
 
 // setBits stores a value at bit position start.
