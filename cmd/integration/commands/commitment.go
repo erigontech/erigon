@@ -508,40 +508,46 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 	outAgg.PresetOfflineMerge()
 
 	if commitmentStateKeyOnly {
-		// Fail fast (before the long stream/compress) if the recovered root doesn't match the
-		// canonical block header — that would mean the source file's branches are inconsistent.
-		// A file boundary often falls mid-block (partial block); a partial-block root is not the
-		// full-block header root, so skip the comparison then (same as the integrity check).
-		txNum := commitmentRangeStepTo*settings.StepSize - 1
-		verify := func(blockNum uint64, root []byte) error {
+		// Choose the state-key labels by matching the recovered root against block headers.
+		// Production/execution-built files store a block-boundary state (root == header(B).Root,
+		// txNum == B's last txnum); the offline rebuild stores a mid-block state at endTxNum-1.
+		// If the root matches the boundary block (the one containing endTxNum-1) or the previous
+		// one, use that block-boundary label (strong verification); otherwise keep the default
+		// mid-block labels and rely on the integrity recompute.
+		resolveLabel := func(root []byte, defBlockNum, defTxNum uint64) (uint64, uint64, error) {
 			roTx, err := db.BeginTemporalRo(ctx)
 			if err != nil {
-				return err
+				return 0, 0, err
 			}
 			defer roTx.Rollback()
-			blockMaxTxNum, err := txNumsReader.Max(ctx, roTx, blockNum)
-			if err != nil {
-				return err
+			rootH := common.BytesToHash(root)
+			for _, cand := range []uint64{defBlockNum, defBlockNum - 1} {
+				h, err := br.HeaderByNumber(ctx, roTx, cand)
+				if err != nil {
+					return 0, 0, err
+				}
+				if h == nil || h.Root != rootH {
+					continue
+				}
+				bmax, err := txNumsReader.Max(ctx, roTx, cand)
+				if err != nil {
+					return 0, 0, err
+				}
+				if bmax > defTxNum { // boundary beyond the file → not this file's last commitment
+					continue
+				}
+				logger.Info("[commitment_rebuild] root matches a block boundary; using block-boundary state key",
+					"block", cand, "txNum", bmax, "root", hex.EncodeToString(root))
+				return cand, bmax, nil
 			}
-			if txNum < blockMaxTxNum {
-				logger.Info("[commitment_rebuild] file boundary is a partial block; root is not header-comparable, skipping header check",
-					"block", blockNum, "txNum", txNum, "blockMaxTxNum", blockMaxTxNum, "root", hex.EncodeToString(root))
-				return nil
-			}
-			h, err := br.HeaderByNumber(ctx, roTx, blockNum)
-			if err != nil {
-				return err
-			}
-			if h != nil && h.Root != common.BytesToHash(root) {
-				return fmt.Errorf("recovered root %x does not match header root %x for block %d (source branches inconsistent?)", root, h.Root, blockNum)
-			}
-			logger.Info("[commitment_rebuild] root verified against header", "block", blockNum, "root", hex.EncodeToString(root))
-			return nil
+			logger.Info("[commitment_rebuild] root matches no nearby header (mid-block / rebuild convention); using endTxNum-1 labels (final check is the integrity recompute)",
+				"block", defBlockNum, "txNum", defTxNum, "root", hex.EncodeToString(root))
+			return defBlockNum, defTxNum, nil
 		}
 		// Read the source commitment file via the source DB's aggregator, stream it into the
 		// output dir with the state key added, then build the new file's accessors.
 		dstPath, root, err := dbstate.RegenerateCommitmentFileWithStateKey(ctx, db, &txNumsReader,
-			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), outDirs.SnapDomain, logger, verify)
+			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), outDirs.SnapDomain, logger, resolveLabel)
 		if err != nil {
 			return err
 		}

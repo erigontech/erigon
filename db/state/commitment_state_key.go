@@ -19,12 +19,13 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// ComputeCommitmentStateValueForRange returns the encoded KeyCommitmentState value for the
-// commitment file covering steps [fromStep,toStep). It loads the trie root from the existing
-// commitment files (touching a single existing key so only the root path is read — not the
-// whole range) and encodes the resulting state. This is the cheap way to recover the state
-// key for a file that has all its branch data but had the state entry stripped (purified).
-func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, fromStep, toStep kv.Step, logger log.Logger) (stateVal []byte, rootHash []byte, blockNumber uint64, err error) {
+// CommitmentRootForRange computes the trie root of the commitment file covering steps
+// [fromStep,toStep) by loading the root from the existing commitment files (touching a single
+// existing key so only the root path is read — not the whole range). It also returns the
+// default state-key labels (blockNum, txNum) using the offline-rebuild convention (txNum =
+// endTxNum-1). Callers may override the labels (e.g. to the block-boundary convention) before
+// building the state value with EncodeCommitmentStateValue.
+func CommitmentRootForRange(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, fromStep, toStep kv.Step, logger log.Logger) (rootHash []byte, blockNum, txNum uint64, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	stepSize := a.StepSize()
 	fromTx, toTx := uint64(fromStep)*stepSize, uint64(toStep)*stepSize
@@ -35,10 +36,10 @@ func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRw
 	// one existing key whose path forces the root branch to be read and folded
 	oneKey, dom, err := firstKeyInRange(acRo, fromTx, toTx)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, 0, err
 	}
 
-	blockNum, err := func() (uint64, error) {
+	blockNum, err = func() (uint64, error) {
 		roTx, err := a.db.BeginRo(ctx)
 		if err != nil {
 			return 0, err
@@ -56,12 +57,12 @@ func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRw
 		return bn, nil
 	}()
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	rwTx, err := rwDb.BeginTemporalRw(ctx)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer rwTx.Rollback()
 
@@ -69,12 +70,12 @@ func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRw
 	// clear them in this rolled-back tx so SeekCommitment starts from an empty trie and we
 	// load the root purely from the range's files.
 	if err := clearCommitmentTables(rwTx); err != nil {
-		return nil, nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	domains, err := execctx.NewSharedDomainsWithTrieVariant(ctx, rwTx, logger, commitment.VariantHexPatriciaTrie)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer domains.Close()
 
@@ -93,27 +94,45 @@ func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRw
 	domains.GetCommitmentCtx().TouchKey(dom, string(oneKey), nil)
 	rh, err := domains.GetCommitmentCtx().ComputeCommitment(ctx, rwTx, false /* saveState */, blockNum, toTx-1, "", nil)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("ComputeCommitment: %w", err)
+		return nil, 0, 0, fmt.Errorf("ComputeCommitment: %w", err)
 	}
 	if len(rh) != length.Hash || bytes.Equal(rh, make([]byte, length.Hash)) {
-		return nil, nil, 0, fmt.Errorf("computed empty/invalid root %x for range %d-%d", rh, fromStep, toStep)
+		return nil, 0, 0, fmt.Errorf("computed empty/invalid root %x for range %d-%d", rh, fromStep, toStep)
 	}
+	logger.Info("[commitment_state_key] computed", "range", fmt.Sprintf("%d-%d", fromStep, toStep), "block", blockNum, "root", common.BytesToHash(rh))
+	return bytes.Clone(rh), blockNum, toTx - 1, nil
+}
 
-	// Build the state value from the computed root directly. The trie's auto-saved state can
-	// carry an unmaterialized (empty) root cell on deep tries after a single-key fold, whereas
-	// the returned root hash is always computed fresh and correct.
-	trieState, err := commitment.HexTrieEncodeRootState(rh)
+// EncodeCommitmentStateValue wraps a root hash and (blockNum, txNum) into the encoded
+// KeyCommitmentState value. The trie state carries only the root cell hash; the full branch
+// structure is read from the file on restore.
+func EncodeCommitmentStateValue(rootHash []byte, blockNum, txNum uint64) ([]byte, error) {
+	trieState, err := commitment.HexTrieEncodeRootState(rootHash)
+	if err != nil {
+		return nil, err
+	}
+	v := make([]byte, 18+len(trieState))
+	binary.BigEndian.PutUint64(v[0:8], txNum)
+	binary.BigEndian.PutUint64(v[8:16], blockNum)
+	binary.BigEndian.PutUint16(v[16:18], uint16(len(trieState)))
+	copy(v[18:], trieState)
+	return v, nil
+}
+
+// ComputeCommitmentStateValueForRange recovers the KeyCommitmentState value for the file
+// covering steps [fromStep,toStep) using the default (offline-rebuild) labels. This is the
+// cheap way to recover the state key for a file that has all its branch data but had the
+// state entry stripped (purified).
+func ComputeCommitmentStateValueForRange(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, fromStep, toStep kv.Step, logger log.Logger) (stateVal []byte, rootHash []byte, blockNumber uint64, err error) {
+	rh, blockNum, txNum, err := CommitmentRootForRange(ctx, rwDb, txNumsReader, fromStep, toStep, logger)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	stateVal = make([]byte, 18+len(trieState))
-	binary.BigEndian.PutUint64(stateVal[0:8], toTx-1)
-	binary.BigEndian.PutUint64(stateVal[8:16], blockNum)
-	binary.BigEndian.PutUint16(stateVal[16:18], uint16(len(trieState)))
-	copy(stateVal[18:], trieState)
-
-	logger.Info("[commitment_state_key] computed", "range", fmt.Sprintf("%d-%d", fromStep, toStep), "block", blockNum, "root", common.BytesToHash(rh))
-	return stateVal, bytes.Clone(rh), blockNum, nil
+	stateVal, err = EncodeCommitmentStateValue(rh, blockNum, txNum)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	return stateVal, rh, blockNum, nil
 }
 
 // firstKeyInRange returns the first key (and its domain) from the accounts file for the exact
@@ -144,11 +163,13 @@ func firstKeyInRange(acRo *AggregatorRoTx, fromTx, toTx uint64) ([]byte, kv.Doma
 // state value is computed by ComputeCommitmentStateValueForRange. Returns the new file path
 // and the root hash. Accessors are NOT built here (caller rebuilds them).
 //
-// verify, if non-nil, is called with the (blockNum, rootHash) of the recovered state before
-// the expensive streaming/compression — letting the caller reject a wrong root in seconds
-// (e.g. by comparing against the canonical block header) instead of after the whole file is
-// rewritten.
-func RegenerateCommitmentFileWithStateKey(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, fromStep, toStep kv.Step, dstDir string, logger log.Logger, verify func(blockNum uint64, rootHash []byte) error) (dstPath string, rootHash []byte, err error) {
+// resolveLabel, if non-nil, is called with the recovered root and the default labels
+// (blockNum, txNum from the offline-rebuild convention) before the expensive
+// streaming/compression. It returns the (blockNum, txNum) to record in the state key — letting
+// the caller pick the block-boundary convention when the root matches a block header, or fall
+// back to the default mid-block labels otherwise. Returning an error aborts (e.g. the root
+// matches no expected header → source branches inconsistent).
+func RegenerateCommitmentFileWithStateKey(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, fromStep, toStep kv.Step, dstDir string, logger log.Logger, resolveLabel func(rootHash []byte, defBlockNum, defTxNum uint64) (blockNum, txNum uint64, err error)) (dstPath string, rootHash []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	fromTx, toTx := uint64(fromStep)*a.StepSize(), uint64(toStep)*a.StepSize()
 
@@ -165,21 +186,25 @@ func RegenerateCommitmentFileWithStateKey(ctx context.Context, rwDb kv.TemporalR
 		return "", nil, fmt.Errorf("no commitment file for range %d-%d", fromStep, toStep)
 	}
 
-	stateVal, rootHash, blockNum, err := ComputeCommitmentStateValueForRange(ctx, rwDb, txNumsReader, fromStep, toStep, logger)
+	rh, blockNum, txNum, err := CommitmentRootForRange(ctx, rwDb, txNumsReader, fromStep, toStep, logger)
 	if err != nil {
 		return "", nil, err
 	}
-	if verify != nil {
-		if err := verify(blockNum, rootHash); err != nil {
+	if resolveLabel != nil {
+		if blockNum, txNum, err = resolveLabel(rh, blockNum, txNum); err != nil {
 			return "", nil, err
 		}
+	}
+	stateVal, err := EncodeCommitmentStateValue(rh, blockNum, txNum)
+	if err != nil {
+		return "", nil, err
 	}
 
 	dstPath = filepath.Join(dstDir, filepath.Base(srcPath))
 	if err := streamCommitmentWithStateKey(ctx, a, srcPath, dstPath, fromStep, toStep, stateVal, logger); err != nil {
 		return "", nil, err
 	}
-	return dstPath, rootHash, nil
+	return dstPath, rh, nil
 }
 
 func streamCommitmentWithStateKey(ctx context.Context, a *Aggregator, srcPath, dstPath string, fromStep, toStep kv.Step, stateVal []byte, logger log.Logger) error {
