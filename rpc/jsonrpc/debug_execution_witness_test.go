@@ -23,6 +23,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -251,6 +253,49 @@ func TestCollectAccessedState_KeysIncludeDeletedPreExisting(t *testing.T) {
 	if sawCreatedThenDeleted {
 		t.Error("preimage for an account that never existed pre-state and was deleted in-block must be excluded")
 	}
+}
+
+// TestCheckWitnessKeysComplete pins the internal verifier's keys[]-completeness check:
+// every account/storage leaf the stateless re-execution resolved from the witness trie
+// must have its preimage in keys[]; the protocol system address is exempt.
+func TestCheckWitnessKeysComplete(t *testing.T) {
+	addrA := common.HexToAddress("0x16fd7629978addaf41c426601176c37977a0faa7")
+	addrB := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	slotS := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000000000aa")
+	sys := common.Address(params.SystemAddress.Value())
+	key20 := func(a common.Address) hexutil.Bytes { return bytes.Clone(a[:]) }
+	key32 := func(h common.Hash) hexutil.Bytes { return bytes.Clone(h[:]) }
+
+	t.Run("missing account preimage flagged", func(t *testing.T) {
+		used := map[common.Address]struct{}{addrA: {}}
+		if err := checkWitnessKeysComplete(used, nil, nil); err == nil {
+			t.Fatal("expected error: accessed account leaf missing from keys[]")
+		}
+	})
+	t.Run("present account preimage ok", func(t *testing.T) {
+		used := map[common.Address]struct{}{addrA: {}}
+		if err := checkWitnessKeysComplete(used, nil, []hexutil.Bytes{key20(addrA)}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("system address exempt", func(t *testing.T) {
+		used := map[common.Address]struct{}{sys: {}}
+		if err := checkWitnessKeysComplete(used, nil, nil); err != nil {
+			t.Fatalf("system address must not require a preimage: %v", err)
+		}
+	})
+	t.Run("missing slot preimage flagged", func(t *testing.T) {
+		usedS := map[common.Hash]struct{}{slotS: {}}
+		if err := checkWitnessKeysComplete(nil, usedS, []hexutil.Bytes{key20(addrB)}); err == nil {
+			t.Fatal("expected error: accessed storage leaf missing from keys[]")
+		}
+	})
+	t.Run("present slot preimage ok", func(t *testing.T) {
+		usedS := map[common.Hash]struct{}{slotS: {}}
+		if err := checkWitnessKeysComplete(nil, usedS, []hexutil.Bytes{key32(slotS)}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func TestResolveWitnessMode(t *testing.T) {
