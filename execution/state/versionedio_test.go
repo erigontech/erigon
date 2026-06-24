@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -1292,4 +1293,52 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.spuriousDragon, tc.isAura, tc.addr))
 		})
 	}
+}
+
+// TestVersionedUpdates_EstimateCellConsumed pins #21667: finalize
+// reconstruction must consume an in-block subfield write that sits in an
+// Estimate (Dependency) cell, not fall back to the stale pre-block value. The
+// per-path versionedUpdate helpers must gate on != MVReadResultNone (Done OR
+// Dependency), like versionedUpdateAddress and main's generic versionedUpdate;
+// gating on == MVReadResultDone drops the Estimate cell and reads stale state,
+// diverging balance/nonce/codeHash/storage and the trie root.
+func TestVersionedUpdates_EstimateCellConsumed(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x7667"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	vm := NewVersionMap(nil)
+
+	ver := Version{TxIndex: 1, Incarnation: 0}
+	newBalance := *uint256.NewInt(0xB0)
+	newNonce := uint64(7)
+	newIncarnation := uint64(3)
+	newCodeHash := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00}))
+	newStorage := *uint256.NewInt(0x5707)
+
+	// complete=false → Estimate cells (Dependency status when read from tx 5).
+	vm.WriteBalance(addr, ver, newBalance, false)
+	vm.WriteNonce(addr, ver, newNonce, false)
+	vm.WriteIncarnation(addr, ver, newIncarnation, false)
+	vm.WriteCodeHash(addr, ver, newCodeHash, false)
+	vm.WriteStorage(addr, key, ver, newStorage, false)
+
+	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil)
+
+	stale := accounts.NewAccount()
+	stale.Balance = *uint256.NewInt(0x01)
+	stale.Nonce = 1
+	stale.Incarnation = 1
+	stale.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xFF}))
+
+	got := vr.applyVersionedUpdates(addr, stale)
+	require.Equal(t, newBalance, got.Balance, "Estimate-cell balance must be consumed, not stale")
+	require.Equal(t, newNonce, got.Nonce, "Estimate-cell nonce must be consumed")
+	require.Equal(t, newIncarnation, got.Incarnation, "Estimate-cell incarnation must be consumed")
+	require.Equal(t, newCodeHash, got.CodeHash, "Estimate-cell codeHash must be consumed")
+
+	storageGot, ok, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.True(t, ok, "Estimate-cell storage must be found")
+	require.Equal(t, newStorage, storageGot, "Estimate-cell storage must be consumed, not stale")
 }

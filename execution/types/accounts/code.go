@@ -16,6 +16,8 @@
 
 package accounts
 
+import "github.com/erigontech/erigon/common/crypto"
+
 // Code pairs EVM bytecode with its interned CodeHash.
 //
 // INVARIANT: Hash == Keccak256(Bytes), computed once at construction. Bytes is
@@ -29,6 +31,15 @@ type Code struct {
 
 // EmptyCode is the canonical empty bytecode value (len 0, Hash = EmptyCodeHash).
 var EmptyCode = Code{Hash: EmptyCodeHash}
+
+// NewCode builds a Code from raw bytecode, hashing once so the
+// Hash == Keccak256(Bytes) invariant holds by construction.
+func NewCode(bytes []byte) Code {
+	if len(bytes) == 0 {
+		return EmptyCode
+	}
+	return Code{Hash: InternCodeHash(crypto.HashData(bytes)), Bytes: bytes}
+}
 
 func (c Code) Len() int      { return len(c.Bytes) }
 func (c Code) IsEmpty() bool { return len(c.Bytes) == 0 }

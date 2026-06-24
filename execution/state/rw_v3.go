@@ -105,28 +105,28 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 			switch h.Path {
 			case BalancePath:
-				v, _ := Val[uint256.Int](w)
+				v := MustVal[uint256.Int](w)
 				d.balance = &v
 			case NoncePath:
-				v, _ := Val[uint64](w)
+				v := MustVal[uint64](w)
 				d.nonce = &v
 			case IncarnationPath:
-				v, _ := Val[uint64](w)
+				v := MustVal[uint64](w)
 				d.incarnation = &v
 			case CodeHashPath:
-				v, _ := Val[accounts.CodeHash](w)
+				v := MustVal[accounts.CodeHash](w)
 				d.codeHash = &v
 			case CodePath:
-				v, _ := Val[accounts.Code](w)
+				v := MustVal[accounts.Code](w)
 				d.code = v.Bytes
 			case SelfDestructPath:
-				v, _ := Val[bool](w)
+				v := MustVal[bool](w)
 				d.selfDestruct = v
 			case CreateContractPath:
-				v, _ := Val[bool](w)
+				v := MustVal[bool](w)
 				d.createContract = v
 			case StoragePath:
-				v, _ := Val[uint256.Int](w)
+				v := MustVal[uint256.Int](w)
 				d.storage = append(d.storage, storageItem{h.Key, v})
 			}
 		}

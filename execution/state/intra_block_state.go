@@ -1249,8 +1249,8 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	codeHash := accounts.InternCodeHash(crypto.HashData(code))
-	canonical := accounts.Code{Hash: codeHash, Bytes: code}
+	canonical := accounts.NewCode(code)
+	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	written, err := stateObject.SetCode(canonical, !sdb.hasWrite(addr, CodePath, accounts.NilKey), reason)
 	if err != nil {
