@@ -74,7 +74,7 @@ func TestParseBlockNumber(t *testing.T) {
 		{
 			name:    "decimal number",
 			input:   "100",
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 
