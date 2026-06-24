@@ -616,15 +616,17 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		name := filepath.Base(f.Fullpath())
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
 		rootNodePrefix := []byte("state")
-		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
+		rootNode, ok, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
 		if err != nil {
 			return fmt.Errorf("failed to get root node from files: %w", err)
 		}
-		rootString, err := commitment.HexTrieStateToShortString(rootNode)
-		if err != nil {
-			return fmt.Errorf("failed to extract state root from root node: %w", err)
+		rootString := "<NO state key>"
+		if ok && len(rootNode) > 0 {
+			if rootString, err = commitment.HexTrieStateToShortString(rootNode); err != nil {
+				rootString = fmt.Sprintf("<bad state key: %v>", err)
+			}
 		}
-		fmt.Printf("%28s: prefixes %8s %s\n", name, common.PrettyCounter(count), rootString)
+		fmt.Printf("%28s: endTxNum %d prefixes %8s %s\n", name, f.EndRootNum(), common.PrettyCounter(count), rootString)
 	}
 
 	str, err := dbstate.CheckCommitmentForPrint(ctx, db)
