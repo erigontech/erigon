@@ -44,8 +44,8 @@ type BranchCache struct {
 	// read path.
 	root atomic.Pointer[branchCacheEntry]
 
-	// LRU tail — bounded entries, evicts oldest when full. Sharded so the many
-	// concurrent commitment warmup workers don't serialize on one LRU mutex.
+	// LRU tail — bounded entries, evicts oldest when full. Sharded; see
+	// branchCacheTailShards for why.
 	tail *maphash.ShardedLRU[*branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().

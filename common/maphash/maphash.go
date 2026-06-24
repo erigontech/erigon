@@ -150,31 +150,33 @@ func (l *LRU[V]) Purge() {
 }
 
 // ShardedLRU is a thread-safe LRU split into independently-locked shards keyed
-// by the low bits of the maphash. A single lru.Cache serializes every Get on one
+// by the low bits of the maphash. A single LRU serializes every Get on one
 // mutex (Get promotes recency); sharding cuts that lock traffic by the shard
 // count, which is what makes it usable from many concurrent readers.
 type ShardedLRU[V any] struct {
-	shards []*lru.Cache[uint64, V]
+	shards []*LRU[V]
 	mask   uint64
 }
 
-// NewShardedLRU creates a sharded LRU holding ~size entries total, spread over
-// shards (rounded down to a power of two, clamped to [1, size]).
+// NewShardedLRU creates a sharded LRU holding size entries total, partitioned
+// as evenly as possible across shards. The shard count is the requested count
+// capped at size, rounded down to a power of two.
 func NewShardedLRU[V any](size, shards int) (*ShardedLRU[V], error) {
-	if shards < 1 {
-		shards = 1
+	if shards > size {
+		shards = size
 	}
 	n := 1
 	for n*2 <= shards {
 		n *= 2
 	}
-	if n > size {
-		n = 1
-	}
-	perShard := (size + n - 1) / n
-	s := &ShardedLRU[V]{shards: make([]*lru.Cache[uint64, V], n), mask: uint64(n - 1)}
+	base, extra := size/n, size%n
+	s := &ShardedLRU[V]{shards: make([]*LRU[V], n), mask: uint64(n - 1)}
 	for i := range s.shards {
-		c, err := lru.New[uint64, V](perShard)
+		shardSize := base
+		if i < extra {
+			shardSize++
+		}
+		c, err := NewLRU[V](shardSize)
 		if err != nil {
 			return nil, err
 		}
@@ -183,29 +185,29 @@ func NewShardedLRU[V any](size, shards int) (*ShardedLRU[V], error) {
 	return s, nil
 }
 
-func (l *ShardedLRU[V]) shardOf(hash uint64) *lru.Cache[uint64, V] {
+func (l *ShardedLRU[V]) shardOf(hash uint64) *LRU[V] {
 	return l.shards[hash&l.mask]
 }
 
 func (l *ShardedLRU[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
-	return l.shardOf(h).Get(h)
+	return l.shardOf(h).GetByHash(h)
 }
 
 func (l *ShardedLRU[V]) Set(key []byte, value V) {
 	h := Hash(key)
-	l.shardOf(h).Add(h, value)
+	l.shardOf(h).SetByHash(h, value)
 }
 
 func (l *ShardedLRU[V]) Delete(key []byte) {
 	h := Hash(key)
-	l.shardOf(h).Remove(h)
+	l.shardOf(h).DeleteByHash(h)
 }
 
 // DeleteByHash removes the entry under a pre-computed hash; pair with Range,
 // which yields the same hashes used for shard routing.
 func (l *ShardedLRU[V]) DeleteByHash(hash uint64) {
-	l.shardOf(hash).Remove(hash)
+	l.shardOf(hash).DeleteByHash(hash)
 }
 
 func (l *ShardedLRU[V]) Len() int {
@@ -226,14 +228,16 @@ func (l *ShardedLRU[V]) Purge() {
 // false from fn to stop early. The original byte-key is not recoverable.
 func (l *ShardedLRU[V]) Range(fn func(hash uint64, v V) bool) {
 	for _, c := range l.shards {
-		for _, h := range c.Keys() {
-			v, ok := c.Peek(h)
-			if !ok {
-				continue
-			}
+		stopped := false
+		c.Range(func(h uint64, v V) bool {
 			if !fn(h, v) {
-				return
+				stopped = true
+				return false
 			}
+			return true
+		})
+		if stopped {
+			return
 		}
 	}
 }

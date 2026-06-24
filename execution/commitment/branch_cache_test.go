@@ -220,3 +220,33 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 	_, _, ok = c.Get(aboveKey)
 	require.False(t, ok, "entry at txN>watermark must be evicted")
 }
+
+// TestBranchCache_ShardedTailUnwindAcrossShards exercises UnwindTo at the
+// production tail granularity: a capacity >= branchCacheTailShards spreads the
+// tail across all 256 shards, whereas the other tests here use small capacities
+// that collapse it to one shard. It pins that the Range→DeleteByHash pairing
+// routes correctly across shards — every stale entry is evicted and every fresh
+// one survives, no matter which shard it landed in.
+func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
+	c := NewBranchCache(DefaultBranchCacheTailCapacity)
+
+	const n = 2000
+	const watermark = 1000
+	for i := 0; i < n; i++ {
+		prefix := []byte{0x01, byte(i), byte(i >> 8)}
+		c.Put(prefix, []byte{byte(i)}, 0, uint64(i))
+	}
+
+	evicted := c.UnwindTo(watermark)
+	require.Equal(t, n-watermark-1, evicted, "every tail entry with txN > watermark must be evicted")
+
+	for i := 0; i < n; i++ {
+		prefix := []byte{0x01, byte(i), byte(i >> 8)}
+		_, _, ok := c.Get(prefix)
+		if uint64(i) > watermark {
+			require.False(t, ok, "entry txN=%d must be evicted by watermark=%d", i, watermark)
+		} else {
+			require.True(t, ok, "entry txN=%d must survive watermark=%d", i, watermark)
+		}
+	}
+}

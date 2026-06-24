@@ -91,6 +91,22 @@ func TestShardedLRUConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestShardedLRUMoreShardsThanSize(t *testing.T) {
+	l, err := NewShardedLRU[int](50, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shard count capped at size (50) then rounded down to a power of two = 32,
+	// not collapsed to a single shard.
+	if len(l.shards) != 32 {
+		t.Fatalf("shard count = %d want 32", len(l.shards))
+	}
+	l.Set([]byte("k"), 42)
+	if v, ok := l.Get([]byte("k")); !ok || v != 42 {
+		t.Fatalf("Get after Set = %d,%v want 42,true", v, ok)
+	}
+}
+
 func TestSetSeed(t *testing.T) {
 	SetSeed(12345)
 	key := []byte("test")
