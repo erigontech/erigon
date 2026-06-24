@@ -203,32 +203,32 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 	}
 }
 
-func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) error {
+func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) (subscribed, expired int, err error) {
 	validator := g.newPubsubValidator(service, conditions...)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
-		return err
+		return
 	}
 	// register all topics and subscribe
-	subscribed, expired := 0, 0
 	for _, name := range service.Names() {
 		topic := composeTopic(forkDigest, name)
-		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
-			return err
+		if err = g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
+			return
 		}
-		topicHandle, err := g.p2p.Pubsub().Join(topic)
-		if err != nil {
-			return err
+		topicHandle, joinErr := g.p2p.Pubsub().Join(topic)
+		if joinErr != nil {
+			err = joinErr
+			return
 		}
 		if params := g.topicScoreParams(name); params != nil {
-			if err := topicHandle.SetScoreParams(params); err != nil {
+			if err = topicHandle.SetScoreParams(params); err != nil {
 				topicHandle.Close()
-				return err
+				return
 			}
 		}
-		if err := g.subscriptions.Add(topic, topicHandle, validator); err != nil {
+		if err = g.subscriptions.Add(topic, topicHandle, validator); err != nil {
 			topicHandle.Close()
-			return err
+			return
 		}
 		err = g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name))
 		switch {
@@ -237,12 +237,12 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		case errors.Is(err, ErrExpiryInThePast):
 			expired++
 		default:
-			return err
+			return
 		}
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
-	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
-	return nil
+	err = nil
+	return
 }
 
 func (g *GossipManager) defaultExpiryForTopic(name string) time.Time {
