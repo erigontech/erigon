@@ -103,6 +103,31 @@ func TestGloasWeightTreePrepareIsIdempotent(t *testing.T) {
 	require.Empty(t, f.gloasWeightTree.dirty)
 }
 
+func TestGloasWeightTreePayloadStatusChangeSkipsDirectRebuild(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.gloasWeightTree.prepare(justified, cs)
+	children := f.gloasWeightTree.nodes[justified.Root].children
+	require.NotEmpty(t, children)
+
+	childNode := f.gloasWeightTree.nodes[children[0]]
+	actualStatus := childNode.parentPayloadStatus
+	childNode.parentPayloadStatus = cltypes.PayloadStatusPending
+	if actualStatus == cltypes.PayloadStatusPending {
+		childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
+	}
+
+	require.False(t, f.gloasWeightTree.ensureTopology(justified.Root))
+	require.Equal(t, actualStatus, childNode.parentPayloadStatus)
+}
+
 func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 	f := buildExAnteStore(t)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)

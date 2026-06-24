@@ -118,7 +118,7 @@ func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointStat
 }
 
 func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
-	changed := false
+	requiresDirectRebuild := false
 	if t.topologySeen == nil {
 		t.topologySeen = make(map[common.Hash]struct{})
 	} else {
@@ -137,30 +137,32 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 		if !ok {
 			node = &gloasWeightNode{root: current, parentPayloadStatus: cltypes.PayloadStatusPending}
 			t.nodes[current] = node
-			changed = true
+			requiresDirectRebuild = true
 		}
 
 		if t.filterLiveChildren(current, node) {
-			changed = true
+			requiresDirectRebuild = true
 		}
 		for _, child := range node.children {
 			childNode, ok := t.nodes[child]
 			if !ok {
 				childNode = &gloasWeightNode{root: child}
 				t.nodes[child] = childNode
-				changed = true
+				requiresDirectRebuild = true
 			}
 			block, _ := t.f.forkGraph.GetBlock(child)
 			parentPayloadStatus := t.f.getParentPayloadStatus(block.Block)
-			if childNode.parent != current || childNode.parentPayloadStatus != parentPayloadStatus {
+			if childNode.parent != current {
 				childNode.parent = current
+				requiresDirectRebuild = true
+			}
+			if childNode.parentPayloadStatus != parentPayloadStatus {
 				childNode.parentPayloadStatus = parentPayloadStatus
-				changed = true
 			}
 			t.stack = append(t.stack, child)
 		}
 	}
-	return changed
+	return requiresDirectRebuild
 }
 
 func (t *gloasWeightTree) filterLiveChildren(root common.Hash, node *gloasWeightNode) bool {
@@ -476,25 +478,6 @@ func (t *gloasWeightTree) isHeadWeak(root common.Hash) bool {
 		}
 	}
 	return headWeight < reorgThreshold
-}
-
-func (t *gloasWeightTree) isParentStrong(root common.Hash) bool {
-	cs := t.state
-	if cs == nil {
-		return false
-	}
-	committeeWeight := cs.activeBalance / t.f.beaconCfg.SlotsPerEpoch
-	parentThreshold := committeeWeight * clparams.ReorgParentWeightThreshold / 100
-
-	block, ok := t.f.forkGraph.GetBlock(root)
-	if !ok || block == nil {
-		return false
-	}
-	parentNode := ForkChoiceNode{
-		Root:          block.Block.ParentRoot,
-		PayloadStatus: t.f.getParentPayloadStatus(block.Block),
-	}
-	return t.GetAttestationScore(parentNode) > parentThreshold
 }
 
 func (t *gloasWeightTree) pruneFinalized(finalizedSlot uint64) {
