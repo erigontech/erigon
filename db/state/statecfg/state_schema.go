@@ -189,13 +189,13 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
 
-// commitmentKVWriteVersion stamps v2.0 on referenced commitment files and v2.1 on plain ones;
-// the read ceiling (DataKV.Current = v2.1) accepts both.
+// commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
+// default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	if c.ReferencesInCommitmentBranches {
-		return version.V2_0
+		return version.V2_1
 	}
-	return version.V2_1
+	return version.V2_2
 }
 
 // ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path

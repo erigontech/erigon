@@ -95,10 +95,10 @@ func TestOpenAppliesCommitmentRefsFlagTrue(t *testing.T) {
 }
 
 // The resolved erigondb.toml regime must bind to the produced commitment file version:
-// an in-place upgrade (toml without the field -> default true) keeps writing v2.0
-// referenced files; a downloaded plain set (references=false) writes v2.1 plain files.
+// an in-place upgrade (toml without the field -> default true) keeps writing v2.1
+// referenced files; a downloaded plain set (references=false) writes v2.2 plain files.
 func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
-	t.Run("in-place upgrade without field writes v2.0 referenced", func(t *testing.T) {
+	t.Run("in-place upgrade without field writes v2.1 referenced", func(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		content := fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\n",
 			config3.DefaultStepSize, config3.DefaultStepsInFrozenFile)
@@ -111,11 +111,11 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 		agg := openTestAggForRefs(t, dirs, settings)
 		commit := agg.d[kv.CommitmentDomain]
 		require.True(t, agg.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches)
-		require.Equal(t, version.V2_0, commit.kvWriteVersion())
-		require.Contains(t, commit.kvNewFilePath(0, 1), "v2.0-commitment.0-1.kv")
+		require.Equal(t, version.V2_1, commit.kvWriteVersion())
+		require.Contains(t, commit.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")
 	})
 
-	t.Run("downloaded plain set writes v2.1 plain", func(t *testing.T) {
+	t.Run("downloaded plain set writes v2.2 plain", func(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		writeRefsToml(t, dirs, false)
 
@@ -126,7 +126,7 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 		agg := openTestAggForRefs(t, dirs, settings)
 		commit := agg.d[kv.CommitmentDomain]
 		require.False(t, agg.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches)
-		require.Equal(t, version.V2_1, commit.kvWriteVersion())
-		require.Contains(t, commit.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")
+		require.Equal(t, version.V2_2, commit.kvWriteVersion())
+		require.Contains(t, commit.kvNewFilePath(0, 1), "v2.2-commitment.0-1.kv")
 	})
 }

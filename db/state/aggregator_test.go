@@ -674,9 +674,9 @@ func TestCommitmentMergeInputsReferenced(t *testing.T) {
 	}{
 		{"v2.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_0)}, true},
 		{"v1.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V1_0)}, true},
-		{"v2.1 is always plain", []*FilesItem{fi(0, 2, version.V2_1)}, false},
+		{"v2.1 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_1)}, true},
 		{"v2.0 below threshold is plain", []*FilesItem{fi(0, 1, version.V2_0)}, false},
-		{"hypothetical v2.2 is plain", []*FilesItem{fi(0, 2, version.Version{Major: 2, Minor: 2})}, false},
+		{"v2.2 is plain", []*FilesItem{fi(0, 2, version.V2_2)}, false},
 		{"empty inputs", nil, false},
 		{"nil entries skipped", []*FilesItem{nil}, false},
 		{"any referenced input wins", []*FilesItem{fi(0, 2, version.V2_1), fi(2, 4, version.V2_0)}, true},
@@ -707,9 +707,9 @@ func TestCommitmentMergeNeedsTransform(t *testing.T) {
 		from, to    uint64
 		want        bool
 	}{
-		{"plain inputs, flag off -> no transform, no block", in(version.V2_1), false, fromAbove, toAbove, false},
-		{"plain inputs, flag on, below threshold -> no transform, no block", in(version.V2_1), true, fromBelow, toBelow, false},
-		{"plain inputs, flag on, at threshold -> reshorten, block", in(version.V2_1), true, fromAbove, toAbove, true},
+		{"plain inputs, flag off -> no transform, no block", in(version.V2_2), false, fromAbove, toAbove, false},
+		{"plain inputs, flag on, below threshold -> no transform, no block", in(version.V2_2), true, fromBelow, toBelow, false},
+		{"plain inputs, flag on, at threshold -> reshorten, block", in(version.V2_2), true, fromAbove, toAbove, true},
 		{"referenced input, flag off -> expand, block", in(version.V2_0), false, fromAbove, toAbove, true},
 		{"referenced input, flag on -> block", in(version.V2_0), true, fromAbove, toAbove, true},
 		{"no inputs -> no transform", nil, true, fromBelow, toBelow, false},
@@ -757,8 +757,11 @@ func TestCommitmentVisibleFilesReferenced(t *testing.T) {
 	t.Run("v2.0 at-threshold file reports referencing with flag off", func(t *testing.T) {
 		check(t, version.V2_0, true)
 	})
-	t.Run("v2.1 file does not report referencing", func(t *testing.T) {
-		check(t, version.V2_1, false)
+	t.Run("v2.1 at-threshold file reports referencing with flag off", func(t *testing.T) {
+		check(t, version.V2_1, true)
+	})
+	t.Run("v2.2 file does not report referencing", func(t *testing.T) {
+		check(t, version.V2_2, false)
 	})
 }
 

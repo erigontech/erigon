@@ -189,14 +189,14 @@ func commitmentKVFiles(t *testing.T, dir string) []commitmentKVFile {
 	return out
 }
 
-// assertCommitmentVersionConsistency enforces the regime invariant: a v2.1 (plain-regime) commitment
-// file must hold no short reference keys (a v2.1 file with short keys is the stale-offset corruption).
+// assertCommitmentVersionConsistency enforces the regime invariant: a v2.2 (plain-regime) commitment
+// file must hold no short reference keys (a v2.2 file with short keys is the stale-offset corruption).
 func assertCommitmentVersionConsistency(t *testing.T, dir string) (referencedFiles int) {
 	t.Helper()
 	for _, f := range commitmentKVFiles(t, dir) {
 		_, short := branchKeyKinds(t, f.path)
-		if !f.version.Less(version.V2_1) {
-			require.Zerof(t, short, "v2.1+ file %s must hold only plain keys, found %d short refs (stale offsets)", f.name, short)
+		if !f.version.Less(version.V2_2) {
+			require.Zerof(t, short, "v2.2+ file %s must hold only plain keys, found %d short refs (stale offsets)", f.name, short)
 		} else if short > 0 {
 			referencedFiles++
 		}
@@ -204,12 +204,12 @@ func assertCommitmentVersionConsistency(t *testing.T, dir string) (referencedFil
 	return referencedFiles
 }
 
-// commitmentVersionCounts returns how many commitment .kv files are referenced (version < v2.1 and
-// carry short keys) vs plain (version >= v2.1).
+// commitmentVersionCounts returns how many commitment .kv files are referenced (version < v2.2 and
+// carry short keys) vs plain (version >= v2.2).
 func commitmentVersionCounts(t *testing.T, dir string) (referenced, plain int) {
 	t.Helper()
 	for _, f := range commitmentKVFiles(t, dir) {
-		if f.version.Less(version.V2_1) {
+		if f.version.Less(version.V2_2) {
 			if _, short := branchKeyKinds(t, f.path); short > 0 {
 				referenced++
 			}
@@ -221,7 +221,7 @@ func commitmentVersionCounts(t *testing.T, dir string) (referenced, plain int) {
 }
 
 // commitmentRangeReferenced reports whether the on-disk commitment file covering the tx range is in
-// the referenced regime (version < v2.1 and range >= the referencing threshold).
+// the referenced regime (version < v2.2 and range >= the referencing threshold).
 func commitmentRangeReferenced(t *testing.T, dir string, fileStart, fileEnd, stepSize uint64) bool {
 	t.Helper()
 	fromStep, toStep := fileStart/stepSize, fileEnd/stepSize
@@ -231,13 +231,13 @@ func commitmentRangeReferenced(t *testing.T, dir string, fileStart, fileEnd, ste
 	suffix := fmt.Sprintf("commitment.%d-%d.kv", fromStep, toStep)
 	for _, f := range commitmentKVFiles(t, dir) {
 		if strings.HasSuffix(f.name, suffix) {
-			return f.version.Less(version.V2_1)
+			return f.version.Less(version.V2_2)
 		}
 	}
 	return false
 }
 
-// buildMixedRegimeDatadir builds a datadir holding both v2.0-referenced and v2.1-plain commitment
+// buildMixedRegimeDatadir builds a datadir holding both v2.1-referenced and v2.2-plain commitment
 // files: setA is frozen early under the flag-on (referenced) regime and never rewritten, so its
 // referenced branches stay read winners; setB advances the tx range into later flag-off (plain) files.
 func buildMixedRegimeDatadir(t *testing.T, stepSize, frozenSteps uint64) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs, [][]byte, [][]byte) {

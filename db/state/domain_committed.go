@@ -45,7 +45,7 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 // CommitmentBranchReferenced reports whether a commitment file at fileVersion over from..to carries
 // shortened key references — a property of the file (version+range), independent of the live write flag.
 func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to uint64) bool {
-	return fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
+	return fileVersion.Less(version.V2_2) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
 }
 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
@@ -98,7 +98,7 @@ func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
 // by looking them up in the account and storage domain files. It guards the call to
 // ExpandShortenedKeysInBranch with the read-path preconditions (empty branch, KeyCommitmentState
-// carve-out, files-not-empty) and the per-file version gate (referenced iff version < v2.1 and range >= threshold).
+// carve-out, files-not-empty) and the per-file version gate (referenced iff version < v2.2 and range >= threshold).
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
@@ -111,7 +111,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 
 	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
 	if !CommitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
-		return branch, nil // input file was written plain (v2.1) or below the referencing threshold
+		return branch, nil // input file was written plain (v2.2) or below the referencing threshold
 	}
 
 	sto := aggTx.d[kv.StorageDomain]

@@ -616,8 +616,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return nil
 	}
 
-	// Output .kv version encodes the squeeze target for the version-gated reader (v2.0 squeezed,
-	// v2.1 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
+	// Output .kv version encodes the squeeze target for the version-gated reader (v2.1 squeezed,
+	// v2.2 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
 	prevRefs := at.a.referencesInCommitmentBranches()
 	at.a.applyReferencesInCommitmentBranches(opts.TargetSqueeze)
 	defer at.a.applyReferencesInCommitmentBranches(prevRefs)
