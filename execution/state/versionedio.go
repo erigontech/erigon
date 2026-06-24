@@ -410,7 +410,6 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 	}
 }
 
-
 // Merge returns a new read set containing every entry of s then o.  On a
 // collision o's entry wins.
 func (s ReadSet) Merge(o ReadSet) ReadSet {

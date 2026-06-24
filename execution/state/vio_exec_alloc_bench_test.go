@@ -99,7 +99,7 @@ func BenchmarkVersionMapRead_BoxedVsTyped(b *testing.B) {
 	b.Run("Storage/typed", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			sinkU256, _, _ = mvhm.ReadStorageCell(addr, key, txIdx)
+			sinkU256, _, _ = mvhm.ReadStorage(addr, key, txIdx)
 		}
 	})
 }

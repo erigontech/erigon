@@ -647,48 +647,6 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 	return fv.Value, res, true
 }
 
-// ReadStorageCell mirrors ReadStorage but exposes the underlying cell
-// pointer instead of extracting the value.  Used by the cell-based read
-// pipeline to flow typed cells up to consumers (frame-local cache,
-// readSet records) without re-allocating or boxing through ReadResult's
-// any-typed Value.
-// ReadStorageCell returns the cell value (copied under the read lock) and
-// metadata for the storage slot. Returning the value rather than the cell
-// pointer keeps the caller race-free against a concurrent
-// FlushVersionedWrites that mutates cell.Value.
-func (vm *VersionMap) ReadStorageCell(addr accounts.Address, key accounts.StorageKey, txIdx int) (val uint256.Int, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present {
-		return val, res, false
-	}
-	cells := e.Storage[key]
-	if cells == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[uint256.Int]
-	cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	val = fv.Value
-	return val, res, true
-}
-
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
 	res.depIdx = UnknownDep
 	res.incarnation = -1
@@ -1358,11 +1316,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
-		// #21294 SD-staleness: a later tx self-destructed (with no Balance/
-		// Nonce/CodeHash revival), so this read predates the destruct. The
-		// serial path returns zero via the SD-zero short-circuit; checkVersion
-		// alone misses it because SD doesn't write the read's own path.
-		// revivalLimit excludes our own writes (validation runs post-flush).
+		// A later tx self-destructed the account (no revival), so a read predating
+		// the destruct is stale; checkVersion alone misses it because the SD doesn't
+		// write the read's own path.
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
 			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
@@ -1387,12 +1343,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	case MVReadResultNone:
 		if source == MapRead && !recursive &&
 			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath) {
-			// #21319: the recording side (versionedReadCore, MVReadResultNone)
-			// folds a sub-field read with no dedicated versionMap cell onto the
-			// account record — it stamps the read with AddressPath's source and
-			// version (a created account writes AddressPath but not NoncePath, so
-			// a later nonce read carries (AddressPath tx, MapRead)). Mirror that
-			// fold: valid iff AddressPath at the recorded version still holds.
+			// A sub-field read with no dedicated cell is recorded folded onto
+			// AddressPath (its source/version), so validate it against AddressPath
+			// at that version.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 				version, nil, checkVersion, traceInvalid, tracePrefix, true)
 		} else if source != StorageRead {
@@ -1416,15 +1369,10 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix, true)
 
-					// A prior tx re-creating this account makes a nil
-					// AddressPath read from storage stale. IncarnationPath is
-					// the SPECIFIC signal — written only by CreateAccount and
-					// SelfDestruct, never by UpdateAccountData and never by BAL
-					// pre-population (WriteChanges writes Storage/Balance/Nonce/
-					// Code only). The prior implementation cross-checked
-					// BalancePath, which overfires for every gas-paying tx and
-					// every BAL-listed balance change — a retry storm under
-					// BAL. Ported from main #21294/#21319.
+					// A prior tx re-creating this account makes a nil AddressPath
+					// storage read stale; IncarnationPath is the specific signal
+					// (written only by CreateAccount and SelfDestruct), unlike
+					// BalancePath which overfires for every gas payer.
 					if valid == VersionValid {
 						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
 							valid = VersionInvalid

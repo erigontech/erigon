@@ -55,32 +55,10 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 	return l
 }
 
-// versionedReadCore performs the type-independent orchestration of a
-// versionMap-aware read: in-memory tier probes (writeSet, versionMap,
-// readSet) plus the destruct/revival logic.  Returns a discriminated
-// readPathResult that tells the typed wrapper which source record to
-// extract the path-typed value from (and where to record it back into
-// the readSet).
-//
-// Behaviour preserved from the legacy versionedRead[T]:
-//   - panics ErrDependency on intra-tx read/write version conflicts;
-//     the parallel executor recovers.
-//   - the selfdestruct revival check probes Balance/Nonce/CodeHash
-//     siblings before short-circuiting to zero on a non-CodePath read.
-//   - CodePath is exempt from the SD short-circuit and is separately
-//     trumped by a Done SelfDestruct at >= the code's DepIdx.
-//   - StoragePath reads return zero when IncarnationPath was rewritten
-//     by a prior tx in this block, with the IncarnationPath dep recorded.
-//   - For paths in {Balance, Nonce, Incarnation, CodeHash}, an
-//     unwritten slot may resolve via the AddressPath account.
-//
-// The wrapper completes the read by:
-//   - recording the read via the typed ReadSet.SetX path with its typed
-//     value and r.hdr when r.recordVR is true;
-//   - performing any typed storage read against r.so when
-//     r.outcome == outcomeStorageRead or outcomeLegacyStorage;
-//   - returning the path-typed zero (or the caller's defaultV) for the
-//     return-default outcomes.
+// versionedReadCore runs the type-independent part of a versionMap-aware read —
+// the writeSet/versionMap/readSet tier probes plus destruct/revival logic — and
+// returns a readPathResult telling the typed wrapper which source to read the
+// path-typed value from. Panics ErrDependency on an intra-tx version conflict.
 type readPathOutcome uint8
 
 const (
@@ -181,14 +159,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	}
 
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
-		// When the in-memory deletion reflects a prior tx's selfdestruct
-		// (versionMap has SelfDestructPath=true), surface the SD version
-		// rather than UnknownVersion. Returning UnknownVersion here stamped
-		// CreateAccount's synthetic Balance/Incarnation read records with
-		// UnknownVersion while subsequent reads via the SD-zero path observed
-		// the real (tx.0) version — a versionedReads mismatch that panicked
-		// tx N+1 on every incarnation and exhausted the retry budget
-		// ("too many incarnations", #21231). Align with the SD-zero path below.
+		// When the in-memory deletion reflects a prior tx's selfdestruct, surface
+		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
+		// records match later SD-zero-path reads and don't force a version conflict.
 		if destructed, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
 			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 			if !commited {
@@ -211,11 +184,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	var destructedVersion Version
 	if destructed, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
 		destructTxIndex := sdRes.DepIdx()
-		// #21286: a same-tx own write to this path (a value-transfer or recreate
-		// that revived the account) is returned directly as WriteSetRead. A tx
-		// always observes its own write regardless of a prior tx's self-destruct;
-		// routing it through the cross-tx dependency check below would spuriously
-		// abort.
+		// A tx's own same-tx write to this path is returned directly: it always
+		// observes its own write, even after a prior tx's self-destruct.
 		if !commited {
 			if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
 				r.outcome = outcomeWriteSetHit
@@ -224,15 +194,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
-		// #21323: per-path revival resolution. THIS field is revived iff the
-		// version map holds a write to THIS path at a strictly higher TxIndex
-		// (Done, or Dependency for an in-flight revival). versionMap.Read floors
-		// at txIndex-1, so a prior incarnation of the current tx cannot pose as a
-		// later tx's revival. Per-path (vs the old account-wide Balance|Nonce|
-		// CodeHash scan) is precise: a field with no post-SD write reads as the
-		// fresh account's zero — correct for a value-transfer revival — and never
-		// surfaces a stale pre-SD nonce/codeHash for an account revived only via
-		// BalancePath.
+		// This field is revived only if the version map holds a write to THIS path
+		// at a strictly higher TxIndex; per-path (not account-wide) so a field with
+		// no post-self-destruct write correctly reads as the fresh account's zero.
 		revived := false
 		if pathRevival := s.versionMap.ReadStatus(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
 			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
@@ -300,7 +264,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case CreateContractPath:
 		r.mapCreateContractVal, res, _ = s.versionMap.ReadCreateContract(addr, s.txIndex)
 	case StoragePath:
-		r.mapStorageVal, res, _ = s.versionMap.ReadStorageCell(addr, key, s.txIndex)
+		r.mapStorageVal, res, _ = s.versionMap.ReadStorage(addr, key, s.txIndex)
 	default:
 		res = s.versionMap.Read(addr, path, key, s.txIndex)
 	}
@@ -433,14 +397,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			}
 		}
 
-		// #21345: a self-destructed account's per-account field (Balance/Nonce/
-		// Incarnation/CodeHash/Code/CodeSize) with no dedicated versionMap cell
-		// reads as the post-SD zero value. Record the read as a dependency on the
-		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion —
-		// the latter is rejected on sight by the validator (path==AddressPath
-		// cross-check) and produces a non-converging validator-invalid retry loop.
-		// Per-path: reaching here means THIS path's versionMap read was None, so
-		// it is not revived regardless of whether sibling fields were.
+		// A self-destructed account's per-account field with no versionMap cell
+		// reads as the post-SD zero, recorded as a dependency on the SelfDestructPath
+		// entry; a bare StorageRead/UnknownVersion would be rejected by the validator
+		// (path==AddressPath cross-check) and loop on validator-invalid retries.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
 			if destructed, sd, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sd.Status() == MVReadResultDone && destructed {
