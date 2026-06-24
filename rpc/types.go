@@ -105,49 +105,48 @@ var (
 // - an out of range error when the given block number is either too little or too large
 func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	input := strings.TrimSpace(string(data))
-	isQuotedString := len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
-	if isQuotedString {
+	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
 		input = input[1 : len(input)-1]
-	}
-
-	switch input {
-	case "earliest":
-		*bn = EarliestBlockNumber
-		return nil
-	case "latest":
-		*bn = LatestBlockNumber
-		return nil
-	case "pending":
-		*bn = PendingBlockNumber
-		return nil
-	case "safe":
-		*bn = SafeBlockNumber
-		return nil
-	case "finalized":
-		*bn = FinalizedBlockNumber
-		return nil
-	case "latestExecuted":
-		*bn = LatestExecutedBlockNumber
-		return nil
-	case "null":
-		*bn = LatestBlockNumber
-		return nil
-	}
-
-	var blckNum uint64
-	var err error
-	if !isQuotedString {
-		// Bare JSON integer: accept decimal.
-		blckNum, err = strconv.ParseUint(input, 10, 64)
-		if err != nil {
-			blckNum, err = hexutil.DecodeUint64(input)
+		switch input {
+		case "earliest":
+			*bn = EarliestBlockNumber
+			return nil
+		case "latest":
+			*bn = LatestBlockNumber
+			return nil
+		case "pending":
+			*bn = PendingBlockNumber
+			return nil
+		case "safe":
+			*bn = SafeBlockNumber
+			return nil
+		case "finalized":
+			*bn = FinalizedBlockNumber
+			return nil
+		case "latestExecuted":
+			*bn = LatestExecutedBlockNumber
+			return nil
+		case "null":
+			*bn = LatestBlockNumber
+			return nil
 		}
-	} else {
-		// Quoted string: require 0x hex prefix.
-		blckNum, err = hexutil.DecodeUint64(input)
+		blckNum, err := hexutil.DecodeUint64(input)
+		if err != nil {
+			return err
+		}
+		if blckNum > math.MaxInt64 {
+			return errors.New("block number larger than int64")
+		}
+		*bn = BlockNumber(blckNum)
+		return nil
 	}
+	// Bare JSON integer: accept decimal or hex.
+	blckNum, err := strconv.ParseUint(input, 10, 64)
 	if err != nil {
-		return err
+		blckNum, err = hexutil.DecodeUint64(input)
+		if err != nil {
+			return err
+		}
 	}
 	if blckNum > math.MaxInt64 {
 		return errors.New("block number larger than int64")
