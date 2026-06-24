@@ -274,10 +274,22 @@ func (s *CaplinStateSnapshots) blocksAvailableForType(name string) uint64 {
 		return 0
 	}
 	segs, ok := v.([]*VisibleSegment)
-	if !ok || len(segs) == 0 {
+	if !ok {
 		return 0
 	}
-	return segs[len(segs)-1].to
+	// Contiguous prefix from 0: stop at the first gap so a missing range is
+	// re-dumped rather than skipped (Caplin's recalcVisibleFiles does not
+	// truncate visible segments at gaps).
+	var to uint64
+	for _, seg := range segs {
+		if seg.from > to {
+			break
+		}
+		if seg.to > to {
+			to = seg.to
+		}
+	}
+	return to
 }
 
 func (s *CaplinStateSnapshots) Close() {
@@ -726,7 +738,9 @@ func planStateDump(availability map[string]uint64, toSlot, blocksPerFile uint64)
 
 	jobs := make([]caplinStateDumpJob, 0)
 	for _, name := range names {
-		from := (availability[name] / blocksPerFile) * blocksPerFile
+		// Resume exactly at the type's coverage end; flooring to a file
+		// boundary could re-dump an unaligned tail and create overlap.
+		from := availability[name]
 		for i := from; i+blocksPerFile <= toSlot; i += blocksPerFile {
 			jobs = append(jobs, caplinStateDumpJob{name: name, from: i, to: i + blocksPerFile})
 		}

@@ -73,6 +73,31 @@ func TestPlanStateDumpResumesPerType(t *testing.T) {
 	require.Equal(t, uint64(10_400_000/blocksPerFile), countJobs(jobs, "Empty"))
 }
 
+// A gap in a type's visible segments must cap availability at the contiguous
+// prefix, so planStateDump re-dumps the missing range instead of skipping it.
+func TestBlocksAvailableForTypeStopsAtGap(t *testing.T) {
+	s := &CaplinStateSnapshots{}
+	s.visible.Store("Gapped", []*VisibleSegment{
+		{Range: Range{from: 0, to: 7_150_000}},
+		{Range: Range{from: 7_200_000, to: 7_250_000}}, // 7.15M..7.2M missing
+	})
+	require.Equal(t, uint64(7_150_000), s.blocksAvailableForType("Gapped"))
+}
+
+// Resuming must start exactly at the coverage end, never below it — flooring an
+// unaligned tail to a file boundary would overlap the existing files.
+func TestPlanStateDumpUnalignedResumeHasNoOverlap(t *testing.T) {
+	const blocksPerFile = 50_000
+	jobs := planStateDump(map[string]uint64{"X": 2_725_000}, 2_825_000, blocksPerFile)
+
+	from, ok := firstJobFrom(jobs, "X")
+	require.True(t, ok)
+	require.Equal(t, uint64(2_725_000), from, "must resume at availability, not floor below it")
+	for _, j := range jobs {
+		require.GreaterOrEqual(t, j.from, uint64(2_725_000), "no job may start before existing coverage")
+	}
+}
+
 func TestBlocksAvailableForType(t *testing.T) {
 	s := &CaplinStateSnapshots{}
 	s.visible.Store("A", []*VisibleSegment{
