@@ -121,9 +121,8 @@ func TestSignTransactionResultMarshalJSON_EIP1559(t *testing.T) {
 
 	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
 
-	// EIP-1559 without known baseFee: gasPrice is absent (computeGasPrice returns nil).
-	_, ok := fields["gasPrice"]
-	require.False(t, ok, "gasPrice must be absent when baseFee is unknown")
+	// EIP-1559 without known baseFee: gasPrice is null (matching Geth).
+	require.Equal(t, "null", string(fields["gasPrice"]), "gasPrice must be null when baseFee is unknown")
 
 	// maxFeePerGas and maxPriorityFeePerGas must be set.
 	require.NotEqual(t, "null", string(fields["maxFeePerGas"]))
@@ -161,11 +160,9 @@ func TestSignTransactionResultMarshalJSON_Legacy(t *testing.T) {
 	require.True(t, ok, "gasPrice must be present")
 	require.NotEqual(t, "null", string(gasPrice))
 
-	// Legacy: maxFeePerGas and maxPriorityFeePerGas are inapplicable and must be absent.
-	_, ok = fields["maxFeePerGas"]
-	require.False(t, ok, "maxFeePerGas must be absent for legacy tx")
-	_, ok = fields["maxPriorityFeePerGas"]
-	require.False(t, ok, "maxPriorityFeePerGas must be absent for legacy tx")
+	// Legacy: maxFeePerGas and maxPriorityFeePerGas are inapplicable and must be null (matching Geth).
+	require.Equal(t, "null", string(fields["maxFeePerGas"]), "maxFeePerGas must be null for legacy tx")
+	require.Equal(t, "null", string(fields["maxPriorityFeePerGas"]), "maxPriorityFeePerGas must be null for legacy tx")
 
 	// unsigned tx: v/r/s must be "0x0", not null.
 	require.Equal(t, `"0x0"`, string(fields["v"]))

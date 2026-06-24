@@ -522,6 +522,12 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	for _, k := range []string{"blockHash", "blockNumber", "blockTimestamp", "transactionIndex", "from"} {
 		delete(m, k)
 	}
+	nullVal := json.RawMessage("null")
+	for _, k := range []string{"gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"} {
+		if _, ok := m[k]; !ok {
+			m[k] = nullVal
+		}
+	}
 	zeroHex := json.RawMessage(`"0x0"`)
 	for _, k := range []string{"v", "r", "s"} {
 		if v, ok := m[k]; !ok || string(v) == "null" {
