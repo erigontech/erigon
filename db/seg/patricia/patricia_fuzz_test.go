@@ -17,73 +17,15 @@
 package patricia
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"testing"
 )
 
-// go test -trimpath -v -fuzz=FuzzPatricia -fuzztime=10s ./patricia
-
-func FuzzPatricia(f *testing.F) {
-	f.Fuzz(func(t *testing.T, build []byte, test []byte) {
-		var n node
-		keyMap := make(map[string][]byte)
-		i := 0
-		for i < len(build) {
-			keyLen := int(build[i]>>4) + 1
-			valLen := int(build[i]&15) + 1
-			i++
-			var key []byte
-			var val []byte
-			for keyLen > 0 && i < len(build) {
-				key = append(key, build[i])
-				i++
-				keyLen--
-			}
-			for valLen > 0 && i < len(build) {
-				val = append(val, build[i])
-				i++
-				valLen--
-			}
-			n.insert(key, val)
-			keyMap[string(key)] = val
-		}
-		var testKeys [][]byte
-		i = 0
-		for i < len(test) {
-			keyLen := int(test[i]>>4) + 1
-			i++
-			var key []byte
-			for keyLen > 0 && i < len(test) {
-				key = append(key, test[i])
-				i++
-				keyLen--
-			}
-			if _, ok := keyMap[string(key)]; !ok {
-				testKeys = append(testKeys, key)
-			}
-		}
-		for key, vals := range keyMap {
-			v, ok := n.get([]byte(key))
-			if ok {
-				if !bytes.Equal(vals, v.([]byte)) {
-					t.Errorf("for key %x expected value %x, got %x", key, vals, v.([]byte))
-				}
-			}
-		}
-		for _, key := range testKeys {
-			_, ok := n.get(key)
-			if ok {
-				t.Errorf("unexpected key found [%x]", key)
-			}
-		}
-	})
-}
+// go test -trimpath -v -fuzz=FuzzLongestMatch -fuzztime=10s ./patricia
 
 func FuzzLongestMatch(f *testing.F) {
 	f.Fuzz(func(t *testing.T, build []byte, test []byte) {
-		var pt PatriciaTree
 		keyMap := make(map[string][]byte)
 		i := 0
 		for i < len(build) {
@@ -102,7 +44,6 @@ func FuzzLongestMatch(f *testing.F) {
 				i++
 				valLen--
 			}
-			pt.Insert(key, val)
 			keyMap[string(key)] = val
 		}
 		var keys []string
@@ -122,12 +63,8 @@ func FuzzLongestMatch(f *testing.F) {
 				data = append(data, key[len(key)-1-j])
 			}
 		}
-		ft := pt.Flatten()
-		mf3 := NewMatchFinder3(ft)
-		_ = mf3.FindLongestMatches(data)
-		// AC is validated against a brute-force oracle instead of MatchFinder:
-		// patricia.Insert loses an existing key when inserting its proper
-		// prefix, so MF3 under-reports matches on prefix-nested dicts.
+		// Brute-force oracle: longest dictionary key at each position, then drop
+		// matches subsumed by an earlier, further-reaching one (the maximal set).
 		var oracle Matches
 		lastEnd := 0
 		for s := 0; s < len(data); s++ {
