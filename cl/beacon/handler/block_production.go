@@ -878,7 +878,8 @@ func (a *ApiHandler) produceBeaconBody(
 		// the chain's slot time (Gnosis/Chiado 5s slots: build ~1.25s; mainnet
 		// 12s: ~3s). A late produce request grabs immediately.
 		slotStart := time.Unix(int64(state.ComputeTimestampAtSlot(baseState, targetSlot)), 0)
-		buildUntil := time.Now().Add(slotDuration / 4)
+		builderBudget := slotDuration / 4
+		buildUntil := time.Now().Add(builderBudget)
 		if deadline := slotStart.Add(slotDuration / 3); buildUntil.After(deadline) {
 			buildUntil = deadline
 		}
@@ -892,7 +893,7 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 		// Keep requesting the (now matured) block until it's ready.
-		stopTimer := time.NewTimer(slotDuration / 4)
+		stopTimer := time.NewTimer(builderBudget)
 		ticker := time.NewTicker(retryTime)
 		defer stopTimer.Stop()
 		defer ticker.Stop()
