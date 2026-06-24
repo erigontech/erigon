@@ -1,3 +1,6 @@
+// Command commitment-regime classifies a commitment .kv file as plain or referenced
+// (shortened keys). Temporary diagnostic tooling as-is — remove once the regime work
+// settles, or promote into cmd/integration.
 package main
 
 import (
