@@ -111,8 +111,9 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
+		headHash, headSlot := f.headHash, f.headSlot
 		f.mu.RUnlock()
-		return f.headHash, f.headSlot, nil
+		return headHash, headSlot, nil
 	}
 	f.mu.RUnlock()
 
