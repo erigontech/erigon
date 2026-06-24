@@ -24,7 +24,8 @@ import (
 
 func main() {
 	dir := flag.String("chaindata", "", "path to chaindata directory")
-	prefixHex := flag.String("prefix", "", "compact-hex prefix (no 0x) to read from kv.TblCommitmentVals")
+	prefixHex := flag.String("prefix", "", "compact-hex prefix (no 0x) to read")
+	tableName := flag.String("table", kv.TblCommitmentVals, "DupSort values table to dump (e.g. StorageVals, AccountVals, CommitmentVals)")
 	stepSize := flag.Uint64("step-size", 390625, "txns per step (default 390625 for mainnet/hoodi)")
 	flag.Parse()
 	if *dir == "" || *prefixHex == "" {
@@ -53,14 +54,14 @@ func main() {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.CursorDupSort(kv.TblCommitmentVals)
+	c, err := tx.CursorDupSort(*tableName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cursor: %v\n", err)
 		os.Exit(1)
 	}
 	defer c.Close()
 
-	fmt.Printf("table=%s prefix=%x prefixLen=%d step_size=%d\n", kv.TblCommitmentVals, prefix, len(prefix), *stepSize)
+	fmt.Printf("table=%s prefix=%x prefixLen=%d step_size=%d\n", *tableName, prefix, len(prefix), *stepSize)
 	fmt.Printf("decoded step = ^binary.BigEndian.Uint64(value[:8])\n")
 	fmt.Printf("higher step sorts first within a dup-key\n\n")
 
