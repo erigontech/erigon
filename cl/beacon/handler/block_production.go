@@ -772,7 +772,7 @@ func (a *ApiHandler) produceBeaconBody(
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
-		timeoutForBlockBuilding := 2 * time.Second // keep asking for 2 seconds for block
+		slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		var withdrawals []*types.Withdrawal
@@ -859,8 +859,30 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Warn("BlockProduction: ForkchoiceUpdate returned no payload id (EL may be syncing)", "slot", targetSlot)
 			return
 		}
-		// Keep requesting block until it's ready
-		stopTimer := time.NewTimer(timeoutForBlockBuilding)
+		// GetAssembledBlock stops the EL builder and returns whatever it has
+		// assembled so far, so grabbing the first result yields a near-empty
+		// block. The builder fills the payload for up to SecondsPerSlot/4 (its
+		// own budget, see execmodule.AssembleBlock), so wait for that before
+		// stopping it — but never past the attestation deadline (SecondsPerSlot/3
+		// into the slot) so the block still propagates in time. Both scale with
+		// the chain's slot time (Gnosis/Chiado 5s slots: build ~1.25s; mainnet
+		// 12s: ~3s). A late produce request grabs immediately.
+		slotStart := time.Unix(int64(a.ethClock.GenesisTime()+targetSlot*a.beaconChainCfg.SecondsPerSlot), 0)
+		buildUntil := time.Now().Add(slotDuration / 4)
+		if deadline := slotStart.Add(slotDuration / 3); buildUntil.After(deadline) {
+			buildUntil = deadline
+		}
+		if wait := time.Until(buildUntil); wait > 0 {
+			buildTimer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				buildTimer.Stop()
+				return
+			case <-buildTimer.C:
+			}
+		}
+		// Keep requesting the (now matured) block until it's ready.
+		stopTimer := time.NewTimer(slotDuration / 4)
 		ticker := time.NewTicker(retryTime)
 		defer stopTimer.Stop()
 		defer ticker.Stop()
