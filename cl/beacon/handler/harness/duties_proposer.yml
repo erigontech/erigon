@@ -40,3 +40,35 @@ tests:
        - has(actual.data[0].pubkey)
        - has(actual.data[0].validator_index)
        - has(actual.data[0].slot)
+  - name: proposer duties v2
+    actual:
+      handler: i
+      path: /eth/v2/validator/duties/proposer/{{.Vars.head_epoch}}
+    compare:
+      exprs:
+       - actual_code == 200
+       - size(actual.data) == 32
+       - has(actual.data[0].pubkey)
+       - has(actual.data[0].validator_index)
+       - has(actual.data[0].slot)
+  - name: proposer duties v2 bad epoch
+    actual:
+      handler: i
+      path: /eth/v2/validator/duties/proposer/abc
+    compare:
+      exprs:
+       - actual_code == 400
+  - name: proposer duties overflow epoch
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/proposer/576460752303423488
+    compare:
+      exprs:
+       - actual_code == 400
+  - name: proposer duties v2 overflow epoch
+    actual:
+      handler: i
+      path: /eth/v2/validator/duties/proposer/576460752303423488
+    compare:
+      exprs:
+       - actual_code == 400

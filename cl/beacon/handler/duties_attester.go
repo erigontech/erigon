@@ -19,6 +19,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -29,6 +30,23 @@ import (
 )
 
 const maxEpochsLookaheadForDuties = 32
+
+func epochSlotOverflows(epoch, slotsPerEpoch uint64) bool {
+	return slotsPerEpoch > 0 && epoch > math.MaxUint64/slotsPerEpoch-1
+}
+
+func computeDependentRootSlot(epoch, slotsPerEpoch uint64, attester bool) uint64 {
+	switch {
+	case epoch == 0:
+		return 0
+	case attester && epoch <= 1:
+		return 0
+	case attester:
+		return (epoch-1)*slotsPerEpoch - 1
+	default:
+		return epoch*slotsPerEpoch - 1
+	}
+}
 
 type attesterDutyResponse struct {
 	Pubkey                  common.Bytes48 `json:"pubkey"`
@@ -46,10 +64,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 		err           error
 	)
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		dependentRootSlot := (epoch * a.beaconChainCfg.SlotsPerEpoch) - 1
-		if attester {
-			dependentRootSlot = ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
-		}
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, attester)
 		if !a.syncedData.Syncing() && dependentRootSlot == a.syncedData.HeadSlot() {
 			dependentRoot = a.syncedData.HeadRoot()
 			return nil
@@ -75,6 +90,9 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
+	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
 
 	dependentRoot, err := a.getDependentRoot(epoch, true)
