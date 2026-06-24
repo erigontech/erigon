@@ -73,9 +73,9 @@ type branchCacheEntry struct {
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
 
-// branchCacheTailShards spreads tail lock traffic; sized for the default
-// commitment warmup pool (dbg.TipTrieWarmupers ≈ NumCPU*8) so warmup workers
-// rarely collide on a shard.
+// branchCacheTailShards splits the tail into this many independently-locked
+// shards so concurrent warmup workers don't serialize on a single LRU mutex.
+// Fixed value sized for the default warmup pool (dbg.TipTrieWarmupers ≈ NumCPU*8).
 const branchCacheTailShards = 256
 
 // Implemented by *db/state.AggregatorRoTx via duck typing to avoid an execctx→db/state import cycle. Nil means caching is disabled.
