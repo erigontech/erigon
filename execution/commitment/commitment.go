@@ -142,21 +142,14 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
-	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
-	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
-	VariantStreamingHexPatricia  TrieVariant = "hex-streaming-patricia-hashed"
+	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
+	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
+	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
 )
 
 // InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
-	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
-		trie := NewConcurrentPatriciaHashed(root, nil)
-		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
-		// tree.SetConcurrentCommitment(true) // first run always sequential
-		return trie, tree
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -1243,8 +1236,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "hex-parallel":
-		trieVariant = VariantConcurrentHexPatricia
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1376,7 +1367,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
+				case VariantHexPatriciaTrie:
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++

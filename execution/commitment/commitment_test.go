@@ -1071,18 +1071,3 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)
 }
-
-func TestInitializeTrieAndUpdates_ConcurrentVariantUnchanged(t *testing.T) {
-	t.Parallel()
-
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantConcurrentHexPatricia
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer upd.Close()
-	defer trie.Release()
-
-	require.IsType(t, (*ConcurrentPatriciaHashed)(nil), trie)
-	require.Equal(t, VariantConcurrentHexPatricia, trie.Variant())
-	require.Equal(t, ModeDirect, upd.Mode())
-	require.Nil(t, upd.parallel)
-}
