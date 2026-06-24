@@ -44,8 +44,8 @@ type BranchCache struct {
 	// read path.
 	root atomic.Pointer[branchCacheEntry]
 
-	// LRU tail — bounded entries, evicts oldest when full. Sharded; see
-	// branchCacheTailShards for why.
+	// LRU tail — bounded entries with per-shard LRU eviction (no global recency
+	// order across shards). See branchCacheTailShards for why it's sharded.
 	tail *maphash.ShardedLRU[*branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().
