@@ -545,18 +545,6 @@ func Val[T any](w AnyVersionedWrite) (T, bool) {
 	return zero, false
 }
 
-// MustVal returns w's typed value and panics on a type mismatch — a programming
-// error, since the AccountPath fixes the concrete type. State-apply paths use it
-// to keep the fail-fast of the pre-typed-vio direct assertion, where a silent
-// zero would corrupt the derived state.
-func MustVal[T any](w AnyVersionedWrite) T {
-	v, ok := Val[T](w)
-	if !ok {
-		panic(fmt.Sprintf("versioned write at %s: type mismatch, got %T", w.Header().Path, w))
-	}
-	return v
-}
-
 func (w *VersionedWrite[T]) String() string {
 	return WriteString(w)
 }

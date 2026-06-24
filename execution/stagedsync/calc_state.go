@@ -221,21 +221,21 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 		switch h.Path {
 		case state.BalancePath:
 			acc := cs.ensureAccount(h.Address)
-			acc.Balance = state.MustVal[uint256.Int](w)
+			acc.Balance, _ = state.Val[uint256.Int](w)
 			acc.dirty = true
 			if clearsDeleted(h.Address, !acc.Balance.IsZero()) {
 				acc.Deleted = false
 			}
 		case state.NoncePath:
 			acc := cs.ensureAccount(h.Address)
-			acc.Nonce = state.MustVal[uint64](w)
+			acc.Nonce, _ = state.Val[uint64](w)
 			acc.dirty = true
 			if clearsDeleted(h.Address, acc.Nonce != 0) {
 				acc.Deleted = false
 			}
 		case state.CodeHashPath:
 			acc := cs.ensureAccount(h.Address)
-			v := state.MustVal[accounts.CodeHash](w)
+			v, _ := state.Val[accounts.CodeHash](w)
 			acc.CodeHash = v.Value()
 			acc.dirty = true
 			if clearsDeleted(h.Address, v.Value() != empty.CodeHash) {
@@ -243,7 +243,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			}
 		case state.CodePath:
 			acc := cs.ensureAccount(h.Address)
-			code := state.MustVal[accounts.Code](w)
+			code, _ := state.Val[accounts.Code](w)
 			acc.CodeHash = code.Hash.Value()
 			acc.dirty = true
 			if clearsDeleted(h.Address, code.Len() > 0) {
@@ -263,7 +263,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				cs.deleteStorageSubtree(h.Address)
 			}
 		case state.StoragePath:
-			v := state.MustVal[uint256.Int](w)
+			v, _ := state.Val[uint256.Int](w)
 			// Skip lazy-loading the prior slot value: the only downstream
 			// consumer (FlushToUpdates) reads exactly the value set below, so
 			// the cold GetAsOf seek it would cost is wasted.
@@ -279,7 +279,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			cs.storageDirty[h.Address][h.Key] = true
 		case state.IncarnationPath:
 			acc := cs.ensureAccount(h.Address)
-			acc.Incarnation = state.MustVal[uint64](w)
+			acc.Incarnation, _ = state.Val[uint64](w)
 			acc.dirty = true
 		}
 	}
