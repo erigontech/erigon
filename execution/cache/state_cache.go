@@ -98,17 +98,38 @@ func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode 
 	}
 }
 
+// Byte budgets used by NewDefaultStateCache, defaulting to the production
+// constants. Mutated only by SetDefaultStateCacheSizesForTesting.
+var (
+	defaultAccountCacheBytes = DefaultAccountCacheBytes
+	defaultStorageCacheBytes = DefaultStorageCacheBytes
+	defaultCodeCacheBytes    = DefaultCodeCacheBytes
+	defaultAddrCacheBytes    = DefaultAddrCacheBytes
+)
+
 // NewDefaultStateCache creates a new StateCache with the default byte budgets
-// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB). Test/CLI harnesses that
-// build many short-lived ExecModules pass an explicit small cache to
-// NewExecModule instead, so this is the production path.
+// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB in production).
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
-		DefaultAccountCacheBytes,
-		DefaultStorageCacheBytes,
-		DefaultCodeCacheBytes,
-		DefaultAddrCacheBytes,
+		defaultAccountCacheBytes,
+		defaultStorageCacheBytes,
+		defaultCodeCacheBytes,
+		defaultAddrCacheBytes,
 	)
+}
+
+// SetDefaultStateCacheSizesForTesting shrinks the budgets NewDefaultStateCache
+// allocates. The eest CLI runners (cmd/evm) call this at startup: they build
+// one ExecModule per fixture (the enginextest path goes through eth.New, not
+// the per-instance cache), and at production sizes each one allocates ~1.6 GB
+// of LRU tables, so the full corpus exhausts the runner's RAM. Production
+// (erigon) never calls this; the call lives in the CLI entrypoint, not an
+// import-time init, so merely importing a test helper can't change sizing.
+func SetDefaultStateCacheSizesForTesting(account, storage, code, addr datasize.ByteSize) {
+	defaultAccountCacheBytes = account
+	defaultStorageCacheBytes = storage
+	defaultCodeCacheBytes = code
+	defaultAddrCacheBytes = addr
 }
 
 // Get retrieves data for the given domain and key.

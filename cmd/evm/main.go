@@ -25,11 +25,13 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/cache"
 	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
@@ -213,6 +215,11 @@ func init() {
 }
 
 func main() {
+	// evm is a test/dev runner that builds one ExecModule per fixture (blocktest,
+	// enginextest via eth.New, statetest). Production-size state caches (~1.6 GB
+	// each) would exhaust the host across the full corpus, so shrink the default
+	// here at the CLI entrypoint — not in any imported test helper.
+	cache.SetDefaultStateCacheSizesForTesting(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 	if err := app.Run(os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
