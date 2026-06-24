@@ -506,10 +506,24 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
+// commitmentReferencingMemo caches commitmentFileReferencing per file path. Integrity checks run
+// over an immutable file set within a process and several phases query the same file, so the full
+// content scan is done once per file.
+var commitmentReferencingMemo sync.Map // string -> bool
+
 // commitmentFileReferencing reports whether a commitment file carries shortened key references.
 // The integrity tool full-scans the content (not the file's version stamp) to catch a mis-stamped
-// file; any read error returns true rather than under-report as plain.
+// file; any read error returns true rather than under-report as plain. Memoized per path.
 func commitmentFileReferencing(file state.VisibleFile) bool {
+	if v, ok := commitmentReferencingMemo.Load(file.Fullpath()); ok {
+		return v.(bool)
+	}
+	r := computeCommitmentFileReferencing(file)
+	commitmentReferencingMemo.Store(file.Fullpath(), r)
+	return r
+}
+
+func computeCommitmentFileReferencing(file state.VisibleFile) bool {
 	decomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
 		log.Root().Warn("[integrity] commitmentFileReferencing: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
