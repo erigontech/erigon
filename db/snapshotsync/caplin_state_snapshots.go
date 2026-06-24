@@ -265,31 +265,23 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
-func (s *CaplinStateSnapshots) blocksAvailableForType(name string) uint64 {
+func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 	s.visibleLock.RLock()
 	defer s.visibleLock.RUnlock()
 
 	v, ok := s.visible.Load(name)
 	if !ok {
-		return 0
+		return nil
 	}
 	segs, ok := v.([]*VisibleSegment)
 	if !ok {
-		return 0
+		return nil
 	}
-	// Contiguous prefix from 0: stop at the first gap so a missing range is
-	// re-dumped rather than skipped (Caplin's recalcVisibleFiles does not
-	// truncate visible segments at gaps).
-	var to uint64
+	ranges := make([]Range, 0, len(segs))
 	for _, seg := range segs {
-		if seg.from > to {
-			break
-		}
-		if seg.to > to {
-			to = seg.to
-		}
+		ranges = append(ranges, seg.Range)
 	}
-	return to
+	return ranges
 }
 
 func (s *CaplinStateSnapshots) Close() {
@@ -723,36 +715,57 @@ type caplinStateDumpJob struct {
 	from, to uint64
 }
 
-// planStateDump computes the per-type slot ranges to dump. Each type resumes
-// from its own coverage (availability) rather than a shared floor, so a type
-// already caught up is not re-sliced into files that overlap its existing ones,
-// and a newly added type is still dumped from genesis.
-func planStateDump(availability map[string]uint64, toSlot, blocksPerFile uint64) []caplinStateDumpJob {
+// missingRanges returns the sub-ranges of [0, toSlot) not covered by `covered`
+// (the type's existing segment ranges, sorted by `from`).
+func missingRanges(covered []Range, toSlot uint64) []Range {
+	var missing []Range
+	var cur uint64
+	for _, r := range covered {
+		if r.from > cur {
+			gapEnd := min(r.from, toSlot)
+			missing = append(missing, Range{from: cur, to: gapEnd})
+		}
+		cur = max(cur, r.to)
+		if cur >= toSlot {
+			return missing
+		}
+	}
+	if cur < toSlot {
+		missing = append(missing, Range{from: cur, to: toSlot})
+	}
+	return missing
+}
+
+// planStateDump schedules only the ranges each type is missing within
+// [0, toSlot), starting every full file at a gap boundary so it fills holes and
+// the trailing tail without overlapping an existing segment.
+func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []caplinStateDumpJob {
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
 
-	names := make([]string, 0, len(availability))
-	for name := range availability {
+	names := make([]string, 0, len(coverage))
+	for name := range coverage {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	jobs := make([]caplinStateDumpJob, 0)
 	for _, name := range names {
-		from := availability[name]
-		for i := from; i+blocksPerFile <= toSlot; i += blocksPerFile {
-			jobs = append(jobs, caplinStateDumpJob{name: name, from: i, to: i + blocksPerFile})
+		for _, gap := range missingRanges(coverage[name], toSlot) {
+			for i := gap.from; i+blocksPerFile <= gap.to; i += blocksPerFile {
+				jobs = append(jobs, caplinStateDumpJob{name: name, from: i, to: i + blocksPerFile})
+			}
 		}
 	}
 	return jobs
 }
 
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	availability := make(map[string]uint64, len(s.snapshotTypes.KeyValueGetters))
+	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
 	for name := range s.snapshotTypes.KeyValueGetters {
-		availability[name] = s.blocksAvailableForType(name)
+		coverage[name] = s.coveredRangesForType(name)
 	}
 
-	for _, job := range planStateDump(availability, toSlot, blocksPerFile) {
+	for _, job := range planStateDump(coverage, toSlot, blocksPerFile) {
 		logger.Log(lvl, "Dumping "+job.name, "from", job.from, "to", job.to)
 		if err := dumpCaplinState(ctx, job.name, s.snapshotTypes.KeyValueGetters[job.name], job.from, job.to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[job.name]); err != nil {
 			return err
