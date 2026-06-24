@@ -137,10 +137,6 @@ type EngineReader interface {
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
-	// ValidateBlockPostExecution checks block-level commitments after all
-	// transactions have been executed: gas used vs header, blob gas used,
-	// receipt root, and log bloom. Chain-specific engines may override for
-	// different gas accounting or optional checks.
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 		receipts types.Receipts, txns types.Transactions, logger log.Logger) error
@@ -202,9 +198,6 @@ type EngineWriter interface {
 	APIs(chain ChainHeaderReader) []rpc.API
 }
 
-// DefaultBlockPostValidation performs the standard Ethereum post-execution
-// checks. Engine implementations that do not need custom validation should
-// call this from their ValidateBlockPostExecution method.
 func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {

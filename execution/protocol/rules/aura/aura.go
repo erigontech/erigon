@@ -384,7 +384,13 @@ func (c *AuRa) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header,
 		log.Error("rules.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return rules.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+	if err := ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/); err != nil {
+		return err
+	}
+	if !c.HasGasLimitContract() {
+		return misc.VerifyParentGasLimit(chain.Config(), parent, header)
+	}
+	return nil
 }
 
 // nolint

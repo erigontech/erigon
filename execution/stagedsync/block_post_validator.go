@@ -9,22 +9,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// blockValidator runs ValidateBlockPostExecution in a goroutine for a SINGLE block.
-// One instance per block — no shared state across blocks. The previous
-// shared-across-blocks validator carried v.err and v.wg between blocks,
-// which was prone to leaking wg counters on early-return and to "sticky
-// errors" propagating from one block's failure into the next. A fresh
-// instance per block eliminates both classes of bug.
-//
-// The shape mirrors the commitmentCalculator: the validator owns its own
-// goroutine and delivers its result through a buffered channel. Wait()
-// is the single point of synchronization.
 type blockValidator struct {
 	done chan error // buffered(1); written once, then re-stuffed on each Wait
 }
 
-// newBlockValidator starts validation in a goroutine. The caller must
-// eventually call Wait() to surface the result and to drain the goroutine.
 func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) *blockValidator {
@@ -35,9 +23,7 @@ func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, ch
 	return bv
 }
 
-// Wait blocks until validation completes and returns the (wrapped) error,
-// or nil. Safe to call on a nil receiver (no-op) and safe to call multiple
-// times — the result is re-stuffed into the channel after each read.
+// Safe on nil receiver and idempotent (re-stuffs the result after each read).
 func (bv *blockValidator) Wait() error {
 	if bv == nil {
 		return nil

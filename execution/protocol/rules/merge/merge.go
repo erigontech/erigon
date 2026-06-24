@@ -323,7 +323,10 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return errInvalidUncleHash
 	}
 
-	if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false); err != nil {
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		return err
+	}
+	if err := misc.VerifyParentGasLimit(chain.Config(), parent, header); err != nil {
 		return err
 	}
 
