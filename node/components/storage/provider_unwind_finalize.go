@@ -119,9 +119,22 @@ func (p *Provider) FinalizeUnwind() error {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: pre-regen OpenFolder failed (continuing — restart will refresh)", "err", err)
 			}
 		}
+		var regenBaseNames []string
 		for _, pair := range regen.pairs {
 			if err := os.Rename(pair.regenPath, pair.finalPath); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .regen → .kv failed (continuing — restart will recover from .old)", "err", err, "regen", pair.regenPath, "final", pair.finalPath)
+				continue
+			}
+			// Regen rewrote the file bytes; the seed's .torrent sidecar now
+			// claims a stale hash. Leaving it in place lets the running
+			// downloader notice the mismatch, yank the .kv to .part, and
+			// wedge the next process restart.
+			_ = dir.RemoveFile(pair.finalPath + ".torrent")
+			regenBaseNames = append(regenBaseNames, filepath.Base(pair.finalPath))
+		}
+		if p.downloaderClient != nil && len(regenBaseNames) > 0 {
+			if err := p.downloaderClient.Delete(context.Background(), regenBaseNames); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete for regen failed (continuing)", "err", err, "files", len(regenBaseNames))
 			}
 		}
 		if p.Aggregator != nil {
