@@ -845,7 +845,11 @@ func customTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 
 	ctx, cancleCtx := context.WithCancel(ctx)
 	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
-	defer workers.Wait()
+	// Workers block in popWait until the queue is closed, so close it before waiting or an early return deadlocks.
+	defer func() {
+		in.Close()
+		workers.Wait()
+	}()
 
 	workersExited := &atomic.Bool{}
 	go func() {
