@@ -81,6 +81,49 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
+type blockBuilderWindow struct {
+	builderBudget time.Duration
+	firstGetAt    time.Time
+	pollUntil     time.Time
+}
+
+func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
+	if cfg == nil || cfg.SecondsPerSlot == 0 {
+		return 0
+	}
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		return time.Duration(cfg.SecondsPerSlot*clparams.AttestationDueBpsGloas/(clparams.BpsFactor/1000)) * time.Millisecond
+	}
+	if cfg.IntervalsPerSlot == 0 {
+		return 0
+	}
+	return time.Duration(cfg.SecondsPerSlot*1000/cfg.IntervalsPerSlot) * time.Millisecond
+}
+
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) blockBuilderWindow {
+	var builderBudget time.Duration
+	if cfg != nil {
+		builderBudget = time.Duration(cfg.SecondsPerSlot/4) * time.Second
+	}
+	deadline := slotStart.Add(attestationDue(cfg, stateVersion))
+	firstGetAt := now.Add(builderBudget)
+	if firstGetAt.After(deadline) {
+		firstGetAt = deadline
+	}
+	if firstGetAt.Before(now) {
+		firstGetAt = now
+	}
+	return blockBuilderWindow{
+		builderBudget: builderBudget,
+		firstGetAt:    firstGetAt,
+		pollUntil:     deadline,
+	}
+}
+
+func shouldRetryGetPayload(now, deadline time.Time) bool {
+	return now.Before(deadline)
+}
+
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 	stopCh := time.After(time.Second)
 	for {
@@ -782,7 +825,6 @@ func (a *ApiHandler) produceBeaconBody(
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
-		slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		var withdrawals []*types.Withdrawal
@@ -869,21 +911,10 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Warn("BlockProduction: ForkchoiceUpdate returned no payload id (EL may be syncing)", "slot", targetSlot)
 			return
 		}
-		// GetAssembledBlock stops the EL builder and returns whatever it has
-		// assembled so far, so grabbing the first result yields a near-empty
-		// block. The builder fills the payload for up to SecondsPerSlot/4 (its
-		// own budget, see execmodule.AssembleBlock), so wait for that before
-		// stopping it — but never past the attestation deadline (SecondsPerSlot/3
-		// into the slot) so the block still propagates in time. Both scale with
-		// the chain's slot time (Gnosis/Chiado 5s slots: build ~1.25s; mainnet
-		// 12s: ~3s). A late produce request grabs immediately.
+		// GetAssembledBlock stops the EL builder, so delay the first call until the builder budget or forkchoice deadline matures.
 		slotStart := time.Unix(int64(state.ComputeTimestampAtSlot(baseState, targetSlot)), 0)
-		builderBudget := slotDuration / 4
-		buildUntil := time.Now().Add(builderBudget)
-		if deadline := slotStart.Add(slotDuration / 3); buildUntil.After(deadline) {
-			buildUntil = deadline
-		}
-		if wait := time.Until(buildUntil); wait > 0 {
+		buildWindow := computeBlockBuilderWindow(time.Now(), slotStart, a.beaconChainCfg, stateVersion)
+		if wait := time.Until(buildWindow.firstGetAt); wait > 0 {
 			buildTimer := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
@@ -892,22 +923,50 @@ func (a *ApiHandler) produceBeaconBody(
 			case <-buildTimer.C:
 			}
 		}
-		// Keep requesting the (now matured) block until it's ready.
-		stopTimer := time.NewTimer(builderBudget)
-		ticker := time.NewTicker(retryTime)
+		pollTimeout := time.Until(buildWindow.pollUntil)
+		if pollTimeout < 0 {
+			pollTimeout = 0
+		}
+		stopTimer := time.NewTimer(pollTimeout)
 		defer stopTimer.Stop()
-		defer ticker.Stop()
+		// Start with an immediate payload attempt before enabling deadline polling, so late requests still grab once.
+		retryTimer := time.NewTimer(0)
+		defer retryTimer.Stop()
+		var stopPolling <-chan time.Time
+		firstPayloadAttempt := true
+		schedulePayloadRetry := func() bool {
+			if !shouldRetryGetPayload(time.Now(), buildWindow.pollUntil) {
+				return false
+			}
+			stopPolling = stopTimer.C
+			retryTimer.Reset(retryTime)
+			return true
+		}
 		for {
 			select {
-			case <-stopTimer.C:
+			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-stopPolling:
+				return
+			case <-retryTimer.C:
+				stopPolling = stopTimer.C
+				if firstPayloadAttempt {
+					firstPayloadAttempt = false
+				} else if !shouldRetryGetPayload(time.Now(), buildWindow.pollUntil) {
+					return
+				}
 				payload, bundles, requestsBundle, blockValue, err := a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 				if err != nil {
 					log.Error("BlockProduction: Failed to get payload", "err", err)
+					if !schedulePayloadRetry() {
+						return
+					}
 					continue
 				}
 				if payload == nil {
+					if !schedulePayloadRetry() {
+						return
+					}
 					continue
 				}
 				// Determine block value

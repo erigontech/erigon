@@ -42,6 +42,72 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
+func TestBlockBuilderWindowPreGloas(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	require.Equal(t, 3*time.Second, window.builderBudget)
+	require.Equal(t, slotStart.Add(3*time.Second), window.firstGetAt)
+	require.Equal(t, slotStart.Add(4*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowGloas(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+
+	require.Equal(t, 3*time.Second, window.builderBudget)
+	require.Equal(t, slotStart.Add(3*time.Second), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart.Add(5 * time.Second)
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+
+	require.Equal(t, now, window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
+	deadline := time.Unix(100, 0)
+
+	require.True(t, shouldRetryGetPayload(deadline.Add(-time.Nanosecond), deadline))
+	require.False(t, shouldRetryGetPayload(deadline, deadline))
+	require.False(t, shouldRetryGetPayload(deadline.Add(time.Nanosecond), deadline))
+}
+
+func TestBlockBuilderWindowUsesExecutionBuilderIntegerBudget(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   5,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	require.Equal(t, time.Second, window.builderBudget)
+	require.Equal(t, slotStart.Add(time.Second), window.firstGetAt)
+}
+
 func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
