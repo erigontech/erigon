@@ -508,46 +508,58 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 	outAgg.PresetOfflineMerge()
 
 	if commitmentStateKeyOnly {
-		// Choose the state-key labels by matching the recovered root against block headers.
-		// Production/execution-built files store a block-boundary state (root == header(B).Root,
-		// txNum == B's last txnum); the offline rebuild stores a mid-block state at endTxNum-1.
-		// If the root matches the boundary block (the one containing endTxNum-1) or the previous
-		// one, use that block-boundary label (strong verification); otherwise keep the default
-		// mid-block labels and rely on the integrity recompute.
-		resolveLabel := func(root []byte, defBlockNum, defTxNum uint64) (uint64, uint64, error) {
+		// The state key's root is the canonical state root of the file's boundary block — i.e.
+		// the block header's stateRoot for the last block FULLY committed at/before the file's
+		// last txnum. No trie reconstruction is needed (and it's impossible on purified files,
+		// whose superseded branches were moved to newer files). Integrity validates this via the
+		// file-data header compare + SD check; run it with CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE_RECOMPUTE.
+		endTx := commitmentRangeStepTo * settings.StepSize
+		var blockNum, txNum uint64
+		var rootHash common.Hash
+		if err := func() error {
 			roTx, err := db.BeginTemporalRo(ctx)
 			if err != nil {
-				return 0, 0, err
+				return err
 			}
 			defer roTx.Rollback()
-			rootH := common.BytesToHash(root)
-			for _, cand := range []uint64{defBlockNum, defBlockNum - 1} {
-				h, err := br.HeaderByNumber(ctx, roTx, cand)
-				if err != nil {
-					return 0, 0, err
-				}
-				if h == nil || h.Root != rootH {
-					continue
-				}
-				bmax, err := txNumsReader.Max(ctx, roTx, cand)
-				if err != nil {
-					return 0, 0, err
-				}
-				if bmax > defTxNum { // boundary beyond the file → not this file's last commitment
-					continue
-				}
-				logger.Info("[commitment_rebuild] root matches a block boundary; using block-boundary state key",
-					"block", cand, "txNum", bmax, "root", hex.EncodeToString(root))
-				return cand, bmax, nil
+			b, ok, err := txNumsReader.FindBlockNum(ctx, roTx, endTx-1)
+			if err != nil {
+				return err
 			}
-			logger.Info("[commitment_rebuild] root matches no nearby header (mid-block / rebuild convention); using endTxNum-1 labels (final check is the integrity recompute)",
-				"block", defBlockNum, "txNum", defTxNum, "root", hex.EncodeToString(root))
-			return defBlockNum, defTxNum, nil
+			if !ok {
+				if b, _, err = txNumsReader.Last(roTx); err != nil {
+					return err
+				}
+			}
+			bmax, err := txNumsReader.Max(ctx, roTx, b)
+			if err != nil {
+				return err
+			}
+			if bmax > endTx-1 { // endTx-1 is mid-block b; the file's last full block is b-1
+				if b == 0 {
+					return fmt.Errorf("no fully-committed block at/before txnum %d", endTx-1)
+				}
+				b--
+				if bmax, err = txNumsReader.Max(ctx, roTx, b); err != nil {
+					return err
+				}
+			}
+			h, err := br.HeaderByNumber(ctx, roTx, b)
+			if err != nil {
+				return err
+			}
+			if h == nil {
+				return fmt.Errorf("missing canonical header for block %d", b)
+			}
+			blockNum, txNum, rootHash = b, bmax, h.Root
+			return nil
+		}(); err != nil {
+			return err
 		}
-		// Read the source commitment file via the source DB's aggregator, stream it into the
-		// output dir with the state key added, then build the new file's accessors.
-		dstPath, root, err := dbstate.RegenerateCommitmentFileWithStateKey(ctx, db, &txNumsReader,
-			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), outDirs.SnapDomain, logger, resolveLabel)
+		logger.Info("[commitment_rebuild] state key from block header", "block", blockNum, "txNum", txNum, "root", hex.EncodeToString(rootHash[:]))
+
+		dstPath, err := dbstate.WriteCommitmentFileWithStateKey(ctx, db,
+			kv.Step(commitmentRangeStepFrom), kv.Step(commitmentRangeStepTo), rootHash[:], blockNum, txNum, outDirs.SnapDomain, logger)
 		if err != nil {
 			return err
 		}
@@ -557,9 +569,9 @@ func commitmentRebuildRange(db kv.TemporalRwDB, ctx context.Context, logger log.
 		if err := outAgg.BuildMissedAccessors(ctx, runtime.NumCPU()); err != nil {
 			return fmt.Errorf("building accessors for %s: %w", dstPath, err)
 		}
-		logger.Info("[commitment_rebuild] state key added (no recompute)",
+		logger.Info("[commitment_rebuild] state key added from header",
 			"steps", fmt.Sprintf("%d-%d", commitmentRangeStepFrom, commitmentRangeStepTo),
-			"root", hex.EncodeToString(root), "file", dstPath)
+			"block", blockNum, "root", hex.EncodeToString(rootHash[:]), "file", dstPath)
 		return nil
 	}
 

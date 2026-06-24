@@ -25,10 +25,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestComputeCommitmentStateValueForRange checks that the state key value (and root) can be
-// recovered by loading just the root from existing files — without recomputing the range —
-// and matches the value the files were built with.
-func TestComputeCommitmentStateValueForRange(t *testing.T) {
+// TestWriteCommitmentFileWithStateKey checks that streaming a commitment file and splicing in a
+// state key (built from a given root/block/txn — as the tool does with the block-header root)
+// copies all branch data verbatim and inserts a well-formed, correctly-sorted state entry.
+func TestWriteCommitmentFileWithStateKey(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode")
 	}
@@ -88,55 +88,42 @@ func TestComputeCommitmentStateValueForRange(t *testing.T) {
 	domains.Close()
 	require.NoError(t, rwTx.Commit())
 	require.NoError(t, agg.BuildFiles(totalTxs))
-
-	// canonical files via full rebuild (matches what the tool reads from)
-	db, agg = reopenAggregator(t, db, agg, stepSize)
-	wipeCommitment(t, db, agg, dirs)
-	_, err = state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), false)
-	require.NoError(t, err)
 	_ = rawDB
 
-	for _, r := range fileStepRanges(t, dirs, kv.CommitmentDomain) {
-		wantRoot, ok := readCommitmentStateRoot(t, dirs, r.from, r.to)
-		require.True(t, ok, "source file %d-%d must have state key", r.from, r.to)
-
-		stateVal, gotRoot, _, err := state.ComputeCommitmentStateValueForRange(ctx, db, &rawdbv3.TxNums,
-			kv.Step(r.from), kv.Step(r.to), log.New())
-		require.NoError(t, err, "range %d-%d", r.from, r.to)
-		require.Equal(t, wantRoot, common.BytesToHash(gotRoot), "root mismatch for %d-%d", r.from, r.to)
-
-		extractedRoot, bn, txn, err := commitment.HexTrieExtractStateRoot(stateVal)
+	ranges := fileStepRanges(t, dirs, kv.CommitmentDomain)
+	require.NotEmpty(t, ranges)
+	for _, r := range ranges {
+		// Use the file's own state-key (root/block/txn) as the value to splice back in — this
+		// stands in for the header-derived root the command computes.
+		want := readAllCommitmentKVFile(t, commitmentFilePath(t, dirs, r.from, r.to), r.from, r.to)
+		stateBefore, ok := want["state"]
+		require.True(t, ok, "generated file %d-%d should have a state key", r.from, r.to)
+		root, bn, txn, err := commitment.HexTrieExtractStateRoot([]byte(stateBefore))
 		require.NoError(t, err)
-		require.Equal(t, wantRoot, common.BytesToHash(extractedRoot))
-		require.Less(t, txn, r.to*stepSize, "txNum must be within range")
-		require.GreaterOrEqual(t, txn, r.from*stepSize)
-		t.Logf("range %d-%d: root=%x block=%d txn=%d", r.from, r.to, gotRoot, bn, txn)
 
-		// Full stream path: regenerate the file with the state key. All branch data must be
-		// copied verbatim, and the added state key must carry the correct root (its trie
-		// working-maps need not be byte-identical — only the root cell matters, which is what
-		// integrity's checkCommitmentRootViaSd compares).
-		srcKV := readAllCommitmentKV(t, dirs, r.from, r.to)
 		outDir := t.TempDir()
-		dstPath, _, err := state.RegenerateCommitmentFileWithStateKey(ctx, db, &rawdbv3.TxNums,
-			kv.Step(r.from), kv.Step(r.to), outDir, log.New(), nil)
+		dstPath, err := state.WriteCommitmentFileWithStateKey(ctx, db,
+			kv.Step(r.from), kv.Step(r.to), root, bn, txn, outDir, log.New())
 		require.NoError(t, err)
-		dstKV := readAllCommitmentKVFile(t, dstPath, r.from, r.to)
 
-		dstState, hasState := dstKV["state"]
-		require.True(t, hasState, "regenerated file must contain the state key")
-		dRoot, _, _, err := commitment.HexTrieExtractStateRoot([]byte(dstState))
+		got := readAllCommitmentKVFile(t, dstPath, r.from, r.to)
+		gotState, ok := got["state"]
+		require.True(t, ok, "regenerated file must contain the state key")
+		gRoot, gBn, gTxn, err := commitment.HexTrieExtractStateRoot([]byte(gotState))
 		require.NoError(t, err)
-		require.Equal(t, wantRoot, common.BytesToHash(dRoot), "regenerated state root must match")
+		require.Equal(t, common.BytesToHash(root), common.BytesToHash(gRoot))
+		require.Equal(t, bn, gBn)
+		require.Equal(t, txn, gTxn)
 
-		// branch data must be byte-identical to the source
-		delete(srcKV, "state")
-		delete(dstKV, "state")
-		require.Equal(t, srcKV, dstKV, "branch data must be copied verbatim for %d-%d", r.from, r.to)
+		// branch data byte-identical to source
+		delete(want, "state")
+		delete(got, "state")
+		require.Equal(t, want, got, "branch data must be copied verbatim for %d-%d", r.from, r.to)
+		t.Logf("range %d-%d: root=%x block=%d txn=%d branches=%d", r.from, r.to, root, bn, txn, len(got))
 	}
 }
 
-func readAllCommitmentKV(t *testing.T, dirs datadir.Dirs, from, to uint64) map[string]string {
+func commitmentFilePath(t *testing.T, dirs datadir.Dirs, from, to uint64) string {
 	t.Helper()
 	entries, err := os.ReadDir(dirs.SnapDomain)
 	require.NoError(t, err)
@@ -144,11 +131,11 @@ func readAllCommitmentKV(t *testing.T, dirs datadir.Dirs, from, to uint64) map[s
 	suffix := "." + strconv.FormatUint(from, 10) + "-" + strconv.FormatUint(to, 10) + ".kv"
 	for _, e := range entries {
 		if strings.Contains(e.Name(), tag) && strings.HasSuffix(e.Name(), suffix) {
-			return readAllCommitmentKVFile(t, filepath.Join(dirs.SnapDomain, e.Name()), from, to)
+			return filepath.Join(dirs.SnapDomain, e.Name())
 		}
 	}
 	t.Fatalf("no commitment file for %d-%d", from, to)
-	return nil
+	return ""
 }
 
 func readAllCommitmentKVFile(t *testing.T, path string, from, to uint64) map[string]string {
