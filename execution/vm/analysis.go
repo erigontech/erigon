@@ -19,27 +19,59 @@
 
 package vm
 
+import "encoding/binary"
+
+// SWAR (SIMD-within-a-register) constants for scanning a uint64 of code 8 bytes
+// at a time. A byte b is a PUSH opcode (PUSH1..PUSH32, 0x60..0x7f) iff
+// b&0xe0 == 0x60, so (b&swarPushHi)^swarPushPat is zero exactly for PUSH bytes;
+// the classic has-zero-byte trick then locates them.
+const (
+	swarPushHi  = 0xe0e0e0e0e0e0e0e0
+	swarPushPat = 0x6060606060606060
+	swarLow     = 0x0101010101010101
+	swarHigh    = 0x8080808080808080
+)
+
 // codeBitmap collects data locations in code.
 func codeBitmap(code []byte) bitvec {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
 	bits := make(bitvec, (len(code)+32+63)/64)
-	for pc := uint64(0); pc < uint64(len(code)); {
-		op := OpCode(code[pc])
-		pc++
-		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
-			continue
+	codeLen := uint64(len(code))
+	pc := uint64(0)
+	for pc < codeLen {
+		// Fast path: only PUSH opcodes contribute data bits. pc is always at an
+		// opcode boundary here, so an 8-byte word with no PUSH opcode is 8 pure
+		// opcodes (e.g. JUMPDEST-heavy code) with nothing to mark — skip it.
+		if pc+8 <= codeLen {
+			w := binary.LittleEndian.Uint64(code[pc : pc+8])
+			t := (w & swarPushHi) ^ swarPushPat
+			if (t-swarLow)&^t&swarHigh == 0 { // no PUSH byte in this word
+				pc += 8
+				continue
+			}
 		}
-		if op == PUSH1 {
-			bits.set1(pc)
-			pc += 1
-			continue
+		// This word contains a PUSH (or fewer than 8 bytes remain): walk it
+		// byte-at-a-time with the canonical logic. Advancing at least to the
+		// next 8-byte boundary amortises the peek over >=8 bytes, so push-dense
+		// code is not penalised.
+		wordEnd := pc + 8
+		for pc < codeLen && pc < wordEnd {
+			op := OpCode(code[pc])
+			pc++
+			if int8(op) < int8(PUSH1) { // not PUSH (int8(op) > int8(PUSH32) is always false)
+				continue
+			}
+			if op == PUSH1 {
+				bits.set1(pc)
+				pc++
+				continue
+			}
+			numbits := uint64(op - PUSH1 + 1)
+			bits.setN(uint64(1)<<numbits-1, pc)
+			pc += numbits
 		}
-
-		numbits := uint64(op - PUSH1 + 1)
-		bits.setN(uint64(1)<<numbits-1, pc)
-		pc += numbits
 	}
 	return bits
 }
