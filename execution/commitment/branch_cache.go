@@ -172,6 +172,9 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 // it. Use when the caller knows the canonical store has changed and the cached
 // entry should not be served at all.
 func (c *BranchCache) Invalidate(prefix []byte) {
+	if isCommitmentStateKey(prefix) {
+		return
+	}
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return
