@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"sync/atomic"
 
 	"github.com/elastic/go-freelru"
@@ -85,8 +86,8 @@ func u64noHash(h uint64) uint32 { return uint32(h) }
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
 // Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
 func NewBranchCache(tailCapacity int) *BranchCache {
-	if tailCapacity <= 0 {
-		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
+	if tailCapacity <= 0 || uint64(tailCapacity) > math.MaxUint32 {
+		panic(fmt.Sprintf("BranchCache: tailCapacity must be in [1, %d], got %d", uint64(math.MaxUint32), tailCapacity))
 	}
 	tail, err := freelru.NewSharded[uint64, *branchCacheEntry](uint32(tailCapacity), u64noHash)
 	if err != nil {
