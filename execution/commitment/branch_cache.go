@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/elastic/go-freelru"
+
 	"github.com/erigontech/erigon/common/maphash"
 )
 
@@ -44,9 +46,9 @@ type BranchCache struct {
 	// read path.
 	root atomic.Pointer[branchCacheEntry]
 
-	// LRU tail — bounded entries with per-shard LRU eviction (no global recency
-	// order across shards). See branchCacheTailShards for why it's sharded.
-	tail *maphash.ShardedLRU[*branchCacheEntry]
+	// LRU tail — bounded, sharded (per-shard locks) cache keyed by the maphash
+	// of the prefix; eviction is per-shard, not a global recency order.
+	tail *freelru.ShardedLRU[uint64, *branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().
 	rootHits, rootMisses atomic.Uint64
@@ -73,15 +75,12 @@ type branchCacheEntry struct {
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
 
-// branchCacheTailShards splits the tail into this many independently-locked
-// shards so concurrent warmup workers don't serialize on a single LRU mutex.
-// Fixed value sized for the default warmup pool (dbg.TipTrieWarmupers ≈ NumCPU*8).
-const branchCacheTailShards = 256
-
 // Implemented by *db/state.AggregatorRoTx via duck typing to avoid an execctx→db/state import cycle. Nil means caching is disabled.
 type BranchCacheProvider interface {
 	BranchCache() *BranchCache
 }
+
+func u64noHash(h uint64) uint32 { return uint32(h) }
 
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
 // Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
@@ -89,9 +88,9 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
-	tail, err := maphash.NewShardedLRU[*branchCacheEntry](tailCapacity, branchCacheTailShards)
+	tail, err := freelru.NewSharded[uint64, *branchCacheEntry](uint32(tailCapacity), u64noHash)
 	if err != nil {
-		panic(fmt.Sprintf("BranchCache: NewShardedLRU: %s", err))
+		panic(fmt.Sprintf("BranchCache: NewSharded: %s", err))
 	}
 	return &BranchCache{
 		tail: tail,
@@ -116,7 +115,7 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		c.rootHits.Add(1)
 		return entry, true
 	}
-	entry, ok := c.tail.Get(prefix)
+	entry, ok := c.tail.Get(maphash.Hash(prefix))
 	if !ok {
 		c.tailMisses.Add(1)
 		return nil, false
@@ -130,7 +129,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
-	c.tail.Set(prefix, entry)
+	c.tail.Add(maphash.Hash(prefix), entry)
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
@@ -176,7 +175,7 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 		c.root.Store(nil)
 		return
 	}
-	c.tail.Delete(prefix)
+	c.tail.Remove(maphash.Hash(prefix))
 }
 
 // UnwindTo evicts every cache entry whose txN > maxValidTxN across
@@ -189,13 +188,14 @@ func (c *BranchCache) UnwindTo(maxValidTxN uint64) (evicted int) {
 		c.root.Store(nil)
 		evicted++
 	}
-	c.tail.Range(func(hash uint64, entry *branchCacheEntry) bool {
-		if entry != nil && entry.txN > maxValidTxN {
-			c.tail.DeleteByHash(hash)
-			evicted++
+	for _, hash := range c.tail.Keys() {
+		entry, ok := c.tail.Peek(hash)
+		if ok && entry != nil && entry.txN > maxValidTxN {
+			if c.tail.Remove(hash) {
+				evicted++
+			}
 		}
-		return true
-	})
+	}
 	return evicted
 }
 

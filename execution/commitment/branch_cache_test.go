@@ -222,9 +222,8 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 }
 
 // TestBranchCache_ShardedTailUnwindAcrossShards drives UnwindTo over many tail
-// entries spread across all 256 shards (the default capacity exceeds the shard
-// count, so it is not capped down). It pins that the Range→DeleteByHash pairing
-// routes correctly at scale: every stale entry is evicted and every fresh one
+// entries spread across the sharded tail, pinning that eviction by txN
+// watermark works at scale: every stale entry is evicted and every fresh one
 // survives, regardless of which shard it landed in.
 func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	c := NewBranchCache(DefaultBranchCacheTailCapacity)
