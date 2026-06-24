@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -258,8 +259,7 @@ func TestFillTransactionGasPriceWithAccessListIsTypeOne(t *testing.T) {
 		AccessList: &al,
 	})
 	require.NoError(t, err)
-	require.Equal(t, hexutil.Uint64(types.AccessListTxType), result.Tx.Type,
-		"gasPrice + explicit accessList must produce type-1 tx (Erigon diverges from Geth here)")
+	require.Equal(t, hexutil.Uint64(types.AccessListTxType), result.Tx.Type)
 }
 
 func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {
@@ -356,4 +356,69 @@ func TestFillTransactionGasPricePostLondon(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(types.LegacyTxType), result.Tx.Type, "explicit gasPrice must produce a legacy tx")
+}
+
+func TestFillTransactionBlobFeeUsesNextBlockExcess(t *testing.T) {
+	// Genesis has a large ExcessBlobGas but zero BlobGasUsed.
+	// CalcExcessBlobGas returns ExcessBlobGas - targetBlobGas, not ExcessBlobGas itself.
+	// FillTransaction must use the former (next block's excess), not the latter.
+	const headExcessBlobGas = uint64(10_000_000)
+
+	cancunCfg := &chain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 chain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
+		ShanghaiTime:          common.NewUint64(0),
+		CancunTime:            common.NewUint64(0),
+		Ethash:                new(chain.EthashConfig),
+	}
+
+	excess := headExcessBlobGas
+	blobUsed := uint64(0)
+	gspec := &types.Genesis{
+		Config:        cancunCfg,
+		ExcessBlobGas: &excess,
+		BlobGasUsed:   &blobUsed,
+	}
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		BlobVersionedHashes:  []common.Hash{blobHash},
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Tx.MaxFeePerBlobGas)
+
+	head := m.Genesis.HeaderNoCopy()
+	nextTime := head.Time + cancunCfg.SecondsPerSlot()
+	nextExcess := misc.CalcExcessBlobGas(cancunCfg, head, nextTime)
+	correctFee, err := misc.GetBlobGasPrice(cancunCfg, nextExcess, nextTime)
+	require.NoError(t, err)
+	expectedMaxFeePerBlobGas := new(big.Int).Lsh(correctFee.ToBig(), 1)
+	require.Equal(t, expectedMaxFeePerBlobGas, result.Tx.MaxFeePerBlobGas.ToInt())
+
+	// Sanity: the old approach (using head.ExcessBlobGas directly) gives a different, larger value.
+	oldFee, err := misc.GetBlobGasPrice(cancunCfg, headExcessBlobGas, nextTime)
+	require.NoError(t, err)
+	oldMaxFeePerBlobGas := new(big.Int).Lsh(oldFee.ToBig(), 1)
+	require.NotEqual(t, expectedMaxFeePerBlobGas, oldMaxFeePerBlobGas,
+		"test scenario must differentiate CalcExcessBlobGas from head.ExcessBlobGas")
 }

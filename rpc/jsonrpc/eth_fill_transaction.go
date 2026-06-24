@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -72,9 +72,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			if err != nil {
 				return nil, err
 			}
-			if count != nil {
-				nonce = uint64(*count)
-			}
+			nonce = uint64(*count)
 		}
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
@@ -114,7 +112,8 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		}
 		if args.MaxFeePerBlobGas == nil {
 			nextBlockTime := head.Time + cc.SecondsPerSlot()
-			blobFee, err := misc.GetBlobGasPrice(cc, *head.ExcessBlobGas, nextBlockTime)
+			nextExcessBlobGas := misc.CalcExcessBlobGas(cc, head, nextBlockTime)
+			blobFee, err := misc.GetBlobGasPrice(cc, nextExcessBlobGas, nextBlockTime)
 			if err != nil {
 				return nil, err
 			}
@@ -130,7 +129,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	if args.Gas == nil {
-		estimated, err := api.EstimateGas(ctx, &args, nil, nil, nil)
+		estimated, err := api.EstimateGas(ctx, &args, &latestNumOrHash, nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -154,7 +153,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 }
 
 func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {
-	return gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
+	return gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
 }
 
 func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, head *types.Header, dbTx kv.TemporalTx) error {

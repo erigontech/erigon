@@ -287,8 +287,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
-	// Deliberate divergence from Geth: an explicit accessList is preserved as type 1 even when gasPrice
-	// is also set; Geth silently drops the access list and returns a LegacyTx (type 0).
+	// Unlike Geth, an explicit accessList with gasPrice produces type 1 rather than dropping the list.
 	case args.AccessList != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -504,72 +503,36 @@ type SignTransactionResult struct {
 	Tx  *RPCTransaction `json:"tx"`
 }
 
-// signedTxJSON is the allowlist output shape for SignTransactionResult.Tx; block-placement and sender fields are absent.
-type signedTxJSON struct {
-	Gas                  hexutil.Uint64             `json:"gas"`
-	GasPrice             *hexutil.Big               `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big               `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big               `json:"maxFeePerGas"`
-	Hash                 common.Hash                `json:"hash"`
-	Input                hexutil.Bytes              `json:"input"`
-	Nonce                hexutil.Uint64             `json:"nonce"`
-	To                   *common.Address            `json:"to"`
-	Value                *hexutil.Big               `json:"value"`
-	Type                 hexutil.Uint64             `json:"type"`
-	Accesses             *types.AccessList          `json:"accessList,omitempty"`
-	ChainID              *hexutil.Big               `json:"chainId,omitempty"`
-	MaxFeePerBlobGas     *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes  []common.Hash              `json:"blobVersionedHashes,omitempty"`
-	Authorizations       *[]types.JsonAuthorization `json:"authorizationList,omitempty"`
-	V                    *hexutil.Big               `json:"v"`
-	YParity              *hexutil.Big               `json:"yParity,omitempty"`
-	R                    *hexutil.Big               `json:"r"`
-	S                    *hexutil.Big               `json:"s"`
-}
-
 func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	if r.Tx == nil {
 		return nil, errors.New("nil transaction")
 	}
-	zero := (*hexutil.Big)(new(big.Int))
-	vv, rv, sv := r.Tx.V, r.Tx.R, r.Tx.S
-	if vv == nil {
-		vv = zero
-	}
-	if rv == nil {
-		rv = zero
-	}
-	if sv == nil {
-		sv = zero
-	}
 	type plain struct {
-		Raw hexutil.Bytes `json:"raw"`
-		Tx  signedTxJSON  `json:"tx"`
+		Raw hexutil.Bytes   `json:"raw"`
+		Tx  json.RawMessage `json:"tx"`
 	}
-	return json.Marshal(plain{
-		Raw: r.Raw,
-		Tx: signedTxJSON{
-			Gas:                  r.Tx.Gas,
-			GasPrice:             r.Tx.GasPrice,
-			MaxPriorityFeePerGas: r.Tx.MaxPriorityFeePerGas,
-			MaxFeePerGas:         r.Tx.MaxFeePerGas,
-			Hash:                 r.Tx.Hash,
-			Input:                r.Tx.Input,
-			Nonce:                r.Tx.Nonce,
-			To:                   r.Tx.To,
-			Value:                r.Tx.Value,
-			Type:                 r.Tx.Type,
-			Accesses:             r.Tx.Accesses,
-			ChainID:              r.Tx.ChainID,
-			MaxFeePerBlobGas:     r.Tx.MaxFeePerBlobGas,
-			BlobVersionedHashes:  r.Tx.BlobVersionedHashes,
-			Authorizations:       r.Tx.Authorizations,
-			V:                    vv,
-			YParity:              r.Tx.YParity,
-			R:                    rv,
-			S:                    sv,
-		},
-	})
+	txBytes, err := json.Marshal(r.Tx)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(txBytes, &m); err != nil {
+		return nil, err
+	}
+	for _, k := range []string{"blockHash", "blockNumber", "blockTimestamp", "transactionIndex", "from"} {
+		delete(m, k)
+	}
+	zeroHex := json.RawMessage(`"0x0"`)
+	for _, k := range []string{"v", "r", "s"} {
+		if v, ok := m[k]; !ok || string(v) == "null" {
+			m[k] = zeroHex
+		}
+	}
+	stripped, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(plain{Raw: r.Raw, Tx: stripped})
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction

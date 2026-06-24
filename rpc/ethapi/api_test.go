@@ -121,10 +121,9 @@ func TestSignTransactionResultMarshalJSON_EIP1559(t *testing.T) {
 
 	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
 
-	// EIP-1559: gasPrice must be explicit null.
-	gasPrice, ok := fields["gasPrice"]
-	require.True(t, ok, "gasPrice must be present")
-	require.Equal(t, "null", string(gasPrice))
+	// EIP-1559 without known baseFee: gasPrice is absent (computeGasPrice returns nil).
+	_, ok := fields["gasPrice"]
+	require.False(t, ok, "gasPrice must be absent when baseFee is unknown")
 
 	// maxFeePerGas and maxPriorityFeePerGas must be set.
 	require.NotEqual(t, "null", string(fields["maxFeePerGas"]))
@@ -135,7 +134,7 @@ func TestSignTransactionResultMarshalJSON_EIP1559(t *testing.T) {
 	require.Equal(t, `"0x0"`, string(fields["r"]))
 	require.Equal(t, `"0x0"`, string(fields["s"]))
 
-	// block-placement and sender fields must be stripped.
+	// block-placement and sender fields must be absent.
 	for _, k := range []string{"from", "blockHash", "blockNumber", "blockTimestamp", "transactionIndex"} {
 		_, present := fields[k]
 		require.False(t, present, "%s must be absent", k)
@@ -162,13 +161,11 @@ func TestSignTransactionResultMarshalJSON_Legacy(t *testing.T) {
 	require.True(t, ok, "gasPrice must be present")
 	require.NotEqual(t, "null", string(gasPrice))
 
-	// maxFeePerGas and maxPriorityFeePerGas must be explicit null.
-	maxFee, ok := fields["maxFeePerGas"]
-	require.True(t, ok, "maxFeePerGas must be present")
-	require.Equal(t, "null", string(maxFee))
-	maxPrio, ok := fields["maxPriorityFeePerGas"]
-	require.True(t, ok, "maxPriorityFeePerGas must be present")
-	require.Equal(t, "null", string(maxPrio))
+	// Legacy: maxFeePerGas and maxPriorityFeePerGas are inapplicable and must be absent.
+	_, ok = fields["maxFeePerGas"]
+	require.False(t, ok, "maxFeePerGas must be absent for legacy tx")
+	_, ok = fields["maxPriorityFeePerGas"]
+	require.False(t, ok, "maxPriorityFeePerGas must be absent for legacy tx")
 
 	// unsigned tx: v/r/s must be "0x0", not null.
 	require.Equal(t, `"0x0"`, string(fields["v"]))
