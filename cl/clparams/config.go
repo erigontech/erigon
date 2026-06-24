@@ -1088,6 +1088,28 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
+
+	// Forks absent from a custom config are unscheduled (far-future), as in other
+	// clients, rather than inheriting the mainnet base config's finite epochs.
+	var rawCfg map[string]any
+	if err := yaml.Unmarshal(b, &rawCfg); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	forkEpochs := map[string]*uint64{
+		"ALTAIR_FORK_EPOCH":    &beaconCfg.AltairForkEpoch,
+		"BELLATRIX_FORK_EPOCH": &beaconCfg.BellatrixForkEpoch,
+		"CAPELLA_FORK_EPOCH":   &beaconCfg.CapellaForkEpoch,
+		"DENEB_FORK_EPOCH":     &beaconCfg.DenebForkEpoch,
+		"ELECTRA_FORK_EPOCH":   &beaconCfg.ElectraForkEpoch,
+		"FULU_FORK_EPOCH":      &beaconCfg.FuluForkEpoch,
+		"GLOAS_FORK_EPOCH":     &beaconCfg.GloasForkEpoch,
+	}
+	for key, epoch := range forkEpochs {
+		if _, ok := rawCfg[key]; !ok {
+			*epoch = math.MaxUint64
+		}
+	}
+
 	beaconCfg.InitializeForkSchedule()
 
 	// setup network config
