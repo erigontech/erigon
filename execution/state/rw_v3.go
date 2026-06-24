@@ -1202,6 +1202,12 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	// Mark deleted in the current view so subsequent in-block reads / puts
 	// see the destruction immediately. nil (not absent) so GetCurrentAccount
 	// reports "present but empty" rather than falling back to committed state.
+	if v, present := c.currentAccounts[addr]; present && v == nil {
+		// Already deleted by an earlier tx in this block — match serial's
+		// IBS short-circuit so Flush emits a single DomainDel per address.
+		c.mu.Unlock()
+		return
+	}
 	c.currentAccounts[addr] = nil
 	delete(c.currentCode, addr)
 	delete(c.currentStorage, addr)
