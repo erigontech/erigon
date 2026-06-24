@@ -738,8 +738,6 @@ func planStateDump(availability map[string]uint64, toSlot, blocksPerFile uint64)
 
 	jobs := make([]caplinStateDumpJob, 0)
 	for _, name := range names {
-		// Resume exactly at the type's coverage end; flooring to a file
-		// boundary could re-dump an unaligned tail and create overlap.
 		from := availability[name]
 		for i := from; i+blocksPerFile <= toSlot; i += blocksPerFile {
 			jobs = append(jobs, caplinStateDumpJob{name: name, from: i, to: i + blocksPerFile})
