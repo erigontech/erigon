@@ -1333,8 +1333,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-		if value != nil {
+		// A key changed at several steps in the range has one diff per step, sorted
+		// by key then descending step; only the lowest step's value is the value at
+		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
+		// DupSort table keeps several dups at unwindStep and getLatestFromDb returns
+		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
+		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
+		if value != nil && lastForKey {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
