@@ -30,8 +30,7 @@ var (
 
 // GetCustodyGroups generates custody groups for a given node ID.
 // This function is re-entrant and thread-safe.
-func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex, error) {
-	cfg := clparams.GetBeaconConfig()
+func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64, cfg *clparams.BeaconChainConfig) ([]CustodyIndex, error) {
 	if custodyGroupCount > cfg.NumberOfCustodyGroups {
 		return nil, fmt.Errorf("custody group count %d exceeds maximum allowed %d", custodyGroupCount, cfg.NumberOfCustodyGroups)
 	}
@@ -71,9 +70,9 @@ func GetCustodyGroups(nodeID enode.ID, custodyGroupCount uint64) ([]CustodyIndex
 
 // ComputeColumnsForCustodyGroup returns the column indices that belong to a given custody group.
 // This function is re-entrant and thread-safe.
-func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, error) {
-	numberOfCustodyGroups := clparams.GetBeaconConfig().NumberOfCustodyGroups
-	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
+func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex, cfg *clparams.BeaconChainConfig) ([]ColumnIndex, error) {
+	numberOfCustodyGroups := cfg.NumberOfCustodyGroups
+	numberOfColumns := cfg.NumberOfColumns
 
 	if custodyGroup >= numberOfCustodyGroups {
 		return nil, fmt.Errorf("custody group %d is greater than or equal to the number of custody groups (%d)", custodyGroup, numberOfCustodyGroups)
@@ -91,8 +90,8 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 
 // ComputeMatrix takes a slice of blobs and returns a flattened sequence of matrix entries.
 // This function is re-entrant and thread-safe.
-func ComputeMatrix(blobs [][]byte) ([]cltypes.MatrixEntry, error) {
-	numberOfColumns := clparams.GetBeaconConfig().NumberOfColumns
+func ComputeMatrix(blobs [][]byte, cfg *clparams.BeaconChainConfig) ([]cltypes.MatrixEntry, error) {
+	numberOfColumns := cfg.NumberOfColumns
 	matrix := make([]cltypes.MatrixEntry, 0, len(blobs)*int(numberOfColumns))
 
 	for blobIndex, blob := range blobs {
@@ -202,16 +201,15 @@ func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, 
 	return convertCells, convertProofs, nil
 }
 
-func GetCustodyColumns(nodeID enode.ID, cgc uint64) (map[cltypes.CustodyIndex]bool, error) {
-	// TODO: cache the following computations in terms of custody columns
-	groups, err := GetCustodyGroups(nodeID, cgc)
+func GetCustodyColumns(nodeID enode.ID, cgc uint64, cfg *clparams.BeaconChainConfig) (map[cltypes.CustodyIndex]bool, error) {
+	groups, err := GetCustodyGroups(nodeID, cgc, cfg)
 	if err != nil {
 		return nil, err
 	}
 	// compute all required custody columns
 	custodyColumns := map[cltypes.CustodyIndex]bool{}
 	for _, group := range groups {
-		columns, err := ComputeColumnsForCustodyGroup(group)
+		columns, err := ComputeColumnsForCustodyGroup(group, cfg)
 		if err != nil {
 			return nil, err
 		}

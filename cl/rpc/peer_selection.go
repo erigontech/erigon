@@ -121,7 +121,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			} else {
 				// get custody indices
 				enodeId := enode.HexID(peer.EnodeId)
-				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
+				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount, c.beaconConfig)
 				if err != nil {
 					log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
 					continue

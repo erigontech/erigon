@@ -1683,7 +1683,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				if err != nil {
 					return fmt.Errorf("failed to compute block root: %w", err)
 				}
-				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(blk.Block.Slot, blockRoot, cellsAndProofsPerBlob, a.beaconChainCfg)
 				if err != nil {
 					return fmt.Errorf("failed to get data column sidecars: %w", err)
 				}
@@ -1697,7 +1697,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				for i, h := range inclusionProofRaw {
 					commitmentInclusionProof.Set(i, h)
 				}
-				columnsSidecars, err = peerdasutils.GetDataColumnSidecars(header, kzgCommitments, commitmentInclusionProof, cellsAndProofsPerBlob)
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecars(header, kzgCommitments, commitmentInclusionProof, cellsAndProofsPerBlob, a.beaconChainCfg)
 				if err != nil {
 					return fmt.Errorf("failed to get data column sidecars: %w", err)
 				}
@@ -1745,7 +1745,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				a.logger.Error("Failed to encode column sidecar", "err", err)
 				continue
 			}
-			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
+			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index, a.beaconChainCfg)
 			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 				a.logger.Error("Failed to publish data column sidecar", "err", err)
 			}

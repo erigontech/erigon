@@ -188,12 +188,12 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
-	if !verifyDataColumnSidecar(msg) {
+	if !verifyDataColumnSidecar(msg, s.cfg) {
 		return errors.New("invalid data column sidecar")
 	}
 
 	// [REJECT] The sidecar is for the correct subnet
-	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index, s.cfg) {
 		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
@@ -324,12 +324,12 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	}
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar, bid.blob_kzg_commitments)
-	if !verifyDataColumnSidecarWithCommitments(msg, kzgCommitments) {
+	if !verifyDataColumnSidecarWithCommitments(msg, kzgCommitments, s.cfg) {
 		return errors.New("invalid data column sidecar")
 	}
 
 	// [REJECT] The sidecar is for the correct subnet
-	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index, s.cfg) {
 		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 

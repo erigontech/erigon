@@ -231,7 +231,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidDataColumnSid
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_ReturnsError() {
 	// Setup mock functions
 	incorrectSubnet := uint64(987654321)
-	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 } // Return different subnet
+	computeSubnetForDataColumnSidecar = func(index uint64, _ *clparams.BeaconChainConfig) uint64 { return 1234 } // Return different subnet
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
 	blsVerify = t.mockFuncs.BlsVerify
 
@@ -618,7 +618,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecar_
 // TestGloasProcessMessage_WhenIncorrectSubnet_ReturnsError tests GLOAS subnet validation
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenIncorrectSubnet_ReturnsError() {
 	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
-	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 }
+	computeSubnetForDataColumnSidecar = func(index uint64, _ *clparams.BeaconChainConfig) uint64 { return 1234 }
 
 	incorrectSubnet := uint64(9999)
 
