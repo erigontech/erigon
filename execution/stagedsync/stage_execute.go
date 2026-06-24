@@ -485,20 +485,43 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	// that defers to FCU when work is pending — out of scope here.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	quickPruneTimeout := baseTimeout
+	stagePruneTimeout := baseTimeout
 	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
 			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
 			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			quickPruneTimeout = baseTimeout + extra
-			if quickPruneTimeout > maxTimeout {
-				quickPruneTimeout = maxTimeout
+			stagePruneTimeout = baseTimeout + extra
+			if stagePruneTimeout > maxTimeout {
+				stagePruneTimeout = maxTimeout
 			}
 		}
 	}
+	if timeout > 0 && timeout > stagePruneTimeout {
+		stagePruneTimeout = timeout
+	}
 
-	if timeout > 0 && timeout > quickPruneTimeout {
-		quickPruneTimeout = timeout
+	pruneDiffsLimit := 200_000
+	pruneBalLimit := 10_000
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneDiffsLimit = math.MaxInt
+		pruneBalLimit = math.MaxInt
+		stagePruneTimeout = 12 * time.Hour
+	}
+
+	stagePruneStartTime := time.Now()
+	remainingPruneTimeout := func() time.Duration {
+		// Initial-cycle pruning is aggressive: there is no FCU to leave time for, so
+		// each prune step gets the full long budget instead of sharing it. Sharing
+		// here would let earlier steps eat into the budget and drop PruneSmallBatches
+		// below the furious-prune threshold (>5h) or skip it entirely.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return stagePruneTimeout
+		}
+		remaining := stagePruneTimeout - time.Since(stagePruneStartTime)
+		if remaining <= 0 {
+			return 0
+		}
+		return remaining
 	}
 
 	// AlwaysGenerateChangesets disables this prune so the node retains
@@ -509,71 +532,61 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 200_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
-			tx,
-			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneDiffsLimitOnChainTip,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
-		}
-		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
+		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+			pruneChangeSetsStartTime := time.Now()
+			if err := rawdb.PruneTable(
+				tx,
+				kv.ChangeSets3,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneDiffsLimit,
+				pruneChangeSetsTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
+			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+				logger.Debug(
+					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+					"duration", duration,
+					"timeout", pruneChangeSetsTimeout,
+					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				)
+			}
 		}
 	}
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		pruneBalLimit := 10_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		if err := rawdb.PruneTable(
-			tx,
-			kv.BlockAccessList,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneBalLimit,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
+		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+			if err := rawdb.PruneTable(
+				tx,
+				kv.BlockAccessList,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneBalLimit,
+				pruneTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
 		}
 	}
 
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
-	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+			return err
+		}
 	}
-
-	pruneSmallBatchesStartTime := time.Now()
-	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
-		return err
-	}
-	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
+	if duration := time.Since(stagePruneStartTime); duration > stagePruneTimeout {
 		logger.Debug(
-			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
+			fmt.Sprintf("[%s] prune execution timing", s.LogPrefix()),
 			"duration", duration,
+			"timeout", stagePruneTimeout,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}

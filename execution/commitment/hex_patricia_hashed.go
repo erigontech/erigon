@@ -92,8 +92,9 @@ type HexPatriciaHashed struct {
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
-	mounted    bool // true if this trie is mounted to some root trie
-	mountedNib int  // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
+	mounted    bool  // true if this trie is mounted to some root trie
+	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
+	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
@@ -199,6 +200,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	hph.mounted = false
 	hph.mountedNib = 0
+	hph.mountWall = 0
 
 	// tracing / capture
 	hph.capture = nil
@@ -360,12 +362,10 @@ func (cell *cell) setFromUpdate(update *Update) {
 	cell.Update.Merge(update)
 	if update.Flags&StorageUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadStorage)
-		mxTrieStateLoadRate.Inc()
 		hadToLoad.Add(1)
 	}
 	if update.Flags&BalanceUpdate != 0 || update.Flags&NonceUpdate != 0 || update.Flags&CodeUpdate != 0 {
 		cell.loaded = cell.loaded.addFlag(cellLoadAccount)
-		mxTrieStateLoadRate.Inc()
 		hadToLoad.Add(1)
 	}
 }
@@ -881,7 +881,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
 			}
-			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
 				return res, storageRootHashIsSet, nil, err
@@ -971,7 +970,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 				hph.keccak.Reset()
 
-				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
@@ -1049,7 +1047,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if hph.trace {
 				fmt.Printf("REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
 			}
-			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
@@ -1125,7 +1122,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			if cell.stateHashLen > 0 {
 				hph.keccak.Reset()
 
-				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
@@ -1717,9 +1713,21 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
 	}
 	hph.branchBefore[row] = true
-	maps, err := DecodeBranchInto(branchData, deleted, &hph.grid[row])
-	if err != nil {
+	if err := hph.decodeBranchIntoRow(row, depth, branchData, deleted); err != nil {
 		return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
+	}
+	hph.depths[hph.activeRows] = depth
+	hph.activeRows++
+	return nil
+}
+
+// decodeBranchIntoRow decodes branch (with the touch/after-map prefix already stripped)
+// into grid[row], records its touch/after maps, and derives hashed keys for present cells
+// at depth. The on-disk read and its flush/metrics handling stay with each caller.
+func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch []byte, deleted bool) error {
+	maps, err := DecodeBranchInto(branch, deleted, &hph.grid[row])
+	if err != nil {
+		return err
 	}
 	hph.touchMap[row] = maps.TouchMap
 	hph.afterMap[row] = maps.AfterMap
@@ -1730,14 +1738,11 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-		// relies on plain account/storage key so need to be dereferenced before hashing
-		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+		if err := cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return err
 		}
 		bitset ^= bit
 	}
-	hph.depths[hph.activeRows] = depth
-	hph.activeRows++
 	return nil
 }
 
@@ -1825,6 +1830,29 @@ var (
 	skippedLoad atomic.Uint64
 	hadToReset  atomic.Uint64
 )
+
+var (
+	rateFlushMu       sync.Mutex
+	loadRatePublished uint64
+	skipRatePublished uint64
+)
+
+// flushTrieStateRates publishes the cumulative load/skip atomics to their
+// prometheus counters once per Process, replacing the per-key .Inc() on the hot
+// path. The atomics are monotonic and the publish is delta-based, so the emitted
+// counter value is identical regardless of how often this is called.
+func flushTrieStateRates() {
+	rateFlushMu.Lock()
+	defer rateFlushMu.Unlock()
+	if l := hadToLoad.Load(); l > loadRatePublished {
+		mxTrieStateLoadRate.AddUint64(l - loadRatePublished)
+		loadRatePublished = l
+	}
+	if s := skippedLoad.Load(); s > skipRatePublished {
+		mxTrieStateSkipRate.AddUint64(s - skipRatePublished)
+		skipRatePublished = s
+	}
+}
 
 type skipStat struct {
 	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
@@ -2542,7 +2570,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 			return cell{}, err
 		}
 		// fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
-		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
+		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == hph.mountWall {
 			if hph.trace {
 				fmt.Printf("mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
 			}
@@ -2848,6 +2876,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		hph.branchEncoder.ClearDeferred()
 	}
+
+	flushTrieStateRates()
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
