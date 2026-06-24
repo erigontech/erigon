@@ -426,6 +426,13 @@ func (s *RecordingState) accountExists(addr common.Address) bool {
 	return err != nil || acc != nil
 }
 
+// existedPreBlock reports parent-state presence regardless of in-block deletion, so a
+// pre-existing-but-deleted account still contributes its witness-trie preimage.
+func (s *RecordingState) existedPreBlock(addr common.Address) bool {
+	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
+	return err != nil || acc != nil
+}
+
 // --- Query methods ---
 
 // GetAccessedKeys returns all accessed account addresses and storage keys (reads + writes)
@@ -944,7 +951,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	}
 	witnessKeys := make([]hexutil.Bytes, 0, len(out.Addresses)+len(slotSet))
 	for addr := range out.Addresses {
-		if !rs.accountExists(addr) {
+		if !rs.accountExists(addr) && !rs.existedPreBlock(addr) {
 			continue
 		}
 		witnessKeys = append(witnessKeys, bytes.Clone(addr[:]))

@@ -172,8 +172,9 @@ func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
 }
 
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
-// key is emitted only for accounts that exist post-state; accessed-but-nonexistent
-// addresses are excluded, while their accessed storage slots are still emitted.
+// key is emitted only for accounts represented in the witness trie (present in pre-
+// or post-state); an address that exists in neither is excluded, while its accessed
+// storage slots are still emitted.
 func TestCollectAccessedState_KeysOnlyExistingAccounts(t *testing.T) {
 	existing := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	missing := common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -208,6 +209,47 @@ func TestCollectAccessedState_KeysOnlyExistingAccounts(t *testing.T) {
 	}
 	if !sawSlot {
 		t.Error("expected storage slot key to still be emitted for nonexistent account")
+	}
+}
+
+// TestCollectAccessedState_KeysIncludeDeletedPreExisting is a regression test for the
+// missing-preimage bug: an account present in the parent state but emptied and
+// state-cleared in-block (EIP-161) keeps its leaf in the parent-state witness trie,
+// so its 20-byte preimage must stay in keys[] even though it no longer exists
+// post-state. An account that never existed pre-state and is deleted in-block has no
+// parent-trie leaf and stays excluded.
+func TestCollectAccessedState_KeysIncludeDeletedPreExisting(t *testing.T) {
+	preExistingDeleted := common.HexToAddress("0x16fd7629978addaf41c426601176c37977a0faa7")
+	createdThenDeleted := common.HexToAddress("0x2222222222222222222222222222222222222222")
+
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{
+		preExistingDeleted: {Balance: *uint256.NewInt(1)},
+	}}
+	rs := NewRecordingState(inner)
+	rs.AccessedAccounts[preExistingDeleted] = struct{}{}
+	rs.DeletedAccounts[preExistingDeleted] = struct{}{}
+	rs.AccessedAccounts[createdThenDeleted] = struct{}{}
+	rs.DeletedAccounts[createdThenDeleted] = struct{}{}
+
+	accessed := collectAccessedState(rs, witnessModeLegacy)
+
+	var sawPreExisting, sawCreatedThenDeleted bool
+	for _, k := range accessed.WitnessKeys {
+		if len(k) != 20 {
+			continue
+		}
+		switch common.BytesToAddress(k) {
+		case preExistingDeleted:
+			sawPreExisting = true
+		case createdThenDeleted:
+			sawCreatedThenDeleted = true
+		}
+	}
+	if !sawPreExisting {
+		t.Error("preimage for a pre-existing account deleted in-block must remain in keys[]")
+	}
+	if sawCreatedThenDeleted {
+		t.Error("preimage for an account that never existed pre-state and was deleted in-block must be excluded")
 	}
 }
 
