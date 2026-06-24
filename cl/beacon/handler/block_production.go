@@ -867,7 +867,7 @@ func (a *ApiHandler) produceBeaconBody(
 		// into the slot) so the block still propagates in time. Both scale with
 		// the chain's slot time (Gnosis/Chiado 5s slots: build ~1.25s; mainnet
 		// 12s: ~3s). A late produce request grabs immediately.
-		slotStart := a.ethClock.GetSlotTime(targetSlot)
+		slotStart := time.Unix(int64(state.ComputeTimestampAtSlot(baseState, targetSlot)), 0)
 		builderBudget := slotDuration / 4
 		buildUntil := time.Now().Add(builderBudget)
 		if deadline := slotStart.Add(slotDuration / 3); buildUntil.After(deadline) {
