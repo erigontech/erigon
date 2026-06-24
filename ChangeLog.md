@@ -4,6 +4,26 @@
 
 ### Breaking Changes
 
+#### JSON-RPC: block-number strings must use the `0x` hex format
+
+Quoted decimal strings (e.g., `"3"`) are no longer accepted as block-number
+parameters; use the canonical hex form (e.g., `"0x3"`) instead. Bare JSON
+integers (`3`) and named tags (`"latest"`, `"earliest"`, `"pending"`,
+`"safe"`, `"finalized"`) are unchanged.
+
+**What changed:**
+
+| Input | Before | After |
+|---|---|---|
+| `"3"` (quoted decimal) | accepted | rejected with `-32602` |
+| `"0x3"` (hex string) | accepted | accepted |
+| `3` (bare integer) | accepted | accepted |
+
+**Migration:** replace any quoted decimal block number with its `0x`
+equivalent — e.g., `"3"` → `"0x3"`, `"1000000"` → `"0xf4240"`.
+
+---
+
 #### `eth_simulateV1`: base fee too low error code corrected to `-38012`
 
 Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth/nethermind#11412](https://github.com/NethermindEth/nethermind/issues/11412)).

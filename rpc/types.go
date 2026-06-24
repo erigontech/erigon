@@ -105,7 +105,8 @@ var (
 // - an out of range error when the given block number is either too little or too large
 func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	input := strings.TrimSpace(string(data))
-	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
+	isQuotedString := len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
+	if isQuotedString {
 		input = input[1 : len(input)-1]
 	}
 
@@ -133,13 +134,20 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Try to parse it as a number
-	blckNum, err := strconv.ParseUint(input, 10, 64)
-	if err != nil {
-		// Now try as a hex number
-		if blckNum, err = hexutil.DecodeUint64(input); err != nil {
-			return err
+	var blckNum uint64
+	var err error
+	if !isQuotedString {
+		// Bare JSON integer: accept decimal.
+		blckNum, err = strconv.ParseUint(input, 10, 64)
+		if err != nil {
+			blckNum, err = hexutil.DecodeUint64(input)
 		}
+	} else {
+		// Quoted string: require 0x hex prefix.
+		blckNum, err = hexutil.DecodeUint64(input)
+	}
+	if err != nil {
+		return err
 	}
 	if blckNum > math.MaxInt64 {
 		return errors.New("block number larger than int64")
@@ -265,12 +273,8 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 			bnh.BlockHash = &hash
 			return nil
 		} else {
-			blckNum, decErr := strconv.ParseUint(input, 10, 64)
-			if decErr != nil {
-				blckNum, err = hexutil.DecodeUint64(input)
-				if err != nil {
-					return err
-				}
+			if blckNum, err = hexutil.DecodeUint64(input); err != nil {
+				return err
 			}
 			if blckNum > math.MaxInt64 {
 				return errors.New("blocknumber too high")
