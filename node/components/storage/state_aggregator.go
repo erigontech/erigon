@@ -59,4 +59,12 @@ type StateAggregator interface {
 	// the original's wire format. Production *state.Aggregator
 	// returns a.Cfg(domain).Compression; mocks return CompressNone.
 	DomainCompression(domain kv.Domain) seg.FileCompression
+
+	// Unwind is the cross-cutting aggregator-side unwind step:
+	// invalidates every aggregator-lifetime cache keyed by txN past
+	// the unwind target. SharedDomains.Unwind reaches the same surface
+	// via commitment.AggregatorUnwindHandler; mode-B Provider.Unwind
+	// calls this directly. Anything added to (*Aggregator).Unwind
+	// applies to both unwind paths automatically.
+	Unwind(txN uint64)
 }

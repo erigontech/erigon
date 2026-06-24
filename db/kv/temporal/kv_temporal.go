@@ -795,7 +795,7 @@ func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (h
 	return haveMore || hasMore, nil
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
+	return tx.aggtx.UnwindDomains(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
 func (tx *tx) ForkableAggTx(id kv.ForkableId) any {

@@ -167,6 +167,26 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 	}
 	rawdb.WriteForkchoiceHead(tx, targetHash)
 
+	// Bump PlainStateVersion so external observers (the RPC
+	// kv.PlainStateVersion stream and any cache that keys
+	// invalidation off the version) see that state moved. The
+	// canonical changeset-window unwind path does this implicitly via
+	// the flush-with-unwind in db/state/temporal_mem_batch.go; mode-B
+	// reaches MDBX without going through that path, so the bump must
+	// be wired in explicitly.
+	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+		return fmt.Errorf("IncrementStateVersion: %w", err)
+	}
+
+	// PoS epoch records (kv.PoSEpoch / kv.PoSEpochPending) past the
+	// unwind target must be cleared. The canonical staged-sync unwind
+	// does this in execution/stagedsync/stage_execute.go via
+	// rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); mode-B reaches
+	// the same table state and needs the same cleanup.
+	if err := rawdb.DeleteNewerEpochs(tx, toBlock+1); err != nil {
+		return fmt.Errorf("DeleteNewerEpochs(%d): %w", toBlock+1, err)
+	}
+
 	if err := deleteChangeSetsPastBlock(tx, toBlock); err != nil {
 		return fmt.Errorf("deleteChangeSetsPastBlock(%d): %w", toBlock, err)
 	}

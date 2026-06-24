@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -719,6 +720,40 @@ func TestGetAsOf_FallsThroughForUnchangedKey(t *testing.T) {
 		"GetAsOf(lastTxNum+1=%d) must return the still-current value — it falls through to GetLatest when history has no entry, which is the semantic the regen now relies on",
 		lastTxNum+1)
 	require.NotEmpty(t, gaVal)
+}
+
+// TestAggregator_Unwind_EvictsBranchCache pins the cross-cutting
+// unwind step: (*Aggregator).Unwind(txN) must invalidate the
+// aggregator-lifetime BranchCache past txN. Both unwind paths
+// (changeset-window SharedDomains.Unwind and mode-B Provider.Unwind)
+// route through this method, so a regression here breaks both paths
+// silently and produces wrong-trie-root in catchup.
+func TestAggregator_Unwind_EvictsBranchCache(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok, "AggregatorRoTx must implement commitment.BranchCacheProvider")
+	bc := provider.BranchCache()
+	require.NotNil(t, bc, "BranchCache must be attached to the commitment domain (gated by dbg.UseStateCache)")
+
+	keepKey := []byte{0xa0, 0xb0}
+	evictKey := []byte{0xa0, 0xb1}
+	bc.Put(keepKey, []byte("keep"), 0, 50)    // txN below watermark — survives
+	bc.Put(evictKey, []byte("evict"), 0, 100) // txN above watermark — must be evicted
+
+	agg.Unwind(60)
+
+	_, _, ok = bc.Get(keepKey)
+	require.True(t, ok, "txN=50 entry must survive Aggregator.Unwind(60)")
+	_, _, ok = bc.Get(evictKey)
+	require.False(t, ok, "txN=100 entry must be evicted by Aggregator.Unwind(60) — without this, mode-B Provider.Unwind leaves stale branches and forward-exec wedges on wrong-trie-root a handful of blocks past the unwind target")
 }
 
 // newWipeTestDB constructs a temporal DB + aggregator sized for fast

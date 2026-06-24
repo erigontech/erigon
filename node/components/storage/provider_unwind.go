@@ -230,6 +230,16 @@ func (p *Provider) unwindFinalize(ctx context.Context, tx kv.TemporalRwTx, toBlo
 		p.pendingTrimLock.Unlock()
 	}
 
+	// 6b. Invalidate aggregator-lifetime caches past lastTxNum. Mode-B
+	//     never goes through SharedDomains.Unwind, so without this the
+	//     BranchCache (and any future cache added to Aggregator.Unwind)
+	//     keeps entries with txN > lastTxNum and forward-exec after
+	//     mode-B reads stale cached commitment branches — surfaces as
+	//     wrong-trie-root a handful of blocks past the unwind target.
+	if p.Aggregator != nil {
+		p.Aggregator.Unwind(lastTxNum)
+	}
+
 	// 7. Verify the DB image is consistent with the unwind target
 	//    before the tx commits. Catches silent wipe-completeness gaps
 	//    in any of the sub-ops above; a failure here rolls the whole

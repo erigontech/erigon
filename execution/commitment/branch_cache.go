@@ -78,6 +78,16 @@ type BranchCacheProvider interface {
 	BranchCache() *BranchCache
 }
 
+// AggregatorUnwindHandler is the duck-typed contract for the cross-cutting
+// aggregator-side unwind step. SharedDomains.Unwind and the mode-B
+// past-changeset Provider.Unwind both route through this, so any
+// aggregator-lifetime cache invalidation added in Aggregator.Unwind
+// automatically applies to both unwind paths instead of getting added
+// to only one and silently breaking the other.
+type AggregatorUnwindHandler interface {
+	Unwind(txN uint64)
+}
+
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
 // Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
 func NewBranchCache(tailCapacity int) *BranchCache {

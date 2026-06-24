@@ -43,6 +43,7 @@ func (mockAggregator) WipeWritableShadowPast(context.Context, kv.TemporalRwTx, u
 	return nil
 }
 func (mockAggregator) DomainCompression(kv.Domain) seg.FileCompression { return seg.CompressNone }
+func (mockAggregator) Unwind(uint64)                                   {}
 
 // noopDBEventNotifier is the harness stand-in for shards.Events — the
 // Provider only forwards OnNewSnapshot through it, which the harness has

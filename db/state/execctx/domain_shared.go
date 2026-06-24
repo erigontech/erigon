@@ -129,6 +129,13 @@ type SharedDomains struct {
 
 	// Aggregator-scope commitment-branch cache, consulted only after sd.mem/parent.mem miss. Nil when AggTx is not a BranchCacheProvider.
 	branchCache *commitment.BranchCache
+
+	// Aggregator-scope unwind hook, captured at construction so
+	// SharedDomains.Unwind routes through (*Aggregator).Unwind via the
+	// duck-typed AggregatorUnwindHandler — same cross-cutting cleanup
+	// the mode-B Provider.Unwind path uses. Nil when the AggTx doesn't
+	// implement the interface (synthetic test fixtures).
+	aggUnwind commitment.AggregatorUnwindHandler
 }
 
 // PickTrieVariant returns the commitment trie variant selected by the
@@ -168,12 +175,16 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-	// Duck-typed lookup; see BranchCacheProvider for why this avoids an import cycle.
+	// Duck-typed lookups; see BranchCacheProvider / AggregatorUnwindHandler
+	// for why these avoid an import cycle.
 	var branchCache *commitment.BranchCache
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
 		branchCache = p.BranchCache()
 	}
 	sd.branchCache = branchCache
+	if h, ok := tx.AggTx().(commitment.AggregatorUnwindHandler); ok {
+		sd.aggUnwind = h
+	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
@@ -504,8 +515,25 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	sd.aggregatorUnwind(txNumUnwindTo)
+}
+
+// aggregatorUnwind invokes (*Aggregator).Unwind via the duck-typed
+// AggregatorUnwindHandler interface stashed at construction (no
+// import cycle against db/state). Mode-B Provider.Unwind reaches the
+// same surface directly; this is the route the changeset-window
+// SharedDomains.Unwind uses. Both converge on (*Aggregator).Unwind,
+// so additions there automatically apply to both unwind paths.
+//
+// Falls back to the standalone sd.branchCache for synthetic test
+// fixtures whose AggTx doesn't implement the handler.
+func (sd *SharedDomains) aggregatorUnwind(txN uint64) {
+	if sd.aggUnwind != nil {
+		sd.aggUnwind.Unwind(txN)
+		return
+	}
 	if sd.branchCache != nil {
-		sd.branchCache.UnwindTo(txNumUnwindTo)
+		sd.branchCache.UnwindTo(txN)
 	}
 }
 

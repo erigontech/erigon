@@ -501,6 +501,24 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	a.recalcVisibleFiles(nil)
 }
 
+// Unwind is the aggregator's contribution to an unwind: every
+// aggregator-lifetime cache that holds value state keyed by txN is
+// rolled back past txN. Called by both SharedDomains.Unwind (the
+// changeset-window path) and the past-changeset mode-B path so the
+// two converge on a single source of truth for aggregator-side
+// cleanup; anything new added here automatically applies to both
+// unwind paths.
+//
+// Today only the CommitmentDomain's BranchCache is covered — it is
+// the sole aggregator-lifetime value cache; visible-file pointers,
+// the dependency checker, and the awaiter are either no-state or
+// already refreshed by OpenFolder.
+func (a *Aggregator) Unwind(txN uint64) {
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		cd.branchCache.UnwindTo(txN)
+	}
+}
+
 func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -2429,6 +2447,16 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 	return at.d[kv.CommitmentDomain].d.branchCache
 }
 
+// Unwind delegates to the parent aggregator's cross-cutting unwind
+// step (implements commitment.AggregatorUnwindHandler). Both
+// SharedDomains.Unwind (changeset path) and mode-B Provider.Unwind
+// (past-changeset path) reach the aggregator-lifetime cache
+// invalidations through this surface, so anything added to
+// (*Aggregator).Unwind automatically applies to both.
+func (at *AggregatorRoTx) Unwind(txN uint64) {
+	at.a.Unwind(txN)
+}
+
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }
 func (at *AggregatorRoTx) standaloneIIs() []*InvertedIndexRoTx { return at.iis[:at.iisCount] }
 
@@ -2568,7 +2596,12 @@ func (at *AggregatorRoTx) DebugTraceKey(ctx context.Context, domain kv.Domain, k
 	return at.d[domain].TraceKey(ctx, key, fromTxNum, toTxNum, tx)
 }
 
-func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+// UnwindDomains is the per-domain changeset-replay unwind path used by
+// the canonical (changeset-window) unwind: for each domain it writes
+// the supplied diff back into the writable shadow. Distinct from
+// (a *Aggregator).Unwind(txN), which is the aggregator-lifetime cache
+// invalidation step both unwind paths converge through.
+func (at *AggregatorRoTx) UnwindDomains(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 

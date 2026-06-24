@@ -32,6 +32,75 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// TestUnwindDBPastBlock_IncrementsStateVersion pins the PlainState
+// version bump that mode-B now performs alongside the table
+// truncations. The canonical changeset-window unwind path increments
+// the version implicitly via flush-with-unwind in
+// db/state/temporal_mem_batch.go; mode-B reaches MDBX without going
+// through that path, so without an explicit bump here every external
+// observer that keys cache invalidation off kv.PlainStateVersion
+// (the RPC stateChanges stream, downstream caches) misses the
+// unwind. The unwind step itself lives at provider_unwind_db_reset.go
+// at the rawdb.IncrementStateVersion call; this test pins that the
+// underlying rawdb helper actually bumps the version when invoked.
+func TestUnwindDBPastBlock_IncrementsStateVersion(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	before, err := rawdb.IncrementStateVersion(tx)
+	require.NoError(t, err)
+
+	after, err := rawdb.IncrementStateVersion(tx)
+	require.NoError(t, err)
+	require.Greater(t, after, before,
+		"rawdb.IncrementStateVersion must bump kv.PlainStateVersion; mode-B unwindDBPastBlock invokes this so external observers see state moved post-unwind")
+}
+
+// TestUnwindDBPastBlock_DeletesNewerEpochs pins the PoS-epoch
+// cleanup mode-B now performs. The canonical staged-sync unwind
+// (execution/stagedsync/stage_execute.go) does
+// rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1) — mode-B reaches
+// the same table state and needs the same wipe. Without it,
+// kv.PendingEpoch entries past toBlock survive and CL-layer epoch
+// lookups on the new tip can hit a stale record from the pre-unwind
+// chain.
+func TestUnwindDBPastBlock_DeletesNewerEpochs(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const toBlock = uint64(100)
+	for n := uint64(95); n <= 105; n++ {
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key, n)
+		require.NoError(t, tx.Put(kv.PendingEpoch, key, []byte("epoch-payload")))
+	}
+
+	require.NoError(t, rawdb.DeleteNewerEpochs(tx, toBlock+1))
+
+	for n := uint64(95); n <= 100; n++ {
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key, n)
+		got, err := tx.GetOne(kv.PendingEpoch, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, got, "PendingEpoch at block %d (≤ toBlock) must survive", n)
+	}
+	for n := uint64(101); n <= 105; n++ {
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key, n)
+		got, err := tx.GetOne(kv.PendingEpoch, key)
+		require.NoError(t, err)
+		require.Empty(t, got, "PendingEpoch at block %d (> toBlock) must be deleted by DeleteNewerEpochs", n)
+	}
+}
+
 // seedHeaderAt writes a minimal Header + HeaderNumber + TD + body
 // entry for (blockNum, hash) into the supplied tx. Used to fabricate
 // "leaked" forward block data in DB-reset tests.
