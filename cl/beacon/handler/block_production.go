@@ -150,15 +150,17 @@ func pollAssembledPayload(
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, true
 		}
-		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-			return nil, nil, nil, nil, false
-		}
 		select {
 		case <-ctx.Done():
 			return nil, nil, nil, nil, false
 		case <-deadlineTimer.C:
 			return nil, nil, nil, nil, false
 		case <-retryTicker.C:
+		}
+		// Re-check here, not before get(): the select may pick the ticker after
+		// deadlineTimer fired, and get() stops the builder, so it must not run past pollUntil.
+		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
+			return nil, nil, nil, nil, false
 		}
 	}
 }
