@@ -94,7 +94,7 @@ jobs:
       # inputs the previous run discovered. Restored AFTER setup-erigon (which
       # caches all of GOCACHE), so this dedicated entry wins for $GOCACHE/fuzz.
       - name: Restore fuzz corpus
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ steps.erigon.outputs.build }}/fuzz
           key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}

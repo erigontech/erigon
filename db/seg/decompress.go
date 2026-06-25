@@ -62,10 +62,9 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 }
 
-// posEntry is one slot in a Huffman position table.
-// bits==0 signals a subtable pointer (see posTable.ptrs); otherwise bits is
-// the number of Huffman code bits consumed and pos is the decoded position.
-// pos fits in uint32 because positions are bounded by the word length.
+// posEntry is one slot in a Huffman position table: bits>0 is a terminal
+// (pos is the decoded position); bits==0 is a subtable router (pos is the
+// child index in posArena.tables), valid on the posMask!=0 path only.
 type posEntry struct {
 	pos  uint32
 	bits uint8
@@ -74,7 +73,6 @@ type posEntry struct {
 
 type posTable struct {
 	entries []posEntry
-	ptrs    []*posTable
 	bitLen  int
 	mask    uint16 // precomputed (1<<bitLen)-1
 }
@@ -108,26 +106,25 @@ func (a *patternArena) allocTable(bitLen int) *patternTable {
 	return t
 }
 
-// posArena pre-allocates all storage for a decompressor's Huffman position table,
-// consolidating O(N) individual heap allocations into 3 large slabs.
+// posArena pre-allocates all storage for a decompressor's Huffman position table
+// up front, to reduce per-table heap allocations and GC pressure.
 type posArena struct {
 	tables     []posTable
 	entriesArr []posEntry
-	ptrsArr    []*posTable
 	tableIdx   int
 	slotIdx    int
 }
 
-func (a *posArena) allocTable(bitLen int) *posTable {
+func (a *posArena) allocTable(bitLen int) (uint32, *posTable) {
 	sz := 1 << bitLen
-	t := &a.tables[a.tableIdx]
+	idx := a.tableIdx
+	t := &a.tables[idx]
 	a.tableIdx++
 	t.bitLen = bitLen
 	t.mask = uint16(1)<<bitLen - 1
 	t.entries = a.entriesArr[a.slotIdx : a.slotIdx+sz]
-	t.ptrs = a.ptrsArr[a.slotIdx : a.slotIdx+sz]
 	a.slotIdx += sz
-	return t
+	return uint32(idx), t
 }
 
 // countHuffmanArena mirrors the recursive build logic to count, without allocating,
@@ -401,9 +398,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		d.posArena = &posArena{
 			tables:     make([]posTable, 1+numSubTables),
 			entriesArr: make([]posEntry, totalSlots),
-			ptrsArr:    make([]*posTable, totalSlots),
 		}
-		d.posDict = d.posArena.allocTable(bitLen)
+		_, d.posDict = d.posArena.allocTable(bitLen)
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth, d.posArena); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
@@ -469,14 +465,12 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		entry := posEntry{pos: uint32(p), bits: uint8(bits)}
 		if table.bitLen == bits {
 			table.entries[code] = entry
-			table.ptrs[code] = nil
 		} else {
 			codeStep := uint16(1) << bits
 			codeFrom := code
 			codeTo := code | (uint16(1) << table.bitLen)
 			for c := codeFrom; c < codeTo; c += codeStep {
 				table.entries[c] = entry
-				table.ptrs[c] = nil
 			}
 		}
 		return 1, nil
@@ -488,9 +482,8 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		} else {
 			bitLen = int(maxDepth)
 		}
-		newTable := arena.allocTable(bitLen)
-		table.entries[code] = posEntry{} // bits==0 signals subtable
-		table.ptrs[code] = newTable
+		newIdx, newTable := arena.allocTable(bitLen)
+		table.entries[code] = posEntry{pos: newIdx} // bits==0 marks a subtable
 		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth, arena)
 	}
 	if maxDepth == 0 {
@@ -526,7 +519,6 @@ func (d *Decompressor) DictMemSize() uint64 {
 	if d.posArena != nil {
 		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
 		total += uint64(cap(d.posArena.entriesArr)) * uint64(unsafe.Sizeof(posEntry{}))
-		total += uint64(cap(d.posArena.ptrsArr)) * uint64(unsafe.Sizeof((*posTable)(nil)))
 	}
 	return total
 }
@@ -751,11 +743,13 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 func (v *SequentialView) MakeGetter() *Getter {
 	g := &Getter{
 		d:           v.d,
-		posDict:     v.d.posDict,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
+	}
+	if v.d.posArena != nil {
+		g.posTables = v.d.posArena.tables
 	}
 	if v.d.posDict != nil {
 		g.posMask = v.d.posDict.mask
@@ -779,11 +773,11 @@ type Getter struct {
 	dataP      uint64     // current byte offset in data
 	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
 	dataBit    int        // bit offset within current byte (0-7)
-	posMask    uint16     // cached posDict.mask, avoids pointer chain
-	posEntries []posEntry // cached posDict.entries, avoids pointer-chase through posDict
+	posMask    uint16     // cached d.posDict.mask, avoids pointer chain on hot path
+	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posDict     *posTable // Huffman table for positions (only used for subtable path)
+	posTables   []posTable // posArena.tables; only used for the subtable path
 	patternDict *patternTable
 	d           *Decompressor
 	fName       string
@@ -828,7 +822,7 @@ func (g *Getter) nextPos() uint64 {
 	entry := g.posEntries[code]
 	l := uint(entry.bits)
 	if l == 0 {
-		return g.nextPosSubtable(g.posDict, code)
+		return g.nextPosSubtable(entry.pos)
 	}
 	dataBit += l
 	dataP += uint64(dataBit >> 3)
@@ -838,19 +832,21 @@ func (g *Getter) nextPos() uint64 {
 }
 
 // nextPosSubtable handles the uncommon case where the initial table lookup
-// leads to a subtable (Huffman depth > 9).
+// leads to a subtable (Huffman depth > 9). tableIdx is the subtable to descend
+// into within g.posTables.
 //
 //go:noinline
-func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
+func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
+	tables := g.posTables
 	data := g.data
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7
 	for {
-		table = table.ptrs[code]
+		table := &tables[tableIdx]
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
-		code = uint16(data[dataP]) >> dataBit
+		code := uint16(data[dataP]) >> dataBit
 		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
@@ -863,6 +859,7 @@ func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 			g.dataBit = int(dataBit & 7)
 			return uint64(entry.pos)
 		}
+		tableIdx = entry.pos
 	}
 }
 
@@ -914,11 +911,13 @@ func (d *Decompressor) MakeGetter() *Getter {
 	data := d.data[d.wordsStart:]
 	g := &Getter{
 		d:           d,
-		posDict:     d.posDict,
 		data:        data,
 		dataLen:     uint64(len(data)),
 		patternDict: d.dict,
 		fName:       d.FileName(),
+	}
+	if d.posArena != nil {
+		g.posTables = d.posArena.tables
 	}
 	if d.posDict != nil {
 		g.posMask = d.posDict.mask
