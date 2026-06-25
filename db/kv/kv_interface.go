@@ -520,12 +520,9 @@ type TemporalDebugDB interface {
 // FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by
 // FlushOption values.
 type FlushConfig struct {
-	// DomainCallbacks, if set for a domain, is invoked for each
-	// (key, value, step, txNum) tuple in that domain during Flush — letting a
-	// downstream cache (e.g. the commitment BranchCache) stay in sync with the
-	// flush. txNum is the value's write txNum: a cache stamps its entry with it
-	// so unwind invalidation is tx-precise rather than step-coarse (an unwind to
-	// a txNum inside the latest step needs txNum precision).
+	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
+	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
+	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 

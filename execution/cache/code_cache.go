@@ -51,25 +51,15 @@ const (
 	DefaultCodeSizeCacheEntries int64 = 1_000_000
 )
 
-// CodeCache is a multi-level concurrent cache for contract code.
-// Level 1: addr → maphash(code) (mutable, cleared on reorg)
-// Level 2: maphash(code) → code (immutable, never cleared)
-// Level 2b: codeHash(code) → code (immutable, never cleared) — enables
-//           bypass of the addr level when the caller already knows the
-//           Ethereum codeHash from a prior account read (common path
-//           for EXTCODESIZE / EXTCODEHASH / CALL where many addresses
-//           share the same bytecode — proxies, factory-deployed clones,
-//           ERC-20 holders, etc.).
+// CodeCache is a multi-level concurrent cache for contract code, keyed by the
+// cheap maphash rather than Keccak256 so many shared-code addresses cost little:
+//   - L1  addr → maphash(code)
+//   - L2  maphash(code) → code
+//   - L2b codeHash(code) → code — lets a caller that already knows the Ethereum
+//         codeHash (EXTCODESIZE/EXTCODEHASH/CALL after an account read) skip L1.
 //
-// This design is efficient because:
-// - Multiple addresses can share the same code (common with proxies/clones)
-// - Uses fast maphash instead of cryptographic Keccak256 for L1/L2
-// - Address mappings are small (8 bytes) so we can cache many more
-// - codeHashToCode lets callers with the codeHash in hand skip L1 entirely
-// - Thread-safe via sync.Map
-//
-// Capacity is byte-based. Once full, new puts are no-ops but
-// modifications to existing entries and deletions are still allowed.
+// Capacity is byte-based; once full new puts are dropped, but updates to
+// existing entries and deletions still apply.
 
 // Every cached layer carries (txNum, epoch) so an unwind invalidates code the
 // same way as the account/storage/branch caches: a contract's code
@@ -226,7 +216,7 @@ func NewDefaultCodeCache() *CodeCache {
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	k := addrKey(addr)
 	vID, ok := c.addrToHash.Get(k)
-	if !ok || vID.addrID == 0 {
+	if !ok {
 		c.addrMisses.Add(1)
 		return nil, false
 	}
@@ -302,7 +292,12 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	}
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
 	if _, loaded := c.hashToCode.LoadOrStore(hashKey, entry); !loaded {
-		c.codeSize.Add(codeEntrySize)
+		// Account only the real insert, then back it out if it raced past the cap
+		// so concurrent inserts of distinct codes can't overshoot the budget.
+		if c.codeSize.Add(codeEntrySize) > int64(c.codeCapacityB) {
+			c.codeSize.Add(-codeEntrySize)
+			c.hashToCode.Delete(hashKey)
+		}
 	}
 }
 
@@ -405,7 +400,10 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	}
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
 	if _, loaded := c.codeHashToCode.LoadOrStore(codeHash, entry); !loaded {
-		c.codeHashCodeSize.Add(entrySize)
+		if c.codeHashCodeSize.Add(entrySize) > int64(c.codeCapacityB) {
+			c.codeHashCodeSize.Add(-entrySize)
+			c.codeHashToCode.Delete(codeHash)
+		}
 	}
 }
 
@@ -457,7 +455,10 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 	}
 	entry := codeSizeEntry{size: size, keyHash: kh, txNum: txNum, epoch: ep}
 	if _, loaded := c.codeSizeByCodeHash.LoadOrStore(codeHash, entry); !loaded {
-		c.codeSizeEntries.Add(1)
+		if c.codeSizeEntries.Add(1) > c.codeSizeCapEntries {
+			c.codeSizeEntries.Add(-1)
+			c.codeSizeByCodeHash.Delete(codeHash)
+		}
 	}
 }
 

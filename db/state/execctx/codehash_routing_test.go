@@ -13,14 +13,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU is the deterministic
-// regression for the codeHash-no-code corruption: the addr→codeHash LRU caches
-// committed state and is invalidated only at flush, so an in-batch account
-// write (a 7702 set/clear, a fresh EOA) it has not yet seen must override it.
-// Before the fix, codeHashForAddr consulted the LRU before sd.mem and returned
-// a codeHash stale relative to the uncommitted write — a non-empty codeHash
-// beside an empty (mem-routed) code read, which surfaces on re-exec as EIP-3607
-// "sender not an eoa".
+// Pins that an in-batch account write overrides a stale addr→codeHash LRU entry
+// (the LRU caches committed state and is invalidated only at flush).
 func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

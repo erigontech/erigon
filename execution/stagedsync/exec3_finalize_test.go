@@ -1811,19 +1811,8 @@ func countPath(writes state.VersionedWrites, path state.AccountPath) int {
 	return n
 }
 
-// TestNormalizeWriteSet_CodePathTravelsWithCodeHash reproduces the EIP-7702
-// write-drop that wrongly rejected a delegated sender with "sender not an eoa".
-//
-// A delegating tx re-executes in parallel. On the re-exec, SetCode short-circuits
-// (so.Code() already returns the designator written by the prior incarnation, so
-// bytes.Equal(prevcode, code) is true), so the validated incarnation emits the
-// authority's nonce bump but NO fresh CodePath/CodeHashPath. The raw writeset
-// therefore carries the stale prior-incarnation code writes. normalizeWriteSet
-// keeps CodeHashPath (resolved from the versionMap) but the incarnation filter
-// drops the stale CodePath — leaving a codeHash with no code. The account then
-// persists a non-empty codeHash whose code bytes are missing from CodeDomain, so
-// a later block's GetDelegatedDesignation reads empty and EIP-3607 rejects the
-// 7702 sender. CodePath must be recovered so code always travels with its hash.
+// Pins that normalizeWriteSet recovers CodePath alongside CodeHashPath for a
+// 7702 designator, so an account is never left with a codeHash but no code.
 func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	authority := accounts.InternAddress([20]byte{0x42})

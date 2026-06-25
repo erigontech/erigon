@@ -27,14 +27,9 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-// TestCommit_UpdatesStorageStateCache is the deterministic regression for the
-// stateCache stale-storage bug: storage values live in a dedicated ordered
-// btree (sd.storage), not sd.domains[StorageDomain], so the flush-callback loop
-// — which iterated sd.domains[domain] only — never fired the StorageDomain
-// callback. The storage cache was therefore only ever read-populated and never
-// refreshed on commit: once a slot was cached, a later write to it was invisible
-// and the cache served the stale value on hit. (Surfaced under parallel exec as
-// a swap reading a stale reserve → revert → gas mismatch.)
+// Pins that Commit fires the StorageDomain flush-callback so the storage cache
+// is refreshed. Storage lives in a separate btree (sd.storage), not sd.domains,
+// so the callback loop must cover it — else a cached slot serves a stale value.
 //
 // The caches are commit-gated: they are populated only after tx.Commit succeeds
 // (Commit stashes the flush-callback tuples and applies them post-commit), never

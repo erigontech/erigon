@@ -1263,13 +1263,10 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
 	if len(addr) == 0 {
 		return nil
 	}
-	// In-batch state is authoritative and MUST win over any cache. sd.mem /
-	// parent.mem hold this batch's uncommitted account writes (a 7702 set/clear,
-	// a selfdestruct); the addr→codeHash LRU is invalidated only on flush, so
-	// consulting it first would return a codeHash stale relative to those writes
-	// — diverging from the mem-routed code read and yielding a codeHash with no
-	// code (EIP-3607 "sender not an eoa" on re-exec). Route mem-first; the LRU is
-	// a committed-state layer that may only answer once mem has missed.
+	// In-batch state is authoritative: sd.mem / parent.mem hold this batch's
+	// uncommitted account writes, while the addr→codeHash LRU is invalidated only
+	// on flush. Route mem-first; the LRU is a committed-state layer that may only
+	// answer once mem has missed.
 	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
 		return decodeAccountCodeHash(v)
 	}

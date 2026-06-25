@@ -293,6 +293,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		},
 		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+		// Small per-instance state cache: one ExecModule is built per fixture,
+		// so the full production cache would exhaust memory across the corpus.
+		StateCacheBudget: 1 * datasize.MB,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)

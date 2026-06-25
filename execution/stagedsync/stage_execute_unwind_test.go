@@ -39,31 +39,10 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// TestUnwindExecutionStage_PrunesUncommittedOverlayWrite is a regression test
-// for the Hoodi block-3004265 gas-used mismatch (originally found on
-// release/3.4, same gap on main).
-//
-// Repro of the original chain of events:
-//
-//  1. In serial batch execution, block 3004265 tx19 does a first-time SSTORE to
-//     ca5daf64 slot0. That write lands in the in-RAM SharedDomains /
-//     TemporalMemBatch overlay (stamped with tx19's txNum) but the block then
-//     fails its post-execution gas check, so its step is never committed.
-//  2. The executor schedules UnwindTo(3004264). Because 3004265 was never
-//     committed, the committed execution-stage progress (s.BlockNumber) sits at
-//     or below the unwind point, so UnwindExecutionStage hit the
-//     `u.UnwindPoint >= s.BlockNumber` early return and skipped unwindExec3 —
-//     i.e. it never called sd.Unwind, so the overlay prune added by #20625
-//     (which only runs from unwindExec3) never executed.
-//  3. The same overlay is reused across the unwind→retry loop inside one
-//     sync.Run, so on retry the storage read returned tx19's own stale
-//     first-write (…a3a34) instead of the committed 0. The contract took the
-//     "already initialised" branch, skipped an SSTORE_SET (20000 gas), the block
-//     came up exactly 21045 gas short, and the node spun in an unwind/retry loop.
-//
-// Before the fix, step 2's early return leaves the overlay untouched, so the
-// failed block's write is still visible after the unwind — this test asserts it
-// is gone, while a write at/below the unwind point survives (no over-pruning).
+// Pins that the unwind early-return (u.UnwindPoint >= s.BlockNumber) prunes
+// uncommitted overlay writes above the unwind point — which the overlay-reusing
+// retry loop would otherwise read as stale — while a write at/below the unwind
+// point survives (no over-pruning).
 func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	t.Parallel()
 

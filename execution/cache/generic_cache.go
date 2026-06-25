@@ -53,10 +53,11 @@ type entry[T any] struct {
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
-	data        *freelru.ShardedLRU[uint64, entry[T]]
-	capacityB   datasize.ByteSize
-	currentSize atomic.Int64
-	mode        Mode
+	data            *freelru.ShardedLRU[uint64, entry[T]]
+	capacityB       datasize.ByteSize
+	capacityEntries uint32 // freelru's slot cap; ModeNoOp refuses inserts at this count
+	currentSize     atomic.Int64
+	mode            Mode
 
 	// Cache coherence across unwinds is txNum/epoch based — no block awareness,
 	// no diffset. An entry is valid iff it was written in the current epoch OR
@@ -107,10 +108,11 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 		panic(err)
 	}
 	c := &GenericCache[T]{
-		data:      lru,
-		capacityB: capacityBytes,
-		mode:      mode,
-		sizeFunc:  sizeFunc,
+		data:            lru,
+		capacityB:       capacityBytes,
+		capacityEntries: capacityEntries,
+		mode:            mode,
+		sizeFunc:        sizeFunc,
 	}
 	// Before any unwind every entry predates the (nonexistent) floor, so all
 	// reads are valid; the floor only drops once an unwind happens.
@@ -204,7 +206,9 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	}
 
 	if c.mode == ModeNoOp {
-		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) {
+		// Refuse once full by either bound — freelru would otherwise evict at the
+		// entry-count cap, which ModeNoOp ("drop new keys when full") must not do.
+		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || c.data.Len() >= int(c.capacityEntries) {
 			c.dropped.Add(1)
 			return
 		}
@@ -285,7 +289,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	}
 	sizeBytes := c.currentSize.Load()
 	usagePct := float64(sizeBytes) / float64(c.capacityB) * 100
-	log.Info(name+" cache stats",
+	log.Debug(name+" cache stats",
 		"mode", c.mode.String(),
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,

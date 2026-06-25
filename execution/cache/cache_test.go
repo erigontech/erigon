@@ -701,13 +701,9 @@ func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
 	assert.Equal(t, 1, c.Len(), "the stale entry is evicted lazily on its read")
 }
 
-// Boundary regression: unwindToTxNum is the FIRST rolled-back txNum
-// (Min(UnwindPoint+1)), so an entry stamped at exactly that txNum belongs to the
-// first dead block and must be evicted — the drop rule is txNum>=floor, not
-// txNum>floor. This reproduces the Sidechain Reorg wrong-root bug: an EIP-4788
-// beacon-root storage write runs in a block's begin-system-tx, stamped at the
-// block's first txNum; when that block is the first unwound one, txNum==floor and
-// a strict `>` left the dead-fork value served stale.
+// Pins the unwind floor boundary: unwindToTxNum is the FIRST rolled-back txNum,
+// so an entry stamped at exactly that txNum is dead-fork state and must be
+// evicted — the drop rule is txNum >= floor, not txNum > floor.
 func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	atFloor := makeAddr(1)

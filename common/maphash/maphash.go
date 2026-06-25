@@ -45,11 +45,8 @@ func (m *Map[V]) Set(key []byte, value V) {
 	m.m.Store(h, value)
 }
 
-// LoadOrStore returns the existing value for the key if present; otherwise it
-// stores and returns value. loaded is true if the value was already present.
-// The insert is atomic, so concurrent callers see exactly one insert — callers
-// that account for inserts (e.g. byte-size counters) must act only when
-// loaded is false.
+// LoadOrStore atomically returns the existing value (loaded=true) or stores and
+// returns value (loaded=false). Size/count accounting must act only on !loaded.
 func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
 	h := Hash(key)
 	return m.m.LoadOrStore(h, value)
@@ -61,10 +58,9 @@ func (m *Map[V]) Delete(key []byte) {
 	m.m.Delete(h)
 }
 
-// LoadAndDelete deletes the value for a key, returning the previous value if
-// present. loaded is true only for the caller that actually removed it, so
-// concurrent callers that adjust external accounting (e.g. byte-size counters)
-// must act only when loaded is true.
+// LoadAndDelete atomically deletes the key, returning the previous value.
+// loaded is true only for the caller that removed it, so size/count accounting
+// must act only on loaded.
 func (m *Map[V]) LoadAndDelete(key []byte) (value V, loaded bool) {
 	h := Hash(key)
 	return m.m.LoadAndDelete(h)

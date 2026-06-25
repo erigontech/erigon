@@ -387,44 +387,31 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	}
 
 	t := time.Now()
-	frozenBlocks := br.blockReader.FrozenBlocks()
-	isBor := br.chainConfig.Bor != nil
+
+	// PruneBlocks/PruneHeimdall delete the whole [from, to) range capped at limit in a
+	// single cursor pass; the sync loop re-enters each cycle, so no inner loop is needed.
+	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
+		if deleted, err = br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+			return deleted, err
+		}
+	}
 
 	var deletedBorBlocks int
-	for i := 0; i < limit; i++ {
-		if time.Since(t) > timeout {
-			break
-		}
-		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
-			deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, 1)
-			if err != nil {
-				return deleted, err
-			}
-			deleted += deletedBlocks
-		}
-
-		if !isBor {
-			continue
-		}
-
-		frozenBlocks := br.blockReader.FrozenBorBlocks(true)
-
-		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
-			// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
-
-			_deletedBorBlocks, err := func() (deleted int, err error) {
+	if br.chainConfig.Bor != nil {
+		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks(true)); canDeleteTo > 0 {
+			deletedBorBlocks, err = func() (int, error) {
 				defer mxPruneTookBor.ObserveDuration(time.Now())
 
 				return bordb.PruneHeimdall(context.Background(),
-					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, 1)
+					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, limit)
 			}()
-			deletedBorBlocks += _deletedBorBlocks
 			if err != nil {
 				return deleted, err
 			}
 		}
 	}
-	if deleted > 0 {
+
+	if deleted > 0 || deletedBorBlocks > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "deleted", deleted, "deletedBorBlocks", deletedBorBlocks, "took", time.Since(t))
 	}
 

@@ -3412,26 +3412,13 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// CodePath travels with CodeHashPath. The CodeHashPath case and the
-	// fill-missing loop above both recover an account's codeHash from the
-	// versionMap, but CodePath has no equivalent recovery: the case above keeps
-	// it only when this tx's CodePath write is present at the validated
-	// incarnation (the incarnation filter), and the fill loop never emits it.
-	// So a tx whose validated writeset lacks a fresh CodePath — e.g. an EIP-7702
-	// delegating tx that re-executes: SetCode short-circuits because so.Code()
-	// already returns the designator written by the prior incarnation
-	// (bytes.Equal(prevcode, code)), so the validated incarnation emits no new
-	// CodePath — still recovers CodeHashPath here while CodePath is dropped. The
-	// account then persists a non-empty codeHash with no code bytes; a later
-	// block's GetCode/GetDelegatedDesignation reads empty, and for a 7702 sender
-	// the EIP-3607 check wrongly rejects the tx ("sender not an eoa"). Recover
-	// the designator code (versionMap, else the post-state via stateReader) and
-	// re-emit CodePath, mirroring CodeHashPath so a delegation's code can never
-	// be lost while its hash survives. Bounded to 7702 designators (see below)
-	// so we never re-emit ordinary unchanged contract code for a touched
-	// contract. NOTE: this prevents the drop during forward execution; it
-	// cannot repair state already collated into immutable snapshot files with
-	// codeHash-but-no-code (that needs a snapshot unwind).
+	// CodePath must travel with CodeHashPath: the case above and the fill loop
+	// recover an account's codeHash but not its code, so a validated writeset
+	// lacking a fresh CodePath (e.g. a re-executing 7702 tx whose SetCode
+	// short-circuited) would persist a codeHash with no code. Recover the code
+	// (versionMap, else stateReader post-state) and re-emit CodePath, bounded to
+	// 7702 designators so unchanged contract code isn't re-emitted. Forward-only:
+	// it can't repair codeHash-no-code already collated into snapshots.
 	codeInOutput := make(map[accounts.Address]bool)
 	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
 	for _, w := range filtered {
