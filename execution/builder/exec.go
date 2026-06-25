@@ -326,7 +326,7 @@ func getNextTransactions(
 // single block build, so the builder can log one concise summary instead of a
 // per-batch line.
 type filtrationStats struct {
-	selected      int
+	filtered      int
 	badChainID    int
 	noSender      int
 	noAccount     int
@@ -343,7 +343,7 @@ func (s *filtrationStats) dropped() int {
 
 // logArgs returns key/value pairs for the summary, omitting zero-valued drop reasons.
 func (s *filtrationStats) logArgs() []any {
-	args := []any{"selected", s.selected, "dropped", s.dropped()}
+	args := []any{"filtered", s.filtered, "dropped", s.dropped()}
 	add := func(k string, v int) {
 		if v > 0 {
 			args = append(args, k, v)
@@ -481,7 +481,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	}
 	logger.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
 	if stats != nil {
-		stats.selected += len(filtered)
+		stats.filtered += len(filtered)
 		stats.badChainID += badChainId
 		stats.noSender += noSenderCnt
 		stats.noAccount += noAccountCnt
