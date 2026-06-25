@@ -901,6 +901,7 @@ func (a *ApiHandler) produceBeaconBody(
 			attrs.SlotNumber = &sn
 			attrs.TargetGasLimit = targetGasLimit
 		}
+		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
 			finalizedHash,
@@ -919,7 +920,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 		// GetAssembledBlock stops the EL builder, so delay the first call until the builder budget or forkchoice deadline matures.
 		slotStart := time.Unix(int64(state.ComputeTimestampAtSlot(baseState, targetSlot)), 0)
-		buildWindow := computeBlockBuilderWindow(time.Now(), slotStart, a.beaconChainCfg, stateVersion)
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
 		if wait := time.Until(buildWindow.firstGetAt); wait > 0 {
 			buildTimer := time.NewTimer(wait)
 			select {
