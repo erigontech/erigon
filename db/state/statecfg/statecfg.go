@@ -20,6 +20,10 @@ type DomainCfg struct {
 	// for commitment domain only
 	ReplaceKeysInValues bool
 
+	// KVWriteVersion, when set, decides the version stamped on a freshly written .kv file
+	// from the live DomainCfg; nil falls back to FileVersion.DataKV.Current.
+	KVWriteVersion func(*DomainCfg) version.Version
+
 	ExistenceFilter ExistenceFilterMode
 
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)

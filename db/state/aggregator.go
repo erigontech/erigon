@@ -304,6 +304,14 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
 
+	// references_in_commitment_branches drives both the merge deref behavior and the .kv write
+	// version (plain => v2.2, referenced => v2.1). Default false on this branch (plain).
+	refs := settings.RefsInCommitmentBranches()
+	statecfg.Schema.CommitmentDomain.ReplaceKeysInValues = refs
+	if a.configured && a.d[kv.CommitmentDomain] != nil {
+		a.d[kv.CommitmentDomain].ReplaceKeysInValues = refs
+	}
+
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
 			"old_step_size", oldStepSize, "new_step_size", settings.StepSize,

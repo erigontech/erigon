@@ -61,6 +61,7 @@ var (
 	V1_2                Version  = Version{1, 2}
 	V2_0                Version  = Version{2, 0}
 	V2_1                Version  = Version{2, 1}
+	V2_2                Version  = Version{2, 2}
 	V1_0_standart       Versions = Versions{V1_0, V1_0}
 	V1_1_standart       Versions = Versions{V1_1, V1_0}
 	V1_2_standart       Versions = Versions{V1_2, V1_0}

@@ -136,8 +136,15 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
 
+func (d *Domain) kvWriteVersion() version.Version {
+	if d.KVWriteVersion != nil {
+		return d.KVWriteVersion(&d.DomainCfg)
+	}
+	return d.FileVersion.DataKV.Current
+}
+
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.FileVersion.DataKV.String(), d.FilenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
 }
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.FileVersion.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))

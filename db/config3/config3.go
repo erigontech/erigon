@@ -40,6 +40,10 @@ const UnboundedDomainMerge uint64 = math.MaxUint64
 
 const EnableHistoryV4InTest = true
 
+// DefaultReferencesInCommitmentBranches is the default when erigondb.toml omits
+// references_in_commitment_branches. False => plain commitment values (v2.2 .kv files).
+const DefaultReferencesInCommitmentBranches = false
+
 // DefaultPruneDistance is the retention window used by full and blocks prune
 // modes. The value (2^18 blocks ≈ 36.4 days) matches EIP-8252's
 // REORG_RETENTION_WINDOW, the inactivity-leak-bounded non-finality window

@@ -17,6 +17,18 @@ const ERIGONDB_SETTINGS_FILE = "erigondb.toml"
 type ErigonDBSettings struct {
 	StepSize          uint64 `toml:"step_size"`
 	StepsInFrozenFile uint64 `toml:"steps_in_frozen_file"`
+
+	// ReferencesInCommitmentBranches is tri-state: nil resolves to
+	// config3.DefaultReferencesInCommitmentBranches via RefsInCommitmentBranches.
+	ReferencesInCommitmentBranches *bool `toml:"references_in_commitment_branches,omitempty"`
+}
+
+// RefsInCommitmentBranches resolves the commitment-branch referencing flag, defaulting when unset.
+func (s *ErigonDBSettings) RefsInCommitmentBranches() bool {
+	if s.ReferencesInCommitmentBranches == nil {
+		return config3.DefaultReferencesInCommitmentBranches
+	}
+	return *s.ReferencesInCommitmentBranches
 }
 
 func readErigonDBSettings(path string) (*ErigonDBSettings, error) {
