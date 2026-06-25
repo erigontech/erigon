@@ -23,6 +23,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -172,8 +174,9 @@ func TestCollectAccessedState_Legacy7702Designator(t *testing.T) {
 }
 
 // TestCollectAccessedState_KeysOnlyExistingAccounts asserts that a 20-byte address
-// key is emitted only for accounts that exist post-state; accessed-but-nonexistent
-// addresses are excluded, while their accessed storage slots are still emitted.
+// key is emitted only for accounts represented in the witness trie (present in pre-
+// or post-state); an address that exists in neither is excluded, while its accessed
+// storage slots are still emitted.
 func TestCollectAccessedState_KeysOnlyExistingAccounts(t *testing.T) {
 	existing := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	missing := common.HexToAddress("0x2222222222222222222222222222222222222222")
@@ -209,6 +212,90 @@ func TestCollectAccessedState_KeysOnlyExistingAccounts(t *testing.T) {
 	if !sawSlot {
 		t.Error("expected storage slot key to still be emitted for nonexistent account")
 	}
+}
+
+// TestCollectAccessedState_KeysIncludeDeletedPreExisting is a regression test for the
+// missing-preimage bug: an account present in the parent state but emptied and
+// state-cleared in-block (EIP-161) keeps its leaf in the parent-state witness trie,
+// so its 20-byte preimage must stay in keys[] even though it no longer exists
+// post-state. An account that never existed pre-state and is deleted in-block has no
+// parent-trie leaf and stays excluded.
+func TestCollectAccessedState_KeysIncludeDeletedPreExisting(t *testing.T) {
+	preExistingDeleted := common.HexToAddress("0x16fd7629978addaf41c426601176c37977a0faa7")
+	createdThenDeleted := common.HexToAddress("0x2222222222222222222222222222222222222222")
+
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{
+		preExistingDeleted: {Balance: *uint256.NewInt(1)},
+	}}
+	rs := NewRecordingState(inner)
+	rs.AccessedAccounts[preExistingDeleted] = struct{}{}
+	rs.DeletedAccounts[preExistingDeleted] = struct{}{}
+	rs.AccessedAccounts[createdThenDeleted] = struct{}{}
+	rs.DeletedAccounts[createdThenDeleted] = struct{}{}
+
+	accessed := collectAccessedState(rs, witnessModeLegacy)
+
+	var sawPreExisting, sawCreatedThenDeleted bool
+	for _, k := range accessed.WitnessKeys {
+		if len(k) != 20 {
+			continue
+		}
+		switch common.BytesToAddress(k) {
+		case preExistingDeleted:
+			sawPreExisting = true
+		case createdThenDeleted:
+			sawCreatedThenDeleted = true
+		}
+	}
+	if !sawPreExisting {
+		t.Error("preimage for a pre-existing account deleted in-block must remain in keys[]")
+	}
+	if sawCreatedThenDeleted {
+		t.Error("preimage for an account that never existed pre-state and was deleted in-block must be excluded")
+	}
+}
+
+// TestCheckWitnessKeysComplete pins the internal verifier's keys[]-completeness check:
+// every account/storage leaf the stateless re-execution resolved from the witness trie
+// must have its preimage in keys[]; the protocol system address is exempt.
+func TestCheckWitnessKeysComplete(t *testing.T) {
+	addrA := common.HexToAddress("0x16fd7629978addaf41c426601176c37977a0faa7")
+	addrB := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	slotS := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000000000aa")
+	sys := common.Address(params.SystemAddress.Value())
+	key20 := func(a common.Address) hexutil.Bytes { return bytes.Clone(a[:]) }
+	key32 := func(h common.Hash) hexutil.Bytes { return bytes.Clone(h[:]) }
+
+	t.Run("missing account preimage flagged", func(t *testing.T) {
+		used := map[common.Address]struct{}{addrA: {}}
+		if err := checkWitnessKeysComplete(used, nil, nil); err == nil {
+			t.Fatal("expected error: accessed account leaf missing from keys[]")
+		}
+	})
+	t.Run("present account preimage ok", func(t *testing.T) {
+		used := map[common.Address]struct{}{addrA: {}}
+		if err := checkWitnessKeysComplete(used, nil, []hexutil.Bytes{key20(addrA)}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("system address exempt", func(t *testing.T) {
+		used := map[common.Address]struct{}{sys: {}}
+		if err := checkWitnessKeysComplete(used, nil, nil); err != nil {
+			t.Fatalf("system address must not require a preimage: %v", err)
+		}
+	})
+	t.Run("missing slot preimage flagged", func(t *testing.T) {
+		usedS := map[common.Hash]struct{}{slotS: {}}
+		if err := checkWitnessKeysComplete(nil, usedS, []hexutil.Bytes{key20(addrB)}); err == nil {
+			t.Fatal("expected error: accessed storage leaf missing from keys[]")
+		}
+	})
+	t.Run("present slot preimage ok", func(t *testing.T) {
+		usedS := map[common.Hash]struct{}{slotS: {}}
+		if err := checkWitnessKeysComplete(nil, usedS, []hexutil.Bytes{key32(slotS)}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func TestResolveWitnessMode(t *testing.T) {
