@@ -202,7 +202,7 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 				// full mask, no need to filter
 				newReq.Append(item)
 			} else {
-				identifier := cltypes.NewDataColumnsByRootIdentifier()
+				identifier := cltypes.NewDataColumnsByRootIdentifier(c.beaconConfig)
 				item.Columns.Range(func(_ int, column uint64, _ int) bool {
 					if peer.mask[column] {
 						identifier.Columns.Append(column)

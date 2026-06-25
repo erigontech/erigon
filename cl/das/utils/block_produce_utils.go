@@ -103,7 +103,7 @@ func GetDataColumnSidecarsGloas(
 			columnProofs.Append(proof)
 		}
 
-		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, cfg)
 		sidecar.Index = columnIndex
 		sidecar.Column = columnCells
 		sidecar.KzgProofs = columnProofs

@@ -469,7 +469,7 @@ var testBlockRoot = common.Hash{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 
 
 // createMockGloasDataColumnSidecar creates a GLOAS-style sidecar with Slot and BeaconBlockRoot
 func createMockGloasDataColumnSidecar(slot uint64, index uint64, blockRoot common.Hash) *cltypes.DataColumnSidecar {
-	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	sidecar.Index = index
 	sidecar.Slot = slot
 	sidecar.BeaconBlockRoot = blockRoot

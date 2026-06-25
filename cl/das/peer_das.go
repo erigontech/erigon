@@ -528,7 +528,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 			if !exist {
 				blobSize := anyColumnSidecar.Column.Len()
-				sidecar := cltypes.NewDataColumnSidecar()
+				sidecar := cltypes.NewDataColumnSidecar(d.beaconConfig)
 				sidecar.Index = columnIndex
 				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
 				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
@@ -1071,10 +1071,8 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 	d.tableMutex.RLock()
 	defer d.tableMutex.RUnlock()
 	for entry, columns := range d.downloadTable {
-		id := &cltypes.DataColumnsByRootIdentifier{
-			BlockRoot: entry.blockRoot,
-			Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
-		}
+		id := cltypes.NewDataColumnsByRootIdentifier(d.beaconConfig)
+		id.BlockRoot = entry.blockRoot
 		for column := range columns {
 			id.Columns.Append(column)
 		}
