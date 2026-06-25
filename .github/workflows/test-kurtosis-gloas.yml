@@ -29,7 +29,8 @@ env:
   # Docker Hub pull fails.
   BUILDKIT_IMAGE: "moby/buildkit:v0.30.0"
   # eth2-val-tools is the validator-keystore generator pulled during `kurtosis run`;
-  # it publishes only :latest, so the cache serves the last-warmed digest.
+  # it publishes only :latest, so the cache serves the `latest` digest from the last
+  # warm rather than tracking live `latest`.
   ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
 
 on:
