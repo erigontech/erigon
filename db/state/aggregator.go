@@ -137,7 +137,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:              background.NewProgressSet(),
 		logger:          logger,
-		workers:         workersCfg{allowEditing: true, merge: 1, collateAndBuild: 1},
+		workers:         workersCfg{merge: 1, collateAndBuild: 1},
 
 		produce: true,
 	}
@@ -1157,6 +1157,11 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
+
+	// Pin worker counts for the duration of the merge; mergeFiles reads
+	// per-domain CompressorCfg.Workers that ExecV3's Preset* calls would race.
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
 
 	// Merge is background operation. It must not crush application.
 	// Convert panic to error.
