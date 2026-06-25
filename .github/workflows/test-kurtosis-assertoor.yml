@@ -12,6 +12,10 @@ env:
   LIGHTHOUSE_VC_IMAGE: "sigp/lighthouse:v7.0.1"
   TEKU_IMAGE: "consensys/teku:26.4.0"
   ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.1.2"
+  # Per-suite assertoor pins kept in sync with their .io files (pectra.io,
+  # glamsterdam.io); cached so neither is pulled live during the run.
+  ASSERTOOR_PECTRA_IMAGE: "ethpandaops/assertoor:v0.0.17"
+  ASSERTOOR_GLAMSTERDAM_IMAGE: "ethpandaops/assertoor:master-0ad56fb"
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -199,7 +203,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -218,6 +222,8 @@ jobs:
           pull "${LIGHTHOUSE_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
+          pull "${ASSERTOOR_PECTRA_IMAGE}"
+          pull "${ASSERTOOR_GLAMSTERDAM_IMAGE}"
           pull "kurtosistech/engine:${KURTOSIS_VERSION}"
           pull "kurtosistech/core:${KURTOSIS_VERSION}"
           pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
@@ -233,6 +239,8 @@ jobs:
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
+          docker save "${ASSERTOOR_GLAMSTERDAM_IMAGE}" -o /tmp/docker-cache/assertoor-glamsterdam.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
           docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
           docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
@@ -250,7 +258,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -373,7 +381,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
@@ -382,6 +390,8 @@ jobs:
           docker load -i /tmp/docker-cache/lighthouse-vc.tar
           docker load -i /tmp/docker-cache/teku.tar
           docker load -i /tmp/docker-cache/assertoor.tar
+          docker load -i /tmp/docker-cache/assertoor-pectra.tar
+          docker load -i /tmp/docker-cache/assertoor-glamsterdam.tar
           docker load -i /tmp/docker-cache/kurtosis-engine.tar
           docker load -i /tmp/docker-cache/kurtosis-core.tar
           docker load -i /tmp/docker-cache/kurtosis-expander.tar
@@ -410,6 +420,8 @@ jobs:
           pull "${LIGHTHOUSE_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
+          pull "${ASSERTOOR_PECTRA_IMAGE}"
+          pull "${ASSERTOOR_GLAMSTERDAM_IMAGE}"
           pull "kurtosistech/engine:${KURTOSIS_VERSION}"
           pull "kurtosistech/core:${KURTOSIS_VERSION}"
           pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
@@ -425,6 +437,8 @@ jobs:
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
+          docker save "${ASSERTOOR_GLAMSTERDAM_IMAGE}" -o /tmp/docker-cache/assertoor-glamsterdam.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
           docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
           docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
