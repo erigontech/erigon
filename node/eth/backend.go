@@ -1554,14 +1554,6 @@ func (s *Ethereum) Stop() error {
 		mergeCancel()
 	}
 
-	// chainDB.Close (temporal) does not close the state aggregator it holds;
-	// close it here to release snapshot-file mmaps before shutdown completes.
-	if hasAgg, ok := s.chainDB.(state.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			agg.Close()
-		}
-	}
-
 	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
