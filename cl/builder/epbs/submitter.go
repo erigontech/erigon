@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
@@ -22,7 +23,7 @@ type BidSubmitter interface {
 
 	// BroadcastPayload publishes the signed envelope on gossip and processes
 	// it through forkchoice so the local node transitions to FULL status.
-	BroadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope) error
+	BroadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, columnSidecars []*cltypes.DataColumnSidecar) error
 }
 
 // CaplinBidSubmitter implements BidSubmitter using the Caplin gossip and forkchoice.
@@ -75,7 +76,7 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 // execution_payload gossip topic and processes it through forkchoice so the
 // local node transitions the block from PENDING to FULL status.
 // Pattern follows broadcastSelfBuildEnvelope in block_production.go.
-func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, columnSidecars []*cltypes.DataColumnSidecar) error {
 	if envelope == nil || envelope.Message == nil {
 		return fmt.Errorf("epbs/submitter: nil envelope")
 	}
@@ -97,6 +98,20 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 
 	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
 		return fmt.Errorf("epbs/submitter: publish envelope: %w", err)
+	}
+
+	for _, column := range columnSidecars {
+		if column == nil {
+			continue
+		}
+		columnSSZ, err := column.EncodeSSZ(nil)
+		if err != nil {
+			return fmt.Errorf("epbs/submitter: encode data column sidecar %d: %w", column.Index, err)
+		}
+		subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
+		if err := s.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
+			return fmt.Errorf("epbs/submitter: publish data column sidecar %d: %w", column.Index, err)
+		}
 	}
 
 	return nil

@@ -9,12 +9,16 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
+	eth2 "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types"
 	ethevent "github.com/erigontech/erigon/p2p/event"
 )
 
@@ -161,33 +165,14 @@ func handleHeadEvent(
 		return
 	}
 
-	// Get RANDAO from head state. If the state is unavailable (not synced),
-	// skip — building with a zero RANDAO would produce an invalid payload
-	// that gets rejected during state transition (operations.go:561).
-	var randaoMix common.Hash
-	if err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
-		epoch := nextSlot / beaconCfg.SlotsPerEpoch
-		randaoMix = s.GetRandaoMixes(epoch)
-		return nil
-	}); err != nil {
-		log.Debug("ePBS builder: head state unavailable for OnNewHead, skipping",
-			"slot", nextSlot, "err", err)
-		return
-	}
-
 	timestamp := ethClock.GenesisTime() + beaconCfg.SecondsPerSlot*nextSlot
 
 	for _, parent := range parents {
-		sc := SlotContext{
-			Slot: nextSlot,
-			Parent: ParentInfo{
-				Slot:          parent.Slot,
-				BlockRoot:     parent.BlockRoot,
-				ExecutionHash: parent.ExecutionHash,
-				ShouldExtend:  parent.ShouldExtend,
-			},
-			Timestamp:  timestamp,
-			PrevRandao: randaoMix,
+		sc, err := buildSlotContext(sd, fc, beaconCfg, nextSlot, timestamp, parent)
+		if err != nil {
+			log.Debug("ePBS builder: unable to prepare OnNewHead slot context, skipping",
+				"slot", nextSlot, "parentRoot", parent.BlockRoot, "err", err)
+			continue
 		}
 		if err := loop.OnNewHead(ctx, sc); err != nil {
 			log.Warn("ePBS builder: OnNewHead failed",
@@ -230,32 +215,14 @@ func runSlotWatcher(
 			continue
 		}
 
-		// Get RANDAO from head state. If unavailable, skip this slot —
-		// a zero RANDAO would produce an invalid bid/envelope.
-		var randaoMix common.Hash
-		if err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
-			epoch := slot / beaconCfg.SlotsPerEpoch
-			randaoMix = s.GetRandaoMixes(epoch)
-			return nil
-		}); err != nil {
-			log.Debug("ePBS builder: head state unavailable for OnSlot, skipping",
-				"slot", slot, "err", err)
-			continue
-		}
-
 		timestamp := ethClock.GenesisTime() + beaconCfg.SecondsPerSlot*slot
 
 		for _, parent := range parents {
-			sc := SlotContext{
-				Slot: slot,
-				Parent: ParentInfo{
-					Slot:          parent.Slot,
-					BlockRoot:     parent.BlockRoot,
-					ExecutionHash: parent.ExecutionHash,
-					ShouldExtend:  parent.ShouldExtend,
-				},
-				Timestamp:  timestamp,
-				PrevRandao: randaoMix,
+			sc, err := buildSlotContext(sd, fc, beaconCfg, slot, timestamp, parent)
+			if err != nil {
+				log.Debug("ePBS builder: unable to prepare OnSlot slot context, skipping",
+					"slot", slot, "parentRoot", parent.BlockRoot, "err", err)
+				continue
 			}
 			if err := loop.OnSlot(ctx, sc); err != nil {
 				log.Warn("ePBS builder: OnSlot failed",
@@ -266,6 +233,121 @@ func runSlotWatcher(
 			}
 		}
 	}
+}
+
+func buildSlotContext(
+	sd *synced_data.SyncedDataManager,
+	fc *forkchoice.ForkChoiceStore,
+	beaconCfg *clparams.BeaconChainConfig,
+	slot uint64,
+	timestamp uint64,
+	parent forkchoice.ParentCandidate,
+) (SlotContext, error) {
+	var sc SlotContext
+	if err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
+		epoch := slot / beaconCfg.SlotsPerEpoch
+		withdrawals, err := resolveWithdrawalsForParent(s, fc, beaconCfg, slot, parent)
+		if err != nil {
+			return err
+		}
+		sc = SlotContext{
+			Slot: slot,
+			Parent: ParentInfo{
+				Slot:          parent.Slot,
+				BlockRoot:     parent.BlockRoot,
+				ExecutionHash: parent.ExecutionHash,
+				ShouldExtend:  parent.ShouldExtend,
+			},
+			Timestamp:   timestamp,
+			PrevRandao:  s.GetRandaoMixes(epoch),
+			Withdrawals: withdrawals,
+		}
+		return nil
+	}); err != nil {
+		return SlotContext{}, err
+	}
+	return sc, nil
+}
+
+func resolveWithdrawalsForParent(
+	baseState *state.CachingBeaconState,
+	fc *forkchoice.ForkChoiceStore,
+	beaconCfg *clparams.BeaconChainConfig,
+	targetSlot uint64,
+	parent forkchoice.ParentCandidate,
+) ([]*types.Withdrawal, error) {
+	stateVersion := beaconCfg.GetCurrentStateVersion(targetSlot / beaconCfg.SlotsPerEpoch)
+	if stateVersion < clparams.GloasVersion {
+		expected, err := state.GetExpectedWithdrawals(baseState, targetSlot/beaconCfg.SlotsPerEpoch)
+		if err != nil {
+			return nil, err
+		}
+		return withdrawalsToExecution(expected.Withdrawals), nil
+	}
+
+	if !parent.ShouldExtend {
+		return withdrawalsListToExecution(baseState.GetPayloadExpectedWithdrawals()), nil
+	}
+
+	stateCopy, err := baseState.Copy()
+	if err != nil {
+		return nil, fmt.Errorf("copy state for FULL parent withdrawals: %w", err)
+	}
+	envelope, err := fc.ReadEnvelopeFromDisk(parent.BlockRoot)
+	if err != nil {
+		return nil, fmt.Errorf("read FULL parent envelope: %w", err)
+	}
+	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+		return nil, fmt.Errorf("FULL parent %x missing envelope execution requests", parent.BlockRoot)
+	}
+	stfMachine := &eth2.Impl{}
+	if err := stfMachine.ApplyParentExecutionPayload(stateCopy, envelope.Message.ExecutionRequests); err != nil {
+		return nil, fmt.Errorf("apply FULL parent execution payload: %w", err)
+	}
+	expected, err := state.GetExpectedWithdrawals(stateCopy, targetSlot/beaconCfg.SlotsPerEpoch)
+	if err != nil {
+		return nil, err
+	}
+	return withdrawalsToExecution(expected.Withdrawals), nil
+}
+
+func withdrawalsToExecution(withdrawals []*cltypes.Withdrawal) []*types.Withdrawal {
+	if len(withdrawals) == 0 {
+		return nil
+	}
+	out := make([]*types.Withdrawal, 0, len(withdrawals))
+	for _, w := range withdrawals {
+		if w == nil {
+			continue
+		}
+		out = append(out, &types.Withdrawal{
+			Index:     w.Index,
+			Amount:    w.Amount,
+			Validator: w.Validator,
+			Address:   w.Address,
+		})
+	}
+	return out
+}
+
+func withdrawalsListToExecution(withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdrawal {
+	if withdrawals == nil || withdrawals.Len() == 0 {
+		return nil
+	}
+	out := make([]*types.Withdrawal, 0, withdrawals.Len())
+	for i := 0; i < withdrawals.Len(); i++ {
+		w := withdrawals.Get(i)
+		if w == nil {
+			continue
+		}
+		out = append(out, &types.Withdrawal{
+			Index:     w.Index,
+			Amount:    w.Amount,
+			Validator: w.Validator,
+			Address:   w.Address,
+		})
+	}
+	return out
 }
 
 // OnBidWonFunc returns a callback suitable for BlockService.OnBidWon.
