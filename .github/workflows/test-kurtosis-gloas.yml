@@ -3,10 +3,10 @@ name: Kurtosis GLOAS Tests
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   APP_REPO: "erigontech/erigon"
-  # Pinned to match the gloas-*.io assertoor (pre-EIP-8282); bump with those and #22008.
-  # The lighthouse/prysm glamsterdam-devnet images are mutable tags, so they're pulled
-  # live (not cached) to avoid serving a stale client.
-  ASSERTOOR_IMAGE: "ethpandaops/assertoor:master-2231b3e"
+  # ASSERTOOR_IMAGE and GENESIS_GENERATOR_IMAGE are loaded at job start from the
+  # gloas-*.io files (single source of truth) by the "Load image versions" step, so
+  # the cache can't drift from what kurtosis runs. Mutable lighthouse/prysm devnet
+  # client images are pulled live (not cached) to avoid serving a stale client.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -28,9 +28,8 @@ env:
   # Cached and pre-loaded so buildx can fall back to the local copy when its
   # Docker Hub pull fails.
   BUILDKIT_IMAGE: "moby/buildkit:v0.30.0"
-  # ethereum-package machinery pulled during `kurtosis run` (genesis, validator
-  # keystores, helpers); cached so a Docker Hub blip there can't fail the run.
-  GENESIS_GENERATOR_IMAGE: "ethpandaops/ethereum-genesis-generator:5.3.5"
+  # ethereum-package machinery pulled during `kurtosis run` (validator keystores,
+  # helpers); cached so a Docker Hub blip there can't fail the run.
   # eth2-val-tools publishes only :latest (like curl-jq above); cache serves the last-warmed digest.
   ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
   ETHEREUM_PACKAGE_PYTHON_IMAGE: "python:3.11-alpine"
@@ -85,6 +84,21 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+
+      - name: Checkout kurtosis .io files
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/workflows/kurtosis
+
+      - name: Load image versions from the .io files (single source of truth)
+        run: |
+          io=.github/workflows/kurtosis/gloas-caplin-mixed.io
+          assertoor=$(yq -e '.assertoor_params.image' "$io")
+          genesis=$(yq -e '.ethereum_genesis_generator_params.image' "$io")
+          {
+            echo "ASSERTOOR_IMAGE=$assertoor"
+            echo "GENESIS_GENERATOR_IMAGE=$genesis"
+          } >> "$GITHUB_ENV"
 
       - name: Check whether third-party containers are already cached
         id: cache-cl-images
@@ -188,6 +202,16 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+
+      - name: Load image versions from the .io files (single source of truth)
+        run: |
+          io=.github/workflows/kurtosis/gloas-caplin-mixed.io
+          assertoor=$(yq -e '.assertoor_params.image' "$io")
+          genesis=$(yq -e '.ethereum_genesis_generator_params.image' "$io")
+          {
+            echo "ASSERTOOR_IMAGE=$assertoor"
+            echo "GENESIS_GENERATOR_IMAGE=$genesis"
+          } >> "$GITHUB_ENV"
 
       - name: Conditional Docker Login
         if: |
