@@ -81,6 +81,13 @@ func FuzzPatricia(f *testing.F) {
 	})
 }
 
+type oracleNode struct {
+	next  map[byte]*oracleNode
+	isKey bool
+}
+
+func newOracleNode() *oracleNode { return &oracleNode{next: make(map[byte]*oracleNode)} }
+
 func FuzzLongestMatch(f *testing.F) {
 	f.Fuzz(func(t *testing.T, build []byte, test []byte) {
 		var pt PatriciaTree
@@ -125,17 +132,36 @@ func FuzzLongestMatch(f *testing.F) {
 		ft := pt.Flatten()
 		mf3 := NewMatchFinder3(ft)
 		_ = mf3.FindLongestMatches(data)
-		// AC is validated against a brute-force oracle instead of MatchFinder:
+		// AC is validated against an independent trie oracle instead of MatchFinder:
 		// patricia.Insert loses an existing key when inserting its proper
-		// prefix, so MF3 under-reports matches on prefix-nested dicts.
+		// prefix, so MF3 under-reports matches on prefix-nested dicts. The walk
+		// is O(len(data)*maxKeyLen) so the fuzzer can't drive it to a timeout.
+		oracleRoot := newOracleNode()
+		for key := range keyMap {
+			nd := oracleRoot
+			for j := 0; j < len(key); j++ {
+				c := nd.next[key[j]]
+				if c == nil {
+					c = newOracleNode()
+					nd.next[key[j]] = c
+				}
+				nd = c
+			}
+			nd.isKey = true
+		}
 		var oracle Matches
 		lastEnd := 0
 		for s := 0; s < len(data); s++ {
 			best := 0
-			for key := range keyMap {
-				kl := len(key)
-				if kl > best && s+kl <= len(data) && string(data[s:s+kl]) == key {
-					best = kl
+			nd := oracleRoot
+			for d := 0; s+d < len(data); d++ {
+				c := nd.next[data[s+d]]
+				if c == nil {
+					break
+				}
+				nd = c
+				if nd.isKey {
+					best = d + 1
 				}
 			}
 			if best > 0 && s+best > lastEnd {
