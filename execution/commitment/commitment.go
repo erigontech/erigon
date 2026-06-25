@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1440,9 +1439,6 @@ type Updates struct {
 	mode    Mode
 	tmpdir  string
 
-	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
-	nibbles       [16]*etl.Collector
-
 	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
 	parallel *parallelUpdate
 
@@ -1494,15 +1490,9 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-// Should be called right after updates initialisation. Otherwise could lost some data
-func (t *Updates) SetConcurrentCommitment(b bool) {
-	t.sortPerNibble = b
-	t.initCollector()
-}
-
-// IsConcurrentCommitment reports whether the configuration allows concurrent commitment processing.
+// IsConcurrentCommitment reports whether commitment runs in the parallel mode.
 func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel || t.sortPerNibble
+	return t.mode == ModeParallel
 }
 
 type keyHasher func(key []byte) []byte
@@ -1563,23 +1553,6 @@ func (t *Updates) SetMode(m Mode) {
 }
 
 func (t *Updates) initCollector() {
-	if t.sortPerNibble {
-		for i := 0; i < len(t.nibbles); i++ {
-			if t.nibbles[i] != nil {
-				t.nibbles[i].Close()
-				t.nibbles[i] = nil
-			}
-
-			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
-			t.nibbles[i].SortAndFlushInBackground(true)
-		}
-		if t.etl != nil {
-			t.etl.Close()
-			t.etl = nil
-		}
-		return
-	}
-
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
@@ -1645,12 +1618,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
+			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1722,12 +1690,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
+			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1762,12 +1725,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, []byte{})
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
-			}
+			err := t.etl.Collect(hashedKey, []byte{})
 			if err != nil {
 				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
 			}
@@ -1855,13 +1813,6 @@ func (t *Updates) Close() {
 	}
 	if t.etl != nil {
 		t.etl.Close()
-	}
-	if t.sortPerNibble {
-		for i := 0; i < len(t.nibbles); i++ {
-			if t.nibbles[i] != nil {
-				t.nibbles[i].Close()
-			}
-		}
 	}
 	if t.parallel != nil {
 		t.parallel.Close()

@@ -921,10 +921,6 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.NotNil(t, ut.parallel, "parallel field must be allocated")
 	require.NotNil(t, ut.parallel.trie, "parallel trie must be allocated")
 	require.NotNil(t, ut.keys, "keys dedup map must be allocated")
-	require.False(t, ut.sortPerNibble, "ModeParallel carries keys in the prefix trie, not per-nibble collectors")
-	for i := 0; i < len(ut.nibbles); i++ {
-		require.Nilf(t, ut.nibbles[i], "nibbles[%d] must not be allocated for ModeParallel", i)
-	}
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
@@ -1000,9 +996,6 @@ func TestUpdatesModeParallel_Reset(t *testing.T) {
 	require.NotNil(t, ut.parallel.trie.root, "trie root must be re-allocated after Reset")
 	require.EqualValues(t, 0, ut.parallel.trie.root.subtreeCount, "trie counts cleared after Reset")
 	require.EqualValues(t, 0, ut.parallel.trie.root.bitmap, "trie bitmap cleared after Reset")
-	for i := 0; i < len(ut.nibbles); i++ {
-		require.Nilf(t, ut.nibbles[i], "nibbles[%d] must stay unallocated after Reset", i)
-	}
 
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
@@ -1032,7 +1025,6 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 	ut.SetMode(ModeParallel)
 	require.Equal(t, ModeParallel, ut.mode)
 	require.NotNil(t, ut.parallel)
-	require.False(t, ut.sortPerNibble)
 	require.Equal(t, uint64(0), ut.Size())
 
 	prev := ut.parallel
