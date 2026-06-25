@@ -243,16 +243,15 @@ runs:
       if: ${{ runner.os == 'Linux' }}
       shell: bash
       # erigon only needs build-essential (gcc/make). The hosted runner image
-      # ships extra third-party apt repos (Google Chrome, Microsoft, azure-cli)
-      # that periodically break `apt-get update` — a mid-mirror-sync Packages.gz
-      # size mismatch, or a 403 "repository is no longer signed" — and so fail the
-      # whole job. Drop those repos before updating (we never install from them)
-      # and let the remaining Ubuntu archive retry on transient blips.
+      # ships third-party apt repos (Google Chrome, Microsoft/azure-cli) whose
+      # CDNs intermittently break `apt-get update` — a Packages.gz size mismatch
+      # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
+      # failing the whole job. Drop every source pointing at those CDNs before
+      # updating (we never install from them); the Ubuntu archive retries on blips.
       # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
       run: |
-        sudo rm -f /etc/apt/sources.list.d/google-chrome.* \
-                   /etc/apt/sources.list.d/microsoft-prod.* \
-                   /etc/apt/sources.list.d/azure-cli.* || true
+        sudo grep -rlE 'dl\.google\.com|packages\.microsoft\.com' \
+          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
         sudo apt-get update -qq -o Acquire::Retries=3 \
           && sudo apt-get install -qq -y build-essential 2>/dev/null
 
