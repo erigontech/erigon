@@ -179,6 +179,7 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 
 - Unified Engine API client for standalone mode (#20035) — by @mh0lt
 - Fork-choice and ENR-stability fixes — recovery from a post-GLOAS fork-choice stall and a persistent node key for stable ENR across restarts (#21228, #21276) — by @domiwei
+- Block production: give the EL builder a build window before stopping it, fixing near-empty proposed blocks (~0–2% gas) on otherwise-healthy validators (#21990) — by @lystopad
 
 #### Storage & Performance
 
