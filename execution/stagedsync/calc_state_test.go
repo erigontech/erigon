@@ -373,9 +373,9 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// which goes through the version map, so by the time normalizeWriteSet's
 	// completion loop runs, vm.Read sees these values.
 	vm := state.NewVersionMap(nil)
-	vm.Write(addr, state.IncarnationPath, accounts.NilKey, ver, original.Incarnation, true)
-	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
-	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
+	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
+	vm.WriteSelfDestruct(addr, ver, true, true)
+	vm.WriteBalance(addr, ver, uint256.Int{}, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
@@ -474,11 +474,11 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	// never fires.
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
 	vm := state.NewVersionMap(nil)
-	vm.Write(addr, state.StoragePath, slot1, ver, preSDValue1, true)
-	vm.Write(addr, state.StoragePath, slot2, ver, preSDValue2, true)
-	vm.Write(addr, state.IncarnationPath, accounts.NilKey, ver, original.Incarnation, true)
-	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
-	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
+	vm.WriteStorage(addr, slot1, ver, preSDValue1, true)
+	vm.WriteStorage(addr, slot2, ver, preSDValue2, true)
+	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
+	vm.WriteSelfDestruct(addr, ver, true, true)
+	vm.WriteBalance(addr, ver, uint256.Int{}, true)
 
 	rawWrites := newWS().
 		inc(addr, ver, original.Incarnation).
@@ -614,9 +614,9 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 		codeHash(zeroAddr, ver, accounts.EmptyCodeHash).
 		build()
 	vm := state.NewVersionMap(nil)
-	vm.Write(zeroAddr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
-	vm.Write(zeroAddr, state.NoncePath, accounts.NilKey, ver, uint64(0), true)
-	vm.Write(zeroAddr, state.CodeHashPath, accounts.NilKey, ver, accounts.EmptyCodeHash, true)
+	vm.WriteBalance(zeroAddr, ver, uint256.Int{}, true)
+	vm.WriteNonce(zeroAddr, ver, uint64(0), true)
+	vm.WriteCodeHash(zeroAddr, ver, accounts.EmptyCodeHash, true)
 
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false, false)
 
@@ -653,9 +653,9 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 		codeHash(addr, ver, accounts.EmptyCodeHash).
 		build()
 	vm := state.NewVersionMap(nil)
-	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
-	vm.Write(addr, state.NoncePath, accounts.NilKey, ver, uint64(0), true)
-	vm.Write(addr, state.CodeHashPath, accounts.NilKey, ver, accounts.EmptyCodeHash, true)
+	vm.WriteBalance(addr, ver, uint256.Int{}, true)
+	vm.WriteNonce(addr, ver, uint64(0), true)
+	vm.WriteCodeHash(addr, ver, accounts.EmptyCodeHash, true)
 
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true, false)
 

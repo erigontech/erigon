@@ -3101,10 +3101,8 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
 			sdTxIdx, sdOk := -1, false
-			if sd := vm.Read(h.Address, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
-				if v, ok := sd.Value().(bool); ok && v {
-					sdTxIdx, sdOk = sd.Version().TxIndex, true
-				}
+			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == state.MVReadResultDone && v {
+				sdTxIdx, sdOk = sd.Version().TxIndex, true
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
@@ -3266,10 +3264,8 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
 		// fall through to the normal versionMap lookup.
 		sdEarlier := false
-		if sd := vm.Read(addr, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
-			if v, ok := sd.Value().(bool); ok && v {
-				sdEarlier = true
-			}
+		if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == state.MVReadResultDone && v {
+			sdEarlier = true
 		}
 
 		// Only emit post-SD defaults when this TX created a new contract

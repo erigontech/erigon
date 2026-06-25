@@ -266,7 +266,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case StoragePath:
 		r.mapStorageVal, res, _ = s.versionMap.ReadStorage(addr, key, s.txIndex)
 	default:
-		res = s.versionMap.Read(addr, path, key, s.txIndex)
+		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
 	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}}

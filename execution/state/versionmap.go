@@ -211,58 +211,6 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	}
 }
 
-func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-
-	vm.writeLocked(addr, path, key, v, data, complete)
-}
-
-// writeLocked performs the write without acquiring the lock.
-// Caller must hold vm.mu.Lock(). The `data any` argument is asserted to
-// the AccountPath's contracted value type before storage; a wrong-type
-// `data` panics here rather than masquerading as a wrong typed cell on a
-// later read. The typed Write primitives (WriteBalance/WriteNonce/etc.) let
-// call sites avoid this runtime assertion entirely.
-func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
-	e, ok := vm.s[addr]
-	if !ok {
-		e = &AddressEntry{}
-		vm.s[addr] = e
-	}
-	flag := FlagDone
-	if !complete {
-		flag = FlagEstimate
-	}
-	switch path {
-	case AddressPath:
-		e.Address = putCell(e.Address, addr, path, v.TxIndex, v.Incarnation, flag, data.(*accounts.Account), getCellAccount)
-	case SelfDestructPath:
-		e.SelfDestruct = putCell(e.SelfDestruct, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool), getCellSelfDestruct)
-	case BalancePath:
-		e.Balance = putCell(e.Balance, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int), getCellBalance)
-	case NoncePath:
-		e.Nonce = putCell(e.Nonce, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64), getCellNonce)
-	case IncarnationPath:
-		e.Incarnation = putCell(e.Incarnation, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64), getCellIncarnation)
-	case CodePath:
-		e.Code = putCell(e.Code, addr, path, v.TxIndex, v.Incarnation, flag, data.([]byte), getCellCode)
-	case CodeHashPath:
-		e.CodeHash = putCell(e.CodeHash, addr, path, v.TxIndex, v.Incarnation, flag, data.(accounts.CodeHash), getCellCodeHash)
-	case CodeSizePath:
-		e.CodeSize = putCell(e.CodeSize, addr, path, v.TxIndex, v.Incarnation, flag, data.(int), getCellCodeSize)
-	case CreateContractPath:
-		e.CreateContract = putCell(e.CreateContract, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool), getCellCreateContract)
-	case StoragePath:
-		if e.Storage == nil {
-			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
-		}
-		e.Storage[key] = putCell(e.Storage[key], addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int), getCellStorage)
-	default:
-		panic(fmt.Errorf("writeLocked: unknown path %v", path))
-	}
-}
-
 // Typed Write primitives. Each takes the AccountPath-contracted value type
 // directly so wrong-type writes are caught at compile time — there is no
 // runtime data.(T) assertion path through these.
@@ -360,262 +308,14 @@ func flagFor(complete bool) statusFlag {
 
 // Typed Read primitives. Each returns the typed value, a ReadResult holding
 // the conflict-detection metadata (depIdx, incarnation), and ok=true when a
-// cell exists. The any boundary in ReadResult.value is skipped — callers
-// consume the typed value directly.
+// cell exists.
 
-func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (val *accounts.Account, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.Address == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[*accounts.Account]
-	e.Address.Descend(txIdx-1, func(k int, v *WriteCell[*accounts.Account]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (val bool, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.SelfDestruct == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[bool]
-	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadBalance(addr accounts.Address, txIdx int) (val uint256.Int, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.Balance == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[uint256.Int]
-	e.Balance.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadNonce(addr accounts.Address, txIdx int) (val uint64, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.Nonce == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[uint64]
-	e.Nonce.Descend(txIdx-1, func(k int, v *WriteCell[uint64]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (val uint64, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.Incarnation == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[uint64]
-	e.Incarnation.Descend(txIdx-1, func(k int, v *WriteCell[uint64]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) (val []byte, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.Code == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[[]byte]
-	e.Code.Descend(txIdx-1, func(k int, v *WriteCell[[]byte]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (val accounts.CodeHash, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.CodeHash == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[accounts.CodeHash]
-	e.CodeHash.Descend(txIdx-1, func(k int, v *WriteCell[accounts.CodeHash]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadCodeSize(addr accounts.Address, txIdx int) (val int, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.CodeSize == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[int]
-	e.CodeSize.Descend(txIdx-1, func(k int, v *WriteCell[int]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (val bool, res ReadResult, ok bool) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present || e.CreateContract == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[bool]
-	e.CreateContract.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
-		return val, res, false
-	}
-	res.depIdx = fk
-	if fv.flag == FlagDone {
-		res.incarnation = fv.incarnation
-	}
-	return fv.Value, res, true
-}
-
-func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (val uint256.Int, res ReadResult, ok bool) {
+// readFloor performs the floor read shared by every typed ReadX primitive:
+// it descends sel(e)'s btree for the highest write strictly below txIdx and
+// returns its value plus the conflict-detection metadata (depIdx and, when the
+// floor cell is Done, its incarnation). sel extracts the per-path cell map from
+// the address entry, returning nil when the path is unset.
+func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func(*AddressEntry) *btree.Map[int, *WriteCell[T]]) (val T, res ReadResult, ok bool) {
 	res.depIdx = UnknownDep
 	res.incarnation = -1
 	if vm == nil {
@@ -627,13 +327,13 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 	if !present {
 		return val, res, false
 	}
-	cells := e.Storage[key]
+	cells := sel(e)
 	if cells == nil {
 		return val, res, false
 	}
 	fk := UnknownDep
-	var fv *WriteCell[uint256.Int]
-	cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
+	var fv *WriteCell[T]
+	cells.Descend(txIdx-1, func(k int, v *WriteCell[T]) bool {
 		fk, fv = k, v
 		return false
 	})
@@ -647,210 +347,54 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 	return fv.Value, res, true
 }
 
-func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
-	res.depIdx = UnknownDep
-	res.incarnation = -1
+func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address })
+}
 
-	if vm == nil {
-		return res
-	}
+func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.SelfDestruct })
+}
 
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
+func (vm *VersionMap) ReadBalance(addr accounts.Address, txIdx int) (uint256.Int, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] { return e.Balance })
+}
 
-	e, ok := vm.s[addr]
-	if !ok {
-		return
-	}
+func (vm *VersionMap) ReadNonce(addr accounts.Address, txIdx int) (uint64, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
+}
 
-	// Per-path Descend is inlined per case. A generic helper here costs an
-	// extra heap alloc per Read (Go generic functions are dictionary-passed
-	// rather than fully inlined, so the closure capture escapes once per
-	// instantiation). Inlining the descend keeps reads at one alloc (the
-	// any-box of fv.Value into res.value at the API boundary). The typed Read
-	// primitives (ReadBalance/etc.) drop that any-box; this generic Read remains
-	// only for the few any-shaped callers (the validator value-tiebreaker, tests).
-	maxIdx := txIdx - 1
-	switch path {
-	case AddressPath:
-		if e.Address == nil {
-			return
+func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (uint64, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Incarnation })
+}
+
+func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) ([]byte, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[[]byte]] { return e.Code })
+}
+
+func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (accounts.CodeHash, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.CodeHash]] { return e.CodeHash })
+}
+
+func (vm *VersionMap) ReadCodeSize(addr accounts.Address, txIdx int) (int, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[int]] { return e.CodeSize })
+}
+
+func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.CreateContract })
+}
+
+func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
+		if e.Storage == nil {
+			return nil
 		}
-		fk := UnknownDep
-		var fv *WriteCell[*accounts.Account]
-		e.Address.Descend(maxIdx, func(k int, v *WriteCell[*accounts.Account]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case SelfDestructPath:
-		if e.SelfDestruct == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[bool]
-		e.SelfDestruct.Descend(maxIdx, func(k int, v *WriteCell[bool]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case BalancePath:
-		if e.Balance == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[uint256.Int]
-		e.Balance.Descend(maxIdx, func(k int, v *WriteCell[uint256.Int]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case NoncePath:
-		if e.Nonce == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[uint64]
-		e.Nonce.Descend(maxIdx, func(k int, v *WriteCell[uint64]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case IncarnationPath:
-		if e.Incarnation == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[uint64]
-		e.Incarnation.Descend(maxIdx, func(k int, v *WriteCell[uint64]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case CodePath:
-		if e.Code == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[[]byte]
-		e.Code.Descend(maxIdx, func(k int, v *WriteCell[[]byte]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case CodeHashPath:
-		if e.CodeHash == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[accounts.CodeHash]
-		e.CodeHash.Descend(maxIdx, func(k int, v *WriteCell[accounts.CodeHash]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case CodeSizePath:
-		if e.CodeSize == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[int]
-		e.CodeSize.Descend(maxIdx, func(k int, v *WriteCell[int]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case CreateContractPath:
-		if e.CreateContract == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[bool]
-		e.CreateContract.Descend(maxIdx, func(k int, v *WriteCell[bool]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	case StoragePath:
-		cells := e.Storage[key]
-		if cells == nil {
-			return
-		}
-		fk := UnknownDep
-		var fv *WriteCell[uint256.Int]
-		cells.Descend(maxIdx, func(k int, v *WriteCell[uint256.Int]) bool {
-			fk, fv = k, v
-			return false
-		})
-		if fk != UnknownDep && fv != nil {
-			res.depIdx = fk
-			if fv.flag == FlagDone {
-				res.incarnation = fv.incarnation
-			}
-			res.value = fv.Value
-		}
-	}
-	return
+		return e.Storage[key]
+	})
 }
 
 // ReadStatus returns a path's read outcome (Status/Version/DepIdx/Incarnation)
-// without the value: it dispatches to the typed ReadX and discards the value, so
-// unlike Read it never boxes into ReadResult.value any. For callers that need
-// only version/status (the validator's common path, revival checks).
+// for callers that need only version/status (the validator's common path,
+// revival checks). It dispatches to the typed ReadX and discards the value.
 func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
 	var res ReadResult
 	switch path {
@@ -875,7 +419,7 @@ func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key ac
 	case StoragePath:
 		_, res, _ = vm.ReadStorage(addr, key, txIdx)
 	default:
-		res = vm.Read(addr, path, key, txIdx)
+		panic(fmt.Errorf("ReadStatus: unknown path %v", path))
 	}
 	return res
 }
@@ -1474,17 +1018,37 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return
 }
 
+// liveValueEquals reports whether the live versionMap value for (addr,path,key)
+// equals readVal — the validator tiebreaker when a Done cell exists where the
+// read saw storage but holds the same value, so the read stays valid.
+func liveValueEquals(vm *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, readVal any) bool {
+	switch path {
+	case BalancePath:
+		v, _, ok := vm.ReadBalance(addr, txIdx)
+		return ok && valuesEqual(path, readVal, v)
+	case NoncePath:
+		v, _, ok := vm.ReadNonce(addr, txIdx)
+		return ok && valuesEqual(path, readVal, v)
+	case IncarnationPath:
+		v, _, ok := vm.ReadIncarnation(addr, txIdx)
+		return ok && valuesEqual(path, readVal, v)
+	case CodeHashPath:
+		v, _, ok := vm.ReadCodeHash(addr, txIdx)
+		return ok && valuesEqual(path, readVal, v)
+	case AddressPath:
+		v, _, ok := vm.ReadAddress(addr, txIdx)
+		return ok && valuesEqual(path, readVal, v)
+	case StoragePath:
+		v, _, ok := vm.ReadStorage(addr, key, txIdx)
+		return ok && valuesEqual(path, readVal, v)
+	default:
+		return false
+	}
+}
+
 // valuesEqual compares a read value with a versionMap write value for the
 // same path. Used as a tiebreaker: when the version/source check would
 // invalidate but the actual values match, the read is still valid.
-// liveValueEquals compares the live versionMap value for (addr,path,key) against
-// readVal. Confines the value-boxing Read to the one validator branch that needs
-// the materialised value; the common path uses the alloc-free ReadStatus.
-func liveValueEquals(vm *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, readVal any) bool {
-	cur := vm.Read(addr, path, key, txIdx)
-	return cur.Value() != nil && valuesEqual(path, readVal, cur.Value())
-}
-
 func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 	if readVal == nil || writeVal == nil {
 		return readVal == nil && writeVal == nil
@@ -1629,7 +1193,6 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation int
-	value       any
 }
 
 func (res *ReadResult) DepString() string {
@@ -1645,10 +1208,6 @@ func (res *ReadResult) DepIdx() int {
 
 func (res *ReadResult) Incarnation() int {
 	return res.incarnation
-}
-
-func (res *ReadResult) Value() any {
-	return res.value
 }
 
 func (res *ReadResult) Version() Version {

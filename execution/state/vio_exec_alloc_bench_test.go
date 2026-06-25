@@ -33,15 +33,12 @@ var (
 	sinkBool bool
 )
 
-// BenchmarkVersionMapRead_BoxedVsTyped is the before/after proof for the
-// typed-vio intent: the generic VersionMap.Read returns the value through
-// ReadResult.Value() any (a heap box of the typed value), while the typed
-// ReadXxx primitives return T directly. versionedReadCore currently uses the
-// boxed Read for every non-storage path; this benchmark isolates the boxing
-// alloc that the typed dispatch removes. Run:
+// BenchmarkVersionMapRead_Typed measures the typed ReadXxx primitives, which
+// return T directly with no interface box. The boxed Read().Value() arm was
+// removed when the generic any-boxed VersionMap.Read API was deleted. Run:
 //
-//	go test ./execution/state/ -run=^$ -bench=BenchmarkVersionMapRead_BoxedVsTyped -benchmem
-func BenchmarkVersionMapRead_BoxedVsTyped(b *testing.B) {
+//	go test ./execution/state/ -run=^$ -bench=BenchmarkVersionMapRead_Typed -benchmem
+func BenchmarkVersionMapRead_Typed(b *testing.B) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x01})
 	key := accounts.InternKey([32]byte{0x02})
@@ -52,51 +49,28 @@ func BenchmarkVersionMapRead_BoxedVsTyped(b *testing.B) {
 	mvhm.WriteCodeHash(addr, Version{TxIndex: 0}, accounts.InternCodeHash(common.HexToHash("0xaabb")), true)
 	mvhm.WriteStorage(addr, key, Version{TxIndex: 0}, *uint256.NewInt(99), true)
 
-	b.Run("Balance/boxed", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			res := mvhm.Read(addr, BalancePath, accounts.NilKey, txIdx)
-			sinkU256, _ = res.Value().(uint256.Int)
-		}
-	})
-	b.Run("Balance/typed", func(b *testing.B) {
+	b.Run("Balance", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			sinkU256, _, _ = mvhm.ReadBalance(addr, txIdx)
 		}
 	})
 
-	b.Run("Nonce/boxed", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			res := mvhm.Read(addr, NoncePath, accounts.NilKey, txIdx)
-			sinkU64, _ = res.Value().(uint64)
-		}
-	})
-	b.Run("Nonce/typed", func(b *testing.B) {
+	b.Run("Nonce", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			sinkU64, _, _ = mvhm.ReadNonce(addr, txIdx)
 		}
 	})
 
-	b.Run("CodeHash/boxed", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			res := mvhm.Read(addr, CodeHashPath, accounts.NilKey, txIdx)
-			sinkHash, _ = res.Value().(accounts.CodeHash)
-		}
-	})
-	b.Run("CodeHash/typed", func(b *testing.B) {
+	b.Run("CodeHash", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			sinkHash, _, _ = mvhm.ReadCodeHash(addr, txIdx)
 		}
 	})
 
-	// Storage already has a typed cell path in versionedReadCore; included as
-	// the zero-alloc reference the other paths should match after the fix.
-	b.Run("Storage/typed", func(b *testing.B) {
+	b.Run("Storage", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			sinkU256, _, _ = mvhm.ReadStorage(addr, key, txIdx)

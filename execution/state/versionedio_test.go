@@ -1069,7 +1069,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 
 	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
 	vm := NewVersionMap(nil)
-	vm.Write(addr, BalancePath, accounts.NilKey,
+	vm.WriteBalance(addr,
 		Version{TxIndex: 0, Incarnation: 0},
 		postWithdrawalBalance, true)
 
@@ -1120,7 +1120,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 
 	postWithdrawalBalance := *uint256.NewInt(100_000_000_000_000_000)
 	vm := NewVersionMap(nil)
-	vm.Write(addr, BalancePath, accounts.NilKey,
+	vm.WriteBalance(addr,
 		Version{TxIndex: 0, Incarnation: 0},
 		postWithdrawalBalance, true)
 
@@ -1165,11 +1165,11 @@ func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 	vm := NewVersionMap(nil)
 	// Tx 3 self-destructs: SelfDestructPath=true only — SD doesn't write
 	// Nonce/CodeHash into the versionMap.
-	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+	vm.WriteSelfDestruct(addr,
 		Version{TxIndex: 3, Incarnation: 0}, true, true)
-	vm.Write(addr, BalancePath, accounts.NilKey,
+	vm.WriteBalance(addr,
 		Version{TxIndex: 3, Incarnation: 0}, uint256.Int{}, true)
-	vm.Write(addr, IncarnationPath, accounts.NilKey,
+	vm.WriteIncarnation(addr,
 		Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
 
 	// Tx 4's worker IBS. The reader (analogous to CachedReaderV3) returns
@@ -1203,11 +1203,11 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 
 	// Tx 3: SD + CREATE2 re-deploy. All writes land at (TxIdx=3, Inc=0).
 	vm := NewVersionMap(nil)
-	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+	vm.WriteSelfDestruct(addr,
 		Version{TxIndex: 3, Incarnation: 0}, true, true)
-	vm.Write(addr, BalancePath, accounts.NilKey,
+	vm.WriteBalance(addr,
 		Version{TxIndex: 3, Incarnation: 0}, uint256.Int{}, true)
-	vm.Write(addr, IncarnationPath, accounts.NilKey,
+	vm.WriteIncarnation(addr,
 		Version{TxIndex: 3, Incarnation: 0}, uint64(2), true)
 	// Fresh AddressPath at the same TxIdx as the SD.
 	recreatedAcc := &accounts.Account{
@@ -1215,7 +1215,7 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 		Incarnation: 2,
 		CodeHash:    accounts.InternCodeHash(common.HexToHash("0xdeadbeefcafebabe1111111111111111111111111111111111111111111111ff")),
 	}
-	vm.Write(addr, AddressPath, accounts.NilKey,
+	vm.WriteAddress(addr,
 		Version{TxIndex: 3, Incarnation: 0}, recreatedAcc, true)
 
 	// Tx 4 reads addr. Strict-greater on subfields wouldn't see the

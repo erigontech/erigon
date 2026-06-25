@@ -134,12 +134,16 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			result := ibs.ReadVersion(k.addr, k.path, k.key, version.TxIndex)
 
-			val := result.Value()
-
-			if i == 0 && val != nil && (testWriteValToInt(val) != t.nonce) {
-				return &exec.TxResult{Err: protocol.ErrExecAbortError{
-					DependencyTxIndex: -1,
-					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", testWriteValToInt(val), t.nonce)}}
+			if i == 0 && result.Status() == state.MVReadResultDone {
+				nonce, err := ibs.GetNonce(k.addr)
+				if err != nil {
+					return &exec.TxResult{Err: err}
+				}
+				if int(nonce) != t.nonce {
+					return &exec.TxResult{Err: protocol.ErrExecAbortError{
+						DependencyTxIndex: -1,
+						OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+				}
 			}
 
 			if result.Status() == state.MVReadResultDependency {

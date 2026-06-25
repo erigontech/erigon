@@ -42,7 +42,7 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	balance := uint256.NewInt(1000)
 
 	// Write a balance to the versionMap at txIndex=5
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, *balance, true)
+	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 0}, *balance, true)
 
 	// Validate a read from txIndex=10 that read the SAME value from storage
 	readVal := *balance // Same value
@@ -63,7 +63,7 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x01})
 
 	// Write balance=1000 to versionMap
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(1000), true)
+	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(1000), true)
 
 	// Validate a read that got balance=500 from storage (stale)
 	readVal := *uint256.NewInt(500)
@@ -83,7 +83,7 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x02})
 
 	// Write nonce=42 to versionMap
-	vm.Write(addr, NoncePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
+	vm.WriteNonce(addr, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
 
 	// Same nonce from storage → valid
 	valid := vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
@@ -133,23 +133,23 @@ func TestVersionedWriteVersion(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x03})
 
 	// Write at txIndex=10 with correct Version
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 10, Incarnation: 1}, *uint256.NewInt(500), true)
+	vm.WriteBalance(addr, Version{TxIndex: 10, Incarnation: 1}, *uint256.NewInt(500), true)
 
 	// Read at txIndex=11 should find txIndex=10
-	rr := vm.Read(addr, BalancePath, accounts.NilKey, 11)
+	_, rr, _ := vm.ReadBalance(addr, 11)
 	assert.Equal(t, MVReadResultDone, rr.Status(), "Should find entry at floor(10)")
 	assert.Equal(t, 10, rr.DepIdx(), "Should be from txIndex 10")
 
 	// Now also write at txIndex=0 (simulates the zero-Version bug)
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(999), true)
+	vm.WriteBalance(addr, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(999), true)
 
 	// Read at txIndex=11 should STILL find txIndex=10 (not 0)
-	rr = vm.Read(addr, BalancePath, accounts.NilKey, 11)
+	_, rr, _ = vm.ReadBalance(addr, 11)
 	assert.Equal(t, MVReadResultDone, rr.Status())
 	assert.Equal(t, 10, rr.DepIdx(), "Should find txIndex=10, not txIndex=0")
 
 	// But read at txIndex=1 should find txIndex=0
-	rr = vm.Read(addr, BalancePath, accounts.NilKey, 1)
+	_, rr, _ = vm.ReadBalance(addr, 1)
 	assert.Equal(t, MVReadResultDone, rr.Status())
 	assert.Equal(t, 0, rr.DepIdx(), "Should find txIndex=0 for floor(0)")
 }
@@ -226,19 +226,18 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
 		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
-	vm.Write(addr, CodePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, delegationCode, true)
+	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, delegationCode, true)
 
 	// Read at txIndex=10 should find the code
-	rr := vm.Read(addr, CodePath, accounts.NilKey, 10)
+	code, rr, ok := vm.ReadCode(addr, 10)
 	require.Equal(t, MVReadResultDone, rr.Status(), "Should find CodePath entry")
 
-	code, ok := rr.Value().([]byte)
-	require.True(t, ok, "Value should be []byte")
+	require.True(t, ok, "Code cell should exist")
 	assert.Equal(t, delegationCode, code, "Code should match")
 	assert.Equal(t, byte(0xef), code[0], "Should have EIP-7702 prefix")
 
 	// Read at txIndex=3 should NOT find it (before the write)
-	rr = vm.Read(addr, CodePath, accounts.NilKey, 3)
+	_, rr, _ = vm.ReadCode(addr, 3)
 	assert.NotEqual(t, MVReadResultDone, rr.Status(), "Should not find code before write txIndex")
 }
 

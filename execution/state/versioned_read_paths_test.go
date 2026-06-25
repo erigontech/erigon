@@ -93,7 +93,7 @@ func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xc5})
 	key := accounts.InternKey([32]byte{0x01})
 	// tx 1 wrote a slot value
-	mvhm.Write(addr, StoragePath, key, Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(99), true)
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(99), true)
 	// tx 2 selfdestructed the account
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
 

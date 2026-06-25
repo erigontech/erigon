@@ -890,7 +890,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	// (txIndex=0, incarnation=0). The re-execution at incarnation=1 should
 	// produce a write that masks this; finalize must NOT use this stale
 	// abandoned value.
-	vm.Write(s.coinbase, state.BalancePath, accounts.NilKey,
+	vm.WriteBalance(s.coinbase,
 		state.Version{TxIndex: 0, Incarnation: 0},
 		*uint256.NewInt(abandonedPostBal), true)
 

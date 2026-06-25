@@ -68,23 +68,6 @@ func (b *wsb) addr(addr accounts.Address, ver state.Version, val *accounts.Accou
 	return b
 }
 
-// testWriteValToInt collapses a versionMap-read value (typed per path) back to
-// the int the parallel-exec harness wrote.
-func testWriteValToInt(v any) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case uint64:
-		return int(x)
-	case uint256.Int:
-		return int(x.Uint64())
-	case *uint256.Int:
-		return int(x.Uint64())
-	default:
-		return 0
-	}
-}
-
 // testWriteSetInt records an int-valued write into ws under the path-appropriate
 // typed slot, used by the parallel-exec harness which models all values as ints.
 func testWriteSetInt(ws *state.WriteSet, addr accounts.Address, path state.AccountPath, key accounts.StorageKey, version state.Version, val int) {

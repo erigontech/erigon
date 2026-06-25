@@ -93,9 +93,8 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	vm.FlushVersionedWrites(writes88, true, "")
 
 	// Verify TX 88 wrote empty code hash to versionMap
-	rr := vm.Read(addr, CodeHashPath, accounts.NilKey, 89)
+	ch, rr, ok := vm.ReadCodeHash(addr, 89)
 	require.Equal(t, MVReadResultDone, rr.Status(), "TX 88 should have written CodeHashPath")
-	ch, ok := rr.Value().(accounts.CodeHash)
 	require.True(t, ok)
 	assert.Equal(t, accounts.EmptyCodeHash, ch, "TX 88 should have written EmptyCodeHash")
 

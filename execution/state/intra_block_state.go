@@ -870,7 +870,7 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, erro
 }
 
 func (sdb *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
-	return sdb.versionMap.Read(addr, path, key, txIdx)
+	return sdb.versionMap.ReadStatus(addr, path, key, txIdx)
 }
 
 // AddBalance adds amount to the account associated with addr.
@@ -1024,35 +1024,33 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 		// stale nonce/codeHash flows through refreshVersionedAccount (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if sdRes := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); sdRes.Status() == MVReadResultDone {
-			if destructed, ok := sdRes.Value().(bool); ok && destructed {
-				destructTxIndex := sdRes.DepIdx()
-				revivalLimit := sdb.txIndex - 1
-				revived := false
-				// Same-tx re-creation (metamorphic SD+CREATE2): both
-				// SelfDestructPath and AddressPath are written at the SAME
-				// TxIdx, so >= (not strict >) is needed on AddressPath.
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
+		if destructed, sdRes, _ := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); sdRes.Status() == MVReadResultDone && destructed {
+			destructTxIndex := sdRes.DepIdx()
+			revivalLimit := sdb.txIndex - 1
+			revived := false
+			// Same-tx re-creation (metamorphic SD+CREATE2): both
+			// SelfDestructPath and AddressPath are written at the SAME
+			// TxIdx, so >= (not strict >) is needed on AddressPath.
+			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
+				revived = true
+			}
+			if !revived {
+				if hi, ok := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 					revived = true
 				}
-				if !revived {
-					if hi, ok := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
+			}
+			if !revived {
+				if hi, ok := sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+					revived = true
 				}
-				if !revived {
-					if hi, ok := sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
+			}
+			if !revived {
+				if hi, ok := sdb.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+					revived = true
 				}
-				if !revived {
-					if hi, ok := sdb.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					return nil, StorageRead, UnknownVersion, nil
-				}
+			}
+			if !revived {
+				return nil, StorageRead, UnknownVersion, nil
 			}
 		}
 	}
