@@ -250,8 +250,8 @@ runs:
       # updating (we never install from them); the Ubuntu archive retries on blips.
       # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
       run: |
-        sudo grep -rlE 'dl\.google\.com|packages\.microsoft\.com' \
-          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f || true
+        sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
+          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
         sudo apt-get update -qq -o Acquire::Retries=3 \
           && sudo apt-get install -qq -y build-essential 2>/dev/null
 
