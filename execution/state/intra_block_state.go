@@ -2231,13 +2231,12 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-func (sdb *IntraBlockState) TxIO() *VersionedIO {
-	var io VersionedIO
+// MergeTxIOInto folds the current transaction's recorded reads, writes and
+// accesses into io at the current tx index, without building an intermediate
+// VersionedIO.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.RecordReads(version, sdb.VersionedReads())
-	io.RecordWrites(version, sdb.VersionedWrites(false))
-	io.RecordAccesses(version, sdb.addressAccess)
-	return &io
+	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(false), sdb.addressAccess)
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {

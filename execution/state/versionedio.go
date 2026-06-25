@@ -1988,6 +1988,16 @@ func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
 	return io.inputs[txnIdx+1].readSet
 }
 
+func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
+	if len(io.inputs) <= txnIdx+1 {
+		return -1
+	}
+	if io.inputs[txnIdx+1].readSet.Len() > 0 {
+		return io.inputs[txnIdx+1].incarnation
+	}
+	return 0
+}
+
 func (io *VersionedIO) WriteSet(txnIdx int) *WriteSet {
 	if len(io.outputs) <= txnIdx+1 {
 		return nil
@@ -2089,6 +2099,33 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 		}
 	}
 	return merged
+}
+
+// mergeTx folds a single transaction's reads, writes and accesses (recorded at
+// version.TxIndex) into io at that index, accumulating into the slot rather
+// than overwriting it the way RecordReads does. The three per-tx slices grow in
+// lockstep so they stay equal length.
+func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet, accesses AccessSet) {
+	idx := version.TxIndex + 1
+	n := max(idx+1, len(io.inputs), len(io.outputs), len(io.accessed))
+	if n > len(io.inputs) {
+		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
+	}
+	if n > len(io.outputs) {
+		io.outputs = append(io.outputs, make([]*WriteSet, n-len(io.outputs))...)
+	}
+	if n > len(io.accessed) {
+		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
+	}
+	if reads.Len() > 0 {
+		io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
+	}
+	if !writes.IsEmpty() {
+		io.outputs[idx] = io.outputs[idx].Merge(writes)
+	}
+	if len(accesses) > 0 {
+		io.accessed[idx] = io.accessed[idx].Merge(accesses)
+	}
 }
 
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
