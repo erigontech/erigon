@@ -42,7 +42,7 @@ type DataColumnSidecar struct {
 	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header,omitempty"`             // [Removed in Gloas:EIP7732]
 	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof,omitempty"` // [Removed in Gloas:EIP7732]
 
-	version      clparams.StateVersion              // internal: tracks the version for encoding
+	version      clparams.StateVersion       // internal: tracks the version for encoding
 	beaconConfig *clparams.BeaconChainConfig // internal: per-instance config for multi-chain support
 }
 
