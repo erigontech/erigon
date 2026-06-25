@@ -138,53 +138,27 @@ func pollAssembledPayload(
 		case <-buildTimer.C:
 		}
 	}
-	pollTimeout := time.Until(window.pollUntil)
-	if pollTimeout < 0 {
-		pollTimeout = 0
-	}
-	stopTimer := time.NewTimer(pollTimeout)
-	defer stopTimer.Stop()
-	// Grab once immediately before enabling deadline polling, so late requests still get a payload.
-	retryTimer := time.NewTimer(0)
-	defer retryTimer.Stop()
-	var stopPolling <-chan time.Time
-	firstPayloadAttempt := true
-	schedulePayloadRetry := func() bool {
-		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-			return false
-		}
-		stopPolling = stopTimer.C
-		retryTimer.Reset(retryTime)
-		return true
-	}
+	deadlineTimer := time.NewTimer(time.Until(window.pollUntil))
+	defer deadlineTimer.Stop()
+	retryTicker := time.NewTicker(retryTime)
+	defer retryTicker.Stop()
 	for {
+		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
+		payload, bundles, requestsBundle, blockValue, err := get()
+		if err != nil {
+			log.Error("BlockProduction: Failed to get payload", "err", err)
+		} else if payload != nil {
+			return payload, bundles, requestsBundle, blockValue, true
+		}
+		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
+			return nil, nil, nil, nil, false
+		}
 		select {
 		case <-ctx.Done():
 			return nil, nil, nil, nil, false
-		case <-stopPolling:
+		case <-deadlineTimer.C:
 			return nil, nil, nil, nil, false
-		case <-retryTimer.C:
-			stopPolling = stopTimer.C
-			if firstPayloadAttempt {
-				firstPayloadAttempt = false
-			} else if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-				return nil, nil, nil, nil, false
-			}
-			payload, bundles, requestsBundle, blockValue, err := get()
-			if err != nil {
-				log.Error("BlockProduction: Failed to get payload", "err", err)
-				if !schedulePayloadRetry() {
-					return nil, nil, nil, nil, false
-				}
-				continue
-			}
-			if payload == nil {
-				if !schedulePayloadRetry() {
-					return nil, nil, nil, nil, false
-				}
-				continue
-			}
-			return payload, bundles, requestsBundle, blockValue, true
+		case <-retryTicker.C:
 		}
 	}
 }
