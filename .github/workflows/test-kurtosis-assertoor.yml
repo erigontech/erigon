@@ -9,8 +9,7 @@ env:
   # LIGHTHOUSE_IMAGE, TEKU_IMAGE, LIGHTHOUSE_VC_IMAGE and the ASSERTOOR_* tags are
   # loaded at job start from the suite .io files (single source of truth) by the
   # "Load image versions" step, so they can't drift from what kurtosis runs. The
-  # images defined below aren't pinned in any .io (genesis-generator is the
-  # ethereum-package default; eth2-val-tools/python are internals), so they stay here.
+  # remaining third-party tags below aren't pinned in any .io, so they stay here.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see

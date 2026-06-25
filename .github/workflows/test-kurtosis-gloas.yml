@@ -93,6 +93,13 @@ jobs:
           io=.github/workflows/kurtosis/gloas-caplin-mixed.io
           assertoor=$(yq -e '.assertoor_params.image' "$io")
           genesis=$(yq -e '.ethereum_genesis_generator_params.image' "$io")
+          # One cache (keyed off $io) is shared by every gloas suite, so all
+          # gloas-*.io must pin the same assertoor + genesis — fail if any diverges.
+          for f in .github/workflows/kurtosis/gloas-*.io; do
+            [ "$(yq -e '.assertoor_params.image' "$f")" = "$assertoor" ] \
+              && [ "$(yq -e '.ethereum_genesis_generator_params.image' "$f")" = "$genesis" ] \
+              || { echo "::error::$f disagrees with $io on the assertoor/genesis image; reconcile them or extend the gloas cache key"; exit 1; }
+          done
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "GENESIS_GENERATOR_IMAGE=$genesis"
@@ -203,6 +210,13 @@ jobs:
           io=.github/workflows/kurtosis/gloas-caplin-mixed.io
           assertoor=$(yq -e '.assertoor_params.image' "$io")
           genesis=$(yq -e '.ethereum_genesis_generator_params.image' "$io")
+          # One cache (keyed off $io) is shared by every gloas suite, so all
+          # gloas-*.io must pin the same assertoor + genesis — fail if any diverges.
+          for f in .github/workflows/kurtosis/gloas-*.io; do
+            [ "$(yq -e '.assertoor_params.image' "$f")" = "$assertoor" ] \
+              && [ "$(yq -e '.ethereum_genesis_generator_params.image' "$f")" = "$genesis" ] \
+              || { echo "::error::$f disagrees with $io on the assertoor/genesis image; reconcile them or extend the gloas cache key"; exit 1; }
+          done
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "GENESIS_GENERATOR_IMAGE=$genesis"
