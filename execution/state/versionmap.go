@@ -985,63 +985,60 @@ func (vm *VersionMap) AnyDoneBoolWriteEquals(addr accounts.Address, path Account
 // but not the corresponding CodePath write from the same transaction),
 // which could cause non-deterministic BAL (EIP-7928) hashes during
 // parallel execution.
-func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool, tracePrefix string) {
+// FlushVersionedWrites routes a tx's typed write collections into the version
+// map. Each cell is positioned by the write's (txIndex, incarnation), so the
+// per-path loop order does not affect the result.
+func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
+	if writes == nil {
+		return
+	}
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
-
-	for _, v := range writes {
-		if vm.trace {
-			fmt.Println(tracePrefix, "FLSH", valueStringFromAnyVW(v))
-		}
-		vm.flushVWLocked(v, complete)
-	}
-}
-
-// flushVWLocked routes a VersionedWrite into the typed AddressEntry field
-// matching its Path. Caller must hold vm.mu.Lock(). Cold (flush) path —
-// asserts the concrete value via Val[T] once per write.
-func (vm *VersionMap) flushVWLocked(vw AnyVersionedWrite, complete bool) {
-	hdr := vw.Header()
-	e := vm.entryOrCreate(hdr.Address)
 	flag := flagFor(complete)
-	addr := hdr.Address
-	switch hdr.Path {
-	case AddressPath:
-		v, _ := Val[*accounts.Account](vw)
-		e.Address = putCell(e.Address, addr, AddressPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellAccount)
-	case SelfDestructPath:
-		v, _ := Val[bool](vw)
-		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellSelfDestruct)
-	case BalancePath:
-		v, _ := Val[uint256.Int](vw)
-		e.Balance = putCell(e.Balance, addr, BalancePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellBalance)
-	case NoncePath:
-		v, _ := Val[uint64](vw)
-		e.Nonce = putCell(e.Nonce, addr, NoncePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellNonce)
-	case IncarnationPath:
-		v, _ := Val[uint64](vw)
-		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellIncarnation)
-	case CodePath:
-		if c, ok := Val[accounts.Code](vw); ok {
-			e.Code = putCell(e.Code, addr, CodePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, c.Bytes, getCellCode)
-		} else if b, ok := Val[[]byte](vw); ok {
-			e.Code = putCell(e.Code, addr, CodePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, b, getCellCode)
-		}
-	case CodeHashPath:
-		v, _ := Val[accounts.CodeHash](vw)
-		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCodeHash)
-	case CodeSizePath:
-		v, _ := Val[int](vw)
-		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCodeSize)
-	case CreateContractPath:
-		v, _ := Val[bool](vw)
-		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellCreateContract)
-	case StoragePath:
-		v, _ := Val[uint256.Int](vw)
+	for addr, vw := range writes.address {
+		e := vm.entryOrCreate(addr)
+		e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
+	}
+	for addr, vw := range writes.selfDestruct {
+		e := vm.entryOrCreate(addr)
+		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
+	}
+	for addr, vw := range writes.balance {
+		e := vm.entryOrCreate(addr)
+		e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellBalance)
+	}
+	for addr, vw := range writes.nonce {
+		e := vm.entryOrCreate(addr)
+		e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce)
+	}
+	for addr, vw := range writes.incarnation {
+		e := vm.entryOrCreate(addr)
+		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation)
+	}
+	for addr, vw := range writes.code {
+		e := vm.entryOrCreate(addr)
+		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val.Bytes, getCellCode)
+	}
+	for addr, vw := range writes.codeHash {
+		e := vm.entryOrCreate(addr)
+		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash)
+	}
+	for addr, vw := range writes.codeSize {
+		e := vm.entryOrCreate(addr)
+		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize)
+	}
+	for addr, vw := range writes.createContract {
+		e := vm.entryOrCreate(addr)
+		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract)
+	}
+	for addr, inner := range writes.storage {
+		e := vm.entryOrCreate(addr)
 		if e.Storage == nil {
 			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 		}
-		e.Storage[hdr.Key] = putCell(e.Storage[hdr.Key], addr, StoragePath, hdr.Version.TxIndex, hdr.Version.Incarnation, flag, v, getCellStorage)
+		for key, vw := range inner {
+			e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage)
+		}
 	}
 }
 

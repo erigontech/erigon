@@ -11,35 +11,9 @@ import "github.com/erigontech/erigon/execution/state"
 //
 // applyVersionedWrites reads a base account from the cache/domain for
 // any missing fields, so partial field sets are safe.
-func filterWritesByVersionMap(collectorWrites, vmWrites state.VersionedWrites) state.VersionedWrites {
-	if len(vmWrites) == 0 {
+func filterWritesByVersionMap(collectorWrites, vmWrites *state.WriteSet) *state.WriteSet {
+	if vmWrites.IsEmpty() {
 		return collectorWrites
 	}
-
-	type pathKey struct {
-		path state.AccountPath
-		key  [32]byte
-	}
-	vmSet := make(map[[20]byte]map[pathKey]struct{}, len(vmWrites))
-	for _, w := range vmWrites {
-		addrVal := w.Header().Address.Value()
-		pk := pathKey{path: w.Header().Path, key: w.Header().Key.Value()}
-		if m, ok := vmSet[addrVal]; ok {
-			m[pk] = struct{}{}
-		} else {
-			vmSet[addrVal] = map[pathKey]struct{}{pk: {}}
-		}
-	}
-
-	filtered := make(state.VersionedWrites, 0, len(collectorWrites))
-	for _, w := range collectorWrites {
-		addrVal := w.Header().Address.Value()
-		pk := pathKey{path: w.Header().Path, key: w.Header().Key.Value()}
-		if m, ok := vmSet[addrVal]; ok {
-			if _, ok := m[pk]; ok {
-				filtered = append(filtered, w)
-			}
-		}
-	}
-	return filtered
+	return collectorWrites.Filter(vmWrites.Has)
 }

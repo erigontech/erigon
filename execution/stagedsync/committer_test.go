@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
@@ -148,11 +149,10 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	// A txResult must carry at least one write to enter the fix's
 	// `if len(r.writes) > 0` branch — empty writes have no lazy-loads
 	// to seed and therefore intentionally don't update txNum.
-	someWrites := state.VersionedWrites{
-		// Path/value content irrelevant — domainReader is nil so the
-		// lazy-load path skips the real read. We only need len(writes)>0.
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{}},
-	}
+	// Path/value content irrelevant — domainReader is nil so the lazy-load
+	// path skips the real read. We only need a non-empty write set.
+	someWrites := &state.WriteSet{}
+	someWrites.SetBalance(accounts.NilAddress, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: accounts.NilAddress, Path: state.BalancePath}})
 
 	// First txResult: txNum jumps from 0 to 12345.
 	cc.handleMessage(context.Background(), &txResult{

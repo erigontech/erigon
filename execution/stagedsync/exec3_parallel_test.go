@@ -57,7 +57,7 @@ type testExecTask struct {
 	ctx          context.Context
 	ops          []Op
 	readMap      state.ReadSet
-	writeMap     map[accounts.Address]map[state.AccountKey]state.AnyVersionedWrite
+	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
@@ -86,7 +86,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		ctx:          context.Background(),
 		ops:          ops,
 		readMap:      state.ReadSet{},
-		writeMap:     map[accounts.Address]map[state.AccountKey]state.AnyVersionedWrite{},
+		writeMap:     &state.WriteSet{},
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -118,7 +118,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	version := t.Version()
 
 	t.readMap = state.ReadSet{}
-	t.writeMap = map[accounts.Address]map[state.AccountKey]state.AnyVersionedWrite{}
+	t.writeMap = &state.WriteSet{}
 
 	dep := -1
 
@@ -127,7 +127,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap[k.addr][state.AccountKey{Path: k.path, Key: k.key}]; ok {
+			if t.writeMap.Has(state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key}) {
 				sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 				continue
 			}
@@ -136,10 +136,10 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			val := result.Value()
 
-			if i == 0 && val != nil && (val.(int) != t.nonce) {
+			if i == 0 && val != nil && (testWriteValToInt(val) != t.nonce) {
 				return &exec.TxResult{Err: protocol.ErrExecAbortError{
 					DependencyTxIndex: -1,
-					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
+					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", testWriteValToInt(val), t.nonce)}}
 			}
 
 			if result.Status() == state.MVReadResultDependency {
@@ -160,16 +160,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			vw := &state.VersionedWrite[int]{
-				WriteHeader: state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key, Version: version},
-				Val:         op.val,
-			}
-			inner := t.writeMap[k.addr]
-			if inner == nil {
-				inner = map[state.AccountKey]state.AnyVersionedWrite{}
-				t.writeMap[k.addr] = inner
-			}
-			inner[state.AccountKey{Path: k.path, Key: k.key}] = vw
+			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 		default:
@@ -184,18 +175,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	return &exec.TxResult{}
 }
 
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
-	var total int
-	for _, inner := range t.writeMap {
-		total += len(inner)
-	}
-	writes := make(state.VersionedWrites, 0, total)
-	for _, inner := range t.writeMap {
-		for _, v := range inner {
-			writes = append(writes, v)
-		}
-	}
-	return writes
+func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
+	return t.writeMap
 }
 
 func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {

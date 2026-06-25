@@ -80,10 +80,10 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 //   - pure account deletion (no account fields follow) — from DeleteAccount
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
-func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes VersionedWrites, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
+func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes *WriteSet, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache) error {
 	domains := rs.domains
 
-	if len(writes) > 0 {
+	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
 			balance        *uint256.Int
 			nonce          *uint64
@@ -95,9 +95,8 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			storage        []storageItem
 		}
 
-		perAddr := make(map[accounts.Address]*addrState, len(writes)/4+1)
-		for _, w := range writes {
-			h := w.Header()
+		perAddr := make(map[accounts.Address]*addrState)
+		for h := range writes.AllHeaders() {
 			d := perAddr[h.Address]
 			if d == nil {
 				d = &addrState{}
@@ -105,29 +104,41 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 			switch h.Path {
 			case BalancePath:
-				v, _ := Val[uint256.Int](w)
-				d.balance = &v
+				if vw, ok := writes.GetBalance(h.Address); ok {
+					v := vw.Val
+					d.balance = &v
+				}
 			case NoncePath:
-				v, _ := Val[uint64](w)
-				d.nonce = &v
+				if vw, ok := writes.GetNonce(h.Address); ok {
+					v := vw.Val
+					d.nonce = &v
+				}
 			case IncarnationPath:
-				v, _ := Val[uint64](w)
-				d.incarnation = &v
+				if vw, ok := writes.GetIncarnation(h.Address); ok {
+					v := vw.Val
+					d.incarnation = &v
+				}
 			case CodeHashPath:
-				v, _ := Val[accounts.CodeHash](w)
-				d.codeHash = &v
+				if vw, ok := writes.GetCodeHash(h.Address); ok {
+					v := vw.Val
+					d.codeHash = &v
+				}
 			case CodePath:
-				v, _ := Val[accounts.Code](w)
-				d.code = v.Bytes
+				if vw, ok := writes.GetCode(h.Address); ok {
+					d.code = vw.Val.Bytes
+				}
 			case SelfDestructPath:
-				v, _ := Val[bool](w)
-				d.selfDestruct = v
+				if vw, ok := writes.GetSelfDestruct(h.Address); ok {
+					d.selfDestruct = vw.Val
+				}
 			case CreateContractPath:
-				v, _ := Val[bool](w)
-				d.createContract = v
+				if vw, ok := writes.GetCreateContract(h.Address); ok {
+					d.createContract = vw.Val
+				}
 			case StoragePath:
-				v, _ := Val[uint256.Int](w)
-				d.storage = append(d.storage, storageItem{h.Key, v})
+				if vw, ok := writes.GetStorage(h.Address, h.Key); ok {
+					d.storage = append(d.storage, storageItem{h.Key, vw.Val})
+				}
 			}
 		}
 
@@ -371,12 +382,12 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
-	writes VersionedWrites,
+	writes *WriteSet,
 	balanceIncreases map[accounts.Address]uint256.Int,
 	rules *chain.Rules,
 	blockCache *BlockStateCache,
 ) error {
-	if len(writes) == 0 && len(balanceIncreases) == 0 {
+	if writes.IsEmpty() && len(balanceIncreases) == 0 {
 		return nil
 	}
 	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules, blockCache); err != nil {
@@ -573,17 +584,17 @@ func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Bu
 // goroutine has flushed it to SharedDomains.
 type versionedWriteCollector struct {
 	rs     *StateV3Buffered
-	writes VersionedWrites
+	writes *WriteSet
 }
 
 // NewVersionedWriteCollector creates a versionedWriteCollector that collects
 // StateWriter calls into a VersionedWrites slice and maintains rs.accounts.
 func NewVersionedWriteCollector(rs *StateV3Buffered) *versionedWriteCollector {
-	return &versionedWriteCollector{rs: rs}
+	return &versionedWriteCollector{rs: rs, writes: &WriteSet{}}
 }
 
-// Writes returns the collected VersionedWrites for domain apply.
-func (c *versionedWriteCollector) Writes() VersionedWrites { return c.writes }
+// Writes returns the collected write set for domain apply.
+func (c *versionedWriteCollector) Writes() *WriteSet { return c.writes }
 
 func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	// Copy to prevent aliasing with pooled stateObjects. After tx finalization
@@ -612,17 +623,15 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 		c.rs.accountsMutex.RUnlock()
 	}
 	if needsCleanup {
-		c.writes = append(c.writes, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
+		c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 	}
 
-	// Emit complete account state as individual VersionedWrites so that
-	// applyVersionedWrites can reconstruct the full serialised account.
-	c.writes = append(c.writes,
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance},
-		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce},
-		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation},
-		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash},
-	)
+	// Emit complete account state so applyVersionedWrites can reconstruct the
+	// full serialised account.
+	c.writes.SetBalance(address, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
+	c.writes.SetNonce(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
+	c.writes.SetIncarnation(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
+	c.writes.SetCodeHash(address, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash})
 
 	// Maintain rs.accounts for the cross-block timing hole bridge.
 	c.rs.accountsMutex.Lock()
@@ -639,7 +648,7 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 }
 
 func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	c.writes = append(c.writes, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: address, Path: CodePath}, Val: accounts.Code{Hash: codeHash, Bytes: code}})
+	c.writes.SetCode(address, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: address, Path: CodePath}, Val: accounts.Code{Hash: codeHash, Bytes: code}})
 
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -664,7 +673,7 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	// ever invokes DeleteAccount outside the IBS.Selfdestruct path on a
 	// pre-existing contract, both implementations would need an
 	// IncarnationPath emit here.
-	c.writes = append(c.writes, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
+	c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -682,7 +691,7 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 	if original == value {
 		return nil
 	}
-	c.writes = append(c.writes, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: StoragePath, Key: key}, Val: value})
+	c.writes.SetStorage(address, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: StoragePath, Key: key}, Val: value})
 
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -709,17 +718,17 @@ func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { ret
 // all 4 account fields per address) alongside the normal IBS VersionedWrites.
 // The captured writes are later used in finalize to skip full IBS reconstruction.
 type LightCollector struct {
-	writes VersionedWrites
+	writes *WriteSet
 }
 
 func NewLightCollector() *LightCollector {
-	return &LightCollector{}
+	return &LightCollector{writes: &WriteSet{}}
 }
 
 // TakeWrites returns the accumulated writes and resets the collector.
-func (c *LightCollector) TakeWrites() VersionedWrites {
+func (c *LightCollector) TakeWrites() *WriteSet {
 	writes := c.writes
-	c.writes = nil
+	c.writes = &WriteSet{}
 	return writes
 }
 
@@ -729,7 +738,7 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	accountCopy.PrevIncarnation = account.PrevIncarnation
 
 	if original.Incarnation > accountCopy.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
+		c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 	}
 
 	// Only emit fields that changed vs `original`. In the parallel executor
@@ -739,35 +748,35 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	// balance-only transfer overwriting an earlier TX's nonce increment).
 	// See TestLightCollectorNoncePreservation* for the exact scenario.
 	if !accountCopy.Balance.Eq(&original.Balance) {
-		c.writes = append(c.writes, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
+		c.writes.SetBalance(address, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: BalancePath}, Val: accountCopy.Balance})
 	}
 	if accountCopy.Nonce != original.Nonce {
-		c.writes = append(c.writes, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
+		c.writes.SetNonce(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: NoncePath}, Val: accountCopy.Nonce})
 	}
 	// Emit on up-revs only — a down-rev would clobber a same-block SD-side cell.
 	if accountCopy.Incarnation > original.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
+		c.writes.SetIncarnation(address, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: address, Path: IncarnationPath}, Val: accountCopy.Incarnation})
 	}
 	if accountCopy.CodeHash != original.CodeHash {
-		c.writes = append(c.writes, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash})
+		c.writes.SetCodeHash(address, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: address, Path: CodeHashPath}, Val: accountCopy.CodeHash})
 	}
 	return nil
 }
 
 func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, codeHash accounts.CodeHash, code []byte) error {
-	c.writes = append(c.writes, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: address, Path: CodePath}, Val: accounts.Code{Hash: codeHash, Bytes: code}})
+	c.writes.SetCode(address, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: address, Path: CodePath}, Val: accounts.Code{Hash: codeHash, Bytes: code}})
 	return nil
 }
 
 func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
-	c.writes = append(c.writes, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
+	c.writes.SetSelfDestruct(address, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: address, Path: SelfDestructPath}, Val: true})
 	return nil
 }
 
 func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
 	// Always emit — deduplication happens in the BlockStateCache write buffer.
 	// The buffer compares with pre-block committed values at flush time.
-	c.writes = append(c.writes, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: StoragePath, Key: key}, Val: value})
+	c.writes.SetStorage(address, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: address, Path: StoragePath, Key: key}, Val: value})
 	return nil
 }
 
@@ -777,8 +786,8 @@ func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
 // It reconstructs account state from the per-field writes and calls
 // ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
 // have been called on the accumulator before this function is invoked.
-func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) {
-	if accumulator == nil || len(writes) == 0 {
+func NotifyAccumulator(accumulator *shards.Accumulator, writes *WriteSet) {
+	if accumulator == nil || writes.IsEmpty() {
 		return
 	}
 
@@ -789,57 +798,47 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 		codeHash    *accounts.CodeHash
 	}
 
-	pending := make(map[accounts.Address]*pendingAccount, len(writes)/4+1)
+	pending := make(map[accounts.Address]*pendingAccount, writes.Count()/4+1)
+	get := func(addr accounts.Address) *pendingAccount {
+		p := pending[addr]
+		if p == nil {
+			p = &pendingAccount{}
+			pending[addr] = p
+		}
+		return p
+	}
 
-	for _, w := range writes {
-		h := w.Header()
-		switch h.Path {
-		case BalancePath:
-			p := pending[h.Address]
-			if p == nil {
-				p = &pendingAccount{}
-				pending[h.Address] = p
-			}
-			v, _ := Val[uint256.Int](w)
-			p.balance = &v
-		case NoncePath:
-			p := pending[h.Address]
-			if p == nil {
-				p = &pendingAccount{}
-				pending[h.Address] = p
-			}
-			v, _ := Val[uint64](w)
-			p.nonce = &v
-		case IncarnationPath:
-			p := pending[h.Address]
-			if p == nil {
-				p = &pendingAccount{}
-				pending[h.Address] = p
-			}
-			v, _ := Val[uint64](w)
-			p.incarnation = &v
-		case CodeHashPath:
-			p := pending[h.Address]
-			if p == nil {
-				p = &pendingAccount{}
-				pending[h.Address] = p
-			}
-			v, _ := Val[accounts.CodeHash](w)
-			p.codeHash = &v
-		case CodePath:
-			c, _ := Val[accounts.Code](w)
-			var inc uint64
-			if p := pending[h.Address]; p != nil && p.incarnation != nil {
-				inc = *p.incarnation
-			}
-			accumulator.ChangeCode(h.Address.Value(), inc, c.Bytes)
-		case StoragePath:
-			val, _ := Val[uint256.Int](w)
-			var inc uint64
-			if p := pending[h.Address]; p != nil && p.incarnation != nil {
-				inc = *p.incarnation
-			}
-			accumulator.ChangeStorage(h.Address.Value(), inc, h.Key.Value(), val.Bytes())
+	for addr, w := range writes.Balances() {
+		v := w.Val
+		get(addr).balance = &v
+	}
+	for addr, w := range writes.Nonces() {
+		v := w.Val
+		get(addr).nonce = &v
+	}
+	for addr, w := range writes.Incarnations() {
+		v := w.Val
+		get(addr).incarnation = &v
+	}
+	for addr, w := range writes.CodeHashes() {
+		v := w.Val
+		get(addr).codeHash = &v
+	}
+	for addr, w := range writes.Codes() {
+		var inc uint64
+		if p := pending[addr]; p != nil && p.incarnation != nil {
+			inc = *p.incarnation
+		}
+		accumulator.ChangeCode(addr.Value(), inc, w.Val.Bytes)
+	}
+	for addr, byKey := range writes.Storages() {
+		var inc uint64
+		if p := pending[addr]; p != nil && p.incarnation != nil {
+			inc = *p.incarnation
+		}
+		for key, w := range byKey {
+			val := w.Val
+			accumulator.ChangeStorage(addr.Value(), inc, key.Value(), val.Bytes())
 		}
 	}
 

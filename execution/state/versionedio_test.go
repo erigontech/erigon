@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,29 +32,86 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func anyWriteVal(w AnyVersionedWrite) any {
-	switch w.Header().Path {
+// newWriteSet builds a typed *WriteSet from heterogeneous *VersionedWrite[T]
+// values, routing each into the correct per-path map by its WriteHeader. It is
+// the test-side replacement for the deleted flat VersionedWrites slice literal.
+func newWriteSet(writes ...any) *WriteSet {
+	ws := &WriteSet{}
+	for _, w := range writes {
+		addWriteToSet(ws, w)
+	}
+	return ws
+}
+
+func addWriteToSet(ws *WriteSet, w any) {
+	switch vw := w.(type) {
+	case *VersionedWrite[*accounts.Account]:
+		ws.SetAddress(vw.Address, vw)
+	case *VersionedWrite[uint256.Int]:
+		if vw.Path == StoragePath {
+			ws.SetStorage(vw.Address, vw.Key, vw)
+		} else {
+			ws.SetBalance(vw.Address, vw)
+		}
+	case *VersionedWrite[uint64]:
+		if vw.Path == IncarnationPath {
+			ws.SetIncarnation(vw.Address, vw)
+		} else {
+			ws.SetNonce(vw.Address, vw)
+		}
+	case *VersionedWrite[bool]:
+		if vw.Path == CreateContractPath {
+			ws.SetCreateContract(vw.Address, vw)
+		} else {
+			ws.SetSelfDestruct(vw.Address, vw)
+		}
+	case *VersionedWrite[accounts.Code]:
+		ws.SetCode(vw.Address, vw)
+	case *VersionedWrite[accounts.CodeHash]:
+		ws.SetCodeHash(vw.Address, vw)
+	case *VersionedWrite[int]:
+		ws.SetCodeSize(vw.Address, vw)
+	default:
+		panic(fmt.Sprintf("newWriteSet: unsupported write type %T", w))
+	}
+}
+
+// writeSetVal reads the typed value for a header from the WriteSet's per-path
+// maps and returns it as an any, the test-side replacement for the deleted
+// Val[T] extractor.
+func writeSetVal(s *WriteSet, h WriteHeader) any {
+	switch h.Path {
 	case AddressPath:
-		v, _ := Val[*accounts.Account](w)
-		return v
-	case BalancePath, StoragePath:
-		v, _ := Val[uint256.Int](w)
-		return v
-	case NoncePath, IncarnationPath:
-		v, _ := Val[uint64](w)
-		return v
+		vw, _ := s.GetAddress(h.Address)
+		return vw.Val
+	case BalancePath:
+		vw, _ := s.GetBalance(h.Address)
+		return vw.Val
+	case StoragePath:
+		vw, _ := s.GetStorage(h.Address, h.Key)
+		return vw.Val
+	case NoncePath:
+		vw, _ := s.GetNonce(h.Address)
+		return vw.Val
+	case IncarnationPath:
+		vw, _ := s.GetIncarnation(h.Address)
+		return vw.Val
 	case CodeHashPath:
-		v, _ := Val[accounts.CodeHash](w)
-		return v
+		vw, _ := s.GetCodeHash(h.Address)
+		return vw.Val
 	case CodePath:
-		v, _ := Val[accounts.Code](w)
-		return v
+		vw, _ := s.GetCode(h.Address)
+		return vw.Val
 	case CodeSizePath:
-		v, _ := Val[int](w)
-		return v
+		vw, _ := s.GetCodeSize(h.Address)
+		return vw.Val
 	case SelfDestructPath, CreateContractPath:
-		v, _ := Val[bool](w)
-		return v
+		if h.Path == CreateContractPath {
+			vw, _ := s.GetCreateContract(h.Address)
+			return vw.Val
+		}
+		vw, _ := s.GetSelfDestruct(h.Address)
+		return vw.Val
 	}
 	return nil
 }
@@ -102,9 +161,9 @@ func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
 	readSets := ReadSet{}
 	readSets.SetBalance(userAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
 	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: userAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(200)},
-	})
+	))
 
 	bal := io.AsBlockAccessList()
 
@@ -170,9 +229,9 @@ func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
 	// User tx (txIndex = 0): revertable access BUT with a balance change
 	// (e.g. ETH transferred to system address).
 	recordTouch(io, 0, sysAddr, true)
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sysAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(42)},
-	})
+	))
 
 	bal := io.AsBlockAccessList()
 
@@ -208,9 +267,9 @@ func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.
 	readSets := ReadSet{}
 	readSets.SetBalance(otherAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(50)})
 	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: otherAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(100)},
-	})
+	))
 
 	bal := io.AsBlockAccessList()
 
@@ -271,9 +330,9 @@ func TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL(t *testing.T) {
 	io.RecordReads(Version{TxIndex: -1}, reads)
 
 	// User tx writes the exact same balance back — net-zero, should be omitted.
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: initial},
-	})
+	))
 
 	bal := io.AsBlockAccessList()
 	for _, ac := range bal {
@@ -303,14 +362,14 @@ func TestVersionedIO_BalanceRestoreAfterIntermediateIsRecorded(t *testing.T) {
 	io.RecordReads(Version{TxIndex: -1}, reads)
 
 	// tx0: intermediate write (changes balance away from initial).
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: intermediate},
-	})
+	))
 
 	// tx1: restores initial balance — must be recorded because an intermediate exists.
-	io.RecordWrites(Version{TxIndex: 1}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 1}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: initial},
-	})
+	))
 
 	bal := io.AsBlockAccessList()
 
@@ -336,9 +395,9 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 	io := NewVersionedIO(2)
 
 	// tx0: writes balance=200.
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(200)},
-	})
+	))
 
 	// tx1: stale DB read of balance=100 (DB value predates tx0's write).
 	reads := ReadSet{}
@@ -346,9 +405,9 @@ func TestVersionedIO_StaleBalanceReadAfterWriteDoesNotCorruptNoOpCheck(t *testin
 	io.RecordReads(Version{TxIndex: 1}, reads)
 
 	// tx1: writes balance=200 again — same as tx0, a true no-op.
-	io.RecordWrites(Version{TxIndex: 1}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 1}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: *uint256.NewInt(200)},
-	})
+	))
 
 	bal := io.AsBlockAccessList()
 
@@ -392,9 +451,9 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 	io := NewVersionedIO(2)
 
 	// Tx 1 burns the base fee to addr (value goes from pre-block balance to `burned`).
-	io.RecordWrites(Version{TxIndex: 1}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 1}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}}, Val: burned},
-	})
+	))
 
 	// A later BalancePath read of the same value — emitted by the fresh-IBS
 	// finalize / BAL pre-pop. Before the fix, this poisoned initialBalanceValue.
@@ -433,9 +492,9 @@ func TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL(t *testing.T) {
 
 	io := NewVersionedIO(4)
 	write := func(txIndex int, v uint256.Int) {
-		io.RecordWrites(Version{TxIndex: txIndex}, VersionedWrites{
+		io.RecordWrites(Version{TxIndex: txIndex}, newWriteSet(
 			&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: txIndex}}, Val: v},
-		})
+		))
 	}
 	write(0, valA) // slot: 0 -> A  (real change)
 	write(1, valB) // slot: A -> B  (real change)
@@ -541,9 +600,9 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	writes := ibs.VersionedWrites(false)
 
 	pathSet := map[AccountPath]bool{}
-	for _, vw := range writes {
-		if vw.Header().Address == addr {
-			pathSet[vw.Header().Path] = true
+	for h := range writes.AllHeaders() {
+		if h.Address == addr {
+			pathSet[h.Path] = true
 		}
 	}
 
@@ -567,23 +626,20 @@ func TestSetAccountBalanceOrDelete_UpdateExisting(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x1000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(100)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
-	}
+	)
 
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(100)
 	acc.Nonce = 5
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(200), tracing.BalanceIncreaseRewardTransactionFee, true)
 
-	require.Len(t, result, 2, "no new entries should be added")
-	for _, w := range result {
-		if w.Header().Path == BalancePath {
-			bal, _ := Val[uint256.Int](w)
-			require.Equal(t, uint256.NewInt(200), &bal, "balance should be updated to 200")
-		}
-	}
+	require.Equal(t, 2, result.Count(), "no new entries should be added")
+	bw, ok := result.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, uint256.NewInt(200), &bw.Val, "balance should be updated to 200")
 }
 
 // TestSetAccountBalanceOrDelete_NewAccount verifies that when an account has no
@@ -594,9 +650,9 @@ func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 
 	addr := accounts.InternAddress(common.HexToAddress("0x2000"))
 	otherAddr := accounts.InternAddress(common.HexToAddress("0x3000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: otherAddr, Path: BalancePath}, Val: *uint256.NewInt(50)},
-	}
+	)
 
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(0)
@@ -605,11 +661,11 @@ func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
 
 	// Should have original write + 4 new fields for addr.
-	require.Len(t, result, 5)
+	require.Equal(t, 5, result.Count())
 	pathSet := map[AccountPath]bool{}
-	for _, w := range result {
-		if w.Header().Address == addr {
-			pathSet[w.Header().Path] = true
+	for h := range result.AllHeaders() {
+		if h.Address == addr {
+			pathSet[h.Path] = true
 		}
 	}
 	require.True(t, pathSet[BalancePath], "BalancePath must be emitted")
@@ -624,23 +680,23 @@ func TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x4000"))
-	writes := VersionedWrites{}
+	writes := &WriteSet{}
 
 	result := writes.SetAccountBalanceOrDelete(addr, nil, *uint256.NewInt(100), tracing.BalanceIncreaseRewardTransactionFee, false)
 
-	require.Len(t, result, 4)
-	for _, w := range result {
-		require.Equal(t, addr, w.Header().Address)
-		switch w.Header().Path {
+	require.Equal(t, 4, result.Count())
+	for h := range result.AllHeaders() {
+		require.Equal(t, addr, h.Address)
+		switch h.Path {
 		case NoncePath:
-			gotNonce, _ := Val[uint64](w)
-			require.Equal(t, uint64(0), gotNonce)
+			vw, _ := result.GetNonce(h.Address)
+			require.Equal(t, uint64(0), vw.Val)
 		case IncarnationPath:
-			gotInc, _ := Val[uint64](w)
-			require.Equal(t, uint64(0), gotInc)
+			vw, _ := result.GetIncarnation(h.Address)
+			require.Equal(t, uint64(0), vw.Val)
 		case CodeHashPath:
-			gotCH, _ := Val[accounts.CodeHash](w)
-			require.Equal(t, accounts.EmptyCodeHash, gotCH)
+			vw, _ := result.GetCodeHash(h.Address)
+			require.Equal(t, accounts.EmptyCodeHash, vw.Val)
 		}
 	}
 }
@@ -653,19 +709,20 @@ func TestSetAccountBalanceOrDelete_EIP161EmptyDeletion(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x5000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(100)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(0)},
-	}
+	)
 
 	acc := accounts.NewAccount() // nonce=0, emptyCodeHash
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(0), tracing.BalanceIncreaseRewardTransactionFee, true)
 
-	require.Len(t, result, 1, "existing writes should be stripped")
-	require.Equal(t, SelfDestructPath, result[0].Header().Path)
-	gotSD, _ := Val[bool](result[0])
-	require.Equal(t, true, gotSD)
-	require.Equal(t, addr, result[0].Header().Address)
+	require.Equal(t, 1, result.Count(), "existing writes should be stripped")
+	sd, ok := result.GetSelfDestruct(addr)
+	require.True(t, ok)
+	require.Equal(t, SelfDestructPath, sd.Path)
+	require.Equal(t, true, sd.Val)
+	require.Equal(t, addr, sd.Address)
 }
 
 // TestSetAccountBalanceOrDelete_EIP161NonEmptyNotDeleted verifies that under
@@ -674,19 +731,20 @@ func TestSetAccountBalanceOrDelete_EIP161NonEmptyNotDeleted(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x6000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(100)},
-	}
+	)
 
 	acc := accounts.NewAccount()
 	acc.Nonce = 1 // non-empty
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(0), tracing.BalanceIncreaseRewardTransactionFee, true)
 
 	// Should update in-place, not delete.
-	require.Len(t, result, 1)
-	require.Equal(t, BalancePath, result[0].Header().Path)
-	bal, _ := Val[uint256.Int](result[0])
-	require.True(t, bal.IsZero(), "balance should be set to zero")
+	require.Equal(t, 1, result.Count())
+	bw, ok := result.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, BalancePath, bw.Path)
+	require.True(t, bw.Val.IsZero(), "balance should be set to zero")
 }
 
 // TestSetAccountBalanceOrDelete_EIP161DisabledNoRemoval verifies that when
@@ -695,15 +753,15 @@ func TestSetAccountBalanceOrDelete_EIP161DisabledNoRemoval(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x7000"))
-	writes := VersionedWrites{}
+	writes := &WriteSet{}
 
 	acc := accounts.NewAccount()
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(0), tracing.BalanceIncreaseRewardTransactionFee, false)
 
 	// Should emit all 4 fields, NOT a SelfDestructPath.
-	require.Len(t, result, 4)
-	for _, w := range result {
-		require.NotEqual(t, SelfDestructPath, w.Header().Path)
+	require.Equal(t, 4, result.Count())
+	for h := range result.AllHeaders() {
+		require.NotEqual(t, SelfDestructPath, h.Path)
 	}
 }
 
@@ -715,24 +773,24 @@ func TestSetAccountBalanceOrDelete_OtherAddressWritesPreserved(t *testing.T) {
 
 	target := accounts.InternAddress(common.HexToAddress("0x8000"))
 	other := accounts.InternAddress(common.HexToAddress("0x9000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: target, Path: BalancePath}, Val: *uint256.NewInt(100)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: target, Path: NoncePath}, Val: uint64(0)},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: other, Path: BalancePath}, Val: *uint256.NewInt(999)},
-	}
+	)
 
 	acc := accounts.NewAccount()
 	result := writes.SetAccountBalanceOrDelete(target, &acc, *uint256.NewInt(0), tracing.BalanceIncreaseRewardTransactionFee, true)
 
 	// other's write + SelfDestructPath for target.
-	require.Len(t, result, 2)
+	require.Equal(t, 2, result.Count())
 	otherFound := false
 	selfDestructFound := false
-	for _, w := range result {
-		if w.Header().Address == other && w.Header().Path == BalancePath {
+	for h := range result.AllHeaders() {
+		if h.Address == other && h.Path == BalancePath {
 			otherFound = true
 		}
-		if w.Header().Address == target && w.Header().Path == SelfDestructPath {
+		if h.Address == target && h.Path == SelfDestructPath {
 			selfDestructFound = true
 		}
 	}
@@ -748,15 +806,18 @@ func TestStripBalanceWrite_NoRead(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xA000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(500)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(1)},
-	}
+	)
 
 	stripped, delta, increase, found := writes.StripBalanceWrite(addr, ReadSet{})
 
-	require.Len(t, stripped, 1, "BalancePath write should be removed")
-	require.Equal(t, NoncePath, stripped[0].Header().Path)
+	require.Equal(t, 1, stripped.Count(), "BalancePath write should be removed")
+	_, hasBalance := stripped.GetBalance(addr)
+	require.False(t, hasBalance, "BalancePath write should be removed")
+	_, hasNonce := stripped.GetNonce(addr)
+	require.True(t, hasNonce, "NoncePath write should remain")
 	require.False(t, found, "no delta when TX didn't read the address")
 	require.True(t, delta.IsZero())
 	require.False(t, increase)
@@ -768,16 +829,16 @@ func TestStripBalanceWrite_WithIncreaseDelta(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xB000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(150)},
-	}
+	)
 
 	readSet := ReadSet{}
 	readSet.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
 
 	stripped, delta, increase, found := writes.StripBalanceWrite(addr, readSet)
 
-	require.Len(t, stripped, 0, "BalancePath write should be removed")
+	require.Equal(t, 0, stripped.Count(), "BalancePath write should be removed")
 	require.True(t, found)
 	require.True(t, increase)
 	require.Equal(t, uint256.NewInt(50), &delta, "delta should be 50 (150-100)")
@@ -789,16 +850,16 @@ func TestStripBalanceWrite_WithDecreaseDelta(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xC000"))
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(70)},
-	}
+	)
 
 	readSet := ReadSet{}
 	readSet.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
 
 	stripped, delta, increase, found := writes.StripBalanceWrite(addr, readSet)
 
-	require.Len(t, stripped, 0)
+	require.Equal(t, 0, stripped.Count())
 	require.True(t, found)
 	require.False(t, increase)
 	require.Equal(t, uint256.NewInt(30), &delta, "delta should be 30 (100-70)")
@@ -808,13 +869,13 @@ func TestStripBalanceWrite_WithDecreaseDelta(t *testing.T) {
 func TestStripBalanceWrite_NilAddress(t *testing.T) {
 	t.Parallel()
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: accounts.InternAddress(common.HexToAddress("0xD000")), Path: BalancePath}, Val: *uint256.NewInt(100)},
-	}
+	)
 
 	stripped, delta, increase, found := writes.StripBalanceWrite(accounts.Address{}, ReadSet{})
 
-	require.Len(t, stripped, 1, "writes unchanged")
+	require.Equal(t, 1, stripped.Count(), "writes unchanged")
 	require.False(t, found)
 	require.True(t, delta.IsZero())
 	require.False(t, increase)
@@ -868,9 +929,9 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	err := ibs.ApplyVersionedWrites(VersionedWrites{
+	err := ibs.ApplyVersionedWrites(newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: tracing.BalanceChangeUnspecified}, Val: *uint256.NewInt(200)},
-	})
+	))
 	require.NoError(t, err)
 
 	reads := ibs.VersionedReads()
@@ -893,9 +954,9 @@ func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
-	err := ibs.ApplyVersionedWrites(VersionedWrites{
+	err := ibs.ApplyVersionedWrites(newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: storageKey}, Val: *uint256.NewInt(42)},
-	})
+	))
 	require.NoError(t, err)
 
 	reads := ibs.VersionedReads()
@@ -917,9 +978,9 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	err := ibs.ApplyVersionedWrites(VersionedWrites{
+	err := ibs.ApplyVersionedWrites(newWriteSet(
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(1)},
-	})
+	))
 	require.NoError(t, err)
 
 	reads := ibs.VersionedReads()
@@ -944,11 +1005,11 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
-	err := ibs.ApplyVersionedWrites(VersionedWrites{
+	err := ibs.ApplyVersionedWrites(newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addrA, Path: BalancePath, Reason: tracing.BalanceChangeUnspecified}, Val: *uint256.NewInt(200)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addrB, Path: NoncePath}, Val: uint64(5)},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addrC, Path: StoragePath, Key: storageKey}, Val: *uint256.NewInt(99)},
-	})
+	))
 	require.NoError(t, err)
 
 	reads := ibs.VersionedReads()
@@ -972,9 +1033,9 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	err := ibs.ApplyVersionedWrites(VersionedWrites{
+	err := ibs.ApplyVersionedWrites(newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: tracing.BalanceChangeUnspecified}, Val: *uint256.NewInt(100)},
-	})
+	))
 	require.NoError(t, err)
 
 	reads := ibs.VersionedReads()
@@ -1176,7 +1237,7 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 
 // EIP-7928 net-zero guard: a slot that is read and then written back to the
 // same value must stay a read in the BAL, not become a write. The filter
-// lives in accountState.updateWrite (the helper addStorageUpdate only
+// lives in accountState.applyWriteStorage (the helper addStorageUpdate only
 // appends). This locks the behaviour down across the typed-vio refactor.
 func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
@@ -1188,11 +1249,7 @@ func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	account.updateReadStorage(slot, orig)
 	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
 
-	writeBack := &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 0}},
-		Val:         orig,
-	}
-	account.updateWrite(writeBack, 0)
+	account.applyWriteStorage(slot, orig, 0)
 
 	require.Empty(t, account.changes.StorageChanges,
 		"write-back to the originally-read value is net-zero and must NOT be recorded as a storage write")
@@ -1212,11 +1269,7 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 
 	account.updateReadStorage(slot, orig)
 
-	write := &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 0}},
-		Val:         changed,
-	}
-	account.updateWrite(write, 0)
+	account.applyWriteStorage(slot, changed, 0)
 
 	require.Len(t, account.changes.StorageChanges, 1,
 		"a write to a different value is a real state change and must be recorded")
@@ -1236,10 +1289,10 @@ func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.
 	readSets := ReadSet{}
 	readSets.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100000)})
 	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(1)},
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
-	})
+	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
 	require.Equal(t, addr, bal[0].Address)
@@ -1260,10 +1313,10 @@ func TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange(t *testin
 	readSets := ReadSet{}
 	readSets.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(0)})
 	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(1)},
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
-	})
+	))
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
 	require.Equal(t, addr, bal[0].Address)
@@ -1341,4 +1394,100 @@ func TestVersionedUpdates_EstimateCellConsumed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "Estimate-cell storage must be found")
 	require.Equal(t, newStorage, storageGot, "Estimate-cell storage must be consumed, not stale")
+}
+
+// writeSetFixture builds a WriteSet covering every path, multiple addresses and
+// storage keys — the input for the iteration closed-loop tests.
+func writeSetFixture() (*WriteSet, []string) {
+	a1 := accounts.InternAddress(common.HexToAddress("0xaa01"))
+	a2 := accounts.InternAddress(common.HexToAddress("0xbb02"))
+	k1 := accounts.InternKey(common.HexToHash("0x01"))
+	k2 := accounts.InternKey(common.HexToHash("0x02"))
+	ch := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00}))
+	hdr := func(a accounts.Address, p AccountPath, k accounts.StorageKey) WriteHeader {
+		return WriteHeader{Address: a, Path: p, Key: k, Version: Version{TxIndex: 1}}
+	}
+	var s WriteSet
+	s.SetBalance(a1, &VersionedWrite[uint256.Int]{WriteHeader: hdr(a1, BalancePath, accounts.NilKey), Val: *uint256.NewInt(5)})
+	s.SetNonce(a1, &VersionedWrite[uint64]{WriteHeader: hdr(a1, NoncePath, accounts.NilKey), Val: 7})
+	s.SetIncarnation(a1, &VersionedWrite[uint64]{WriteHeader: hdr(a1, IncarnationPath, accounts.NilKey), Val: 3})
+	s.SetCodeHash(a1, &VersionedWrite[accounts.CodeHash]{WriteHeader: hdr(a1, CodeHashPath, accounts.NilKey), Val: ch})
+	s.SetCode(a1, &VersionedWrite[accounts.Code]{WriteHeader: hdr(a1, CodePath, accounts.NilKey), Val: accounts.NewCode([]byte{0x60, 0x00})})
+	s.SetCodeSize(a1, &VersionedWrite[int]{WriteHeader: hdr(a1, CodeSizePath, accounts.NilKey), Val: 2})
+	s.SetSelfDestruct(a1, &VersionedWrite[bool]{WriteHeader: hdr(a1, SelfDestructPath, accounts.NilKey), Val: true})
+	s.SetCreateContract(a1, &VersionedWrite[bool]{WriteHeader: hdr(a1, CreateContractPath, accounts.NilKey), Val: true})
+	s.SetStorage(a1, k1, &VersionedWrite[uint256.Int]{WriteHeader: hdr(a1, StoragePath, k1), Val: *uint256.NewInt(11)})
+	s.SetStorage(a1, k2, &VersionedWrite[uint256.Int]{WriteHeader: hdr(a1, StoragePath, k2), Val: *uint256.NewInt(22)})
+	s.SetBalance(a2, &VersionedWrite[uint256.Int]{WriteHeader: hdr(a2, BalancePath, accounts.NilKey), Val: *uint256.NewInt(9)})
+	s.SetStorage(a2, k1, &VersionedWrite[uint256.Int]{WriteHeader: hdr(a2, StoragePath, k1), Val: *uint256.NewInt(33)})
+
+	want := []string{
+		writeKeyStr(hdr(a1, BalancePath, accounts.NilKey), (*uint256.NewInt(5)).String()),
+		writeKeyStr(hdr(a1, NoncePath, accounts.NilKey), "7"),
+		writeKeyStr(hdr(a1, IncarnationPath, accounts.NilKey), "3"),
+		writeKeyStr(hdr(a1, CodeHashPath, accounts.NilKey), ch.Value().Hex()),
+		writeKeyStr(hdr(a1, CodePath, accounts.NilKey), accounts.NewCode([]byte{0x60, 0x00}).Hash.Value().Hex()),
+		writeKeyStr(hdr(a1, CodeSizePath, accounts.NilKey), "2"),
+		writeKeyStr(hdr(a1, SelfDestructPath, accounts.NilKey), "true"),
+		writeKeyStr(hdr(a1, CreateContractPath, accounts.NilKey), "true"),
+		writeKeyStr(hdr(a1, StoragePath, k1), (*uint256.NewInt(11)).String()),
+		writeKeyStr(hdr(a1, StoragePath, k2), (*uint256.NewInt(22)).String()),
+		writeKeyStr(hdr(a2, BalancePath, accounts.NilKey), (*uint256.NewInt(9)).String()),
+		writeKeyStr(hdr(a2, StoragePath, k1), (*uint256.NewInt(33)).String()),
+	}
+	sort.Strings(want)
+	return &s, want
+}
+
+func writeKeyStr(h WriteHeader, val string) string {
+	return fmt.Sprintf("%x|%d|%x|%s", h.Address, h.Path, h.Key, val)
+}
+
+// headerValStr reads the typed value for h from the per-path maps (the new
+// iteration: AllHeaders + typed getters, no cast) and formats it.
+func headerValStr(s *WriteSet, h WriteHeader) string {
+	switch h.Path {
+	case BalancePath:
+		vw, _ := s.GetBalance(h.Address)
+		return writeKeyStr(h, vw.Val.String())
+	case NoncePath:
+		vw, _ := s.GetNonce(h.Address)
+		return writeKeyStr(h, fmt.Sprintf("%d", vw.Val))
+	case IncarnationPath:
+		vw, _ := s.GetIncarnation(h.Address)
+		return writeKeyStr(h, fmt.Sprintf("%d", vw.Val))
+	case CodeHashPath:
+		vw, _ := s.GetCodeHash(h.Address)
+		return writeKeyStr(h, vw.Val.Value().Hex())
+	case CodePath:
+		vw, _ := s.GetCode(h.Address)
+		return writeKeyStr(h, vw.Val.Hash.Value().Hex())
+	case CodeSizePath:
+		vw, _ := s.GetCodeSize(h.Address)
+		return writeKeyStr(h, fmt.Sprintf("%d", vw.Val))
+	case SelfDestructPath:
+		vw, _ := s.GetSelfDestruct(h.Address)
+		return writeKeyStr(h, fmt.Sprintf("%t", vw.Val))
+	case CreateContractPath:
+		vw, _ := s.GetCreateContract(h.Address)
+		return writeKeyStr(h, fmt.Sprintf("%t", vw.Val))
+	case StoragePath:
+		vw, _ := s.GetStorage(h.Address, h.Key)
+		return writeKeyStr(h, vw.Val.String())
+	}
+	return ""
+}
+
+// TestWriteSet_AllHeaders_RoundTrip pins that AllHeaders + typed getters visits
+// every inserted write exactly once with the correct typed value — the durable
+// guard that the post-refactor iteration loses nothing.
+func TestWriteSet_AllHeaders_RoundTrip(t *testing.T) {
+	t.Parallel()
+	s, want := writeSetFixture()
+	var got []string
+	for h := range s.AllHeaders() {
+		got = append(got, headerValStr(s, h))
+	}
+	sort.Strings(got)
+	require.Equal(t, want, got)
 }

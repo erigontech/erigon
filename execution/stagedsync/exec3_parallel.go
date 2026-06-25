@@ -363,7 +363,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		blockApplyCount := 0
 		// Collect per-tx writes so we can notify the accumulator AFTER
 		// StartChange (which arrives with the blockResult, after all txResults).
-		var pendingAccumulatorWrites []state.VersionedWrites
+		var pendingAccumulatorWrites []*state.WriteSet
 
 		// handleCommitResult processes a single commitment result from the
 		// calculator. Defined here so both the blockResult handler and the
@@ -487,16 +487,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					uncommittedTransactions++
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 						pe.rs.SetTrace(true)
-						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
+						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.writes.Count())
 					}
-					blockUpdateCount += len(applyResult.writes)
+					blockUpdateCount += applyResult.writes.Count()
 					// All ApplyStateWrites + ApplyTxIndexes run in the execLoop
 					// (sole sd.mem writer). The apply loop here only collects
 					// accumulator notifications and per-tx counters.
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
-					blockApplyCount += len(applyResult.writes)
+					blockApplyCount += applyResult.writes.Count()
 					pe.rs.SetTrace(false)
 				case *blockResult:
 					// Apply loop is the canonical error-emission point for
@@ -1532,7 +1532,7 @@ type txResult struct {
 	logs                  []*types.Log
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
-	writes                state.VersionedWrites
+	writes                *state.WriteSet
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
@@ -1545,10 +1545,10 @@ type execTask struct {
 
 type execResult struct {
 	*exec.TxResult
-	writes state.VersionedWrites
+	writes *state.WriteSet
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1603,7 +1603,7 @@ func (result *execResult) finalizeSystemTx(
 	vm *state.VersionMap,
 	stateReader state.StateReader,
 	stateWriter state.StateWriter,
-) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
 	txIncarnation := task.Version().Incarnation
@@ -1640,7 +1640,7 @@ func (result *execResult) calcFees(
 	vm *state.VersionMap,
 	stateReader state.StateReader,
 	chainRules *chain.Rules,
-) (state.VersionedWrites, error) {
+) (*state.WriteSet, error) {
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
@@ -1680,32 +1680,18 @@ func (result *execResult) calcFees(
 		coinbaseNonce = coinbaseAcc.Nonce
 	}
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
-	for _, w := range result.TxOut {
-		h := w.Header()
-		if h.Address != result.Coinbase && (!hasBurnt || h.Address != burntAddr) {
-			continue
-		}
-		switch h.Path {
-		case state.BalancePath:
-			v, ok := state.Val[uint256.Int](w)
-			if !ok {
-				continue
-			}
-			if h.Address == result.Coinbase {
-				newCoinbaseBalance = v
-			} else {
-				newBurntBalance = v
-			}
-		case state.NoncePath:
-			if h.Address == result.Coinbase {
-				if n, ok := state.Val[uint64](w); ok {
-					coinbaseNonce = n
-				}
-			}
-		case state.CodeHashPath:
-			if h.Address == result.Coinbase {
-				coinbaseHasCodeHashWrite = true
-			}
+	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
+		newCoinbaseBalance = bw.Val
+	}
+	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
+		coinbaseNonce = nw.Val
+	}
+	if _, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
+		coinbaseHasCodeHashWrite = true
+	}
+	if hasBurnt {
+		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
+			newBurntBalance = bw.Val
 		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
@@ -1733,13 +1719,13 @@ func (result *execResult) calcFees(
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
-	var addWrites state.VersionedWrites
+	addWrites := &state.WriteSet{}
 	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
 			tracing.BalanceIncreaseRewardTransactionFee, coinbaseEmptyRemoval)
 		if coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
-			addWrites = append(addWrites, &state.VersionedWrite[bool]{
+			addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
 					Path:    state.SelfDestructPath,
@@ -1748,7 +1734,7 @@ func (result *execResult) calcFees(
 				Val: true,
 			})
 		} else {
-			addWrites = append(addWrites, &state.VersionedWrite[uint256.Int]{
+			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
 					Path:    state.BalancePath,
@@ -1775,7 +1761,7 @@ func (result *execResult) calcFees(
 				addrAcc.Nonce = coinbaseNonce
 				addrAcc.CodeHash = accounts.EmptyCodeHash
 			}
-			addWrites = append(addWrites, &state.VersionedWrite[*accounts.Account]{
+			addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
 					Path:    state.AddressPath,
@@ -1789,7 +1775,7 @@ func (result *execResult) calcFees(
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			burntAddr, burntAcc, newBurntBalance,
 			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsSpuriousDragon, chainRules.IsAura, burntAddr))
-		addWrites = append(addWrites, &state.VersionedWrite[uint256.Int]{
+		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
 				Path:    state.BalancePath,
@@ -1807,7 +1793,7 @@ func (result *execResult) calcFees(
 		} else {
 			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
 		}
-		addWrites = append(addWrites, &state.VersionedWrite[*accounts.Account]{
+		addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
 				Path:    state.AddressPath,
@@ -1827,7 +1813,7 @@ func (result *execResult) finalizeTx(
 	engine rules.Engine,
 	vm *state.VersionMap,
 	stateReader state.StateReader,
-) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
 
@@ -2350,8 +2336,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// Remove entries that were previously written but are no longer written
 			cmpMap := map[accounts.Address]map[state.AccountKey]struct{}{}
 
-			for _, w := range res.TxOut {
-				h := w.Header()
+			for h := range res.TxOut.AllHeaders() {
 				keys, ok := cmpMap[h.Address]
 				if !ok {
 					keys = map[state.AccountKey]struct{}{}
@@ -2360,8 +2345,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				keys[state.AccountKey{Path: h.Path, Key: h.Key}] = struct{}{}
 			}
 
-			for _, v := range prevWrites {
-				h := v.Header()
+			for h := range prevWrites.AllHeaders() {
 				if _, ok := cmpMap[h.Address][state.AccountKey{Path: h.Path, Key: h.Key}]; !ok {
 					hasWriteChange = true
 					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
@@ -2379,10 +2363,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		var trace bool
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", len(be.blockIO.WriteSet(txVersion.TxIndex)))
+			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
 			be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
-			for _, vw := range be.blockIO.WriteSet(txVersion.TxIndex) {
-				fmt.Println(tracePrefix, "WRT", state.WriteString(vw))
+			for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
+				fmt.Println(tracePrefix, "WRT", h.String())
 			}
 		}
 
@@ -2449,7 +2433,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err != nil {
 				return nil, err
 			}
-			if len(tipWrites) > 0 {
+			if !tipWrites.IsEmpty() {
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 				merged := MergeVersionedWrites(existingWrites, tipWrites)
 				be.blockIO.RecordWrites(txVersion, merged)
@@ -2540,7 +2524,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					mergedReads := MergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
-				if len(addWrites) > 0 {
+				if !addWrites.IsEmpty() {
 					// Merge finalization writes with existing execution writes.
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := MergeVersionedWrites(existingWrites, addWrites)
@@ -2554,43 +2538,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 
 					// Update CollectorWrites with fee-adjusted balances (coinbase /
-					// burnt) so the BlockStateCache sees the correct accumulated
-					// fees. CollectorWrites is a flat slice, so replacing a
-					// BalancePath entry by address is a linear scan; doing that per
-					// addWrites entry is O(len(addWrites)·len(CollectorWrites)) — when
-					// finalize is a full block-end IBS reconstruction both can be ~one
-					// entry per account the block touched (a tx that pays ~100k
-					// accounts), i.e. ~10^10 comparisons. Index CollectorWrites'
-					// BalancePath entries by address once instead.
-					if len(txResult.CollectorWrites) > 0 {
-						balIdx := make(map[accounts.Address]int, len(txResult.CollectorWrites))
-						for i, w := range txResult.CollectorWrites {
-							wh := w.Header()
-							if wh.Path == state.BalancePath {
-								// First match wins — mirrors the old per-entry
-								// CollectorWrites.SetBalance(addr) linear scan.
-								if _, seen := balIdx[wh.Address]; !seen {
-									balIdx[wh.Address] = i
-								}
-							}
-						}
-						for _, w := range addWrites {
-							wh := w.Header()
-							if wh.Path != state.BalancePath {
-								continue
-							}
-							bal, ok := state.Val[uint256.Int](w)
-							if !ok {
-								continue
-							}
-							if i, found := balIdx[wh.Address]; found {
-								if bw, ok := txResult.CollectorWrites[i].(*state.VersionedWrite[uint256.Int]); ok {
-									bw.Val = bal
-									bw.Reason = wh.Reason
-								}
+					// burnt) so the BlockStateCache sees the correct accumulated fees.
+					if !txResult.CollectorWrites.IsEmpty() {
+						for addr, w := range addWrites.Balances() {
+							if existing, ok := txResult.CollectorWrites.GetBalance(addr); ok {
+								existing.Val = w.Val
+								existing.Reason = w.Reason
 							} else {
-								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: wh.Address, Path: state.BalancePath, Reason: wh.Reason}, Val: bal})
-								balIdx[wh.Address] = len(txResult.CollectorWrites) - 1
+								txResult.CollectorWrites.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Reason: w.Reason}, Val: w.Val})
 							}
 						}
 					}
@@ -2717,9 +2672,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.writes != nil {
 				applyResult.writes = result.writes
-				if len(applyResult.writes) > 0 {
-					be.applyCount += len(applyResult.writes)
-				}
+				be.applyCount += applyResult.writes.Count()
 			}
 
 			// Apply state writes to sd.mem and block cache.
@@ -2773,7 +2726,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
 		// side so finalize writes go to the BlockStateCache before the Flush.
-		var finalizeWrites state.VersionedWrites
+		var finalizeWrites *state.WriteSet
 		if be.blockNum > 0 {
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
@@ -2841,7 +2794,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
 
 				ivw := ibs.VersionedWrites(true)
-				if len(ivw) > 0 {
+				if !ivw.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, ivw)
 					be.versionMap.FlushVersionedWrites(ivw, true, "")
 				}
@@ -2851,7 +2804,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, err
 				}
 				finalizeWrites = collector.Writes()
-				be.applyCount += len(finalizeWrites)
+				be.applyCount += finalizeWrites.Count()
 
 				// Apply finalize writes to the BlockStateCache.
 				if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
@@ -2863,7 +2816,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		// Send finalize txResult through the channel for index writes.
 		// State writes are already in the BlockStateCache.
-		if len(finalizeWrites) > 0 {
+		if !finalizeWrites.IsEmpty() {
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.blockNum,
@@ -3017,7 +2970,7 @@ func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	return a.Merge(b)
 }
 
-func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 	return prev.Merge(next)
 }
 
@@ -3048,8 +3001,11 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) state.VersionedWrites {
-	filtered := make(state.VersionedWrites, 0, len(writes))
+func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) *state.WriteSet {
+	filtered := &state.WriteSet{}
+	if writes == nil {
+		return filtered
+	}
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
@@ -3101,17 +3057,9 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
 	sdSet := make(map[accounts.Address]bool)
-	for _, w := range writes {
-		h := w.Header()
-		if h.Path == state.SelfDestructPath && h.Version.Incarnation == incarnation {
-			if v, ok := state.Val[bool](w); ok {
-				sdSet[h.Address] = v
-			}
-		}
-	}
-	for addr, sd := range sdSet {
-		if !sd {
-			delete(sdSet, addr)
+	for addr, vw := range writes.SelfDestructs() {
+		if vw.Version.Incarnation == incarnation && vw.Val {
+			sdSet[addr] = true
 		}
 	}
 
@@ -3122,19 +3070,11 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	hasAccountWrite := make(map[accounts.Address]bool)
 	hasStorageWrite := make(map[accounts.Address]bool)
 
-	for _, w := range writes {
+	for h := range writes.AllHeaders() {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
-		// takes the pure-delete branch instead of cleanup-before-recreate.
-		// Also drop StoragePath writes: serial's selfdestruct does
-		// DomainDelPrefix(StorageDomain, addr) which wipes ALL slots, so an
-		// SSTORE made after a SELFDESTRUCT in the same TX (pre-Cancun the
-		// account stays live until end-of-TX, so re-entered code can still
-		// SSTORE) is a no-op once the account is removed. The SelfDestructPath
-		// case below re-emits an explicit StoragePath=0 delete for every slot
-		// (sdStorageSlots), so the trie still sees the wipe. Keeping the raw
-		// SSTORE here would race the cascade delete in ApplyWrites' slice order
-		// and sometimes leave a phantom slot (TestCVE2020_26265).
-		h := w.Header()
+		// takes the pure-delete branch instead of cleanup-before-recreate; drop
+		// raw StoragePath writes too (the SelfDestructPath case re-emits an
+		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 		if sdSet[h.Address] {
 			switch h.Path {
 			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
@@ -3147,7 +3087,11 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			writeVal, _ := state.Val[uint256.Int](w)
+			sw, ok := writes.GetStorage(h.Address, h.Key)
+			if !ok {
+				continue
+			}
+			writeVal := sw.Val
 			// If addr was self-destructed by an earlier TX in this block, its
 			// storage was wiped — the effective baseline for any slot not
 			// re-written since is 0, regardless of what the versionMap (prior
@@ -3202,52 +3146,71 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				}
 			}
 			hasStorageWrite[h.Address] = true
+			filtered.SetStorage(h.Address, h.Key, sw)
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
-			// Account fields: resolve from versionMap to get correct accumulated values.
-			if resolved := state.NewAccountFieldWriteFromMap(vm, h.Address, h.Path, h.Version, txIndex+1); resolved != nil {
-				w = resolved
+			// Account fields: prefer the versionMap's accumulated value; fall
+			// back to the raw write when the map has none.
+			if !state.SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
+				switch h.Path {
+				case state.BalancePath:
+					if vw, ok := writes.GetBalance(h.Address); ok {
+						filtered.SetBalance(h.Address, vw)
+					}
+				case state.NoncePath:
+					if vw, ok := writes.GetNonce(h.Address); ok {
+						filtered.SetNonce(h.Address, vw)
+					}
+				case state.IncarnationPath:
+					if vw, ok := writes.GetIncarnation(h.Address); ok {
+						filtered.SetIncarnation(h.Address, vw)
+					}
+				case state.CodeHashPath:
+					if vw, ok := writes.GetCodeHash(h.Address); ok {
+						filtered.SetCodeHash(h.Address, vw)
+					}
+				}
 			}
 			hasAccountWrite[h.Address] = true
 		case state.CodePath:
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
+			if vw, ok := writes.GetCode(h.Address); ok {
+				filtered.SetCode(h.Address, vw)
+			}
 			hasAccountWrite[h.Address] = true
 		case state.CreateContractPath:
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
+			if vw, ok := writes.GetCreateContract(h.Address); ok {
+				filtered.SetCreateContract(h.Address, vw)
+			}
 			hasAccountWrite[h.Address] = true
-			// Pass through — applyVersionedWrites uses this to call CreateContract
 		case state.SelfDestructPath:
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
 			// Only emit storage DELETE entries when the account was actually
-			// self-destructed (val=true). SelfDestructPath=false means the
-			// account was NOT deleted (e.g., contract creation via CREATE2
-			// sets selfdestructed=false after createObject).
-			destructed, _ := state.Val[bool](w)
-			if destructed {
-				filtered = append(filtered, w)
-				for _, slot := range sdStorageSlots(h.Address) {
-					filtered = append(filtered, &state.VersionedWrite[uint256.Int]{
-						WriteHeader: state.WriteHeader{
-							Address: h.Address,
-							Path:    state.StoragePath,
-							Key:     slot,
-							Version: h.Version,
-						},
-						Val: uint256.Int{}, // zero = delete
-					})
-				}
+			// self-destructed (val=true).
+			sdw, ok := writes.GetSelfDestruct(h.Address)
+			if !ok || !sdw.Val {
+				continue
 			}
-			continue
+			filtered.SetSelfDestruct(h.Address, sdw)
+			for _, slot := range sdStorageSlots(h.Address) {
+				filtered.SetStorage(h.Address, slot, &state.VersionedWrite[uint256.Int]{
+					WriteHeader: state.WriteHeader{
+						Address: h.Address,
+						Path:    state.StoragePath,
+						Key:     slot,
+						Version: h.Version,
+					},
+				})
+			}
 		case state.AddressPath:
 			// AddressPath is record-level — skip for field-level consumers.
-			continue
 		}
-		filtered = append(filtered, w)
 	}
 
 	// For addresses that appear in the raw WriteSet but don't have account-level
@@ -3260,8 +3223,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	//
 	// Collect all addresses from the raw input (before filtering).
 	allAddresses := make(map[accounts.Address]bool)
-	for _, w := range writes {
-		h := w.Header()
+	for h := range writes.AllHeaders() {
 		if h.Path != state.AddressPath {
 			allAddresses[h.Address] = true
 		}
@@ -3269,8 +3231,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 
 	// Track which fields each address already has in the output.
 	addrFields := make(map[accounts.Address]map[state.AccountPath]bool)
-	for _, w := range filtered {
-		h := w.Header()
+	for h := range filtered.AllHeaders() {
 		switch h.Path {
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
 			if addrFields[h.Address] == nil {
@@ -3318,14 +3279,8 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		// (no per-tx FinalizeTx). Forcing defaults here resets nonce/codeHash
 		// against that canonical state (TestSelfDestructReceive).
 		hasCreateContract := false
-		for _, w := range writes {
-			h := w.Header()
-			if h.Address == addr && h.Path == state.CreateContractPath {
-				if v, ok := state.Val[bool](w); ok && v {
-					hasCreateContract = true
-					break
-				}
-			}
+		if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+			hasCreateContract = true
 		}
 
 		// For each missing field, try versionMap then stateReader.
@@ -3334,13 +3289,10 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				continue // already in output
 			}
 			if sdEarlier && hasCreateContract {
-				if zw := state.NewAccountFieldZeroWrite(addr, path, ver); zw != nil {
-					filtered = append(filtered, zw)
-				}
+				state.SetAccountFieldZero(filtered, addr, path, ver)
 				continue
 			}
-			if resolved := state.NewAccountFieldWriteFromMap(vm, addr, path, ver, txIndex+1); resolved != nil {
-				filtered = append(filtered, resolved)
+			if state.SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
 			// Fall back to stateReader for pre-block account state.
@@ -3348,11 +3300,9 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				acc, err := stateReader.ReadAccountData(addr)
 				if err == nil {
 					// New account (acc == nil) — doesn't exist in domain yet.
-					// NewAccountFieldWriteFromAccount emits default values so the
+					// SetAccountFieldFromAccount emits default values so the
 					// commitment sees a full account (not a delete).
-					if fw := state.NewAccountFieldWriteFromAccount(addr, path, ver, acc); fw != nil {
-						filtered = append(filtered, fw)
-					}
+					state.SetAccountFieldFromAccount(filtered, addr, path, ver, acc)
 				}
 			}
 		}
@@ -3378,34 +3328,28 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		hasCode  bool
 	}
 	acctStates := make(map[accounts.Address]*acctState)
-	for _, w := range filtered {
-		h := w.Header()
-		switch h.Path {
-		case state.BalancePath:
-			s := acctStates[h.Address]
-			if s == nil {
-				s = &acctState{}
-				acctStates[h.Address] = s
-			}
-			s.balance, _ = state.Val[uint256.Int](w)
-			s.hasBal = true
-		case state.NoncePath:
-			s := acctStates[h.Address]
-			if s == nil {
-				s = &acctState{}
-				acctStates[h.Address] = s
-			}
-			s.nonce, _ = state.Val[uint64](w)
-			s.hasNonce = true
-		case state.CodeHashPath:
-			s := acctStates[h.Address]
-			if s == nil {
-				s = &acctState{}
-				acctStates[h.Address] = s
-			}
-			s.codeHash, _ = state.Val[accounts.CodeHash](w)
-			s.hasCode = true
+	ensureAcctState := func(addr accounts.Address) *acctState {
+		s := acctStates[addr]
+		if s == nil {
+			s = &acctState{}
+			acctStates[addr] = s
 		}
+		return s
+	}
+	for addr, vw := range filtered.Balances() {
+		s := ensureAcctState(addr)
+		s.balance = vw.Val
+		s.hasBal = true
+	}
+	for addr, vw := range filtered.Nonces() {
+		s := ensureAcctState(addr)
+		s.nonce = vw.Val
+		s.hasNonce = true
+	}
+	for addr, vw := range filtered.CodeHashes() {
+		s := ensureAcctState(addr)
+		s.codeHash = vw.Val
+		s.hasCode = true
 	}
 
 	// Check for empty accounts and replace with Delete. Only when EIP-161
@@ -3422,134 +3366,17 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	if len(emptyAddrs) > 0 {
-		var cleaned state.VersionedWrites
-		for _, w := range filtered {
-			h := w.Header()
-			if emptyAddrs[h.Address] {
-				// Skip regular account field writes for empty accounts
-				if h.Path == state.BalancePath || h.Path == state.NoncePath ||
-					h.Path == state.IncarnationPath || h.Path == state.CodeHashPath {
-					continue
-				}
-			}
-			cleaned = append(cleaned, w)
-		}
-		// Add SelfDestructPath=true for each empty account
-		for addr := range emptyAddrs {
-			cleaned = append(cleaned, &state.VersionedWrite[bool]{
-				WriteHeader: state.WriteHeader{
-					Address: addr,
-					Path:    state.SelfDestructPath,
-					Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
-				},
-				Val: true,
-			})
-		}
-		filtered = cleaned
+	for addr := range emptyAddrs {
+		filtered.DeleteAccountFields(addr)
+		filtered.SetSelfDestruct(addr, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{
+				Address: addr,
+				Path:    state.SelfDestructPath,
+				Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
+			},
+			Val: true,
+		})
 	}
 
-	return filtered
-}
-
-// resolveStorageWrites produces a clean write set from CollectorWrites:
-//  1. Replaces speculative storage values with versionMap resolved values
-//  2. Removes storage keys not in the versionMap (speculative writes from
-//     code paths that differ under stale state)
-//
-// The result matches what the serial IBS collector would produce.
-// DEPRECATED: use normalizeWriteSet with blockIO.WriteSet(txIndex) instead.
-func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, rs *state.StateV3Buffered) state.VersionedWrites {
-	filtered := make(state.VersionedWrites, 0, len(writes))
-	for _, w := range writes {
-		h := w.Header()
-		switch h.Path {
-		case state.StoragePath:
-			// Check versionMap for this TX's write at this address+slot.
-			// Use the resolved value from the versionMap (post-validation correct).
-			rrVal, rr, rrOK := vm.ReadStorage(h.Address, h.Key, txIndex+1)
-			var resolved uint256.Int
-			if rr.Status() == state.MVReadResultDone && rr.Version().TxIndex == txIndex {
-				if rr.Incarnation() != incarnation {
-					continue // stale incarnation entry
-				}
-				if rrOK {
-					resolved = rrVal
-				} else {
-					resolved, _ = state.Val[uint256.Int](w)
-				}
-			} else {
-				continue // not written by this TX
-			}
-			// No-op filter: compare resolved value against origin (what this TX
-			// would have read). This matches serial IBS behaviour where
-			// applyStorageChanges skips keys where dirty == originStorage.
-			// Origin = versionMap floor at txIndex (prior TX's write), or
-			// pre-block value from snapshots if no prior TX wrote this key.
-			{
-				originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
-				if originOK && origin.Status() == state.MVReadResultDone {
-					if resolved.Eq(&originVal) {
-						continue // write-back same as origin — no-op
-					}
-				} else if rs != nil {
-					// No prior TX wrote this key — use pre-block value.
-					// At this point sd.mem may have accumulated writes from
-					// prior TXs, but for THIS specific key (no prior TX wrote it),
-					// GetLatest returns the pre-block value.
-					addr := h.Address.Value()
-					slot := h.Key.Value()
-					composite := append(addr[:], slot[:]...)
-					preBlock, _, err := rs.Domains().GetLatest(kv.StorageDomain, nil, composite)
-					if err == nil {
-						if resolved.IsZero() && len(preBlock) == 0 {
-							continue // both zero — no-op
-						}
-						if len(preBlock) > 0 {
-							var preVal uint256.Int
-							preVal.SetBytes(preBlock)
-							if resolved.Eq(&preVal) {
-								continue // same as pre-block — no-op
-							}
-						}
-					}
-				}
-			}
-			filtered = append(filtered, &state.VersionedWrite[uint256.Int]{
-				WriteHeader: state.WriteHeader{Address: h.Address, Path: state.StoragePath, Key: h.Key, Version: h.Version, Reason: h.Reason},
-				Val:         resolved,
-			})
-			continue
-		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
-			// Resolve account field values from the versionMap.
-			// CollectorWrites may have stale values from speculative execution.
-			if r := state.NewAccountFieldWriteFromMap(vm, h.Address, h.Path, h.Version, txIndex+1); r != nil {
-				w = r
-			}
-		case state.AddressPath:
-			// AddressPath is a record-level write — skip it.
-			// The commitment calculator uses individual field paths.
-			continue
-		case state.SelfDestructPath:
-			// When an account self-destructs, emit storage DELETE entries
-			// for all storage slots that exist for this address.
-			// The IBS path does this via DomainDelPrefix which scans sd.mem
-			// and domain files. We reproduce it here.
-			filtered = append(filtered, w) // keep the SelfDestructPath entry
-			// Emit DELETEs for versionMap storage keys (written this block)
-			for _, slot := range vm.StorageKeys(h.Address) {
-				filtered = append(filtered, &state.VersionedWrite[uint256.Int]{
-					WriteHeader: state.WriteHeader{
-						Address: h.Address,
-						Path:    state.StoragePath,
-						Key:     slot,
-					},
-					Val: uint256.Int{}, // zero = delete
-				})
-			}
-			continue // already appended above
-		}
-		filtered = append(filtered, w)
-	}
 	return filtered
 }

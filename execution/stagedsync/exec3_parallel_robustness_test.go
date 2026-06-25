@@ -958,17 +958,9 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	const invalidTxInc = 0
 	phantomVal := *uint256.NewInt(0xaabb)
 
-	invalidTxWrites := state.VersionedWrites{
-		&state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{
-				Address: addr,
-				Path:    state.StoragePath,
-				Key:     slot,
-				Version: state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc},
-			},
-			Val: phantomVal,
-		},
-	}
+	invalidTxWrites := newWS().
+		stor(addr, slot, state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc}, phantomVal).
+		build()
 
 	// Drive the production flush-decision helper end-to-end.
 	valid := false  // validity == VersionInvalid

@@ -120,13 +120,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 
 	// Also verify that the versionedWrites contain the CodePath entry.
 	writes90 := ibs90.VersionedWrites(false)
-	hasCodeWrite := false
-	for _, w := range writes90 {
-		if w.Header().Address == addr && w.Header().Path == CodePath {
-			hasCodeWrite = true
-			break
-		}
-	}
+	_, hasCodeWrite := writes90.GetCode(addr)
 	assert.True(t, hasCodeWrite,
 		"TX 90 should have a CodePath write in versionedWrites (the revert-to-original optimisation should NOT have fired)")
 }

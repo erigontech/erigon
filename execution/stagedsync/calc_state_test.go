@@ -230,10 +230,10 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0xc1})
 
-	writes := state.VersionedWrites{
-		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath}, Val: uint64(1)},
-		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath}, Val: true},
-	}
+	writes := newWS().
+		inc(addr, state.Version{}, uint64(1)).
+		selfDestruct(addr, state.Version{}, true).
+		build()
 	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
@@ -262,10 +262,10 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0xd1})
 
-	writes := state.VersionedWrites{
-		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath}, Val: true},
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(42)},
-	}
+	writes := newWS().
+		selfDestruct(addr, state.Version{}, true).
+		bal(addr, state.Version{}, *uint256.NewInt(42)).
+		build()
 	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
@@ -363,11 +363,11 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// is fed by versionWritten. So these are the writes the calc actually
 	// sees.
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath, Version: ver}, Val: original.Incarnation},
-		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: ver}, Val: true},
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: ver}, Val: uint256.Int{}},
-	}
+	rawWrites := newWS().
+		inc(addr, ver, original.Incarnation).
+		selfDestruct(addr, ver, true).
+		bal(addr, ver, uint256.Int{}).
+		build()
 
 	// Populate vm with the same writes — IBS.Selfdestruct calls versionWritten
 	// which goes through the version map, so by the time normalizeWriteSet's
@@ -383,11 +383,11 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
 	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
 	// writes are dropped, and the completion loop skips this address.
-	pathSeen := map[state.AccountPath]any{}
-	for _, w := range normalized {
-		switch w.Header().Path {
+	pathSeen := map[state.AccountPath]struct{}{}
+	for h := range normalized.AllHeaders() {
+		switch h.Path {
 		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.IncarnationPath, state.SelfDestructPath:
-			pathSeen[w.Header().Path] = anyWriteVal(w)
+			pathSeen[h.Path] = struct{}{}
 		}
 	}
 	require.Contains(t, pathSeen, state.SelfDestructPath,
@@ -480,11 +480,11 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
 	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
 
-	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath, Version: ver}, Val: original.Incarnation},
-		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: ver}, Val: true},
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: ver}, Val: uint256.Int{}},
-	}
+	rawWrites := newWS().
+		inc(addr, ver, original.Incarnation).
+		selfDestruct(addr, ver, true).
+		bal(addr, ver, uint256.Int{}).
+		build()
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
@@ -495,11 +495,10 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	// effect (slots leak pre-SD values into the trie), but check it
 	// here too so a regression points directly at the offending loop.
 	storageZeroCount := 0
-	for _, w := range normalized {
-		if w.Header().Path == state.StoragePath {
-			val, _ := state.Val[uint256.Int](w)
-			assert.True(t, val.IsZero(),
-				"normalizeWriteSet must emit StoragePath=0 for SD'd slots, got %v", val)
+	for _, inner := range normalized.Storages() {
+		for _, w := range inner {
+			assert.True(t, w.Val.IsZero(),
+				"normalizeWriteSet must emit StoragePath=0 for SD'd slots, got %v", w.Val)
 			storageZeroCount++
 		}
 	}
@@ -559,11 +558,11 @@ func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
 		addr: {untouched1, untouched2},
 	}}
 
-	cs.ApplyWrites(state.VersionedWrites{
-		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.IncarnationPath}, Val: uint64(3)},
-		&state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath}, Val: true},
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: uint256.Int{}},
-	})
+	cs.ApplyWrites(newWS().
+		inc(addr, state.Version{}, uint64(3)).
+		selfDestruct(addr, state.Version{}, true).
+		bal(addr, state.Version{}, uint256.Int{}).
+		build())
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -609,21 +608,20 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 	zeroAddr := accounts.InternAddress([20]byte{})
 
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: zeroAddr, Path: state.BalancePath, Version: ver}, Val: uint256.Int{}},
-		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: zeroAddr, Path: state.NoncePath, Version: ver}, Val: uint64(0)},
-		&state.VersionedWrite[accounts.CodeHash]{WriteHeader: state.WriteHeader{Address: zeroAddr, Path: state.CodeHashPath, Version: ver}, Val: accounts.EmptyCodeHash},
-	}
+	rawWrites := newWS().
+		bal(zeroAddr, ver, uint256.Int{}).
+		nonce(zeroAddr, ver, uint64(0)).
+		codeHash(zeroAddr, ver, accounts.EmptyCodeHash).
+		build()
 	vm := state.NewVersionMap(nil)
-	for _, w := range rawWrites {
-		h := w.Header()
-		vm.Write(h.Address, h.Path, accounts.NilKey, ver, anyWriteVal(w), true)
-	}
+	vm.Write(zeroAddr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
+	vm.Write(zeroAddr, state.NoncePath, accounts.NilKey, ver, uint64(0), true)
+	vm.Write(zeroAddr, state.CodeHashPath, accounts.NilKey, ver, accounts.EmptyCodeHash, true)
 
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false, false)
 
-	for _, w := range normalized {
-		assert.NotEqual(t, state.SelfDestructPath, w.Header().Path,
+	for h := range normalized.AllHeaders() {
+		assert.NotEqual(t, state.SelfDestructPath, h.Path,
 			"emptyRemoval=false must suppress SelfDestructPath emission for empty accounts")
 	}
 
@@ -649,26 +647,21 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xab, 0xcd})
 
 	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: ver}, Val: uint256.Int{}},
-		&state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath, Version: ver}, Val: uint64(0)},
-		&state.VersionedWrite[accounts.CodeHash]{WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath, Version: ver}, Val: accounts.EmptyCodeHash},
-	}
+	rawWrites := newWS().
+		bal(addr, ver, uint256.Int{}).
+		nonce(addr, ver, uint64(0)).
+		codeHash(addr, ver, accounts.EmptyCodeHash).
+		build()
 	vm := state.NewVersionMap(nil)
-	for _, w := range rawWrites {
-		h := w.Header()
-		vm.Write(h.Address, h.Path, accounts.NilKey, ver, anyWriteVal(w), true)
-	}
+	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
+	vm.Write(addr, state.NoncePath, accounts.NilKey, ver, uint64(0), true)
+	vm.Write(addr, state.CodeHashPath, accounts.NilKey, ver, accounts.EmptyCodeHash, true)
 
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true, false)
 
 	sdSeen := false
-	for _, w := range normalized {
-		h := w.Header()
-		if h.Path == state.SelfDestructPath && h.Address == addr {
-			v, _ := state.Val[bool](w)
-			sdSeen = sdSeen || v
-		}
+	if w, ok := normalized.GetSelfDestruct(addr); ok {
+		sdSeen = w.Val
 	}
 	require.True(t, sdSeen, "emptyRemoval=true must emit SelfDestructPath=true for empty account")
 

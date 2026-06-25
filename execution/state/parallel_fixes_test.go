@@ -248,12 +248,12 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 func TestTouchUpdates_Account(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1000)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: uint64(1)},
 		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
-	}
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -267,11 +267,11 @@ func TestTouchUpdates_Account(t *testing.T) {
 func TestTouchUpdates_AccountModeParallel(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1000)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
 		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
-	}
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), func(k []byte) []byte { return k })
 	defer updates.Close()
@@ -288,10 +288,10 @@ func TestToTouchKeys_Storage(t *testing.T) {
 	val1 := *uint256.NewInt(42)
 	val2 := *uint256.NewInt(0) // zero = delete
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot1}, Val: val1},
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot2}, Val: val2},
-	}
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -305,9 +305,9 @@ func TestTouchUpdates_Code(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xd2})
 	code := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03}
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(code)), Bytes: code}},
-	}
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -322,7 +322,7 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 	addr2 := accounts.InternAddress([20]byte{0x02})
 	slot := accounts.InternKey([32]byte{0x04})
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		// Account 1: balance + nonce + code
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr1, Path: BalancePath}, Val: *uint256.NewInt(100)},
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr1, Path: NoncePath}, Val: uint64(1)},
@@ -331,7 +331,7 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr1, Path: CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})), Bytes: []byte{0x60, 0x00}}},
 		// Account 2: storage write
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr2, Path: StoragePath, Key: slot}, Val: *uint256.NewInt(999)},
-	}
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -493,10 +493,12 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	assert.True(t, destructed)
 
 	// And it must NOT have emitted spurious StoragePath=0 writes.
-	for _, w := range ibs.VersionedWrites(false) {
-		if w.Header().Address == addr && w.Header().Path == StoragePath {
-			v, _ := Val[uint256.Int](w)
-			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Header().Key.Value())
+	for waddr, slots := range ibs.VersionedWrites(false).Storages() {
+		if waddr != addr {
+			continue
+		}
+		for _, w := range slots {
+			assert.False(t, w.Val.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Key.Value())
 		}
 	}
 }

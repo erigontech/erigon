@@ -607,8 +607,8 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, balance, b)
 
 	// Tx1 mark estimate
-	for _, v := range states[1].VersionedWrites(true) {
-		mvhm.MarkEstimate(v.Header().Address, v.Header().Path, v.Header().Key, 1)
+	for h := range states[1].VersionedWrites(true).AllHeaders() {
+		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
 	}
 
 	defer func() {
@@ -682,10 +682,9 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.scan(func(v AnyVersionedWrite) bool {
-		mvhm.Delete(v.Header().Address, v.Header().Path, v.Header().Key, 1, true)
-		return true
-	})
+	for h := range states[1].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
+	}
 	states[1].versionedWrites = WriteSet{}
 
 	// Tx2 read should get Tx0's value
@@ -706,10 +705,9 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	states[0].versionedWrites.scan(func(v AnyVersionedWrite) bool {
-		mvhm.Delete(v.Header().Address, v.Header().Path, v.Header().Key, 0, true)
-		return true
-	})
+	for h := range states[0].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
+	}
 	states[0].versionedWrites = WriteSet{}
 
 	// Tx2 read again should get default vals
@@ -802,10 +800,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	states[2].versionedWrites.scan(func(v AnyVersionedWrite) bool {
-		mvhm.Delete(v.Header().Address, v.Header().Path, v.Header().Key, 2, true)
-		return true
-	})
+	for h := range states[2].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
+	}
 	states[2].versionedWrites = WriteSet{}
 
 	// Tx3 read
@@ -846,10 +843,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.scan(func(v AnyVersionedWrite) bool {
-		mvhm.Delete(v.Header().Address, v.Header().Path, v.Header().Key, 1, true)
-		return true
-	})
+	for h := range states[1].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
+	}
 	states[1].versionedWrites = WriteSet{}
 
 	// Tx3 read

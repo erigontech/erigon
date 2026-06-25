@@ -32,24 +32,22 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// writeIndex builds a lookup map from a VersionedWrites slice.
-// Key is (Address, Path, Key); value is the Val field.
-func writeIndex(writes VersionedWrites) map[AccountKey]any {
-	idx := make(map[AccountKey]any, len(writes))
-	for _, w := range writes {
-		h := w.Header()
-		idx[AccountKey{Path: h.Path, Key: h.Key}] = anyWriteVal(w)
+// writeIndex builds a lookup map from a WriteSet.
+// Key is (Address, Path, Key); value is the typed Val field.
+func writeIndex(writes *WriteSet) map[AccountKey]any {
+	idx := make(map[AccountKey]any)
+	for h := range writes.AllHeaders() {
+		idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
 	}
 	return idx
 }
 
 // addrWriteIndex is like writeIndex but scoped to a single address.
-func addrWriteIndex(writes VersionedWrites, addr accounts.Address) map[AccountKey]any {
+func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
-	for _, w := range writes {
-		h := w.Header()
+	for h := range writes.AllHeaders() {
 		if h.Address == addr {
-			idx[AccountKey{Path: h.Path, Key: h.Key}] = anyWriteVal(w)
+			idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
 		}
 	}
 	return idx

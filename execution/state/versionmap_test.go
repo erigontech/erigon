@@ -93,11 +93,24 @@ func TestFlushMVWrite(t *testing.T) {
 
 	var res ReadResult
 
-	wd := VersionedWrites{}
+	// A WriteSet holds at most one AddressPath cell per address, so each
+	// versioned write is flushed in its own WriteSet to reproduce the
+	// accumulation TestMVWriteRead drives through sequential Write calls.
+	flushAddress := func(addr accounts.Address, ver Version) {
+		ws := &WriteSet{}
+		ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{
+			WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: ver},
+			Val:         valueFor(AddressPath, ver.TxIndex, ver.Incarnation).(*accounts.Account),
+		})
+		mvh.FlushVersionedWrites(ws, true, "")
+	}
 
-	wd = append(wd, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: ap1, Path: AddressPath, Version: Version{0, 0, 0, 1}}, Val: valueFor(AddressPath, 0, 1).(*accounts.Account)}, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: ap1, Path: AddressPath, Version: Version{0, 0, 0, 2}}, Val: valueFor(AddressPath, 0, 2).(*accounts.Account)}, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: ap2, Path: AddressPath, Version: Version{0, 0, 1, 1}}, Val: valueFor(AddressPath, 1, 1).(*accounts.Account)}, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: ap2, Path: AddressPath, Version: Version{0, 0, 1, 2}}, Val: valueFor(AddressPath, 1, 2).(*accounts.Account)}, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: ap1, Path: AddressPath, Version: Version{0, 0, 2, 1}}, Val: valueFor(AddressPath, 2, 1).(*accounts.Account)}, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: ap1, Path: AddressPath, Version: Version{0, 0, 2, 2}}, Val: valueFor(AddressPath, 2, 2).(*accounts.Account)})
-
-	mvh.FlushVersionedWrites(wd, true, "")
+	flushAddress(ap1, Version{0, 0, 0, 1})
+	flushAddress(ap1, Version{0, 0, 0, 2})
+	flushAddress(ap2, Version{0, 0, 1, 1})
+	flushAddress(ap2, Version{0, 0, 1, 2})
+	flushAddress(ap1, Version{0, 0, 2, 1})
+	flushAddress(ap1, Version{0, 0, 2, 2})
 
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 0)
 	require.Equal(t, UnknownDep, res.DepIdx())
@@ -495,9 +508,9 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	vm := NewVersionMap(nil)
 
 	// Simulate: TX 5 is valid, flushed as Done (complete=true).
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
-	}
+	)
 	vm.FlushVersionedWrites(writes, true, "")
 
 	// TX 10 reads should see FlagDone → MVReadResultDone.
@@ -508,9 +521,9 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, 1, res.Incarnation())
 
 	// Simulate: TX 7 is invalid, flushed as Estimate (complete=false).
-	writes2 := VersionedWrites{
+	writes2 := newWriteSet(
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Key: accounts.NilKey, Version: Version{TxIndex: 7, Incarnation: 2}}, Val: uint64(5)},
-	}
+	)
 	vm.FlushVersionedWrites(writes2, false, "")
 
 	// TX 10 reads NoncePath should see FlagEstimate → MVReadResultDependency.

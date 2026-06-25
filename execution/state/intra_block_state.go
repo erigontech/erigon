@@ -2479,14 +2479,14 @@ func (sdb *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 	if vw, ok := sdb.versionedWrites.GetBalance(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWBalance()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetBalance(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64) {
@@ -2497,14 +2497,14 @@ func (sdb *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64) 
 	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWNonce()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetNonce(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val uint64) {
@@ -2515,14 +2515,14 @@ func (sdb *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val ui
 	if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWIncarnation()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: IncarnationPath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetIncarnation(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val bool) {
@@ -2533,14 +2533,14 @@ func (sdb *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val b
 	if vw, ok := sdb.versionedWrites.GetSelfDestruct(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWSelfDestruct()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: SelfDestructPath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetSelfDestruct(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val bool) {
@@ -2551,14 +2551,14 @@ func (sdb *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 	if vw, ok := sdb.versionedWrites.GetCreateContract(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWCreateContract()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CreateContractPath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetCreateContract(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
@@ -2569,14 +2569,14 @@ func (sdb *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.
 	if vw, ok := sdb.versionedWrites.GetCode(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWCode()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetCode(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accounts.CodeHash) {
@@ -2587,14 +2587,14 @@ func (sdb *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accou
 	if vw, ok := sdb.versionedWrites.GetCodeHash(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWCodeHash()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeHashPath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetCodeHash(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) {
@@ -2605,14 +2605,14 @@ func (sdb *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 	if vw, ok := sdb.versionedWrites.GetCodeSize(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWCodeSize()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeSizePath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetCodeSize(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accounts.Account) {
@@ -2623,14 +2623,14 @@ func (sdb *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accou
 	if vw, ok := sdb.versionedWrites.GetAddress(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWAddress()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetAddress(addr, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
 func (sdb *IntraBlockState) recordWriteStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
@@ -2641,25 +2641,26 @@ func (sdb *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 	if vw, ok := sdb.versionedWrites.GetStorage(addr, key); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
-		sdb.traceWrite(vw)
+		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWStorage()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: sdb.Version()}
 	vw.Val = val
 	sdb.versionedWrites.SetStorage(addr, key, vw)
-	sdb.traceWrite(vw)
+	traceWrite(sdb, vw)
 }
 
-func (sdb *IntraBlockState) traceWrite(vw AnyVersionedWrite) {
+func traceWrite[T any](sdb *IntraBlockState, vw *VersionedWrite[T]) {
 	if !dbg.TraceTransactionIO {
 		return
 	}
-	hdr := vw.Header()
+	hdr := vw.WriteHeader
 	if !(sdb.trace || (dbg.TraceAccount(hdr.Address.Handle()) && (hdr.Key == accounts.NilKey || traceKey(hdr.Key)))) {
 		return
 	}
-	fmt.Printf("%d (%d.%d) WRT %s\n", sdb.blockNum, sdb.txIndex, sdb.version, valueStringFromAnyVW(vw))
+	fmt.Printf("%d (%d.%d) WRT %x %s: %v (%d.%d)\n", sdb.blockNum, sdb.txIndex, sdb.version,
+		hdr.Address, AccountKey{Path: hdr.Path, Key: hdr.Key}, vw.Val, hdr.Version.TxIndex, hdr.Version.Incarnation)
 }
 
 // versionedWriteSelfDestruct returns the SelfDestructPath write for addr
@@ -2790,115 +2791,167 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // checkDirty - is mainly for testing, for block processing this is called
 // after the block execution is completed and non dirty writes (due to reversions)
 // will already have been cleaned in MakeWriteSet
-func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
-	// Group per-addr first; the per-addr post-pass needs to inspect all
-	// writes for an address before deciding what to emit (selfdestruct
-	// filtering and dirty pruning are both per-addr decisions).
-	byAddr := map[accounts.Address][]AnyVersionedWrite{}
-	sdb.versionedWrites.scan(func(vw AnyVersionedWrite) bool {
-		byAddr[vw.Header().Address] = append(byAddr[vw.Header().Address], vw)
-		return true
-	})
+// VersionedWrites returns a frozen typed snapshot of this tx's writes. With
+// checkDirty, a non-dirty address's writes are dropped (and deleted from the
+// version map). Under self-destruct only SelfDestruct/Balance/Incarnation/
+// Storage are kept (the BAL needs residual balance, resurrection needs the
+// prior incarnation, and the calculator needs per-slot deletes); Nonce/Code/
+// CodeHash/CodeSize/Address/CreateContract are dropped.
+func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
+	src := &sdb.versionedWrites
+	out := &WriteSet{}
 
-	writes := make(VersionedWrites, 0)
-	for addr, vwrites := range byAddr {
+	addrs := make(map[accounts.Address]struct{})
+	for h := range src.AllHeaders() {
+		addrs[h.Address] = struct{}{}
+	}
+
+	for addr := range addrs {
 		if checkDirty {
 			if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-				for _, v := range vwrites {
-					h := v.Header()
-					sdb.versionMap.Delete(h.Address, h.Path, h.Key, sdb.txIndex, false)
-				}
+				sdb.deleteAddrFromVersionMap(addr, src)
 				continue
 			}
 		}
 
-		// First pass: detect whether this account was selfdestructed in
-		// the current TX. We must do this before filtering because the
-		// scan order is non-deterministic — folding the detection into
-		// the filter loop would drop storage writes that happened to
-		// iterate before the SelfDestructPath entry.
-		var selfDestructed bool
-		for _, v := range vwrites {
-			if v.Header().Path == SelfDestructPath {
-				if sd, _ := Val[bool](v); sd {
-					selfDestructed = true
-					break
-				}
+		sd := false
+		if vw, ok := src.selfDestruct[addr]; ok {
+			out.SetSelfDestruct(addr, cloneVW(vw))
+			sd = vw.Val
+		}
+		if vw, ok := src.balance[addr]; ok {
+			out.SetBalance(addr, cloneVW(vw))
+		}
+		if vw, ok := src.incarnation[addr]; ok {
+			out.SetIncarnation(addr, cloneVW(vw))
+		}
+		if inner, ok := src.storage[addr]; ok {
+			for k, vw := range inner {
+				out.SetStorage(addr, k, cloneVW(vw))
 			}
 		}
-
-		// Second pass: if selfdestructed, keep only SelfDestructPath,
-		// BalancePath (the BAL needs residual balance from EIP-7708 case 2),
-		// IncarnationPath (so resurrection txs find the prior incarnation),
-		// and StoragePath (the calculator needs explicit per-slot DELETE
-		// entries since it can't use DomainDelPrefix). NoncePath and CodePath
-		// are dropped because selfdestruct resets them.
-		// Each emitted entry is a fresh value-copy of the per-path map's
-		// pointer.  Boundary callers (FlushVersionedWrites, parallel-exec
-		// result.TxOut) expect a frozen snapshot — subsequent in-tx activity
-		// (journal revert updateValX, RevertChanges delAddr) would otherwise
-		// alias the slice through the per-path pointers and corrupt the
-		// caller's snapshot.
-		for _, v := range vwrites {
-			p := v.Header().Path
-			if !selfDestructed ||
-				p == SelfDestructPath ||
-				p == BalancePath ||
-				p == IncarnationPath ||
-				p == StoragePath {
-				writes = append(writes, v.Clone())
+		if !sd {
+			if vw, ok := src.address[addr]; ok {
+				out.SetAddress(addr, cloneVW(vw))
+			}
+			if vw, ok := src.nonce[addr]; ok {
+				out.SetNonce(addr, cloneVW(vw))
+			}
+			if vw, ok := src.code[addr]; ok {
+				out.SetCode(addr, cloneVW(vw))
+			}
+			if vw, ok := src.codeHash[addr]; ok {
+				out.SetCodeHash(addr, cloneVW(vw))
+			}
+			if vw, ok := src.codeSize[addr]; ok {
+				out.SetCodeSize(addr, cloneVW(vw))
+			}
+			if vw, ok := src.createContract[addr]; ok {
+				out.SetCreateContract(addr, cloneVW(vw))
 			}
 		}
 	}
-	return writes
+	return out
+}
+
+func (sdb *IntraBlockState) deleteAddrFromVersionMap(addr accounts.Address, src *WriteSet) {
+	del := func(path AccountPath, key accounts.StorageKey) {
+		sdb.versionMap.Delete(addr, path, key, sdb.txIndex, false)
+	}
+	if vw, ok := src.address[addr]; ok {
+		del(AddressPath, vw.Key)
+	}
+	if vw, ok := src.balance[addr]; ok {
+		del(BalancePath, vw.Key)
+	}
+	if vw, ok := src.nonce[addr]; ok {
+		del(NoncePath, vw.Key)
+	}
+	if vw, ok := src.incarnation[addr]; ok {
+		del(IncarnationPath, vw.Key)
+	}
+	if vw, ok := src.selfDestruct[addr]; ok {
+		del(SelfDestructPath, vw.Key)
+	}
+	if vw, ok := src.createContract[addr]; ok {
+		del(CreateContractPath, vw.Key)
+	}
+	if vw, ok := src.code[addr]; ok {
+		del(CodePath, vw.Key)
+	}
+	if vw, ok := src.codeHash[addr]; ok {
+		del(CodeHashPath, vw.Key)
+	}
+	if vw, ok := src.codeSize[addr]; ok {
+		del(CodeSizePath, vw.Key)
+	}
+	if inner, ok := src.storage[addr]; ok {
+		for k := range inner {
+			del(StoragePath, k)
+		}
+	}
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
 // of the current StateDB.
-func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
-	// Sort writes by (Address, Path, Key) to ensure deterministic processing
-	// order. VersionedWrites come from WriteSet map iteration (Go maps have
-	// non-deterministic order). Processing order matters because some paths
-	// (CodePath, SelfDestructPath) call GetOrNewStateObject which triggers a
-	// read from the stateReader. If a BalancePath write for the same address
-	// has already been processed, the state object is already loaded and no
-	// read occurs; otherwise an extra read is recorded. Different reads
-	// produce different EIP-7928 BAL hashes.
-	sortVersionedWrites(writes)
-	for i := range writes {
-		hdr := writes[i].Header()
-		path := hdr.Path
+func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
+	if writes == nil {
+		return nil
+	}
+	// Deterministic (Address, Path, Key) order: Code/SelfDestruct load the state
+	// object and may record an extra read depending on whether a prior
+	// same-address write already loaded it, which changes the EIP-7928 BAL hash.
+	headers := make([]WriteHeader, 0, writes.Count())
+	for h := range writes.AllHeaders() {
+		headers = append(headers, h)
+	}
+	sortWriteHeaders(headers)
+	for _, hdr := range headers {
 		addr := hdr.Address
 
-		switch path {
+		switch hdr.Path {
 		case AddressPath:
 			continue
 		case StoragePath:
-			stateKey := hdr.Key
-			state, _ := Val[uint256.Int](writes[i])
-			if err := sdb.setState(addr, stateKey, state, true); err != nil {
+			vw, ok := writes.GetStorage(addr, hdr.Key)
+			if !ok {
+				continue
+			}
+			if err := sdb.setState(addr, hdr.Key, vw.Val, true); err != nil {
 				return err
 			}
 		case BalancePath:
-			balance, _ := Val[uint256.Int](writes[i])
-			if err := sdb.SetBalance(addr, balance, hdr.Reason); err != nil {
+			vw, ok := writes.GetBalance(addr)
+			if !ok {
+				continue
+			}
+			if err := sdb.SetBalance(addr, vw.Val, hdr.Reason); err != nil {
 				return err
 			}
 		case NoncePath:
-			nonce, _ := Val[uint64](writes[i])
-			if err := sdb.SetNonce(addr, nonce, tracing.NonceChangeUnspecified); err != nil {
+			vw, ok := writes.GetNonce(addr)
+			if !ok {
+				continue
+			}
+			if err := sdb.SetNonce(addr, vw.Val, tracing.NonceChangeUnspecified); err != nil {
 				return err
 			}
 		case IncarnationPath:
-			incarnation, _ := Val[uint64](writes[i])
-			if err := sdb.SetIncarnation(addr, incarnation); err != nil {
+			vw, ok := writes.GetIncarnation(addr)
+			if !ok {
+				continue
+			}
+			if err := sdb.SetIncarnation(addr, vw.Val); err != nil {
 				return err
 			}
-			// Re-emit the IncarnationPath write into versionedWrites so that the
-			// finalize IBS's writes are correctly flushed to the global versionMap.
-			sdb.recordWriteIncarnation(addr, incarnation)
+			// Re-emit so the finalize IBS's writes flush to the global versionMap.
+			sdb.recordWriteIncarnation(addr, vw.Val)
 		case CodePath:
-			code, _ := Val[accounts.Code](writes[i])
+			vwCode, ok := writes.GetCode(addr)
+			if !ok {
+				continue
+			}
+			code := vwCode.Val
 			stateObject, err := sdb.GetOrNewStateObject(addr)
 			if err != nil {
 				return err
@@ -2921,8 +2974,11 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		case CodeHashPath, CodeSizePath:
 			// set by CodePath case above
 		case SelfDestructPath:
-			deleted, _ := Val[bool](writes[i])
-			if deleted {
+			vw, ok := writes.GetSelfDestruct(addr)
+			if !ok {
+				continue
+			}
+			if vw.Val {
 				// Ensure the state object exists before calling Selfdestruct.
 				// For newly-created accounts (e.g. coinbase born via CREATE in the
 				// same transaction, with no pre-block DB entry), getStateObject
@@ -2964,7 +3020,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				so.createdContract = true
 			}
 		default:
-			return fmt.Errorf("unknown key type: %d", path)
+			return fmt.Errorf("unknown key type: %d", hdr.Path)
 		}
 	}
 	return nil
