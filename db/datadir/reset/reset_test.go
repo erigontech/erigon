@@ -1,6 +1,7 @@
 package reset
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"iter"
@@ -14,6 +15,8 @@ import (
 	"testing"
 
 	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-quicktest/qt"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -44,6 +47,33 @@ func TestSnapshots(t *testing.T) {
 		r.PreverifiedSnapshots.Sort()
 		qt.Assert(t, qt.IsNil(r.Run()))
 		checkFs(t, root.FS(), haveEntries(startEntries[0])...)
+	})
+}
+
+// A data file whose torrent has an infohash that doesn't match preverified is a stale local build:
+// reset must drop both the torrent and the data file so the downloader re-fetches the canonical copy.
+func TestIncorrectTorrentRemovesDataFile(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		var mi metainfo.MetaInfo
+		infoBytes, err := bencode.Marshal(metainfo.Info{Name: "foo.ef", PieceLength: 16384, Pieces: make([]byte, 20)})
+		qt.Assert(t, qt.IsNil(err))
+		mi.InfoBytes = infoBytes
+		var torrentBuf bytes.Buffer
+		qt.Assert(t, qt.IsNil(mi.Write(&torrentBuf)))
+
+		wrongHash := "0000000000000000000000000000000000000000"
+		qt.Assert(t, qt.Not(qt.Equals(mi.HashInfoBytes().String(), wrongHash)))
+
+		startEntries := []fsEntry{
+			{Name: "snapshots/idx/foo.ef"},
+			{Name: "snapshots/idx/foo.ef.torrent", Data: torrentBuf.String()},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "idx/foo.ef", Hash: wrongHash}}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+		checkFs(t, root.FS(), haveEntries(fsEntry{Name: "snapshots", Mode: fs.ModeDir})...)
 	})
 }
 
@@ -379,6 +409,10 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 		} else {
 			f, err := root.Create(localName)
 			assertNoErr(err)
+			if entry.Data != "" {
+				_, err = f.WriteString(entry.Data)
+				assertNoErr(err)
+			}
 			f.Close()
 		}
 	}
