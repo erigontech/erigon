@@ -405,7 +405,7 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 3, false)
+	g := NewPagedReader(d.MakeGetter(), false)
 	var buf []byte
 	var prevKey []byte
 	i := 0
