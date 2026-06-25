@@ -1164,13 +1164,21 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
 
-	s.bgComponentsEg.Go(func() error {
-		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			s.logger.Error("cli.StartRpcServer error", "err", err)
+	// Create the RPC server and register APIs synchronously so
+	// InProcServer() is available immediately after Init returns.
+	if httpRpcCfg.Enabled {
+		rpcSrv, err := rpcdaemoncli.PrepareRpcServer(&httpRpcCfg, s.apiList, s.logger)
+		if err != nil {
+			return err
 		}
-		return err
-	})
+		s.bgComponentsEg.Go(func() error {
+			err := rpcdaemoncli.ServeRpcServer(ctx, &httpRpcCfg, rpcSrv, s.logger, s.apiList)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("cli.ServeRpcServer error", "err", err)
+			}
+			return err
+		})
+	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		s.bgComponentsEg.Go(func() error {

@@ -286,9 +286,10 @@ type Config struct {
 	// to avoid the extra work.
 	WarmupKzgCtxOnInit bool
 
-	// ExtraGenesisAlloc is merged into Genesis.Alloc before computing the
-	// genesis hash. Embedding applications use this to inject contracts at
-	// genesis without modifying the core chain specification.
+	// ExtraGenesisAlloc is merged into Genesis.Alloc in dev mode (--chain=dev)
+	// before computing the genesis hash. Embedding applications use this to
+	// inject contracts at genesis on dev chains without modifying the core
+	// chain specification. Currently only wired via setDevnetEthConfig.
 	ExtraGenesisAlloc types.GenesisAlloc `toml:"-"`
 }
 

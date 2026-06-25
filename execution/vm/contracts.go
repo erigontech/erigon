@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -69,6 +70,38 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 }
 
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	base := defaultPrecompiles(chainRules)
+
+	chainID := chainRules.ChainID.Uint64()
+	chainPrecompilesMu.RLock()
+	overrides := chainOverrides[chainID]
+	chainPrecompilesMu.RUnlock()
+
+	if len(overrides) == 0 {
+		return base
+	}
+
+	key := activePrecompilesCacheKey{chainID: chainID, forkIdx: forkIndex(chainRules)}
+	activePrecompilesMu.RLock()
+	if cached, ok := mergedPrecompilesCache[key]; ok {
+		activePrecompilesMu.RUnlock()
+		return cached
+	}
+	activePrecompilesMu.RUnlock()
+
+	merged := maps.Clone(base)
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	activePrecompilesMu.Lock()
+	mergedPrecompilesCache[key] = merged
+	activePrecompilesMu.Unlock()
+
+	return merged
+}
+
+func defaultPrecompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
@@ -228,24 +261,87 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
-// ActivePrecompiles returns the precompile addresses enabled with the
-// current configuration. Derived from the Precompiles map so that any
-// entries added after package init (e.g. by RegisterPrecompile) are
-// automatically included.
+var (
+	chainPrecompilesMu sync.RWMutex
+	chainOverrides     = make(map[uint64]PrecompiledContracts) // chainID → custom precompiles
+
+	activePrecompilesMu    sync.RWMutex
+	activePrecompilesCache = make(map[activePrecompilesCacheKey][]accounts.Address)
+	mergedPrecompilesCache = make(map[activePrecompilesCacheKey]PrecompiledContracts)
+)
+
+type activePrecompilesCacheKey struct {
+	chainID uint64
+	forkIdx int8
+}
+
+func forkIndex(rules *chain.Rules) int8 {
+	switch {
+	case rules.IsOsaka:
+		return 9
+	case rules.IsBhilai:
+		return 8
+	case rules.IsPrague:
+		return 7
+	case rules.IsNapoli:
+		return 6
+	case rules.IsCancun:
+		return 5
+	case rules.IsBerlin:
+		return 4
+	case rules.IsIstanbul:
+		return 3
+	case rules.IsByzantium:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// ActivePrecompiles returns the precompile addresses active for the given
+// chain and fork rules. Results are cached per chain+fork so subsequent
+// calls (e.g. once per transaction via IntraBlockState.Prepare) do not
+// allocate.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
+	key := activePrecompilesCacheKey{chainID: rules.ChainID.Uint64(), forkIdx: forkIndex(rules)}
+
+	activePrecompilesMu.RLock()
+	if cached, ok := activePrecompilesCache[key]; ok {
+		activePrecompilesMu.RUnlock()
+		return cached
+	}
+	activePrecompilesMu.RUnlock()
+
 	m := Precompiles(rules)
 	out := make([]accounts.Address, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
+
+	activePrecompilesMu.Lock()
+	activePrecompilesCache[key] = out
+	activePrecompilesMu.Unlock()
 	return out
 }
 
-// RegisterPrecompile adds a precompiled contract to the given fork map.
-// This allows embedding applications to extend the EVM with custom
-// precompiles without modifying the core precompile tables.
-func RegisterPrecompile(contracts PrecompiledContracts, addr accounts.Address, p PrecompiledContract) {
-	contracts[addr] = p
+// RegisterPrecompile registers a custom precompiled contract for a specific
+// chain. Each chain has its own override map, so precompiles registered for
+// one chain do not leak into others. Must be called before execution starts
+// (typically during init or genesis setup). Concurrent calls are safe.
+func RegisterPrecompile(chainID uint64, addr accounts.Address, p PrecompiledContract) {
+	chainPrecompilesMu.Lock()
+	overrides := chainOverrides[chainID]
+	if overrides == nil {
+		overrides = make(PrecompiledContracts)
+		chainOverrides[chainID] = overrides
+	}
+	overrides[addr] = p
+	chainPrecompilesMu.Unlock()
+
+	activePrecompilesMu.Lock()
+	clear(activePrecompilesCache)
+	clear(mergedPrecompilesCache)
+	activePrecompilesMu.Unlock()
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

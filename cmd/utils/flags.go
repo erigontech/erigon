@@ -2206,6 +2206,13 @@ func setDevnetEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logg
 	beaconCfg.InitializeForkSchedule()
 	if len(cfg.ExtraGenesisAlloc) > 0 {
 		for addr, acct := range cfg.ExtraGenesisAlloc {
+			if existing, ok := cfg.Genesis.Alloc[addr]; ok {
+				// Preserve the dev signer's pre-funded balance when ExtraGenesisAlloc
+				// supplies code/storage for the same address but no explicit balance.
+				if acct.Balance == nil && existing.Balance != nil {
+					acct.Balance = existing.Balance
+				}
+			}
 			cfg.Genesis.Alloc[addr] = acct
 		}
 		logger.Info("ExtraGenesisAlloc merged into genesis", "accounts", len(cfg.ExtraGenesisAlloc))
