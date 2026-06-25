@@ -295,8 +295,8 @@ func ConsensusClStages(ctx context.Context,
 					logger.Debug("Backward sync starting",
 						"slot", startingSlot,
 						"stateVersion", cfg.state.Version(),
-						"stateRoot", stateRoot,
-						"blockRoot", startingRoot,
+						"stateRoot", common.Hash(stateRoot),
+						"blockRoot", common.Hash(startingRoot),
 					)
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
 					if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
