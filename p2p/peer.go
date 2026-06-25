@@ -364,9 +364,7 @@ func (p *Peer) handle(msg Msg) error {
 		}
 
 		if p.metricsEnabled {
-			localCode := msg.Code - proto.offset
-			proto.meters[localCode].SetUint32(msg.meterSize)
-			proto.meterPackets[localCode].Set(1)
+			proto.meterIngress(msg.Code-proto.offset, msg.meterSize)
 		}
 		select {
 		case proto.in <- msg:
@@ -468,9 +466,24 @@ type protoRW struct {
 	w      MsgWriter
 	logger log.Logger
 
-	// cached gauge pointers indexed by local message code, avoids lock+map lookup on every message
 	meters       []metrics.Gauge
 	meterPackets []metrics.Gauge
+}
+
+func (rw *protoRW) meterIngress(code uint64, size uint32) {
+	if rw.meters == nil {
+		rw.meters = make([]metrics.Gauge, rw.Length)
+		rw.meterPackets = make([]metrics.Gauge, rw.Length)
+	}
+	g := rw.meters[code]
+	if g == nil {
+		name := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, rw.Name, rw.Version, code)
+		g = metrics.GetOrCreateGauge(name)
+		rw.meters[code] = g
+		rw.meterPackets[code] = metrics.GetOrCreateGauge(name + "_packets")
+	}
+	g.SetUint32(size)
+	rw.meterPackets[code].Set(1)
 }
 
 var traceMsg = false
