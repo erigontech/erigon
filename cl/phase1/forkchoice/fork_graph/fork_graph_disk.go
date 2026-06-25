@@ -32,9 +32,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/consensus"
+	beaconengine "github.com/erigontech/erigon/cl/consensus/beacon"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -135,15 +137,16 @@ type forkGraphDisk struct {
 	sszSnappyWriter *snappy.Writer
 	sszSnappyReader *snappy.Reader
 
-	rcfg       beacon_router_configuration.RouterConfiguration
-	emitter    *beaconevents.EventEmitter
-	syncedData synced_data.SyncedData
+	rcfg            beacon_router_configuration.RouterConfiguration
+	emitter         *beaconevents.EventEmitter
+	syncedData      synced_data.SyncedData
+	consensusEngine consensus.Engine
 
 	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state.
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter, engine ...consensus.Engine) ForkGraph {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -184,19 +187,26 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 
 	farthestExtendingPath[anchorRoot] = true
 
+	var ce consensus.Engine
+	if len(engine) > 0 && engine[0] != nil {
+		ce = engine[0]
+	} else {
+		ce = &beaconengine.Engine{}
+	}
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// current state data
 		currentState:          anchorState,
 		currentStateBlockRoot: anchorRoot,
 		// configuration
-		beaconCfg:   anchorState.BeaconConfig(),
-		genesisTime: anchorState.GenesisTime(),
-		anchorSlot:  anchorState.Slot(),
-		anchorRoot:  anchorRoot,
-		rcfg:        rcfg,
-		emitter:     emitter,
-		syncedData:  syncedData,
+		beaconCfg:       anchorState.BeaconConfig(),
+		genesisTime:     anchorState.GenesisTime(),
+		anchorSlot:      anchorState.Slot(),
+		anchorRoot:      anchorRoot,
+		rcfg:            rcfg,
+		emitter:         emitter,
+		syncedData:      syncedData,
+		consensusEngine: ce,
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
@@ -324,8 +334,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
 	if !isBlockRootTheCurrentState {
-		// Execute the state
-		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
+		// Execute the state using the consensus engine's machine
+		cvm := f.consensusEngine.Machine(fullValidation, blockRewardsCollector)
+		if invalidBlockErr := machine.TransitionState(cvm, newState, signedBlock); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
@@ -550,7 +561,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
-		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
+		replayCvm := f.consensusEngine.Machine(false, nil)
+		if err := machine.TransitionState(replayCvm, copyReferencedState, blocksInTheWay[i]); err != nil {
 			if addChainSegment {
 				f.currentStateMu.Lock()
 				f.currentState = nil

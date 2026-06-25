@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/consensus"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -39,6 +40,7 @@ type ForkChoiceStorageReader interface {
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
 	Engine() execution_client.ExecutionEngine
+	ConsensusEngine() consensus.Engine
 	FinalizedCheckpoint() solid.Checkpoint
 	FinalizedSlot() uint64
 	LowestAvailableSlot() uint64
