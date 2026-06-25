@@ -68,8 +68,22 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
 
 	require.Equal(t, 3*time.Second, window.builderBudget)
-	require.Equal(t, slotStart.Add(3*time.Second), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
 	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowPreGloasLateStartKeepsRetryWindow(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart.Add(1500 * time.Millisecond)
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	require.Equal(t, slotStart.Add(4*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(4*time.Second), window.pollUntil)
 }
 
 func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {

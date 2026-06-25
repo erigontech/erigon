@@ -81,6 +81,8 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
+const minPayloadPollingWindow = 100 * time.Millisecond
+
 type blockBuilderWindow struct {
 	builderBudget time.Duration
 	firstGetAt    time.Time
@@ -107,8 +109,12 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 	}
 	deadline := slotStart.Add(attestationDue(cfg, stateVersion))
 	firstGetAt := now.Add(builderBudget)
-	if firstGetAt.After(deadline) {
-		firstGetAt = deadline
+	latestFirstGetAt := deadline.Add(-minPayloadPollingWindow)
+	if latestFirstGetAt.Before(now) {
+		latestFirstGetAt = now
+	}
+	if firstGetAt.After(latestFirstGetAt) {
+		firstGetAt = latestFirstGetAt
 	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
