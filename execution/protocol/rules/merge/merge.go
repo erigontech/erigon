@@ -192,11 +192,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
-		cap := 3
+		reqCap := 3
 		if config.IsAmsterdam(header.Time) {
-			cap = 5
+			reqCap = 5
 		}
-		rs = make(types.FlatRequests, 0, cap) // deposit, withdrawal, consolidation, plus builder_deposit, builder_exit if Amsterdam is active
+		rs = make(types.FlatRequests, 0, reqCap) // deposit, withdrawal, consolidation, plus builder_deposit, builder_exit if Amsterdam is active
 
 		// Try to reuse buffer, fall back to allocation if concurrent access
 		var allLogs types.Logs
@@ -242,25 +242,25 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
 		}
-	}
 
-	if config.IsAmsterdam(header.Time) {
-		// EIP-8282
-		builderDepositReq, err := misc.DequeueBuilderDepositRequests(syscall, state, config.GetBuilderDepositContract())
-		if err != nil {
-			return nil, err
-		}
-		if builderDepositReq != nil {
-			rs = append(rs, *builderDepositReq)
-		}
+		if config.IsAmsterdam(header.Time) {
+			// EIP-8282
+			builderDepositReq, err := misc.DequeueBuilderDepositRequests(syscall, state, config.GetBuilderDepositContract())
+			if err != nil {
+				return nil, err
+			}
+			if builderDepositReq != nil {
+				rs = append(rs, *builderDepositReq)
+			}
 
-		// EIP-8282
-		builderExitReq, err := misc.DequeueBuilderExitRequests(syscall, state, config.GetBuilderExitContract())
-		if err != nil {
-			return nil, err
-		}
-		if builderExitReq != nil {
-			rs = append(rs, *builderExitReq)
+			// EIP-8282
+			builderExitReq, err := misc.DequeueBuilderExitRequests(syscall, state, config.GetBuilderExitContract())
+			if err != nil {
+				return nil, err
+			}
+			if builderExitReq != nil {
+				rs = append(rs, *builderExitReq)
+			}
 		}
 	}
 
