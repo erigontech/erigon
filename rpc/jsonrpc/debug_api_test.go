@@ -210,6 +210,48 @@ func TestTraceTransactionNotFound(t *testing.T) {
 	require.ErrorContains(t, err, "transaction not found")
 }
 
+// TestTraceErrorPathsWriteNoStream verifies that streaming trace methods write nothing to the
+// stream on early error paths. This is required for JSON-RPC 2.0 compliance: the handler omits
+// the "result" field when the stream is untouched, producing {error:...} without result:null.
+func TestTraceErrorPathsWriteNoStream(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+
+	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
+		var buf bytes.Buffer
+		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	}
+
+	t.Run("TraceBlockByNumber_genesis", func(t *testing.T) {
+		buf, s := newStream()
+		err := api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(0), &tracersConfig.TraceConfig{}, s)
+		require.ErrorContains(t, err, "genesis is not traceable")
+		require.NoError(t, s.Flush())
+		require.Empty(t, buf.Bytes(), "stream must be empty on early error")
+	})
+
+	t.Run("TraceBlockByHash_genesis", func(t *testing.T) {
+		var genesisHash common.Hash
+		require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			genesisHash, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+			return nil
+		}))
+		buf, s := newStream()
+		err := api.TraceBlockByHash(m.Ctx, genesisHash, &tracersConfig.TraceConfig{}, s)
+		require.ErrorContains(t, err, "genesis is not traceable")
+		require.NoError(t, s.Flush())
+		require.Empty(t, buf.Bytes(), "stream must be empty on early error")
+	})
+
+	t.Run("TraceTransaction_genesis", func(t *testing.T) {
+		buf, s := newStream()
+		err := api.TraceTransaction(m.Ctx, common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), &tracersConfig.TraceConfig{}, s)
+		require.ErrorContains(t, err, "transaction not found")
+		require.NoError(t, s.Flush())
+		require.Empty(t, buf.Bytes(), "stream must be empty on early error")
+	})
+}
+
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)

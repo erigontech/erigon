@@ -297,14 +297,11 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
 	}
 	sc.Index = uint32(idx)
-	valBytes, err := s.Bytes()
-	if err != nil {
+	// ReadUint256 enforces canonical (minimal) integer encoding, matching the
+	// encoder and rejecting non-canonical values (leading zero bytes).
+	if err := s.ReadUint256(&sc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if len(valBytes) > 32 {
-		return fmt.Errorf("read Value: too large (%d bytes)", len(valBytes))
-	}
-	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
@@ -340,14 +337,11 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Index: value %d exceeds uint32", idx)
 	}
 	bc.Index = uint32(idx)
-	valBytes, err := s.Bytes()
-	if err != nil {
+	// ReadUint256 enforces canonical (minimal) integer encoding, matching the
+	// encoder and rejecting non-canonical values (leading zero bytes).
+	if err := s.ReadUint256(&bc.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	if len(valBytes) > 32 {
-		return fmt.Errorf("read Value: integer too large (%d bytes)", len(valBytes))
-	}
-	bc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
@@ -810,19 +804,14 @@ func hashToUint256(h common.Hash) uint256.Int {
 	return v
 }
 
-// decodeMinimalHash reads an RLP byte string and right-aligns it into a 32-byte hash.
-// Handles minimal-encoded values (leading zeros stripped).
+// decodeMinimalHash reads a slot/key into a 32-byte hash; ReadUint256 enforces
+// canonical (minimal) encoding, matching the encoder and preventing key malleability.
 func decodeMinimalHash(s *rlp.Stream) (common.Hash, error) {
-	raw, err := s.Bytes()
-	if err != nil {
+	var v uint256.Int
+	if err := s.ReadUint256(&v); err != nil {
 		return common.Hash{}, err
 	}
-	if len(raw) > 32 {
-		return common.Hash{}, fmt.Errorf("hash too large: %d bytes", len(raw))
-	}
-	var out common.Hash
-	copy(out[32-len(raw):], raw)
-	return out, nil
+	return common.Hash(v.Bytes32()), nil
 }
 
 func (bal BlockAccessList) Hash() common.Hash {
