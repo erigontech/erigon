@@ -204,7 +204,23 @@ func NewBlockRetire(
 		borDataNotReadyBefore: time.Now(),
 	}
 	r.workers.Store(int32(compressWorkers))
+	cleanupStaleTmpFiles(dirs.Snap, logger)
 	return r
+}
+
+// cleanupStaleTmpFiles removes .tmp index files left by a previous run that
+// was killed before the atomic rename; safe only at startup before concurrent builds.
+func cleanupStaleTmpFiles(snapDir string, logger log.Logger) {
+	tmpFiles, err := snaptype.TmpFiles(snapDir)
+	if err != nil {
+		logger.Warn("[snapshots] cleanup stale tmp files", "err", err)
+		return
+	}
+	for _, f := range tmpFiles {
+		if err := dir2.RemoveFile(f); err != nil {
+			logger.Warn("[snapshots] remove stale tmp file", "file", f, "err", err)
+		}
+	}
 }
 
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }

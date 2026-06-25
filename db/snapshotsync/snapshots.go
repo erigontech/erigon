@@ -1394,16 +1394,6 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	}
 
 	removeOldFiles(toRemove)
-
-	// remove .tmp files
-	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
-	tmpFiles, err := snaptype.TmpFiles(s.dir)
-	if err != nil {
-		return err
-	}
-	for _, f := range tmpFiles {
-		_ = dir.RemoveFile(f)
-	}
 	return nil
 }
 
