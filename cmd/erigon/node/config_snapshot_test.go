@@ -68,9 +68,8 @@ type configSnapshot struct {
 	ExecWorkerCount int    `json:"exec_worker_count"`
 
 	// Feature flags
-	ExperimentalBAL                  bool `json:"experimental_bal"`
-	KeepExecutionProofs              bool `json:"keep_execution_proofs"`
-	ExperimentalConcurrentCommitment bool `json:"experimental_concurrent_commitment"`
+	ExperimentalBAL     bool `json:"experimental_bal"`
+	KeepExecutionProofs bool `json:"keep_execution_proofs"`
 
 	// Snapshot config
 	SnapKeepBlocks bool `json:"snap_keep_blocks"`
@@ -85,24 +84,23 @@ type configSnapshot struct {
 
 func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 	return configSnapshot{
-		NetworkID:                        cfg.NetworkID,
-		StateStream:                      cfg.StateStream,
-		InternalCL:                       cfg.InternalCL,
-		RPCGasCap:                        cfg.RPCGasCap,
-		RPCTxFeeCap:                      cfg.RPCTxFeeCap,
-		LoopThrottle:                     cfg.Sync.LoopThrottle.String(),
-		BreakAfterStage:                  cfg.Sync.BreakAfterStage,
-		LoopBlockLimit:                   cfg.Sync.LoopBlockLimit,
-		ExecWorkerCount:                  cfg.Sync.ExecWorkerCount,
-		ExperimentalBAL:                  cfg.ExperimentalBAL,
-		KeepExecutionProofs:              cfg.Sync.KeepExecutionProofs,
-		ExperimentalConcurrentCommitment: cfg.Sync.ExperimentalConcurrentCommitment,
-		SnapKeepBlocks:                   cfg.Snapshot.KeepBlocks,
-		SnapProduceE2:                    cfg.Snapshot.ProduceE2,
-		SnapProduceE3:                    cfg.Snapshot.ProduceE3,
-		NoDownloader:                     cfg.Snapshot.NoDownloader,
-		HeimdallURL:                      cfg.HeimdallURL,
-		WithoutHeimdall:                  cfg.WithoutHeimdall,
+		NetworkID:           cfg.NetworkID,
+		StateStream:         cfg.StateStream,
+		InternalCL:          cfg.InternalCL,
+		RPCGasCap:           cfg.RPCGasCap,
+		RPCTxFeeCap:         cfg.RPCTxFeeCap,
+		LoopThrottle:        cfg.Sync.LoopThrottle.String(),
+		BreakAfterStage:     cfg.Sync.BreakAfterStage,
+		LoopBlockLimit:      cfg.Sync.LoopBlockLimit,
+		ExecWorkerCount:     cfg.Sync.ExecWorkerCount,
+		ExperimentalBAL:     cfg.ExperimentalBAL,
+		KeepExecutionProofs: cfg.Sync.KeepExecutionProofs,
+		SnapKeepBlocks:      cfg.Snapshot.KeepBlocks,
+		SnapProduceE2:       cfg.Snapshot.ProduceE2,
+		SnapProduceE3:       cfg.Snapshot.ProduceE3,
+		NoDownloader:        cfg.Snapshot.NoDownloader,
+		HeimdallURL:         cfg.HeimdallURL,
+		WithoutHeimdall:     cfg.WithoutHeimdall,
 	}
 }
 

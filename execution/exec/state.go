@@ -101,11 +101,17 @@ func (c *activeCount) Add(i int64) {
 }
 
 type Worker struct {
-	lock        *sync.RWMutex
-	notifier    *sync.Cond
-	runnable    atomic.Bool
-	logger      log.Logger
-	chainDb     kv.TemporalRoDB
+	lock     *sync.RWMutex
+	notifier *sync.Cond
+	runnable atomic.Bool
+	logger   log.Logger
+	chainDb  kv.TemporalRoDB
+	// chainRoTx is the raw MDBX roTx that owns this worker's snapshot — the
+	// only handle that may be Rolled back. chainTx is the overlay-aware view
+	// (chainRoTx wrapped with the SharedDomains BlockOverlay if one is active);
+	// all reads must go through chainTx so any new consumer is overlay-aware
+	// by construction.
+	chainRoTx   kv.TemporalTx
 	chainTx     kv.TemporalTx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
@@ -143,21 +149,16 @@ type Worker struct {
 }
 
 // installWorkerGetHash replaces the EVM's GetHash function with one that
-// uses the worker's own roTx for BLOCKHASH lookups. This avoids sharing
-// the executeBlocks goroutine's roTx across worker goroutines (data race).
-// When a BlockOverlay is active (post-snapshot Caplin blocks), the roTx is
-// wrapped with the overlay so the worker can see headers not yet in MDBX.
+// uses the worker's own chainTx for BLOCKHASH lookups, avoiding any share
+// of the executeBlocks goroutine's roTx across worker goroutines (data
+// race). chainTx is already overlay-aware (see resetTx) so headers staged
+// in the BlockOverlay but not yet flushed to MDBX are visible.
 func (rw *Worker) installWorkerGetHash(txTask Task) {
 	header := txTask.BlockHeader()
 	if header == nil {
 		return
 	}
-	var workerTx kv.Getter = rw.chainTx
-	if rw.rs != nil {
-		if overlay := rw.rs.Domains().BlockOverlay(); overlay != nil {
-			workerTx = overlay.NewReadView(rw.chainTx)
-		}
-	}
+	workerTx := rw.chainTx
 	br := rw.blockReader
 	ctx := rw.ctx
 	rw.evm.Context.GetHash = protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -291,10 +292,22 @@ func (rw *Worker) resetTxNum(txNum uint64) {
 }
 
 func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
-	if rw.background && rw.chainTx != nil {
-		rw.chainTx.Rollback()
+	if rw.background && rw.chainRoTx != nil {
+		rw.chainRoTx.Rollback()
 	}
 
+	rw.chainRoTx = chainTx
+	// Wrap with BlockOverlay so block-metadata reads (headers/bodies/td
+	// staged by InsertBlocks at chaintip) are visible. Mirrors the blockTx
+	// pattern in executeBlocks (exec3.go:538-543). Single wrap here so every
+	// consumer of rw.chainTx is overlay-aware by construction.
+	if chainTx != nil && rw.rs != nil {
+		if sd := rw.rs.Domains(); sd != nil {
+			if overlay := sd.BlockOverlay(); overlay != nil {
+				chainTx = overlay.NewReadView(chainTx)
+			}
+		}
+	}
 	rw.chainTx = chainTx
 
 	if rw.chainTx != nil {
@@ -357,8 +370,9 @@ func (rw *Worker) Run() (err error) {
 	// Ensure the worker's roTx is closed when Run exits, preventing
 	// MDBX reader slot leaks that block GC page reclamation.
 	defer func() {
-		if rw.background && rw.chainTx != nil {
-			rw.chainTx.Rollback()
+		if rw.background && rw.chainRoTx != nil {
+			rw.chainRoTx.Rollback()
+			rw.chainRoTx = nil
 			rw.chainTx = nil
 		}
 	}()

@@ -12,7 +12,7 @@ runs:
       id: gocache-probe
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' }}
       continue-on-error: true
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ env.ERIGON_CI_GOCACHE_PATH }}
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
@@ -33,7 +33,7 @@ runs:
       id: modcache-probe
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' }}
       continue-on-error: true
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ env.ERIGON_CI_MODCACHE }}/cache/download
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
@@ -50,7 +50,7 @@ runs:
         ${{ always()
         && env.ERIGON_CI_GITOBJECTS_CACHE_KEY != ''
         && env.ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY != env.ERIGON_CI_GITOBJECTS_CACHE_KEY }}
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5
       with:
         path: |
           .git/modules
