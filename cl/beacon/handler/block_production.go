@@ -914,7 +914,7 @@ func (a *ApiHandler) produceBeaconBody(
 						return
 					}
 					if stateVersion.Before(clparams.FuluVersion) && len(bundles.Proofs[i]) != length.Bytes48 {
-						log.Error("BlockProduction: Invalid commitment length")
+						log.Error("BlockProduction: Invalid proof length")
 						return
 					}
 					if len(bundles.Blobs[i]) != cltypes.BYTES_PER_BLOB {
