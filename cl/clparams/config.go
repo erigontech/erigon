@@ -765,6 +765,20 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	return stateVersion
 }
 
+// AttestationDueMs returns the attestation deadline in milliseconds from slot start.
+func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
+	if b == nil || b.SecondsPerSlot == 0 {
+		return 0
+	}
+	if gloas {
+		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
+	}
+	if b.IntervalsPerSlot == 0 {
+		return 0
+	}
+	return b.SecondsPerSlot * 1000 / b.IntervalsPerSlot
+}
+
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
