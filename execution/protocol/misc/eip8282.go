@@ -26,8 +26,9 @@ import (
 )
 
 // TODO(EIP-8282): Define final compiled contract bytecodes here when finalized:
-// var builderDepositRequestCode = []byte{...}
-// var builderExitRequestCode = []byte{...}
+var BuilderDepositRequestCode = []byte{}
+var BuilderExitRequestCode = []byte{}
+
 
 // https://eips.ethereum.org/EIPS/eip-8282
 func DequeueBuilderDepositRequests(syscall rules.SystemCall, state *state.IntraBlockState, builderDepositAddress accounts.Address) (*types.FlatRequest, error) {
