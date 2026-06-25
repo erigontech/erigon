@@ -281,6 +281,9 @@ func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateV
 			if err := out.Consolidations.DecodeSSZ(data, int(version)); err != nil {
 				return nil, err
 			}
+		case types.BuilderDepositRequestType, types.BuilderExitRequestType:
+			// EIP-8282 requests are not part of the consensus-layer ExecutionRequests SSZ container.
+			// They are handled separately and ignored here to prevent SSZ encoding errors.
 		default:
 			return nil, fmt.Errorf("unknown execution request type %d", request[0])
 		}
