@@ -24,6 +24,13 @@ import (
 
 // go test -trimpath -v -fuzz=FuzzLongestMatch -fuzztime=10s ./patricia
 
+type oracleNode struct {
+	next  map[byte]*oracleNode
+	isKey bool
+}
+
+func newOracleNode() *oracleNode { return &oracleNode{next: make(map[byte]*oracleNode)} }
+
 func FuzzLongestMatch(f *testing.F) {
 	f.Fuzz(func(t *testing.T, build []byte, test []byte) {
 		keyMap := make(map[string][]byte)
@@ -63,16 +70,34 @@ func FuzzLongestMatch(f *testing.F) {
 				data = append(data, key[len(key)-1-j])
 			}
 		}
-		// Brute-force oracle: longest dictionary key at each position, then drop
-		// matches subsumed by an earlier, further-reaching one (the maximal set).
+		// Validate AC against an independent trie oracle; the walk is
+		// O(len(data)*maxKeyLen) so the fuzzer can't drive it to a timeout.
+		oracleRoot := newOracleNode()
+		for key := range keyMap {
+			nd := oracleRoot
+			for j := 0; j < len(key); j++ {
+				c := nd.next[key[j]]
+				if c == nil {
+					c = newOracleNode()
+					nd.next[key[j]] = c
+				}
+				nd = c
+			}
+			nd.isKey = true
+		}
 		var oracle Matches
 		lastEnd := 0
 		for s := 0; s < len(data); s++ {
 			best := 0
-			for key := range keyMap {
-				kl := len(key)
-				if kl > best && s+kl <= len(data) && string(data[s:s+kl]) == key {
-					best = kl
+			nd := oracleRoot
+			for d := 0; s+d < len(data); d++ {
+				c := nd.next[data[s+d]]
+				if c == nil {
+					break
+				}
+				nd = c
+				if nd.isKey {
+					best = d + 1
 				}
 			}
 			if best > 0 && s+best > lastEnd {
