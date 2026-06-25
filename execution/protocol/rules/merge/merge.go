@@ -192,7 +192,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
-		rs = make(types.FlatRequests, 0, 3) // deposit, withdrawal, consolidation
+		cap := 3
+		if config.IsAmsterdam(header.Time) {
+			cap = 5
+		}
+		rs = make(types.FlatRequests, 0, cap) // deposit, withdrawal, consolidation, plus builder_deposit, builder_exit if Amsterdam is active
 
 		// Try to reuse buffer, fall back to allocation if concurrent access
 		var allLogs types.Logs
