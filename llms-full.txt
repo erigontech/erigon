@@ -7298,7 +7298,7 @@ curl -X POST http://localhost:8545 \
 URL: https://docs.erigon.tech/interacting-with-erigon/graphql
 
 
-Erigon implements the standard Ethereum GraphQL interface defined in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767), following the same schema as Geth.
+Erigon implements the Ethereum GraphQL interface originally introduced in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767). The schema is maintained in the [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis) repository, kept in sync with client implementations such as Geth and Besu. Erigon follows that schema.
 
 ## Enabling GraphQL
 
