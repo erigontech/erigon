@@ -6,15 +6,11 @@ env:
   # Pinned versions of third-party containers — bump here when upgrading.
   # These are cached via actions/cache (docker save/load) to avoid re-pulling
   # on every run and to eliminate Docker Hub rate-limit exposure.
-  LIGHTHOUSE_IMAGE: "sigp/lighthouse:v8.1.3"
-  # Validator-client image for caplin-minimal, pinned to v7.0.1 in
-  # caplin-minimal-assertoor.io (distinct from the v8.1.3 beacon image above).
-  LIGHTHOUSE_VC_IMAGE: "sigp/lighthouse:v7.0.1"
-  TEKU_IMAGE: "consensys/teku:26.4.0"
-  # ASSERTOOR_IMAGE / ASSERTOOR_PECTRA_IMAGE / ASSERTOOR_GLAMSTERDAM_IMAGE are loaded
-  # at job start from regular-assertoor.io / pectra.io / glamsterdam.io (single source
-  # of truth) by the "Load assertoor versions" step, so they can't drift from what
-  # kurtosis runs.
+  # LIGHTHOUSE_IMAGE, TEKU_IMAGE, LIGHTHOUSE_VC_IMAGE and the ASSERTOOR_* tags are
+  # loaded at job start from the suite .io files (single source of truth) by the
+  # "Load image versions" step, so they can't drift from what kurtosis runs. The
+  # images defined below aren't pinned in any .io (genesis-generator is the
+  # ethereum-package default; eth2-val-tools/python are internals), so they stay here.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -202,15 +198,22 @@ jobs:
         with:
           sparse-checkout: .github/workflows/kurtosis
 
-      - name: Load assertoor versions from the .io files (single source of truth)
+      - name: Load image versions from the .io files (single source of truth)
         run: |
-          assertoor=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/regular-assertoor.io)
+          reg=.github/workflows/kurtosis/regular-assertoor.io
+          assertoor=$(yq -e '.assertoor_params.image' "$reg")
           pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
           glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
+          teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
+            echo "LIGHTHOUSE_IMAGE=$lighthouse"
+            echo "TEKU_IMAGE=$teku"
+            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
 
       - name: Check whether third-party containers are already cached
@@ -391,15 +394,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
-      - name: Load assertoor versions from the .io files (single source of truth)
+      - name: Load image versions from the .io files (single source of truth)
         run: |
-          assertoor=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/regular-assertoor.io)
+          reg=.github/workflows/kurtosis/regular-assertoor.io
+          assertoor=$(yq -e '.assertoor_params.image' "$reg")
           pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
           glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
+          teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
+            echo "LIGHTHOUSE_IMAGE=$lighthouse"
+            echo "TEKU_IMAGE=$teku"
+            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
 
       - name: Restore cached third-party containers
