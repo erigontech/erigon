@@ -162,21 +162,10 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
-		tx.ChainID,
-		tx.NonceKey, tx.Nonce,
-		tx.SenderAddress, tx.SenderValidationData,
-		tx.Deployer, tx.DeployerData,
-		tx.Paymaster, tx.PaymasterData,
-		tx.ExecutionData,
-		tx.BuilderFee,
-		tx.Tip, tx.FeeCap,
-		tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.PostOpGasLimit,
-		tx.GasLimit,
-		tx.AccessList,
-		tx.Authorizations,
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	hash := prefixedPayloadHash(AccountAbstractionTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
 	})
-
 	tx.hash.Store(&hash)
 	return hash
 }

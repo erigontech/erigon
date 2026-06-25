@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
@@ -319,6 +320,57 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	return nil
 }
 
+// ExpandShortenedKeysInBranch expands shortened key references (file offsets) in branch data back
+// to full plain keys by looking them up in the supplied account and storage domain files.
+//
+// This is the read-side counterpart of commitmentValTransformDomain. It assumes the caller has
+// already checked the prerequisites (non-empty branch, not KeyCommitmentState, ReplaceKeysInValues
+// enabled, threshold-reached range): expansion is unconditional. The caller is also responsible
+// for emitting per-key debug metrics; this function intentionally does not so that offline tools
+// like the commitment converter can reuse it without coupling to read-path observability.
+//
+// Plain-keyed entries (address: 20 bytes; address+slot: 52 bytes) are returned as nil so
+// BranchData.ReplacePlainKeys keeps the original bytes. A lookup miss returns an error naming
+// the offending shortened key.
+func ExpandShortenedKeysInBranch(
+	branch commitment.BranchData,
+	accounts, storage *DomainRoTx,
+	accountFile, storageFile *FilesItem,
+	startTxNum, endTxNum uint64,
+) (commitment.BranchData, error) {
+	storageGetter := storage.dataReader(storageFile.decompressor)
+	accountGetter := accounts.dataReader(accountFile.decompressor)
+	logger := log.Root()
+	stepSize := accounts.d.stepSize
+
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil, nil // not a referenced key, keep as is
+			}
+			storagePlainKey, found := storage.lookupByShortenedKey(key, storageGetter)
+			if !found {
+				s0, s1 := startTxNum/stepSize, endTxNum/stepSize
+				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			return storagePlainKey, nil
+		}
+		if len(key) == length.Addr {
+			return nil, nil // not a referenced key, keep as is
+		}
+		apkBuf, found := accounts.lookupByShortenedKey(key, accountGetter)
+		if !found {
+			s0, s1 := startTxNum/stepSize, endTxNum/stepSize
+			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		return apkBuf, nil
+	})
+}
+
 func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
@@ -476,10 +528,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
 	rebuildCfg := commitment.DefaultTrieConfig()
 	rebuildCfg.Variant = execctx.PickTrieVariant()
-	rebuildCfg.EnableWarmupCache = useWarmupCache
 	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(rebuildCfg))
 	if err != nil {
 		return nil, err
@@ -518,8 +568,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize,
-			"warmupCache", useWarmupCache)
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize)
 	}
 	var totalKeysProcessed uint64
 	var rh []byte
@@ -533,14 +582,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
 			"memBatchSize", common.ByteCount(domains.Size()), "root", hex.EncodeToString(rh))
 
-		if err := domains.Flush(ctx, rwTx); err != nil {
+		if err := domains.Commit(ctx, rwTx); err != nil {
 			return err
 		}
 		domains.Close()
-
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
@@ -586,7 +631,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		flushCfg := commitment.DefaultTrieConfig()
 		flushCfg.Variant = execctx.PickTrieVariant()
-		flushCfg.EnableWarmupCache = useWarmupCache
 		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(flushCfg))
 		if err != nil {
 			return err
@@ -701,11 +745,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						return err
 					}
 				}
-				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
+				// Set correct state reader before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
-				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}
 			var domain kv.Domain
@@ -887,7 +930,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
-	rebuildTrieCfg.EnableWarmupCache = false
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
@@ -961,9 +1003,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
+		streaming := statecfg.ExperimentalStreamingCommitment
+		parallel := statecfg.ExperimentalParallelCommitment
 		concurrent := statecfg.ExperimentalConcurrentCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
-		if concurrent {
+		switch {
+		case streaming:
+			trieVariant = commitment.VariantStreamingHexPatricia
+		case parallel:
+			trieVariant = commitment.VariantParallelHexPatricia
+		case concurrent:
 			trieVariant = commitment.VariantConcurrentHexPatricia
 		}
 
@@ -1000,7 +1049,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if concurrent {
+			if concurrent || parallel || streaming {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
