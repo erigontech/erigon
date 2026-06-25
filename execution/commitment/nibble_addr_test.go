@@ -51,12 +51,15 @@ var (
 // seed controls the starting point for the search; each unique seed produces
 // a different address. Results are cached globally.
 func findAddressForNibble(targetNibble int, seed int) []byte {
+	if targetNibble < 0 || targetNibble > 0xf {
+		panic(fmt.Sprintf("findAddressForNibble: nibble %d out of range [0,15]", targetNibble))
+	}
 	key := nibbleSeedKey{targetNibble, seed}
 
 	nibbleAddressCacheMu.Lock()
 	if cached, ok := nibbleAddressCache[key]; ok {
 		nibbleAddressCacheMu.Unlock()
-		return cached
+		return append([]byte(nil), cached...) // copy so callers can't mutate the shared cache
 	}
 	nibbleAddressCacheMu.Unlock()
 
@@ -75,7 +78,7 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 			nibbleAddressCacheMu.Lock()
 			nibbleAddressCache[key] = result
 			nibbleAddressCacheMu.Unlock()
-			return result
+			return append([]byte(nil), result...)
 		}
 		counter++
 	}
