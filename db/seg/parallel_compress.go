@@ -439,10 +439,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 					break outer
 				}
 			}
-			// take processed words in blocking way until either:
-			// 1. compressionQueue is below the limit so that new words can be allocated
-			// 2. there is word in order on top of the queue which can be written down and reused
-			for compressionQueue.Len() >= queueLimit && compressionQueue[0].order < outCount {
+			// Over the queue limit and the next-to-write word hasn't come back yet:
+			// block draining results until it arrives, instead of allocating more work.
+			for compressionQueue.Len() >= queueLimit && compressionQueue[0].order > outCount {
 				// Blocking wait to receive some outputs until the top of queue can be processed
 				batch := <-out
 				for _, w := range batch {
