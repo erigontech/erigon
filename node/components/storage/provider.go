@@ -1669,6 +1669,19 @@ func (p *Provider) BlockAligned() bool {
 	return p.blockAlignedBoundaries
 }
 
+// BlockBuildFiles toggles the aggregator's gate on
+// buildFilesInBackground. setHeadModeB sets it true before
+// Provider.Unwind and clears it in deferred cleanup so the per-step
+// file build cannot race the unwind tx and write narrow files that
+// overlap the pre-mode-B broad boundary file. No-op when the
+// Provider has no Aggregator wired (harness paths).
+func (p *Provider) BlockBuildFiles(v bool) {
+	if p == nil || p.Aggregator == nil {
+		return
+	}
+	p.Aggregator.SetUnwindInProgress(v)
+}
+
 // RestartOpts configures a Provider.Restart cycle. Reason is a
 // short free-form diagnostic string carried in the RestartBegin
 // event (e.g. "adoption-cutover", "fork-from-bootstrap").

@@ -67,4 +67,11 @@ type StateAggregator interface {
 	// calls this directly. Anything added to (*Aggregator).Unwind
 	// applies to both unwind paths automatically.
 	Unwind(txN uint64)
+
+	// SetUnwindInProgress gates buildFilesInBackground from running
+	// during a mode-B unwind. setHeadModeB sets true before
+	// Provider.Unwind and clears it in deferred cleanup so the
+	// per-step file build cannot race the unwind and write narrow
+	// files that overlap the pre-mode-B broad boundary file.
+	SetUnwindInProgress(v bool)
 }

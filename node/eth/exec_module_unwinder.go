@@ -56,3 +56,5 @@ func (a providerUnwinderAdapter) Unwind(ctx context.Context, toBlock uint64, arg
 func (a providerUnwinderAdapter) FinalizeUnwind() error { return a.p.FinalizeUnwind() }
 
 func (a providerUnwinderAdapter) AbortUnwind() { a.p.AbortUnwind() }
+
+func (a providerUnwinderAdapter) BlockBuildFiles(v bool) { a.p.BlockBuildFiles(v) }

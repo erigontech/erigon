@@ -93,6 +93,13 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	// unwindInProgress gates buildFilesInBackground from running during a
+	// mode-B unwind. Set true by setHeadModeB before Provider.Unwind, cleared
+	// in deferred cleanup. While set, buildFilesInBackground short-circuits —
+	// narrow per-step files cannot race against the in-flight unwind tx and
+	// pollute the visibility set against the pre-mode-B broad boundary file.
+	unwindInProgress atomic.Bool
+
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -2092,6 +2099,15 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
+// SetUnwindInProgress is the gate setHeadModeB uses to suppress
+// buildFilesInBackground during a mode-B unwind tx window. While set,
+// buildFilesInBackground returns immediately without collating or
+// writing any per-step files — preventing narrow files from racing
+// the unwind and overlapping the pre-mode-B broad boundary file.
+func (a *Aggregator) SetUnwindInProgress(v bool) {
+	a.unwindInProgress.Store(v)
+}
+
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
@@ -2107,6 +2123,16 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 
 	if !a.produce {
 		a.logger.Debug("[snapshots] buildFiles: produce=false")
+		close(fin)
+		return fin
+	}
+
+	// Gate: skip while a mode-B unwind is in progress so the build doesn't
+	// race the unwind tx and write narrow per-step files that overlap the
+	// pre-mode-B broad boundary file. setHeadModeB sets the flag before
+	// Provider.Unwind and clears it in deferred cleanup.
+	if a.unwindInProgress.Load() {
+		a.logger.Debug("[snapshots] buildFiles: skipped (mode-B unwind in progress)")
 		close(fin)
 		return fin
 	}

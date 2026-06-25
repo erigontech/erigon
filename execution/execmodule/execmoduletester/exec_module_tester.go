@@ -1062,3 +1062,5 @@ func (a testProviderUnwinder) Unwind(ctx context.Context, toBlock uint64, args e
 func (a testProviderUnwinder) FinalizeUnwind() error { return a.p.FinalizeUnwind() }
 
 func (a testProviderUnwinder) AbortUnwind() { a.p.AbortUnwind() }
+
+func (a testProviderUnwinder) BlockBuildFiles(v bool) { a.p.BlockBuildFiles(v) }

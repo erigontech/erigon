@@ -562,6 +562,38 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	}
 }
 
+// TestAggregator_BuildFilesInBackground_SkippedWhenUnwindInProgress pins
+// the mode-B gate: while SetUnwindInProgress(true) is set, the async
+// per-step file build must short-circuit before collating. Without
+// this, narrow per-step files race the unwind tx and overlap the
+// pre-mode-B broad boundary file in the visibility set, surfacing as
+// wrong-trie-root ~209 blocks past the unwind target during forward
+// exec.
+func TestAggregator_BuildFilesInBackground_SkippedWhenUnwindInProgress(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	// Seed enough history that buildFilesInBackground would normally
+	// produce a step-0 file: a key at txNum 1 in step 0 plus a key at
+	// txNum 11 in step 1 so visMin lands below step 1 and the loop
+	// would otherwise iterate.
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 1, []byte("k0"))
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 11, []byte("k1"))
+
+	agg.SetUnwindInProgress(true)
+	fin := agg.BuildFilesInBackground(2 * stepSize)
+	<-fin
+	agg.SetUnwindInProgress(false)
+
+	files, err := dir.ListFiles(agg.Dirs().SnapDomain, ".kv")
+	require.NoError(t, err)
+	for _, f := range files {
+		require.NotContains(t, f, "-accounts.0-",
+			"buildFilesInBackground must not produce any accounts file while SetUnwindInProgress(true); got %s", f)
+	}
+}
+
 // TestAggregator_BuildFiles_EmptyStepOK verifies the corollary: on a fresh
 // datadir (no pre-existing snapshot files) where MDBX happens to have no
 // history at step 0 but does at a later step, the aggregator is allowed to

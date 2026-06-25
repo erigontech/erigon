@@ -46,7 +46,8 @@ func (stubAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwT
 func (stubAggregator) DomainCompression(_ kv.Domain) seg.FileCompression {
 	return seg.CompressNone
 }
-func (stubAggregator) Unwind(_ uint64) {}
+func (stubAggregator) Unwind(_ uint64)            {}
+func (stubAggregator) SetUnwindInProgress(_ bool) {}
 
 // TestCollectFilesPastBlock_StraddleFileSurvives pins the contract
 // that fixed live-rig issue #2 from the 2026-06-01 cycle: the block

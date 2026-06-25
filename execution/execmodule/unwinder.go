@@ -83,6 +83,15 @@ type Unwinder interface {
 	//
 	// Safe to call when nothing is staged.
 	AbortUnwind()
+
+	// BlockBuildFiles toggles the aggregator's gate on
+	// buildFilesInBackground. setHeadModeB sets it true before
+	// Provider.Unwind and clears it in deferred cleanup so the
+	// background per-step file build cannot race the unwind tx and
+	// produce narrow files that overlap the pre-mode-B broad
+	// boundary file. No-op when the Unwinder has no aggregator
+	// handle (harness paths).
+	BlockBuildFiles(v bool)
 }
 
 // Reference rules.EngineReader to keep the import used until / unless we

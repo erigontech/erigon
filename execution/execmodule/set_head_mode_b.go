@@ -60,6 +60,16 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	e.adminUnwindInProgress.Store(true)
 	defer e.adminUnwindInProgress.Store(false)
 
+	// Gate buildFilesInBackground for the full mode-B window. Without
+	// this, the async per-step file builder races the unwind tx and
+	// writes narrow .kv files that overlap the pre-mode-B broad
+	// boundary file — the aggregator's visibility set then serves
+	// reads from a mix, producing wrong-trie-root ~209 blocks past
+	// the unwind target. quiesceRetireIfPastTarget below only covers
+	// BlockRetire; this gate covers state-domain file build.
+	e.unwinder.BlockBuildFiles(true)
+	defer e.unwinder.BlockBuildFiles(false)
+
 	// Cancel any in-flight BlockRetire whose range crosses
 	// targetBlock — that work is, by definition, producing
 	// snapshot/.idx files for blocks the unwind is about to
