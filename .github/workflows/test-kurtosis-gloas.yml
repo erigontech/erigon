@@ -3,8 +3,10 @@ name: Kurtosis GLOAS Tests
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   APP_REPO: "erigontech/erigon"
-  LIGHTHOUSE_IMAGE: "sigp/lighthouse:v7.0.1"
-  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.1.2"
+  # Pinned to match the gloas-*.io assertoor (pre-EIP-8282); bump with those and #22008.
+  # The lighthouse/prysm glamsterdam-devnet images are mutable tags, so they're pulled
+  # live (not cached) to avoid serving a stale client.
+  ASSERTOOR_IMAGE: "ethpandaops/assertoor:master-2231b3e"
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -26,6 +28,12 @@ env:
   # Cached and pre-loaded so buildx can fall back to the local copy when its
   # Docker Hub pull fails.
   BUILDKIT_IMAGE: "moby/buildkit:v0.30.0"
+  # ethereum-package machinery pulled during `kurtosis run` (genesis, validator
+  # keystores, helpers); cached so a Docker Hub blip there can't fail the run.
+  GENESIS_GENERATOR_IMAGE: "ethpandaops/ethereum-genesis-generator:5.3.5"
+  # eth2-val-tools publishes only :latest (like curl-jq above); cache serves the last-warmed digest.
+  ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
+  ETHEREUM_PACKAGE_PYTHON_IMAGE: "python:3.11-alpine"
 
 on:
   pull_request:
@@ -83,7 +91,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -98,7 +106,6 @@ jobs:
             done
             return 1
           }
-          pull "${LIGHTHOUSE_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
           pull "kurtosistech/engine:${KURTOSIS_VERSION}"
           pull "kurtosistech/core:${KURTOSIS_VERSION}"
@@ -108,7 +115,9 @@ jobs:
           pull "${KURTOSIS_CURL_JQ_IMAGE}"
           pull "${KURTOSIS_TRAEFIK_IMAGE}"
           pull "${KURTOSIS_ALPINE_IMAGE}"
-          docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          pull "${GENESIS_GENERATOR_IMAGE}"
+          pull "${ETH2_VAL_TOOLS_IMAGE}"
+          pull "${ETHEREUM_PACKAGE_PYTHON_IMAGE}"
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
           docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
@@ -118,13 +127,16 @@ jobs:
           docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
           docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
           docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
+          docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
+          docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
+          docker save "${ETHEREUM_PACKAGE_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -237,12 +249,11 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
         run: |
-          docker load -i /tmp/docker-cache/lighthouse.tar
           docker load -i /tmp/docker-cache/assertoor.tar
           docker load -i /tmp/docker-cache/kurtosis-engine.tar
           docker load -i /tmp/docker-cache/kurtosis-core.tar
@@ -252,6 +263,9 @@ jobs:
           docker load -i /tmp/docker-cache/curl-jq.tar
           docker load -i /tmp/docker-cache/traefik.tar
           docker load -i /tmp/docker-cache/alpine.tar
+          docker load -i /tmp/docker-cache/genesis-generator.tar
+          docker load -i /tmp/docker-cache/eth2-val-tools.tar
+          docker load -i /tmp/docker-cache/python.tar
 
       - name: Pull third-party containers and save to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
@@ -265,7 +279,6 @@ jobs:
             done
             return 1
           }
-          pull "${LIGHTHOUSE_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
           pull "kurtosistech/engine:${KURTOSIS_VERSION}"
           pull "kurtosistech/core:${KURTOSIS_VERSION}"
@@ -275,7 +288,9 @@ jobs:
           pull "${KURTOSIS_CURL_JQ_IMAGE}"
           pull "${KURTOSIS_TRAEFIK_IMAGE}"
           pull "${KURTOSIS_ALPINE_IMAGE}"
-          docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          pull "${GENESIS_GENERATOR_IMAGE}"
+          pull "${ETH2_VAL_TOOLS_IMAGE}"
+          pull "${ETHEREUM_PACKAGE_PYTHON_IMAGE}"
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
           docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
@@ -285,13 +300,16 @@ jobs:
           docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
           docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
           docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
+          docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
+          docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
+          docker save "${ETHEREUM_PACKAGE_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ETHEREUM_PACKAGE_PYTHON_IMAGE }}
 
       - name: Install Kurtosis CLI and start engine
         # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
