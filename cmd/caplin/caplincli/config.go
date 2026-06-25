@@ -59,6 +59,13 @@ type CaplinCliCfg struct {
 	AllowCredentials   bool     `json:"allow_credentials"`
 	SubscribeAllTopics bool     `json:"subscribe_all_topics"`
 
+	// ePBS builder
+	BuilderEnabled      bool           `json:"builder_enabled"`
+	BuilderKeyPath      string         `json:"builder_key_path"`
+	BuilderFeeRecipient common.Address `json:"builder_fee_recipient"`
+	BuilderBidMargin    float64        `json:"builder_bid_margin"`
+	BuilderMinProfit    string         `json:"builder_min_profit"`
+
 	Dirs datadir.Dirs
 }
 
@@ -110,6 +117,15 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	// Custom Chain
 	cfg.CustomConfig = ctx.String(caplinflags.CustomConfig.Name)
 	cfg.CustomGenesisState = ctx.String(caplinflags.CustomGenesisState.Name)
+
+	// ePBS builder
+	cfg.BuilderEnabled = ctx.Bool(utils.EpbsBuilderFlag.Name)
+	cfg.BuilderKeyPath = ctx.String(utils.EpbsBuilderKeyFlag.Name)
+	if ctx.IsSet(utils.EpbsBuilderFeeRecipientFlag.Name) {
+		cfg.BuilderFeeRecipient = common.HexToAddress(ctx.String(utils.EpbsBuilderFeeRecipientFlag.Name))
+	}
+	cfg.BuilderBidMargin = ctx.Float64(utils.EpbsBuilderBidMarginFlag.Name)
+	cfg.BuilderMinProfit = ctx.String(utils.EpbsBuilderMinProfitFlag.Name)
 
 	return cfg, err
 }

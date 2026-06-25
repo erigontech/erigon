@@ -11,9 +11,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -42,10 +44,11 @@ type pendingPayload struct {
 // SlotContext holds per-slot context that the caller provides to the builder loop.
 // This separates beacon state access (caller responsibility) from build logic.
 type SlotContext struct {
-	Slot       uint64
-	Parent     ParentInfo
-	Timestamp  uint64      // Unix timestamp for the slot (from ComputeTimestampAtSlot)
-	PrevRandao common.Hash // RANDAO mix for the current epoch
+	Slot        uint64
+	Parent      ParentInfo
+	Timestamp   uint64      // Unix timestamp for the slot (from ComputeTimestampAtSlot)
+	PrevRandao  common.Hash // RANDAO mix for the current epoch
+	Withdrawals []*types.Withdrawal
 }
 
 // BuilderLoop is the slot-driven build-bid-reveal core loop for the ePBS builder.
@@ -269,7 +272,7 @@ buildDone:
 		GasLimit:              assembled.Eth1Block.GasLimit,
 		BuilderIndex:          bidBuilderIndex,
 		Value:                 new(big.Int).Div(bidAmount, big.NewInt(weiPerGwei)).Uint64(), // consensus uses Gwei
-		ExecutionPayment:      0, // per spec: builder pays nothing in ePBS
+		ExecutionPayment:      0,                                                            // per spec: builder pays nothing in ePBS
 		BlobKzgCommitments:    *blobCommitments,
 		ExecutionRequestsRoot: execReqsRoot,
 	}
@@ -348,8 +351,13 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		return fmt.Errorf("epbs/loop: sign envelope: %w", err)
 	}
 
+	columnSidecars, err := buildDataColumnSidecars(pending.assembled.BlobsBundle, slot, beaconBlockRoot)
+	if err != nil {
+		return fmt.Errorf("epbs/loop: data column sidecars: %w", err)
+	}
+
 	// Broadcast
-	if err := l.submitter.BroadcastPayload(ctx, signedEnvelope); err != nil {
+	if err := l.submitter.BroadcastPayload(ctx, signedEnvelope, columnSidecars); err != nil {
 		return fmt.Errorf("epbs/loop: broadcast payload: %w", err)
 	}
 
@@ -360,6 +368,26 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 	)
 
 	return nil
+}
+
+func buildDataColumnSidecars(blobsBundle *eladapter.BlobsBundle, slot uint64, beaconBlockRoot common.Hash) ([]*cltypes.DataColumnSidecar, error) {
+	if blobsBundle == nil || len(blobsBundle.Blobs) == 0 {
+		return nil, nil
+	}
+
+	cellsAndProofsPerBlob := make([]peerdasutils.CellsAndKZGProofs, 0, len(blobsBundle.Blobs))
+	for i, blob := range blobsBundle.Blobs {
+		cells, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob)
+		if err != nil {
+			return nil, fmt.Errorf("blob %d: %w", i, err)
+		}
+		cellsAndProofsPerBlob = append(cellsAndProofsPerBlob, peerdasutils.CellsAndKZGProofs{
+			Blobs:  cells,
+			Proofs: proofs,
+		})
+	}
+
+	return peerdasutils.GetDataColumnSidecarsGloas(slot, beaconBlockRoot, cellsAndProofsPerBlob)
 }
 
 // buildParams constructs EL builder.Parameters from a SlotContext.
@@ -375,6 +403,7 @@ func (l *BuilderLoop) buildParams(sc SlotContext) *builder.Parameters {
 		SuggestedFeeRecipient: common.Address{}, // will be overridden by prefs if available
 		ParentBeaconBlockRoot: &beaconBlockRoot,
 		SlotNumber:            &slotNum,
+		Withdrawals:           sc.Withdrawals,
 	}
 }
 

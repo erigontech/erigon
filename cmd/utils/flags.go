@@ -268,6 +268,30 @@ var (
 		Usage: "Cap the number of blob transactions included in a built block",
 	}
 
+	// ePBS builder flags
+	EpbsBuilderFlag = cli.BoolFlag{
+		Name:  "builder",
+		Usage: "Enable ePBS builder mode (EIP-7732 GLOAS)",
+	}
+	EpbsBuilderKeyFlag = cli.StringFlag{
+		Name:  "builder.key",
+		Usage: "Path to BLS secret key file for ePBS builder identity",
+	}
+	EpbsBuilderFeeRecipientFlag = cli.StringFlag{
+		Name:  "builder.fee-recipient",
+		Usage: "Default fee recipient address for ePBS builder payments",
+	}
+	EpbsBuilderBidMarginFlag = cli.Float64Flag{
+		Name:  "builder.bid-margin",
+		Usage: "Fraction of block value to bid (e.g. 0.85 = bid 85%, keep 15% profit)",
+		Value: 0.85,
+	}
+	EpbsBuilderMinProfitFlag = cli.StringFlag{
+		Name:  "builder.min-profit",
+		Usage: "Minimum profit in wei to submit a bid (default: 0)",
+		Value: "0",
+	}
+
 	VMEnableDebugFlag = cli.BoolFlag{
 		Name:  "vmdebug",
 		Usage: "Record information useful for VM and contract debugging",
@@ -1846,6 +1870,20 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
 	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
+
+	// ePBS builder
+	cfg.CaplinConfig.EpbsBuilder.Enabled = ctx.Bool(EpbsBuilderFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
+	if ctx.IsSet(EpbsBuilderFeeRecipientFlag.Name) {
+		cfg.CaplinConfig.EpbsBuilder.FeeRecipient = common.HexToAddress(ctx.String(EpbsBuilderFeeRecipientFlag.Name))
+	}
+	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
+	if ctx.IsSet(EpbsBuilderMinProfitFlag.Name) {
+		profit, ok := new(big.Int).SetString(ctx.String(EpbsBuilderMinProfitFlag.Name), 10)
+		if ok {
+			cfg.CaplinConfig.EpbsBuilder.MinProfit = profit
+		}
+	}
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was

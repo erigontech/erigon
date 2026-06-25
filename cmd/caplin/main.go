@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 
 	"github.com/c2h5oh/datasize"
@@ -26,6 +27,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -35,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -107,6 +110,21 @@ func runCaplinNode(cliCtx *cli.Context) error {
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
+	builderCfg := epbscfg.DefaultConfig()
+	builderCfg.Enabled = cfg.BuilderEnabled
+	builderCfg.KeyPath = cfg.BuilderKeyPath
+	builderCfg.FeeRecipient = cfg.BuilderFeeRecipient
+	builderCfg.BidMargin = cfg.BuilderBidMargin
+	if cfg.BuilderMinProfit != "" {
+		if v, ok := new(big.Int).SetString(cfg.BuilderMinProfit, 10); ok {
+			builderCfg.MinProfit = v
+		}
+	}
+	// Keep the explicitly-set fee recipient; otherwise leave zero (will use proposer prefs).
+	if cfg.BuilderFeeRecipient != (common.Address{}) {
+		builderCfg.FeeRecipient = cfg.BuilderFeeRecipient
+	}
+
 	return caplin1.RunCaplinService(ctx, executionEngine, clparams.CaplinConfig{
 		CaplinDiscoveryAddr:       cfg.Addr,
 		CaplinDiscoveryPort:       uint64(cfg.Port),
@@ -123,5 +141,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		MaxOutboundTrafficPerPeer: datasize.MB,
 		BootstrapNodes:            cfg.Bootnodes,
 		StaticPeers:               cfg.StaticPeers,
+		EpbsBuilder:               builderCfg,
 	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema, nil)
 }

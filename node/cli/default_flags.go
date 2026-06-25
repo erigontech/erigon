@@ -235,6 +235,12 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,
+
+	&utils.EpbsBuilderFlag,
+	&utils.EpbsBuilderKeyFlag,
+	&utils.EpbsBuilderFeeRecipientFlag,
+	&utils.EpbsBuilderBidMarginFlag,
+	&utils.EpbsBuilderMinProfitFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
 	&utils.CaplinUseEngineApiFlag,

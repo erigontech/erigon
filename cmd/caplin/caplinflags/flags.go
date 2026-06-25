@@ -43,6 +43,11 @@ var CliFlags = []cli.Flag{
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinMaxPeerCount,
 	&utils.CaplinSubscribeAllTopicsFlag,
+	&utils.EpbsBuilderFlag,
+	&utils.EpbsBuilderKeyFlag,
+	&utils.EpbsBuilderFeeRecipientFlag,
+	&utils.EpbsBuilderBidMarginFlag,
+	&utils.EpbsBuilderMinProfitFlag,
 }
 
 var (

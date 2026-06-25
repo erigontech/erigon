@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,6 +70,7 @@ type mockBidSubmitter struct {
 	mu            sync.Mutex
 	submittedBids []*cltypes.SignedExecutionPayloadBid
 	broadcasts    []*cltypes.SignedExecutionPayloadEnvelope
+	sidecars      [][]*cltypes.DataColumnSidecar
 	submitBidErr  error
 	broadcastErr  error
 }
@@ -83,13 +85,14 @@ func (s *mockBidSubmitter) SubmitBid(_ context.Context, bid *cltypes.SignedExecu
 	return nil
 }
 
-func (s *mockBidSubmitter) BroadcastPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (s *mockBidSubmitter) BroadcastPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, columnSidecars []*cltypes.DataColumnSidecar) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.broadcastErr != nil {
 		return s.broadcastErr
 	}
 	s.broadcasts = append(s.broadcasts, envelope)
+	s.sidecars = append(s.sidecars, columnSidecars)
 	return nil
 }
 
@@ -315,6 +318,8 @@ func TestBuilderLoop_BidWonReveal(t *testing.T) {
 	submitter.mu.Lock()
 	require.Len(t, submitter.broadcasts, 1)
 	envelope := submitter.broadcasts[0]
+	require.Len(t, submitter.sidecars, 1)
+	require.Empty(t, submitter.sidecars[0])
 	submitter.mu.Unlock()
 
 	require.NotNil(t, envelope.Message)
@@ -336,6 +341,25 @@ func TestBuilderLoop_BidWonReveal_NoPending(t *testing.T) {
 	err := loop.OnBidWon(ctx, 100, 42, common.HexToHash("0xdead"), common.HexToHash("0xbeef"), common.HexToHash("0xaabb"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no pending payload")
+}
+
+func TestBuildDataColumnSidecars_EmptyBundle(t *testing.T) {
+	sidecars, err := buildDataColumnSidecars(nil, 100, common.HexToHash("0xbeef"))
+	require.NoError(t, err)
+	require.Empty(t, sidecars)
+
+	sidecars, err = buildDataColumnSidecars(&eladapter.BlobsBundle{}, 100, common.HexToHash("0xbeef"))
+	require.NoError(t, err)
+	require.Empty(t, sidecars)
+}
+
+func TestBuildDataColumnSidecars_InvalidBlob(t *testing.T) {
+	sidecars, err := buildDataColumnSidecars(&eladapter.BlobsBundle{
+		Blobs: [][]byte{{0x01, 0x02}},
+	}, 100, common.HexToHash("0xbeef"))
+	require.Error(t, err)
+	require.Nil(t, sidecars)
+	require.Contains(t, err.Error(), "blob 0")
 }
 
 func TestBuilderLoop_BidWonReveal_WrongBuilder(t *testing.T) {
@@ -413,6 +437,17 @@ func TestBuilderLoop_BidFields(t *testing.T) {
 	require.NotNil(t, &bid.BlobKzgCommitments)
 	// ExecutionRequestsRoot should be a valid hash (at least non-panic for empty requests)
 	require.NotEqual(t, common.Hash{}, bid.ExecutionRequestsRoot)
+}
+
+func TestBuildParams_CarriesWithdrawals(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	sc := testSlotContext()
+	sc.Withdrawals = []*types.Withdrawal{
+		{Index: 1, Validator: 2, Amount: 3, Address: common.HexToAddress("0x1234")},
+	}
+
+	params := loop.buildParams(sc)
+	require.Equal(t, sc.Withdrawals, params.Withdrawals)
 }
 
 func TestPreferencesWatcher_Timeout(t *testing.T) {
@@ -642,7 +677,7 @@ func TestBuilderLoop_FastPath_FeeRecipientMismatch(t *testing.T) {
 	submitter.mu.Unlock()
 }
 
-/// TestBuilderLoop_FastPath_GasLimitMismatch verifies that when a speculative
+// TestBuilderLoop_FastPath_GasLimitMismatch verifies that when a speculative
 // build exists but the gas limit doesn't match proposer preferences, the builder
 // falls through to the rebuild path. Without this, gossip validation would reject
 // the bid (execution_payload_bid_service.go requires bid.gas_limit == prefs.gas_limit).
@@ -666,7 +701,7 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // zero = no FeeRecipient constraint
-			GasLimit:       50_000_000,        // different from speculative build
+			GasLimit:       50_000_000,       // different from speculative build
 		},
 	}
 
