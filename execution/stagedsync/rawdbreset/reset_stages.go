@@ -108,7 +108,7 @@ func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwD
 	})
 }
 
-func ResetBlocks(tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(db kv.RwDB, tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -139,7 +139,7 @@ func ResetBlocks(tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWrite
 	}
 
 	// ensure no garbage records left (it may happen if db is inconsistent)
-	if err := bw.TruncateBodies(tx, 2); err != nil {
+	if err := bw.TruncateBodies(db, tx, 2); err != nil {
 		return err
 	}
 

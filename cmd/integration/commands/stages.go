@@ -379,7 +379,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := rawdbreset.ResetBlocks(tx, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -434,7 +434,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := rawdbreset.ResetBlocks(tx, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -501,7 +501,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 
 	if reset {
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return rawdbreset.ResetBlocks(tx, br, bw, dirs, logger)
+			return rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger)
 		})
 	}
 
@@ -805,16 +805,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 		txNum := doms.TxNum()
 		doms.ClearRam(true)
-		if !noCommit {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 
-			agg.BuildFilesInBackground(txNum)
+		agg.BuildFilesInBackground(txNum)
 
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
+		if tx, err = db.BeginTemporalRw(ctx); err != nil {
+			return err
 		}
 
 		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
