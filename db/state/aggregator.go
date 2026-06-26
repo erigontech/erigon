@@ -93,11 +93,9 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
-	// unwindInProgress gates buildFilesInBackground from running during a
-	// mode-B unwind. Set true by setHeadModeB before Provider.Unwind, cleared
-	// in deferred cleanup. While set, buildFilesInBackground short-circuits —
-	// narrow per-step files cannot race against the in-flight unwind tx and
-	// pollute the visibility set against the pre-mode-B broad boundary file.
+	// unwindInProgress gates buildFilesInBackground + mergeLoop during a
+	// mode-B unwind tx: locally-produced files at overlapping ranges would
+	// pollute the visibility set against the pre-unwind boundary file.
 	unwindInProgress atomic.Bool
 
 	//warmupWorking          atomic.Bool
@@ -1228,14 +1226,9 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
-	// Mode-B unwind gate: same as buildFilesInBackground. mergeLoop is
-	// spawned from inside buildFilesInBackground after a successful
-	// build; if mode-B starts while that goroutine is still in flight,
-	// the gate at buildFilesInBackground's entry already missed it. The
-	// merge produces wider files (e.g. v2.0-accounts.272-276.kv) that
-	// overlap the pre-mode-B broad boundary file, then forward exec
-	// reads through the overlapped visibility set and wedges with
-	// wrong-trie-root ~209 blocks past the target.
+	// Mode-B unwind gate: mergeLoop is spawned from inside
+	// buildFilesInBackground after a successful build, so a goroutine
+	// past the entry gate can still emit merged files mid-tx.
 	if a.unwindInProgress.Load() {
 		a.mergingFiles.Store(false)
 		a.logger.Debug("[snapshots] mergeLoop: skipped (mode-B unwind in progress)")
@@ -2112,21 +2105,16 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-// SetUnwindInProgress is the gate setHeadModeB uses to suppress
-// buildFilesInBackground + mergeLoop during a mode-B unwind tx window.
-// While set, both return immediately without writing any per-step
-// files — preventing narrow files from racing the unwind and
-// overlapping the pre-mode-B broad boundary file.
+// SetUnwindInProgress gates buildFilesInBackground + mergeLoop while a
+// mode-B unwind is running, so file production cannot pollute the
+// visibility set mid-tx.
 func (a *Aggregator) SetUnwindInProgress(v bool) {
 	a.unwindInProgress.Store(v)
 }
 
-// WaitForBuildAndMergeQuiescence blocks until any in-flight
-// buildFilesInBackground goroutine AND mergeLoop goroutine have
-// exited, or the timeout elapses. setHeadModeB calls this after
-// SetUnwindInProgress(true) so the gate's "no new builds" guarantee
-// extends to "no in-flight builds either" before Provider.Unwind
-// starts. Returns nil if quiescent, error on timeout.
+// WaitForBuildAndMergeQuiescence blocks until in-flight build/merge
+// goroutines exit or timeout. Paired with SetUnwindInProgress to close
+// the "goroutine past the entry gate" window.
 func (a *Aggregator) WaitForBuildAndMergeQuiescence(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -2158,10 +2146,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
-	// Gate: skip while a mode-B unwind is in progress so the build doesn't
-	// race the unwind tx and write narrow per-step files that overlap the
-	// pre-mode-B broad boundary file. setHeadModeB sets the flag before
-	// Provider.Unwind and clears it in deferred cleanup.
+	// Mode-B unwind gate: see SetUnwindInProgress.
 	if a.unwindInProgress.Load() {
 		a.logger.Debug("[snapshots] buildFiles: skipped (mode-B unwind in progress)")
 		close(fin)

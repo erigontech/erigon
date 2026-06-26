@@ -1669,12 +1669,8 @@ func (p *Provider) BlockAligned() bool {
 	return p.blockAlignedBoundaries
 }
 
-// BlockBuildFiles toggles the aggregator's gate on
-// buildFilesInBackground + mergeLoop. setHeadModeB sets it true
-// before Provider.Unwind and clears it in deferred cleanup so neither
-// build nor merge can race the unwind tx and write narrow files that
-// overlap the pre-mode-B broad boundary file. No-op when the
-// Provider has no Aggregator wired (harness paths).
+// BlockBuildFiles toggles the aggregator gate on background
+// build+merge for the mode-B unwind window. No-op without aggregator.
 func (p *Provider) BlockBuildFiles(v bool) {
 	if p == nil || p.Aggregator == nil {
 		return
@@ -1682,11 +1678,8 @@ func (p *Provider) BlockBuildFiles(v bool) {
 	p.Aggregator.SetUnwindInProgress(v)
 }
 
-// WaitForBuildAndMergeQuiescence blocks until any in-flight
-// buildFilesInBackground + mergeLoop goroutines exit. setHeadModeB
-// calls this AFTER BlockBuildFiles(true) so the "no new builds" gate
-// is combined with "no in-flight build" before Provider.Unwind starts.
-// No-op when the Provider has no Aggregator wired.
+// WaitForBuildAndMergeQuiescence blocks until in-flight build/merge
+// goroutines exit. No-op without aggregator.
 func (p *Provider) WaitForBuildAndMergeQuiescence(timeout time.Duration) error {
 	if p == nil || p.Aggregator == nil {
 		return nil

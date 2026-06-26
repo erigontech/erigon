@@ -85,18 +85,13 @@ type Unwinder interface {
 	// Safe to call when nothing is staged.
 	AbortUnwind()
 
-	// BlockBuildFiles toggles the aggregator's gate on
-	// buildFilesInBackground + mergeLoop. setHeadModeB sets it true
-	// before Provider.Unwind and clears it in deferred cleanup so
-	// neither path can race the unwind tx and produce narrow files
-	// that overlap the pre-mode-B broad boundary file. No-op when
-	// the Unwinder has no aggregator handle (harness paths).
+	// BlockBuildFiles toggles the aggregator gate on background
+	// build+merge for the mode-B unwind window. No-op when no
+	// aggregator is wired.
 	BlockBuildFiles(v bool)
 
-	// WaitForBuildAndMergeQuiescence blocks until any in-flight
-	// build/merge goroutines exit. setHeadModeB calls this AFTER
-	// BlockBuildFiles(true) so the gate's "no new builds" guarantee
-	// extends to "no in-flight build" before Provider.Unwind starts.
+	// WaitForBuildAndMergeQuiescence blocks until in-flight
+	// build/merge goroutines exit.
 	WaitForBuildAndMergeQuiescence(timeout time.Duration) error
 }
 

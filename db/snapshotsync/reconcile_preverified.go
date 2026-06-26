@@ -35,36 +35,11 @@ type DownloadRequestLite struct {
 	Hash string
 }
 
-// ReconcilePreverifiedAgainstDisk walks the preverified item list and
-// reports every entry whose .seg / .idx / sidecar file is missing from
-// snapDir AND not subsumed by a locally-held wider file. Returned
-// entries are the input for a download retry — the caller (typically
-// SyncSnapshots' local-preverified branch) feeds them to
-// RequestSnapshotsDownload to fill the gap.
-//
-// Rationale: preverified.toml is authoritative at boot, but ONLY at
-// boot. Once the local node has produced files (forward-exec collation
-// + merge), those local files supersede the preverified entries they
-// cover. Without this distinction, a reconcile after a Mode-B trim
-// would re-download every preverified narrow chunk that the local
-// merge has since consolidated into a wider chunk — undoing the merge
-// and leaving both narrow and wide files on disk, where the aggregator
-// visibility set serves reads from either, manifesting as wrong-trie-
-// root ~209 blocks past the unwind target.
-//
-// Coverage check: a preverified entry with (subdir, version, type, ext,
-// [From, To)) is considered already covered iff a local file in the
-// SAME (subdir, version, type, ext) bucket has [LocalFrom, LocalTo)
-// with LocalFrom ≤ From AND LocalTo ≥ To. Identity covers identity, so
-// the original "exact file missing" check is preserved.
-//
-// The function only checks file existence; it does NOT validate
-// content. Hash verification happens at the downloader layer, against
-// the preverified hash, when the file lands.
-//
-// snapDir is the absolute path of the snapshot directory. Entries with
-// no corresponding file there AND no covering wider local file are
-// reported as missing.
+// ReconcilePreverifiedAgainstDisk reports preverified entries that are
+// neither present on disk nor subsumed by a locally-held wider file —
+// post-bootstrap, locally-produced files supersede the preverified
+// ranges they cover so reconcile cannot undo a local merge by
+// re-pulling the publisher's narrower chunks.
 func ReconcilePreverifiedAgainstDisk(items snapcfg.PreverifiedItems, snapDir string) []DownloadRequestLite {
 	if len(items) == 0 {
 		return nil

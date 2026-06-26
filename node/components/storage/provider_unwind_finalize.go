@@ -125,10 +125,8 @@ func (p *Provider) FinalizeUnwind() error {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .regen → .kv failed (continuing — restart will recover from .old)", "err", err, "regen", pair.regenPath, "final", pair.finalPath)
 				continue
 			}
-			// Regen rewrote the file bytes; the seed's .torrent sidecar now
-			// claims a stale hash. Leaving it in place lets the running
-			// downloader notice the mismatch, yank the .kv to .part, and
-			// wedge the next process restart.
+			// Regen rewrote the file; the seed's .torrent sidecar now claims
+			// a stale hash and the downloader would yank the .kv to .part.
 			_ = dir.RemoveFile(pair.finalPath + ".torrent")
 			regenBaseNames = append(regenBaseNames, filepath.Base(pair.finalPath))
 		}
