@@ -1103,8 +1103,7 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	var header types.Header
 
 	for _, sn := range view.Headers() {
-		if err := sn.Src().WithReadAhead(func() error {
-			g := sn.Src().MakeGetter()
+		if err := sn.Src().WithReadAhead(func(g *seg.Getter) error {
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
 				if err := types.DecodeHeader(word[1:], &header); err != nil {

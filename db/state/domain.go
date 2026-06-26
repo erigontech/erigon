@@ -960,7 +960,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
 		idxPath := d.kviAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
-		if err = d.buildHashMapAccessorAt(ctx, idxPath, d.dataReader(valuesDecomp), ps); err != nil {
+		if err = d.buildHashMapAccessorAt(ctx, idxPath, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
 		valuesIdx, err = d.openHashMapAccessor(idxPath)
@@ -1063,7 +1063,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
+		if err = d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
 		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
@@ -1103,11 +1103,11 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}, nil
 }
 
-func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
+func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
 	return d.buildHashMapAccessorAt(ctx, d.kviAccessorNewFilePath(fromStep, toStep), data, ps)
 }
 
-func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, data *seg.Reader, ps *background.ProgressSet) error {
+func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet) error {
 	versionOfRs := version.DataStructureVersion(0)
 	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
 		versionOfRs = recsplit.ExistenceFilterVersion
@@ -1125,7 +1125,7 @@ func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, dat
 		NoFsync:    d.noFsync,
 		Workers:    d.BuildAccessorsWorkers,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger, d._testBuildAccessorHook)
+	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, d._testBuildAccessorHook)
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -1197,7 +1197,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		item := item
 		g.Go(func() error {
 			fromStep, toStep := item.StepRange(d.stepSize)
-			err := d.buildHashMapAccessor(ctx, fromStep, toStep, d.dataReader(item.decompressor), ps)
+			err := d.buildHashMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.FilenameBase, err)
 			}
@@ -1206,7 +1206,14 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, testHook func(*recsplit.RecSplit)) (err error) {
+func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compression seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, testHook func(*recsplit.RecSplit)) (err error) {
+	seqView, err := decomp.OpenSequentialView()
+	if err != nil {
+		return err
+	}
+	defer seqView.Close()
+	g := seg.NewReader(seqView.MakeGetter(), compression)
+
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
 	if !values {
@@ -1214,8 +1221,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	}
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
-
-	defer g.MadvNormal().DisableReadAhead()
 
 	var rs *recsplit.RecSplit
 	cfg.KeyCount = count
