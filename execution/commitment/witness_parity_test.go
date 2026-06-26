@@ -87,7 +87,7 @@ func Test_Witnesses_ParityWithToWitnessTrie(t *testing.T) {
 
 	// New path: Witnesses() on-the-fly node set.
 	hphB, rootB := processFreshTrie(t, plainKeys, updates)
-	setB, rootWB, err := hphB.Witnesses(context.Background(), touchUpdates(touchAccts, touchStor), "")
+	setB, rootWB, err := hphB.Witnesses(context.Background(), touchUpdates(touchAccts, touchStor), true, "")
 	require.NoError(t, err)
 	require.Equal(t, rootB, rootWB, "Witnesses root must equal commitment root")
 	require.Equal(t, rootA, rootB, "both paths build the same trie")
@@ -129,4 +129,42 @@ func Test_Witnesses_ParityWithToWitnessTrie(t *testing.T) {
 		}
 	}
 	t.Logf("node-set sizes: legacy=%d witnesses=%d; only-in-legacy=%d only-in-witnesses=%d", len(setA), len(setB), onlyA, onlyB)
+}
+
+// Test_Witnesses_ExclusionAcrossFoldedExtension drives Witnesses() in legacy mode
+// on the #21810 shape (absent slot diverging inside a folded storage extension)
+// and asserts the captured set proves absence — the diverging branch is
+// materialized during positioning, no toWitnessTrie walk.
+func Test_Witnesses_ExclusionAcrossFoldedExtension(t *testing.T) {
+	acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
+	acctPlain := acctPlains[0]
+	storPlain, storHashed := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 5, 2)
+
+	builder := NewUpdateBuilder()
+	for i, a := range acctPlains {
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+	}
+	for _, sk := range storPlain {
+		builder.Storage(common.Bytes2Hex(acctPlain), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+	}
+	plainKeys, updates := builder.Build()
+
+	shared := storHashed[0]
+	absentPrefix := []byte{shared[0], shared[1], (shared[2] + 1) & 0xf}
+	absentSlotPlain, _ := generateKeyWithHashedPrefix(absentPrefix, length.Hash)
+	absentStorageKey := storageKey(acctPlain, absentSlotPlain)
+
+	hph, root := processFreshTrie(t, plainKeys, updates)
+	setB, rootW, err := hph.Witnesses(context.Background(),
+		touchUpdates([][]byte{acctPlain}, [][]byte{absentStorageKey}), true, "")
+	require.NoError(t, err)
+	require.Equal(t, root, rootW)
+
+	decoded, err := trie.RLPDecode(setB)
+	require.NoError(t, err)
+	require.Equal(t, root, decoded.Root(), "Witnesses set must reconstruct the root")
+
+	assertPresentStrict(t, decoded, acctPlain)
+	require.True(t, witnessResolvesAbsence(decoded.RootNode, KeyToHexNibbleHash(absentStorageKey), 0),
+		"Witnesses must materialize the diverging branch to prove the absent slot")
 }

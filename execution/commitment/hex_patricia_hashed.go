@@ -2793,11 +2793,60 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
+// captureExtensionDivergence handles the legacy exclusion-proof case: when the
+// key's path diverges inside a folded extension during positioning, the branch
+// behind that extension is never unfolded, so it is materialized here (same hash,
+// witness root unchanged) for a strict verifier to descend. The materialization
+// is hash-verified, so a wrong prefix errors rather than corrupting. Canonical
+// mode skips this. Mirrors the divergence detection in toWitnessTrie, driven by
+// the current positioning depth.
+func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *witnessNodeSet) error {
+	if hph.activeRows == 0 {
+		return nil
+	}
+	row := hph.activeRows - 1
+	depth := hph.depths[row]
+	keyPos := hph.currentKeyLen
+	if keyPos >= int16(len(hashedKey)) {
+		return nil
+	}
+	cell := &hph.grid[row][hashedKey[keyPos]]
+	if cell.hashedExtLen == 0 || cell.hashLen == 0 {
+		return nil
+	}
+	extKeyLength := cell.hashedExtLen
+	if depth < 64 && extKeyLength+depth > 64 {
+		extKeyLength = 64 - depth
+	}
+	hashedExtKey := cell.hashedExtension[:extKeyLength]
+	endPos := min(keyPos+extKeyLength+1, int16(len(hashedKey)))
+	fullPathLength := int(keyPos+1) + len(hashedExtKey)
+	if bytes.Equal(hashedExtKey, hashedKey[keyPos+1:endPos]) || fullPathLength == 64 || fullPathLength == 128 {
+		return nil
+	}
+	branchPrefix := make([]byte, 0, fullPathLength)
+	branchPrefix = append(branchPrefix, hashedKey[:keyPos+1]...)
+	branchPrefix = append(branchPrefix, hashedExtKey...)
+	bn, err := hph.witnessMaterializeBranchChild(branchPrefix, int16(len(branchPrefix))+1, cell.hash[:cell.hashLen])
+	if err != nil {
+		return err
+	}
+	encoded, err := trie.NewInMemoryTrie(bn).RLPEncode()
+	if err != nil {
+		return err
+	}
+	if len(encoded) > 0 {
+		set.onNode(encoded[0], cell.hash[:cell.hashLen])
+	}
+	return nil
+}
+
 // Witnesses builds the execution-witness node set on the fly during the fold
 // traversal, capturing consensus node bytes as they are hashed instead of
-// reconstructing a trie from the grid (toWitnessTrie). It returns the node set
+// reconstructing a trie from the grid (toWitnessTrie). produceExclusionProofs
+// adds materialized diverging branches for legacy mode. It returns the node set
 // (root first) and the root hash. Positioning mirrors GenerateWitness.
-func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
 	set := newWitnessNodeSet()
 	hph.witnessTracer = set
@@ -2832,6 +2881,11 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, l
 			unfolding := hph.needUnfolding(hashedKey)
 			if unfolding <= 0 {
 				break
+			}
+			if produceExclusionProofs {
+				if err := hph.captureExtensionDivergence(hashedKey, set); err != nil {
+					return fmt.Errorf("capture extension divergence: %w", err)
+				}
 			}
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
