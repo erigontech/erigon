@@ -348,6 +348,14 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return nil
 	}
 
+	// Genesis (block 0) has no changeset of its own; detach so its deferred
+	// branch writes aren't recorded in a later block's changeset and reversed
+	// when that block is unwound to genesis.
+	if upd.BlockNum == 0 {
+		prev := switcher.GetChangesetAccumulator()
+		switcher.SetChangesetAccumulator(nil)
+		defer switcher.SetChangesetAccumulator(prev)
+	}
 	// No past changeset found — write into whatever is current
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
