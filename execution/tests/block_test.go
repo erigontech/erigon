@@ -52,8 +52,6 @@ func TestLegacyBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	// The LegacyTests/Cancun snapshot's BlockchainTests are run by
-	// TestLegacyCancunBlockchain below.
 }
 
 // TestLegacyCancunBlockchain runs the LegacyTests/Cancun hand-written
@@ -75,8 +73,8 @@ func TestLegacyCancunBlockchain(t *testing.T) {
 
 	bt := new(testutil.TestMatcher)
 	bt.SkipLoad(`.*\.meta/.*`)
-	// GeneralStateTests run natively via TestLegacyCancunState; re-running all
-	// 2865 of them through the per-test block executor here is prohibitively slow.
+	// GeneralStateTests run natively via TestLegacyCancunState; re-running all of
+	// them through the per-test block executor here is prohibitively slow.
 	bt.SkipLoad(`GeneralStateTests`)
 	// PoW total-difficulty reorg / multi-chain / fork-transition families: the
 	// in-memory harness doesn't do TD-based fork choice, so these fail or flake
