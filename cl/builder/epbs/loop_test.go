@@ -192,7 +192,7 @@ func TestBuilderLoop_FastPath(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -233,7 +233,7 @@ func TestBuilderLoop_RebuildPath(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.HexToAddress("0xfee"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -291,7 +291,7 @@ func TestBuilderLoop_BidWonReveal(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -377,7 +377,7 @@ func TestBuilderLoop_BidWonReveal_WrongBuilder(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{},
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 	prefsWatch.OnPreferencesReceived(sc.Slot, prefs)
@@ -414,7 +414,7 @@ func TestBuilderLoop_BidFields(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -598,7 +598,7 @@ func TestBuilderLoop_EnvelopeUsesConstructor(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -655,7 +655,7 @@ func TestBuilderLoop_FastPath_FeeRecipientMismatch(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -701,7 +701,7 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // zero = no FeeRecipient constraint
-			GasLimit:       50_000_000,       // different from speculative build
+			TargetGasLimit: 50_000_000,       // different from speculative build
 		},
 	}
 
@@ -788,7 +788,7 @@ func TestBuilderLoop_OnBidWon_BeaconBlockRootDistinctFromParent(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 	go func() {
@@ -869,7 +869,7 @@ func TestBuilderLoop_MultiMarket(t *testing.T) {
 			ProposalSlot:   slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{},
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 

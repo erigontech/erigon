@@ -576,6 +576,7 @@ type BeaconChainConfig struct {
 	DomainBeaconBuilder               common.Bytes4 `json:"-"`                                                                                              // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
 	DomainPtcAttester                 common.Bytes4 `json:"-"`                                                                                              // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
 	DomainProposerPreferences         common.Bytes4 `json:"-"`                                                                                              // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
+	DomainBuilderDeposit              common.Bytes4 `json:"-"`                                                                                              // DomainBuilderDeposit defines the BLS signature domain for builder deposit verification (0x0E000000).
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -928,6 +929,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
 	DomainPtcAttester:                 utils.Uint32ToBytes4(0x0C000000),
 	DomainProposerPreferences:         utils.Uint32ToBytes4(0x0D000000),
+	DomainBuilderDeposit:              utils.Uint32ToBytes4(0x0E000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",

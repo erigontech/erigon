@@ -17,9 +17,9 @@ import (
 	eth2 "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	ethevent "github.com/erigontech/erigon/common/event"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
-	ethevent "github.com/erigontech/erigon/p2p/event"
 )
 
 // BuilderService holds all builder components for lifecycle management.

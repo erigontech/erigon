@@ -9,6 +9,7 @@ const (
 	BuilderIndexSelfBuild              = math.MaxUint64
 	BuilderPaymentThresholdNumerator   = uint64(6)
 	BuilderPaymentThresholdDenominator = uint64(10)
+	PayloadBuilderVersion              = uint8(0)
 	// MaxPtcSize is the largest PTC_SIZE across all presets (mainnet=512).
 	// It is used ONLY for fixed-size array declarations in the forkchoice
 	// vote tracking. SSZ encoding/decoding and other logic MUST use the

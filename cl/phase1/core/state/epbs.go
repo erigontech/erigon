@@ -56,10 +56,32 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 	return builder.DepositEpoch < finalizedEpoch && builder.WithdrawableEpoch == farFuture
 }
 
-// IsBuilderWithdrawalCredential checks if the withdrawal credentials belong to a builder.
-// Builder withdrawal credentials have the BUILDER_WITHDRAWAL_PREFIX (0x03) as the first byte.
+// IsBuilderWithdrawalCredential checks the full builder withdrawal credential format:
+// BUILDER_WITHDRAWAL_PREFIX (0x03) + 11 zero bytes + 20-byte execution address.
 func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig *clparams.BeaconChainConfig) bool {
-	return withdrawalCredentials[0] == byte(beaconConfig.BuilderWithdrawalPrefix)
+	if withdrawalCredentials[0] != byte(beaconConfig.BuilderWithdrawalPrefix) {
+		return false
+	}
+	for i := 1; i < 12; i++ {
+		if withdrawalCredentials[i] != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// HasValidBuilderDepositPrefix checks the full builder deposit credential format:
+// PAYLOAD_BUILDER_VERSION (0x00) + 11 zero bytes + 20-byte execution address.
+func HasValidBuilderDepositPrefix(withdrawalCredentials [32]byte) bool {
+	if withdrawalCredentials[0] != clparams.PayloadBuilderVersion {
+		return false
+	}
+	for i := 1; i < 12; i++ {
+		if withdrawalCredentials[i] != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // IsValidIndexedPayloadAttestation checks if the indexed payload attestation is valid.
@@ -199,7 +221,7 @@ func IsPendingValidator(cfg *clparams.BeaconChainConfig, pendingDeposits *solid.
 		if d.PubKey != pubkey {
 			continue
 		}
-		valid, err := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		valid, err := isValidDepositSignatureForDomain(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature, cfg.DomainDeposit)
 		if err != nil {
 			log.Debug("IsValidDepositSignature failed", "pubkey", d.PubKey, "err", err)
 			continue
@@ -227,39 +249,46 @@ func IsBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
 }
 
 // IsValidDepositSignature validates a builder deposit signature.
+// Tries DomainBuilderDeposit (0x0E000000) first; falls back to DomainDeposit
+// (0x03000000) only for legacy fork-onboarding deposits with
+// BUILDER_WITHDRAWAL_PREFIX credentials.
 // [New in Gloas:EIP7732]
 func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
-	// Compute domain for deposit (agnostic domain using genesis fork version)
-	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
+	valid, err := isValidDepositSignatureForDomain(cfg, pubkey, withdrawalCredentials, amount, signature, cfg.DomainBuilderDeposit)
 	if err != nil {
 		return false, err
 	}
+	if valid {
+		return true, nil
+	}
+	if !IsBuilderWithdrawalCredential(withdrawalCredentials, cfg) {
+		return false, nil
+	}
 
-	// Create deposit data for hashing
+	// Fall back to DomainDeposit for legacy fork-migration deposits.
+	return isValidDepositSignatureForDomain(cfg, pubkey, withdrawalCredentials, amount, signature, cfg.DomainDeposit)
+}
+
+func isValidDepositSignatureForDomain(cfg *clparams.BeaconChainConfig, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, domainType common.Bytes4) (bool, error) {
 	depositData := &cltypes.DepositData{
 		PubKey:                pubkey,
 		WithdrawalCredentials: withdrawalCredentials,
 		Amount:                amount,
 		Signature:             signature,
 	}
-
 	depositMessageRoot, err := depositData.MessageHash()
 	if err != nil {
 		return false, err
 	}
 
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+	forkVersion := utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion))
 
-	// Verify BLS signature
-	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
+	domain, err := fork.ComputeDomain(domainType[:], forkVersion, [32]byte{})
 	if err != nil {
 		return false, err
 	}
-	return valid, nil
+	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+	return bls.Verify(signature[:], signedRoot[:], pubkey[:])
 }
 
 // GetIndexForNewBuilder returns the first builder index that is reusable
@@ -289,7 +318,7 @@ func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, withdra
 
 	builder := &cltypes.Builder{
 		Pubkey:            pubkey,
-		Version:           withdrawalCredentials[0],
+		Version:           clparams.PayloadBuilderVersion,
 		ExecutionAddress:  common.BytesToAddress(withdrawalCredentials[12:]),
 		Balance:           amount,
 		DepositEpoch:      GetEpochAtSlot(cfg, slot),

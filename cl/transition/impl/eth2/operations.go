@@ -536,6 +536,10 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 		if !state.IsActiveBuilder(s, builderIndex) {
 			return errors.New("processExecutionPayloadBid: builder is not active")
 		}
+		// Verify builder version
+		if s.GetBuilders().Get(int(builderIndex)).Version != clparams.PayloadBuilderVersion {
+			return errors.New("processExecutionPayloadBid: builder version mismatch")
+		}
 		// Verify that the builder has funds to cover the bid
 		if !state.CanBuilderCoverBid(s, builderIndex, amount) {
 			return errors.New("processExecutionPayloadBid: builder cannot cover bid")
@@ -1666,10 +1670,19 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
 		_, isExistingValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
 		hasBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
+		hasPayloadBuilderVersion := state.HasValidBuilderDepositPrefix(depositRequest.WithdrawalCredentials)
 		isPendingValidator := state.IsPendingValidator(s.BeaconConfig(), s.GetPendingDeposits(), depositRequest.PubKey)
 		isValidator := isExistingValidator || isPendingValidator
+		hasBuilderSignature := false
+		if !isValidator && hasPayloadBuilderVersion {
+			valid, err := state.IsValidDepositSignature(s.BeaconConfig(), depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature)
+			if err != nil {
+				return fmt.Errorf("ProcessDepositRequest: validate builder deposit signature: %w", err)
+			}
+			hasBuilderSignature = valid
+		}
 
-		if isBuilder || (hasBuilderPrefix && !isValidator) {
+		if isBuilder || (!isValidator && (hasBuilderPrefix || hasBuilderSignature)) {
 			state.ApplyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
 			return nil
 		}

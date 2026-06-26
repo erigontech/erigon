@@ -23,18 +23,15 @@ var testFeeRecipient = common.HexToAddress("0x1234567890abcdef1234567890abcdef12
 // BuildWithdrawalCredentials
 // ---------------------------------------------------------------------------
 
-func TestBuildWithdrawalCredentials_PrefixIs0x03(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	creds := BuildWithdrawalCredentials(testFeeRecipient, &cfg)
+func TestBuildWithdrawalCredentials_PrefixIsPayloadBuilderVersion(t *testing.T) {
+	creds := BuildWithdrawalCredentials(testFeeRecipient)
 
-	require.Equal(t, byte(cfg.BuilderWithdrawalPrefix), creds[0],
-		"first byte must be BuilderWithdrawalPrefix (0x03)")
-	require.Equal(t, byte(0x03), creds[0])
+	require.Equal(t, clparams.PayloadBuilderVersion, creds[0],
+		"first byte must be PayloadBuilderVersion (0x00)")
 }
 
 func TestBuildWithdrawalCredentials_ZeroPadding(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	creds := BuildWithdrawalCredentials(testFeeRecipient, &cfg)
+	creds := BuildWithdrawalCredentials(testFeeRecipient)
 
 	// Bytes 1..11 must be zero.
 	for i := 1; i < 12; i++ {
@@ -43,8 +40,7 @@ func TestBuildWithdrawalCredentials_ZeroPadding(t *testing.T) {
 }
 
 func TestBuildWithdrawalCredentials_AddressEmbedded(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	creds := BuildWithdrawalCredentials(testFeeRecipient, &cfg)
+	creds := BuildWithdrawalCredentials(testFeeRecipient)
 
 	// Bytes 12..31 must equal the fee recipient address.
 	var addr common.Address
@@ -75,9 +71,8 @@ func TestBuildDepositData_Fields(t *testing.T) {
 	// Amount matches.
 	require.Equal(t, amount, dd.Amount)
 
-	// Withdrawal credentials have 0x03 prefix.
-	require.Equal(t, byte(0x03), dd.WithdrawalCredentials[0],
-		"withdrawal_credentials[0] must be 0x03 (BuilderWithdrawalPrefix)")
+	// Withdrawal credentials have PAYLOAD_BUILDER_VERSION prefix.
+	require.Equal(t, clparams.PayloadBuilderVersion, dd.WithdrawalCredentials[0])
 
 	// Execution address embedded correctly.
 	var addr common.Address
@@ -85,7 +80,7 @@ func TestBuildDepositData_Fields(t *testing.T) {
 	require.Equal(t, testFeeRecipient, addr)
 }
 
-func TestBuildDepositData_SignatureVerifiesWithDomainDeposit(t *testing.T) {
+func TestBuildDepositData_SignatureVerifiesWithDomainBuilderDeposit(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 
@@ -97,10 +92,8 @@ func TestBuildDepositData_SignatureVerifiesWithDomainDeposit(t *testing.T) {
 	dd, err := BuildDepositData(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
 	require.NoError(t, err)
 
-	// Verify using the same logic as state.IsValidDepositSignature:
-	// domain = ComputeDomain(DomainDeposit, genesisForkVersion, [32]byte{})
 	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
+		cfg.DomainBuilderDeposit[:],
 		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
 		[32]byte{},
 	)
@@ -113,10 +106,10 @@ func TestBuildDepositData_SignatureVerifiesWithDomainDeposit(t *testing.T) {
 
 	valid, err := bls.Verify(dd.Signature[:], signingRoot[:], dd.PubKey[:])
 	require.NoError(t, err)
-	require.True(t, valid, "deposit signature must verify with DomainDeposit")
+	require.True(t, valid, "deposit signature must verify with DomainBuilderDeposit")
 }
 
-func TestBuildDepositData_DoesNotVerifyWithDomainBeaconBuilder(t *testing.T) {
+func TestBuildDepositData_DoesNotVerifyWithDomainDeposit(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 
@@ -128,9 +121,8 @@ func TestBuildDepositData_DoesNotVerifyWithDomainBeaconBuilder(t *testing.T) {
 	dd, err := BuildDepositData(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
 	require.NoError(t, err)
 
-	// If we verify using DomainBeaconBuilder instead, it must fail.
 	wrongDomain, err := fork.ComputeDomain(
-		cfg.DomainBeaconBuilder[:],
+		cfg.DomainDeposit[:],
 		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
 		[32]byte{},
 	)
@@ -144,7 +136,7 @@ func TestBuildDepositData_DoesNotVerifyWithDomainBeaconBuilder(t *testing.T) {
 	valid, err := bls.Verify(dd.Signature[:], wrongSigningRoot[:], dd.PubKey[:])
 	require.NoError(t, err)
 	require.False(t, valid,
-		"deposit signature must NOT verify with DomainBeaconBuilder — deposits use DomainDeposit")
+		"deposit signature must NOT verify with DomainDeposit (legacy domain)")
 }
 
 func TestBuildDepositData_MatchesIsValidDepositSignature(t *testing.T) {

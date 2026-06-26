@@ -174,7 +174,7 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 				"specFeeRecipient", result.Eth1Block.FeeRecipient,
 				"prefsFeeRecipient", prefs.Message.FeeRecipient,
 				"specGasLimit", result.Eth1Block.GasLimit,
-				"prefsGasLimit", prefs.Message.GasLimit)
+				"prefsGasLimit", prefs.Message.TargetGasLimit)
 			hasSpec = false
 		} else {
 			assembled = result
@@ -412,8 +412,8 @@ func (l *BuilderLoop) buildParamsFromPrefs(sc SlotContext, prefs *cltypes.Signed
 	params := l.buildParams(sc)
 	if prefs != nil && prefs.Message != nil {
 		params.SuggestedFeeRecipient = prefs.Message.FeeRecipient
-		if prefs.Message.GasLimit > 0 {
-			gl := prefs.Message.GasLimit
+		if prefs.Message.TargetGasLimit > 0 {
+			gl := prefs.Message.TargetGasLimit
 			params.TargetGasLimit = &gl
 		}
 	}
@@ -435,11 +435,11 @@ func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.
 	if wantRecipient != (common.Address{}) && result.Eth1Block.FeeRecipient != wantRecipient {
 		return false
 	}
-	// GasLimit: gossip validation requires bid.gas_limit == prefs.gas_limit
+	// TargetGasLimit: gossip validation requires bid.gas_limit == prefs.gas_limit
 	// (execution_payload_bid_service.go) and the state transition enforces the
 	// envelope payload's gas_limit matches (operations.go). If the speculative
 	// build used a different gas limit, the bid/reveal will be rejected.
-	if prefs.Message.GasLimit > 0 && result.Eth1Block.GasLimit != prefs.Message.GasLimit {
+	if prefs.Message.TargetGasLimit > 0 && result.Eth1Block.GasLimit != prefs.Message.TargetGasLimit {
 		return false
 	}
 	return true

@@ -14,20 +14,19 @@ import (
 )
 
 // BuildWithdrawalCredentials constructs withdrawal credentials for a builder deposit.
-// Format: BuilderWithdrawalPrefix (0x03) + 11 zero bytes + 20-byte execution address.
-func BuildWithdrawalCredentials(feeRecipient common.Address, beaconCfg *clparams.BeaconChainConfig) common.Hash {
+// Format: PAYLOAD_BUILDER_VERSION (0x00) + 11 zero bytes + 20-byte execution address.
+func BuildWithdrawalCredentials(feeRecipient common.Address) common.Hash {
 	var creds common.Hash
-	creds[0] = byte(beaconCfg.BuilderWithdrawalPrefix)
-	// bytes 1..11 are zero (zero-value)
+	creds[0] = clparams.PayloadBuilderVersion
 	copy(creds[12:], feeRecipient[:])
 	return creds
 }
 
 // BuildDepositData constructs a signed DepositData for builder registration.
 //
-// The signature uses DomainDeposit with the genesis fork version and a zero
-// genesis validators root, matching the verification logic in
-// state.IsValidDepositSignature and statechange.IsValidDepositSignature.
+// The signature uses DomainBuilderDeposit (0x0E000000) with the genesis fork
+// version and a zero genesis validators root, matching the spec's
+// DOMAIN_BUILDER_DEPOSIT for post-fork builder deposits.
 //
 // The resulting DepositData can be submitted as a deposit request on the
 // execution layer to register the builder in the beacon state.
@@ -39,7 +38,7 @@ func BuildDepositData(
 	beaconCfg *clparams.BeaconChainConfig,
 ) (*cltypes.DepositData, error) {
 	pubkey := signer.Pubkey()
-	creds := BuildWithdrawalCredentials(feeRecipient, beaconCfg)
+	creds := BuildWithdrawalCredentials(feeRecipient)
 
 	// Build unsigned deposit data to compute the message hash.
 	dd := &cltypes.DepositData{
@@ -48,10 +47,9 @@ func BuildDepositData(
 		Amount:                amount,
 	}
 
-	// Compute deposit domain: DomainDeposit + genesis fork version + zero genesis validators root.
-	// Deposits are chain-agnostic (not tied to a specific genesis validators root).
+	// Compute deposit domain: DomainBuilderDeposit + genesis fork version + zero genesis validators root.
 	domain, err := fork.ComputeDomain(
-		beaconCfg.DomainDeposit[:],
+		beaconCfg.DomainBuilderDeposit[:],
 		utils.Uint32ToBytes4(uint32(beaconCfg.GenesisForkVersion)),
 		[32]byte{},
 	)

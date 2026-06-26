@@ -245,6 +245,15 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			return fmt.Errorf("builder %d is not active", builderIndex)
 		}
 
+		// [REJECT] builder version matches expected payload builder version
+		builders := headState.GetBuilders()
+		if builders == nil || int(builderIndex) >= builders.Len() {
+			return fmt.Errorf("builder %d not found in state", builderIndex)
+		}
+		if builders.Get(int(builderIndex)).Version != clparams.PayloadBuilderVersion {
+			return fmt.Errorf("builder %d version mismatch", builderIndex)
+		}
+
 		// [IGNORE] builder can cover the bid
 		if !state.CanBuilderCoverBid(headState, builderIndex, bid.Value) {
 			return fmt.Errorf("%w: builder %d cannot cover bid value %d",
@@ -252,18 +261,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 		}
 
 		// [REJECT] BLS signature verification
-		// Get builder public key from builders list
-		builders := headState.GetBuilders()
-		if builders == nil {
-			return fmt.Errorf("builders list not available")
-		}
-		if int(builderIndex) >= builders.Len() {
-			return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
-		}
 		builder := builders.Get(int(builderIndex))
-		if builder == nil {
-			return fmt.Errorf("builder %d not found", builderIndex)
-		}
 		pk := builder.Pubkey
 
 		epoch := s.ethClock.GetEpochAtSlot(slot)
