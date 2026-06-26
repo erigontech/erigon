@@ -146,10 +146,17 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 		out = append(out, c)
 		return nil
 	}
+	addIfStructural := func(n Node) error {
+		switch n.(type) {
+		case *FullNode, *ShortNode, *DuoNode:
+			return add(n)
+		}
+		return nil
+	}
 	for _, key := range hexKeys {
 		tn := t.RootNode
 		k := key
-		for len(k) > 0 && tn != nil {
+		for tn != nil {
 			switch n := tn.(type) {
 			case *ShortNode:
 				if err := add(n); err != nil {
@@ -163,40 +170,49 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 					// Key diverges from / ends inside this extension. Include the node
 					// behind it so a strict verifier can descend the exclusion/collapse
 					// branch (legacy mode materialized it; canonical leaves a HashNode).
-					switch n.Val.(type) {
-					case *FullNode, *ShortNode, *DuoNode:
-						if err := add(n.Val); err != nil {
-							return nil, err
-						}
+					if err := addIfStructural(n.Val); err != nil {
+						return nil, err
 					}
 					tn = nil
 				} else {
 					tn = n.Val
 					k = k[len(nKey):]
 				}
-			case *DuoNode:
-				if err := add(n); err != nil {
-					return nil, err
-				}
-				i1, i2 := n.childrenIdx()
-				switch k[0] {
-				case i1:
-					tn = n.child1
-					k = k[1:]
-				case i2:
-					tn = n.child2
-					k = k[1:]
-				default:
-					tn = nil
-				}
 			case *FullNode:
 				if err := add(n); err != nil {
 					return nil, err
 				}
-				tn = n.Children[k[0]]
-				k = k[1:]
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					tn = n.Children[k[0]]
+					k = k[1:]
+				}
+			case *DuoNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					i1, i2 := n.childrenIdx()
+					switch k[0] {
+					case i1:
+						tn = n.child1
+						k = k[1:]
+					case i2:
+						tn = n.child2
+						k = k[1:]
+					default:
+						tn = nil
+					}
+				}
 			case *AccountNode:
-				tn = n.Storage
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					tn = n.Storage
+				}
 			case ValueNode:
 				tn = nil
 			case HashNode:
