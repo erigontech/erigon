@@ -392,9 +392,8 @@ func enable8037(jt *JumpTable) {
 
 // enable8038 applies EIP-8038 (State-access gas cost update)
 func enable8038(jt *JumpTable) {
-	jt[EXTCODESIZE].constantGas = 2 * params.WarmStorageReadCostEIP2929
-	jt[EXTCODECOPY].constantGas = 2 * params.WarmStorageReadCostEIP2929
-
+	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
 	jt[CREATE].constantGas = params.CreateAccessEIP8038
 	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }

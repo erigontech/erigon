@@ -51,9 +51,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			clearRefund = params.SstoreClearsScheduleRefundEIP8038
 			stateCreate = params.StateGasPerStorageSet
 		} else {
-			coldAccess = params.ColdSloadCostEIP2929 + params.WarmStorageReadCostEIP2929
-			writeCreate = params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929
-			writeExisting = params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929
+			coldAccess = params.SstoreColdAccessEIP2929
+			writeCreate = params.SstoreWriteCreateEIP2929
+			writeExisting = params.SstoreWriteExistingEIP2929
 			clearRefund = clearingRefund
 			stateCreate = 0
 		}

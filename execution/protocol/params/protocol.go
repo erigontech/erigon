@@ -78,6 +78,12 @@ const (
 	// Which becomes: 5000 - 2100 + 1900 = 4800
 	SstoreClearsScheduleRefundEIP3529 = SstoreResetGasEIP2200 - ColdSloadCostEIP2929 + TxAccessListStorageKeyGas
 
+	// EIP-2929/3529 SSTORE schedule as "access cost + write cost": the access
+	// carries the warm SLOAD, so the write costs are net of it.
+	SstoreColdAccessEIP2929    = ColdSloadCostEIP2929 + WarmStorageReadCostEIP2929                         // 2200
+	SstoreWriteCreateEIP2929   = SstoreSetGasEIP2200 - WarmStorageReadCostEIP2929                          // 19900
+	SstoreWriteExistingEIP2929 = SstoreResetGasEIP2200 - ColdSloadCostEIP2929 - WarmStorageReadCostEIP2929 // 2800
+
 	JumpdestGas   uint64 = 1     // Once per JUMPDEST operation.
 	EpochDuration uint64 = 30000 // Duration between proof-of-work epochs.
 
@@ -215,8 +221,6 @@ const (
 	// EIP-8037: State Creation Gas Cost Increase
 	CreateGasEIP8037        = CallValueTransferGas // spec: "9000, assuming same as GAS_CALL_VALUE"
 	Create2GasEIP8037       = CallValueTransferGas
-	SstoreSetGasEIP8037     = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
-	PerAuthBaseCostEIP8037  = 7_500
 	StateBytesNewAccount    = 120 // bytes per new account creation
 	StateBytesPerStorageSet = 64  // bytes per new storage slot
 	StateBytesAuthBase      = 23  // bytes per authorization base cost
@@ -242,6 +246,7 @@ const (
 	SstoreClearsScheduleRefundEIP8038 = uint64(12480)                                          // REFUND_STORAGE_CLEAR = (STORAGE_WRITE+COLD_STORAGE_ACCESS)*4800/5000
 	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038                           // ACCESS_LIST_ADDRESS_COST
 	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038                           // ACCESS_LIST_STORAGE_KEY_COST
+	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929                         // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
 	// REGULAR_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
 	RegularPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
 	// PER_AUTH regular intrinsic = ACCOUNT_WRITE + REGULAR_PER_AUTH_BASE_COST = 15816
