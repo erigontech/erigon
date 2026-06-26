@@ -148,11 +148,6 @@ vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 ```
 
-```markdown
-vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
-ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
-```
-
 If it is failing with "can't allocate memory", try:
 
 ```text

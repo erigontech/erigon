@@ -25,22 +25,25 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
 1.  **Set Up Your Validator**
 
-    Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
+    Deposit your stake and register your validator on Gnosis Chain by following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
 2.  **Register as a Shutterized Validator**
 
     Complete the validator registration for Shutter using the tool provided in the [Shutter Validator Registration Guide](https://github.com/shutter-network/shutter-validator-registration).
 3.  **Verify Registration**
 
     Use the Erigon CLI command to verify that your registration was successful:
-```bash
+
+    ```bash
     erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
     ```
-* `--chain` valid values are `gnosis` or `chiado`
+
+    * `--chain` valid values are `gnosis` or `chiado`
     * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
     * `<VALIDATOR_INFO_JSON>` is the file generated during registration.
 
     for example:
-```bash
+
+    ```bash
     erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
     ```
 4. **Run Erigon with Shutter Support**

@@ -2487,7 +2487,7 @@ make docker-compose
 URL: https://docs.erigon.tech/fundamentals/supported-networks
 
 
-The default flag is `--chain=mainnet`, which enables Erigon to operate on the Ethereum mainnet. Utilize the flag `--chain=<tag>` to synchronize with one of the supported networks. For example, to synchronize Holesky, one of the Ethereum testnets, use:
+The default flag is `--chain=mainnet`, which enables Erigon to operate on the Ethereum mainnet. Utilize the flag `--chain=<tag>` to synchronize with one of the supported networks. For example, to synchronize Hoodi, one of the Ethereum testnets, use:
 
 ```bash
 ./build/bin/erigon --chain=hoodi
@@ -3008,11 +3008,6 @@ For production setups with sufficient RAM, you can lock critical data in memory:
 
 ```bash
 # Lock domain snapshots in RAM
-vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
-ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
-```
-
-```markdown
 vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 ls /mnt/erigon/snapshots/domain/*.kv | parallel vmtouch -vdlw
 ```
@@ -4714,7 +4709,7 @@ This enables faster retrieval of Merkle proofs for any executed block.
 **Example**
 
 ```bash
-curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress",["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -7525,22 +7520,25 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
 1.  **Set Up Your Validator**
 
-    Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
+    Deposit your stake and register your validator on Gnosis Chain by following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
 2.  **Register as a Shutterized Validator**
 
     Complete the validator registration for Shutter using the tool provided in the [Shutter Validator Registration Guide](https://github.com/shutter-network/shutter-validator-registration).
 3.  **Verify Registration**
 
     Use the Erigon CLI command to verify that your registration was successful:
-```bash
+
+    ```bash
     erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
     ```
-* `--chain` valid values are `gnosis` or `chiado`
+
+    * `--chain` valid values are `gnosis` or `chiado`
     * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
     * `<VALIDATOR_INFO_JSON>` is the file generated during registration.
 
     for example:
-```bash
+
+    ```bash
     erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
     ```
 4. **Run Erigon with Shutter Support**

@@ -49,7 +49,7 @@ This enables faster retrieval of Merkle proofs for any executed block.
 **Example**
 
 ```bash
-curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress",["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 
