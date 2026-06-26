@@ -76,8 +76,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Set the starting gas for the raw transaction
 	switch {
 	case args.IsEIP2780:
-		// EIP-2780: decompose the flat intrinsic into TX_BASE plus per-recipient
-		// and per-value charges. Self-transfers skip the recipient/value charges.
 		result.RegularGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
 			result.RegularGas += params.CreateAccessEIP2780
