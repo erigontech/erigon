@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
-	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -2848,9 +2847,7 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // adds materialized diverging branches for legacy mode. It returns the node set
 // (root first) and the root hash. Positioning mirrors GenerateWitness.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
-	memoOn := os.Getenv("WITNESS_MEMO_ON") == "1"
-	pruneOn := os.Getenv("WITNESS_PRUNE") != "0"
-	hph.memoizationOff = !memoOn
+	hph.memoizationOff = true
 	set := newWitnessNodeSet()
 	hph.witnessTracer = set
 	defer func() { hph.witnessTracer = nil }()
@@ -2931,11 +2928,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	if err != nil {
 		return nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	full := set.nodes(rootHash)
-	if !pruneOn {
-		return full, rootHash, nil
-	}
-	witnessTrie, err := trie.RLPDecode(full)
+	witnessTrie, err := trie.RLPDecode(set.nodes(rootHash))
 	if err != nil {
 		return nil, nil, fmt.Errorf("witness prune decode: %w", err)
 	}
