@@ -59,6 +59,14 @@ type CommitmentWrite = stateifs.CommitmentWrite
 // hashedKeyPath is the surviving child's nibble path; branchPrefix is the collapsing branch's.
 type CollapseTracer func(hashedKeyPath, branchPrefix []byte)
 
+// witnessTracer receives canonical trie nodes as they are hashed during a
+// witness fold pass; nil on the normal commitment path.
+type witnessTracer interface {
+	onBranch(prefix []byte, depth int16, afterMap uint16, cellData *[16]cellEncodeData, branchHash []byte)
+	onExtensionLeaf(prefix []byte, depth int16, extNibbles []byte, child *cell)
+	onLeaf(depth int16, c *cell, enc []byte)
+}
+
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
@@ -108,6 +116,8 @@ type HexPatriciaHashed struct {
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
+
+	witnessTracer witnessTracer
 
 	cfg TrieConfig // static config, set at construction
 
@@ -207,6 +217,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.trace = false
 	hph.traceDomain = false
 	hph.collapseTracer = nil
+	hph.witnessTracer = nil
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
@@ -1147,6 +1158,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		}
 		copy(cell.stateHash[:], buf[1:])
 		cell.stateHashLen = int16(len(buf)) - 1
+		if hph.witnessTracer != nil {
+			hph.witnessTracer.onLeaf(depth, cell, buf)
+		}
 		return buf, nil
 	}
 
@@ -1956,6 +1970,9 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
 		return err
 	}
+	if hph.witnessTracer != nil {
+		hph.witnessTracer.onBranch(hph.currentKey[:depth], depth, hph.afterMap[row], &cellData, upCell.hash[:])
+	}
 	if hph.trace {
 		fmt.Printf("} [%x]\n", upCell.hash[:])
 	}
@@ -2167,6 +2184,10 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	}
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
+
+	if hph.witnessTracer != nil {
+		hph.witnessTracer.onExtensionLeaf(hph.currentKey[:upDepth], depth, hph.currentKey[upDepth:hph.currentKeyLen], cell)
+	}
 
 	if err := hph.collectDeleteUpdate(updateKey, row, true); err != nil {
 		return err
