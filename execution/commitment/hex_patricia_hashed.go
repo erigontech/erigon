@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -2847,12 +2848,16 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // adds materialized diverging branches for legacy mode. It returns the node set
 // (root first) and the root hash. Positioning mirrors GenerateWitness.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
-	hph.memoizationOff = true
+	memoOn := os.Getenv("WITNESS_MEMO_ON") == "1"
+	pruneOn := os.Getenv("WITNESS_PRUNE") != "0"
+	hph.memoizationOff = !memoOn
 	set := newWitnessNodeSet()
 	hph.witnessTracer = set
 	defer func() { hph.witnessTracer = nil }()
 
+	provedKeys := make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		provedKeys = append(provedKeys, common.Copy(hashedKey))
 		if len(plainKey) > 0 {
 			if int16(len(plainKey)) == hph.accountKeyLen {
 				if _, err := hph.accountFromCacheOrDB(plainKey); err != nil {
@@ -2926,7 +2931,19 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	if err != nil {
 		return nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return set.nodes(rootHash), rootHash, nil
+	full := set.nodes(rootHash)
+	if !pruneOn {
+		return full, rootHash, nil
+	}
+	witnessTrie, err := trie.RLPDecode(full)
+	if err != nil {
+		return nil, nil, fmt.Errorf("witness prune decode: %w", err)
+	}
+	lean, err := witnessTrie.WitnessNodesForKeys(provedKeys)
+	if err != nil {
+		return nil, nil, fmt.Errorf("witness prune: %w", err)
+	}
+	return lean, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {

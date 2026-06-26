@@ -121,6 +121,94 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	return proof, nil
 }
 
+// WitnessNodesForKeys returns the deduplicated RLP nodes on the paths to the given
+// hex-nibble keys, root first: the lean proof node set those keys need. Account keys
+// are 64 nibbles, account+storage keys 128, and shorter keys (collapse-sibling
+// prefixes) prove the path to that prefix. Keys carry no terminator and storage
+// descent is driven by remaining key length, so mixed-length keys work. A path that
+// reaches a HashNode (a blinded/diverged child) stops there; the parent already
+// proves the divergence.
+func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
+	hasher := newHasher(t.valueNodesRLPEncoded)
+	defer returnHasherToPool(hasher)
+	seen := make(map[string]struct{})
+	var out [][]byte
+	add := func(n Node) error {
+		rlp, err := hasher.hashChildren(n, 0)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[string(rlp)]; ok {
+			return nil
+		}
+		c := common.Copy(rlp)
+		seen[string(c)] = struct{}{}
+		out = append(out, c)
+		return nil
+	}
+	for _, key := range hexKeys {
+		tn := t.RootNode
+		k := key
+		for len(k) > 0 && tn != nil {
+			switch n := tn.(type) {
+			case *ShortNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				nKey := n.Key
+				if len(nKey) > 0 && nKey[len(nKey)-1] == 16 {
+					nKey = nKey[:len(nKey)-1]
+				}
+				if len(k) < len(nKey) || !bytes.Equal(nKey, k[:len(nKey)]) {
+					// Key diverges from / ends inside this extension. Include the node
+					// behind it so a strict verifier can descend the exclusion/collapse
+					// branch (legacy mode materialized it; canonical leaves a HashNode).
+					switch n.Val.(type) {
+					case *FullNode, *ShortNode, *DuoNode:
+						if err := add(n.Val); err != nil {
+							return nil, err
+						}
+					}
+					tn = nil
+				} else {
+					tn = n.Val
+					k = k[len(nKey):]
+				}
+			case *DuoNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				i1, i2 := n.childrenIdx()
+				switch k[0] {
+				case i1:
+					tn = n.child1
+					k = k[1:]
+				case i2:
+					tn = n.child2
+					k = k[1:]
+				default:
+					tn = nil
+				}
+			case *FullNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				tn = n.Children[k[0]]
+				k = k[1:]
+			case *AccountNode:
+				tn = n.Storage
+			case ValueNode:
+				tn = nil
+			case HashNode:
+				tn = nil
+			default:
+				return nil, fmt.Errorf("witness: invalid node %T on key %x", tn, key)
+			}
+		}
+	}
+	return out, nil
+}
+
 func decodeRef(buf []byte) (Node, []byte, error) {
 	kind, val, rest, err := rlp.Split(buf)
 	if err != nil {
