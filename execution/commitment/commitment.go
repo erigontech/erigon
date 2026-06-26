@@ -1452,6 +1452,11 @@ type Updates struct {
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
+
+	// addrNibblesCache caches nibblized keccak(addr) for storage keys, avoiding
+	// redundant hashing when one address has many dirty storage slots (whale storage).
+	// Keyed by 20-byte address, value is the 64 nibbles of the address hash.
+	addrNibblesCache map[[20]byte][64]byte
 }
 
 // arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
@@ -1524,6 +1529,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
+		t.addrNibblesCache = make(map[[20]byte][64]byte)
 	}
 	return t
 }
@@ -1698,7 +1704,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hasher(keyBytes)
+		var hashedKey []byte
+		if t.addrNibblesCache != nil {
+			hashedKey = KeyToHexNibbleHashWithCache(keyBytes, t.addrNibblesCache)
+		} else {
+			hashedKey = t.hasher(keyBytes)
+		}
 		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update

@@ -39,6 +39,54 @@ func KeyToHexNibbleHash(key []byte) []byte {
 	return nibblized
 }
 
+// KeyToHexNibbleHashWithCache is like KeyToHexNibbleHash but caches nibblized address hashes.
+// For storage keys (len > 20), the first 64 nibbles (nibblized keccak(addr)) are cached keyed by [20]byte address.
+// Subsequent calls with the same address reuse the cached nibbles, avoiding redundant keccak + expand.
+// For account keys (len <= 20), no caching is performed.
+// Returns a newly allocated 128-byte (storage) or 64-byte (account) nibblized slice.
+func KeyToHexNibbleHashWithCache(key []byte, cache map[[20]byte][64]byte) []byte {
+	if len(key) > length.Addr { // storage
+		nibblized := make([]byte, 128)
+		var addrKey [20]byte
+		copy(addrKey[:], key[:length.Addr])
+
+		// Address portion: check cache or compute + cache
+		if addrNibs, ok := cache[addrKey]; ok {
+			copy(nibblized[:64], addrNibs[:])
+		} else {
+			h := keccak.Sum256(key[:length.Addr])
+			copy(nibblized[32:64], h[:])
+			for i, b := range nibblized[32:64] {
+				nibblized[i*2] = (b >> 4) & 0xf
+				nibblized[i*2+1] = b & 0xf
+			}
+			var arr [64]byte
+			copy(arr[:], nibblized[:64])
+			cache[addrKey] = arr
+		}
+
+		// Slot portion: always compute (unique per storage key)
+		h := keccak.Sum256(key[length.Addr:])
+		copy(nibblized[96:], h[:])
+		for i := 0; i < 32; i++ {
+			b := nibblized[96+i]
+			nibblized[64+i*2] = (b >> 4) & 0xf
+			nibblized[64+i*2+1] = b & 0xf
+		}
+		return nibblized
+	}
+
+	// Account key: no caching
+	nibblized := make([]byte, 64)
+	h := keccak.Sum256(key)
+	copy(nibblized[32:], h[:])
+	for i, b := range nibblized[32:] {
+		nibblized[i*2] = (b >> 4) & 0xf
+		nibblized[i*2+1] = b & 0xf
+	}
+	return nibblized
+}
+
 func KeyToNibblizedHash(key []byte) []byte {
 	nibblized := make([]byte, 64) // nibblized hash
 	hashed := nibblized[32:]
