@@ -34,7 +34,7 @@ Erigon 3.5.0 is a major release headlined by **parallel block execution becoming
 
 #### `--prune.mode=full`: EIP-8252 retention window replaces pre-merge history-expiry
 
-Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
+Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW` ([#21342](https://github.com/erigontech/erigon/pull/21342)). Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
 
 **What changed:**
 
