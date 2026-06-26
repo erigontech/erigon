@@ -409,9 +409,8 @@ func (s *RecordingState) CreateContract(address accounts.Address) error {
 }
 
 // accountExists reports whether the account exists in the post-state: present and
-// non-nil in the write overlay, otherwise not deleted and present in the inner
-// (pre-block) reader. The inner reader is read directly so the check does not
-// re-mark AccessedAccounts.
+// non-nil in the write overlay, otherwise not deleted and present in the pre-block
+// (inner) reader.
 func (s *RecordingState) accountExists(addr common.Address) bool {
 	if _, deleted := s.DeletedAccounts[addr]; deleted {
 		return false
@@ -419,11 +418,28 @@ func (s *RecordingState) accountExists(addr common.Address) bool {
 	if acc, ok := s.accountOverlay[addr]; ok {
 		return acc != nil
 	}
+	return s.innerExists(addr)
+}
+
+// innerExists reports parent-state (pre-block) presence by reading the inner reader
+// directly, so the check does not re-mark AccessedAccounts. A read error counts as
+// existence: over-inclusion is harmless, a dropped key would make the witness incomplete.
+func (s *RecordingState) innerExists(addr common.Address) bool {
 	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
-	// A read error is unexpected for an account accessed this block; include the key
-	// rather than silently drop it — over-inclusion is harmless, a missing key would
-	// make the witness incomplete.
 	return err != nil || acc != nil
+}
+
+// hasWitnessLeaf reports whether addr has a leaf in the witness trie needing a keys[]
+// preimage: it exists in the post-state, or it existed pre-block (so an account emptied
+// and EIP-161 state-cleared in-block still contributes its parent-trie leaf). The inner
+// reader is consulted at most once.
+func (s *RecordingState) hasWitnessLeaf(addr common.Address) bool {
+	if _, deleted := s.DeletedAccounts[addr]; !deleted {
+		if acc, ok := s.accountOverlay[addr]; ok && acc != nil {
+			return true
+		}
+	}
+	return s.innerExists(addr)
 }
 
 // --- Query methods ---
@@ -944,7 +960,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	}
 	witnessKeys := make([]hexutil.Bytes, 0, len(out.Addresses)+len(slotSet))
 	for addr := range out.Addresses {
-		if !rs.accountExists(addr) {
+		if !rs.hasWitnessLeaf(addr) {
 			continue
 		}
 		witnessKeys = append(witnessKeys, bytes.Clone(addr[:]))
@@ -1282,7 +1298,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
@@ -1292,8 +1308,58 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
+	if stateless != nil {
+		if err := checkWitnessKeysComplete(stateless.usedTrieAddrs, stateless.usedTrieSlots, result.Keys); err != nil {
+			return fmt.Errorf("[debug_executionWitness] %w", err)
+		}
+	}
+
 	log.Debug("[debug_executionWitness] witness verified", "blockNum", block.NumberU64())
 	return nil
+}
+
+// checkWitnessKeysComplete verifies result.Keys carries a preimage for every account
+// and storage leaf the stateless re-execution resolved from the witness trie. A missing
+// preimage means a verifier treating keys[] as the closed accessed set cannot route to a
+// leaf that is present in state[]. The protocol system address is exempt (intentionally
+// omitted from keys[] unless it really changes).
+func checkWitnessKeysComplete(usedAddrs map[common.Address]struct{}, usedSlots map[common.Hash]struct{}, keys []hexutil.Bytes) error {
+	keyAddrs := make(map[common.Address]struct{})
+	keySlots := make(map[common.Hash]struct{})
+	for _, k := range keys {
+		switch len(k) {
+		case 20:
+			keyAddrs[common.BytesToAddress(k)] = struct{}{}
+		case 32:
+			keySlots[common.BytesToHash(k)] = struct{}{}
+		}
+	}
+	sysAddr := common.Address(params.SystemAddress.Value())
+	var missing []string
+	for addr := range usedAddrs {
+		if addr == sysAddr {
+			continue
+		}
+		if _, ok := keyAddrs[addr]; !ok {
+			missing = append(missing, addr.Hex())
+		}
+	}
+	for slot := range usedSlots {
+		if _, ok := keySlots[slot]; !ok {
+			missing = append(missing, slot.Hex())
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	slices.Sort(missing)
+	const maxListed = 16
+	listed, suffix := missing, ""
+	if len(missing) > maxListed {
+		listed = missing[:maxListed]
+		suffix = fmt.Sprintf(" (+%d more)", len(missing)-maxListed)
+	}
+	return fmt.Errorf("witness keys[] incomplete: %d preimage(s) for leaves present in state[] missing: %v%s", len(missing), listed, suffix)
 }
 
 // buildExpectedPostState queries the actual state DB to build expected post-state for verification.
@@ -1423,6 +1489,10 @@ type witnessStateless struct {
 	trace          bool
 	strictVerify   bool // error on trie nodes missing from the witness
 
+	// preimages the witness trie actually supplied during re-exec; keys[] must cover these
+	usedTrieAddrs map[common.Address]struct{}
+	usedTrieSlots map[common.Hash]struct{}
+
 	// Debug: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
 }
@@ -1481,6 +1551,8 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 		created:        make(map[common.Address]struct{}),
 		trace:          false,
 		strictVerify:   dbg.EnvBool("WITNESS_STRICT_VERIFY", false),
+		usedTrieAddrs:  make(map[common.Address]struct{}),
+		usedTrieSlots:  make(map[common.Hash]struct{}),
 	}, nil
 }
 
@@ -1531,6 +1603,9 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 
 	// Read from trie
 	acc, ok := s.t.GetAccount(addrHash[:])
+	if ok && acc != nil {
+		s.usedTrieAddrs[addr] = struct{}{}
+	}
 	if s.tracing(addr) {
 		if ok && acc != nil {
 			fmt.Printf("[TRACE-S] ReadAccountData %s -> trie nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
@@ -1587,6 +1662,7 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	// Read from trie
 	cKey := dbutils.GenerateCompositeTrieKey(addrHash, seckey)
 	if enc, ok := s.t.Get(cKey); ok {
+		s.usedTrieSlots[keyValue] = struct{}{}
 		var res uint256.Int
 		res.SetBytes(enc)
 		if s.tracing(addr) {

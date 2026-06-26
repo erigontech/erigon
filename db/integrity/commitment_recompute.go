@@ -169,8 +169,6 @@ func RecomputeCommitmentAtBlock(
 	switch t := trie.(type) {
 	case *commitment.HexPatriciaHashed:
 		encodedTrieState, err = t.EncodeCurrentState(nil)
-	case *commitment.ConcurrentPatriciaHashed:
-		encodedTrieState, err = t.RootTrie().EncodeCurrentState(nil)
 	default:
 		return nil, common.Hash{}, fmt.Errorf("RecomputeCommitmentAtBlock: unsupported patricia trie type %T", trie)
 	}

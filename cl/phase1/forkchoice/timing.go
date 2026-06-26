@@ -30,14 +30,8 @@ import (
 // post-GLOAS epochs use BPS constants.
 
 // getAttestationDueMs returns the attestation deadline in milliseconds from slot start.
-//
-// Pre-GLOAS:  SecondsPerSlot * 1000 / IntervalsPerSlot  (1/3 of slot = 4000 ms on mainnet)
-// Post-GLOAS: SecondsPerSlot * AttestationDueBpsGloas / 10  (25% of slot = 3000 ms on mainnet)
 func (f *ForkChoiceStore) getAttestationDueMs(epoch uint64) uint64 {
-	if epoch >= f.beaconCfg.GloasForkEpoch {
-		return f.beaconCfg.SecondsPerSlot * clparams.AttestationDueBpsGloas / (clparams.BpsFactor / 1000)
-	}
-	return f.beaconCfg.SecondsPerSlot * 1000 / f.beaconCfg.IntervalsPerSlot
+	return f.beaconCfg.AttestationDueMs(epoch >= f.beaconCfg.GloasForkEpoch)
 }
 
 // getAggregateDueMs returns the aggregate deadline in milliseconds from slot start.

@@ -18,6 +18,31 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
 
+// if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
+func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
+	hph.Reset()
+
+	hph.root = root.root
+
+	hph.activeRows = root.activeRows
+	hph.currentKeyLen = root.currentKeyLen
+	copy(hph.currentKey[:], root.currentKey[:])
+	copy(hph.depths[:], root.depths[:])
+	copy(hph.branchBefore[:], root.branchBefore[:])
+	copy(hph.touchMap[:], root.touchMap[:])
+	copy(hph.afterMap[:], root.afterMap[:])
+	copy(hph.depthsToTxNum[:], root.depthsToTxNum[:])
+
+	hph.mountedNib = nibble
+	hph.mounted = true
+	hph.mountWall = root.currentKeyLen + 1
+	for row := 0; row <= hph.activeRows; row++ {
+		for nib := 0; nib < len(hph.grid[row]); nib++ {
+			hph.grid[row][nib] = root.grid[row][nib]
+		}
+	}
+}
+
 // processMounted folds each touched root-child subtree concurrently, stitches the resulting cells back into the base row, and folds the base up to the root.
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel

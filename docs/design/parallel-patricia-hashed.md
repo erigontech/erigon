@@ -24,9 +24,8 @@ defect, not a trade-off.
 
 It unfolds the root branch once, then mounts a worker per touched top-level
 nibble that folds that child's subtree into a single cell concurrently, and
-re-folds the merged root row on the main goroutine — the *mount/fold* model of
-`ConcurrentPatriciaHashed`, driven from the touched-key prefix trie instead of
-per-nibble ETL collectors.
+re-folds the merged root row on the main goroutine — a *mount/fold* model driven
+from the touched-key prefix trie.
 
 The fold is **single-level**: one worker per touched root nibble (≤ 16). A whole
 child subtree — for example one account's entire storage — folds on a single
@@ -211,8 +210,8 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 | parameter | default | effect |
 | --- | --- | --- |
-| `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia`; takes precedence over `--experimental.concurrent-commitment` (`execctx.PickTrieVariant`) |
-| `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over both `--experimental.parallel-commitment` and `--experimental.concurrent-commitment` |
+| `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`) |
+| `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
 | `ERIGON_WARMUP_PARALLEL_PROCESS` | off (env) | opt-in branch-cache prefetch inside the parallel/streaming `Process`; intended for measurement |
 | `deepStorageThreshold` | 1000 | touched-slot count above which an account's storage subtree folds concurrently (split at the first storage nibble); mitigates the whale bottleneck of §11 |
 | `numWorkers` | `runtime.NumCPU()` | worker-pool size and errgroup limit; override via `SetNumWorkers` |
@@ -239,26 +238,21 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 ## 10. Relationship to the other variants *(informative)*
 
-All three implement `commitment.Trie` and produce the same root; they differ only
+Both implement `commitment.Trie` and produce the same root; they differ only
 in scheduling.
 
-| | `HexPatriciaHashed` | `ConcurrentPatriciaHashed` | `ParallelPatriciaHashed` |
-| --- | --- | --- | --- |
-| flag | (default) | `--experimental.concurrent-commitment` | `--experimental.parallel-commitment` |
-| `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeDirect` + `sortPerNibble` | `ModeParallel` |
-| parallel unit | none | one goroutine per top nibble (≤16) | one worker per **touched** top nibble (≤16) |
-| split granularity | none | fixed 16-way at depth 1 | touched top nibbles at depth 1 (single-level) |
-| merge | single bottom-up fold | per-mount fold under `rootMu` | per-mount cells dropped into the base row, single root fold |
-| branch writes | inline | inline (per mount) | deferred, applied once or handed to the caller |
-| key delivery | one sorted stream | 16 per-nibble ETL collectors | prefix trie carrying `plainKey`/`update` |
-| applicability | always | only when the top node is a wide branch (`CanDoConcurrentNext`) | any shape with `root.ext == 0` |
+| | `HexPatriciaHashed` | `ParallelPatriciaHashed` |
+| --- | --- | --- |
+| flag | (default) | `--experimental.parallel-commitment` |
+| `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeParallel` |
+| parallel unit | none | one worker per **touched** top nibble (≤16) |
+| split granularity | none | touched top nibbles at depth 1 (single-level) |
+| merge | single bottom-up fold | per-mount cells dropped into the base row, single root fold |
+| branch writes | inline | deferred, applied once or handed to the caller |
+| key delivery | one sorted stream | prefix trie carrying `plainKey`/`update` |
+| applicability | always | any shape with `root.ext == 0` |
 
-`ParallelPatriciaHashed` is the mount/fold model of `ConcurrentPatriciaHashed`
-applied only to the nibbles actually touched and fed from the prefix trie;
-`ConcurrentPatriciaHashed` is the only consumer of the 16 per-nibble ETL
-collectors, which ModeParallel does not allocate.
-
-A fourth variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
+A third variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
 `VariantStreamingHexPatricia`), layers on this one rather than replacing it: it
 reuses the same prefix trie and fold engine and upholds R1 identically. It differs
 only in *when* the fold runs — touched keys are re-folded per top-nibble split in a
@@ -290,10 +284,9 @@ inspection, not a CI gate.
 | file | contents |
 | --- | --- |
 | `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, `dfsSubtree`, deferred apply and hand-off |
-| `execution/commitment/parallel_mount.go` | `processMounted` — unfold, per-nibble mount/fold, merged root fold |
+| `execution/commitment/parallel_mount.go` | `processMounted` — unfold, per-nibble mount/fold, merged root fold; `mountTo` mount primitive |
 | `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
 | `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
-| `execution/commitment/hex_concurrent_patricia_hashed.go` | `mountTo`/`foldMounted` mount primitives, shared with `ConcurrentPatriciaHashed` |
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
 | `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |

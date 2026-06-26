@@ -70,18 +70,6 @@ func processBatch(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKe
 	return common.Copy(root)
 }
 
-// processBatchConcurrent applies all updates in a single ConcurrentPatriciaHashed.Process call
-// and returns the root. ms must have concurrent commitment enabled.
-func processBatchConcurrent(tb testing.TB, ms *MockState, trie *ConcurrentPatriciaHashed, plainKeys [][]byte, updates []Update) []byte {
-	tb.Helper()
-	require.NoError(tb, ms.applyPlainUpdates(plainKeys, updates))
-	upds := WrapKeyUpdatesParallel(tb, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer upds.Close()
-	root, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{CtxFactory: mockTrieCtxFactory(ms)})
-	require.NoError(tb, err)
-	return common.Copy(root)
-}
-
 // fixtureBaseAccounts returns a builder with a mixed set of account and storage updates shared
 // by the unique-representation tests. Callers may chain further calls to vary the fixture.
 func fixtureBaseAccounts() *UpdateBuilder {

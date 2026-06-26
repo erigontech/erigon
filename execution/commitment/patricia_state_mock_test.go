@@ -437,23 +437,6 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	return
 }
 
-// WrapKeyUpdatesParallel is WrapKeyUpdates with concurrent commitment enabled on the result.
-func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
-	tb.Helper()
-
-	upd := NewUpdates(mode, tb.TempDir(), hasher)
-	upd.SetConcurrentCommitment(true)
-	for i, key := range keys {
-		ks := common.ToStringZeroCopy(key)
-		upd.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = hasher(key)
-			c.update = &updates[i]
-		})
-	}
-	return upd
-}
-
 func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
 	tb.Helper()
 

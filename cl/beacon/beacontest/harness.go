@@ -208,6 +208,19 @@ type Comparison struct {
 	Literal bool     `json:"literal"`
 }
 
+// exprList returns every assertion to evaluate: the plural exprs, the singular expr if set,
+// and the default assertions only when neither is provided.
+func (c *Comparison) exprList() []string {
+	out := append([]string{}, c.Exprs...)
+	if c.Expr != "" {
+		out = append(out, c.Expr)
+	}
+	if len(c.Exprs) == 0 && c.Expr == "" {
+		out = append(out, "actual_code == 200", "actual == expect")
+	}
+	return out
+}
+
 func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bCode int) error {
 	var err error
 	var a, b any
@@ -252,11 +265,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		bType = cel.StringType
 	}
 
-	exprs := []string{}
-	// if no default expr set and no exprs are set, then add the default expr
-	if len(c.Exprs) == 0 && c.Expr == "" {
-		exprs = append(exprs, "actual_code == 200", "actual == expect")
-	}
+	exprs := c.exprList()
 
 	env, err := cel.NewEnv(
 		cel.Variable("expect", aType),
@@ -268,7 +277,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		return err
 	}
 
-	for _, expr := range append(c.Exprs, exprs...) {
+	for _, expr := range exprs {
 		ast, issues := env.Compile(expr)
 		if issues != nil && issues.Err() != nil {
 			return issues.Err()

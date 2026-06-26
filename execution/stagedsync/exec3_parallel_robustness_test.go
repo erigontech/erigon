@@ -12,6 +12,7 @@ package stagedsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -188,7 +189,7 @@ func TestExecLoopExitCheck(t *testing.T) {
 	t.Run("empty map returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{}
-		if err := pe.execLoopExitCheck("test"); err != nil {
+		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
 			t.Fatalf("execLoopExitCheck on empty map should return nil, got: %v", err)
 		}
 	})
@@ -199,7 +200,7 @@ func TestExecLoopExitCheck(t *testing.T) {
 			3: {},
 			7: {},
 		}
-		err := pe.execLoopExitCheck("test-reason")
+		err := pe.execLoopExitCheck(context.Background(), "test-reason")
 		if err == nil {
 			t.Fatalf("execLoopExitCheck on non-empty map should return error, got nil")
 		}
@@ -218,7 +219,7 @@ func TestExecLoopExitCheck(t *testing.T) {
 	t.Run("nil map returns nil (defensive)", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		// pe.blockExecutors is nil
-		if err := pe.execLoopExitCheck("test"); err != nil {
+		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
 			t.Fatalf("execLoopExitCheck on nil map should return nil, got: %v", err)
 		}
 	})
@@ -427,7 +428,7 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for !stop.Load() {
-			_ = pe.execLoopExitCheck("concurrent")
+			_ = pe.execLoopExitCheck(context.Background(), "concurrent")
 		}
 	}()
 
@@ -996,6 +997,135 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	require.Equal(t, invalidTxIdx, res.DepIdx(),
 		"phantom write is recorded as Estimate, not deleted — downstream "+
 			"OCC must still see it as a dependency")
+}
+
+// Pins processCommitErr: first ErrWrongTrieRoot must cancel the executor
+// (so the exec loop stops dispatching follow-on blocks on top of
+// known-wrong state — issue #21676) AND defer the err so a later
+// applyResult carrying ErrInvalidBlock can supersede it. Subsequent
+// ErrWrongTrieRoots must NOT re-cancel or overwrite the stash. Non-trie-
+// root errors are fast-fail.
+func TestProcessCommitErr(t *testing.T) {
+	wrong5 := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+	wrong6 := fmt.Errorf("%w, block=6", ErrWrongTrieRoot)
+	fastFail := errors.New("commitment compute panic")
+
+	t.Run("nil err passes through", func(t *testing.T) {
+		var cancelCalls atomic.Int32
+		var stash error
+		require.NoError(t, processCommitErr(nil, func() { cancelCalls.Add(1) }, &stash))
+		require.Zero(t, cancelCalls.Load())
+		require.Nil(t, stash)
+	})
+
+	t.Run("first ErrWrongTrieRoot cancels and stashes", func(t *testing.T) {
+		var cancelCalls atomic.Int32
+		var stash error
+		require.NoError(t, processCommitErr(wrong5, func() { cancelCalls.Add(1) }, &stash))
+		require.Equal(t, int32(1), cancelCalls.Load(), "first ErrWrongTrieRoot must cancel exactly once")
+		require.ErrorIs(t, stash, ErrWrongTrieRoot)
+		require.Equal(t, wrong5.Error(), stash.Error())
+	})
+
+	t.Run("second ErrWrongTrieRoot does NOT re-cancel and does NOT overwrite", func(t *testing.T) {
+		var cancelCalls atomic.Int32
+		var stash error
+		require.NoError(t, processCommitErr(wrong5, func() { cancelCalls.Add(1) }, &stash))
+		require.Equal(t, int32(1), cancelCalls.Load())
+
+		require.NoError(t, processCommitErr(wrong6, func() { cancelCalls.Add(1) }, &stash))
+		require.Equal(t, int32(1), cancelCalls.Load(),
+			"only the first ErrWrongTrieRoot may signal cancel; subsequent ones are no-ops")
+		require.Equal(t, wrong5.Error(), stash.Error(),
+			"stash records the first failure; later trie-root errors must not overwrite")
+	})
+
+	t.Run("non-trie-root err is returned without cancel or stash", func(t *testing.T) {
+		var cancelCalls atomic.Int32
+		var stash error
+		err := processCommitErr(fastFail, func() { cancelCalls.Add(1) }, &stash)
+		require.Same(t, fastFail, err, "non-trie-root errors must pass through unchanged")
+		require.Zero(t, cancelCalls.Load(), "non-trie-root errors must not signal cancel")
+		require.Nil(t, stash, "non-trie-root errors must not be stashed")
+	})
+}
+
+// Pins the close-branch precedence: deferredRootErr must surface ahead of
+// the missing-blocks completeness error, otherwise a deliberate cancel masks
+// ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
+// production order — keep them in lock-step.
+func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
+	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
+		if deferredRootErr != nil {
+			return deferredRootErr
+		}
+		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+			return fmt.Errorf("%w: %d missing blockResult(s) %v", rules.ErrInvalidBlock, len(missing), missing)
+		}
+		return nil
+	}
+
+	mkSet := func(ns ...uint64) map[uint64]struct{} {
+		s := make(map[uint64]struct{}, len(ns))
+		for _, n := range ns {
+			s[n] = struct{}{}
+		}
+		return s
+	}
+
+	t.Run("deferred root + missing block — root error wins", func(t *testing.T) {
+		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+		err := closeBranch(rootErr, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, ErrWrongTrieRoot, "deferred root error must surface ahead of missing-block noise")
+		require.Equal(t, rootErr.Error(), err.Error(), "exact rootErr message must be returned — not the missing-block wrapper")
+	})
+
+	t.Run("missing block only — invalid-block error stands", func(t *testing.T) {
+		err := closeBranch(nil, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.NotErrorIs(t, err, ErrWrongTrieRoot)
+		require.Contains(t, err.Error(), "missing blockResult")
+	})
+
+	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {
+		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+		err := closeBranch(rootErr, mkSet(5), mkSet(5))
+		require.ErrorIs(t, err, ErrWrongTrieRoot)
+	})
+
+	t.Run("clean exit — nil", func(t *testing.T) {
+		require.NoError(t, closeBranch(nil, mkSet(5), mkSet(5)))
+	})
+}
+
+// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with
+// errDeliberateStop suppresses the pending-block ErrInvalidBlock noise.
+func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
+	t.Run("pending blocks but deliberate-stop cause returns nil", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errDeliberateStop)
+		if err := pe.execLoopExitCheck(ctx, "post-cancel-drain"); err != nil {
+			t.Fatalf("deliberate-stop cause must suppress pending-block error, got: %v", err)
+		}
+	})
+
+	t.Run("pending blocks without deliberate-stop still errors", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
+		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
+	})
+
+	t.Run("pending blocks with unrelated cancel cause still errors", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errors.New("shutdown"))
+		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
+		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
+	})
 }
 
 // Pins wrapAsExecAbort: a real underlying err must survive as OriginError

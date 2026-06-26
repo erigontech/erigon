@@ -174,6 +174,11 @@ const (
 
 func vmErrorCodeFromErr(err error) int {
 	switch {
+	case errors.Is(err, ErrWriteProtection):
+		// Checked before ErrOutOfGas: the interpreter wraps a static-context
+		// write protection from a dynamic gas function as "%w: %w" over ErrOutOfGas,
+		// so both match and write protection must take precedence.
+		return VMErrorCodeWriteProtection
 	case errors.Is(err, ErrOutOfGas):
 		return VMErrorCodeOutOfGas
 	case errors.Is(err, ErrCodeStoreOutOfGas):
@@ -190,8 +195,6 @@ func vmErrorCodeFromErr(err error) int {
 		return VMErrorCodeMaxCodeSizeExceeded
 	case errors.Is(err, ErrInvalidJump):
 		return VMErrorCodeInvalidJump
-	case errors.Is(err, ErrWriteProtection):
-		return VMErrorCodeWriteProtection
 	case errors.Is(err, ErrReturnDataOutOfBounds):
 		return VMErrorCodeReturnDataOutOfBounds
 	case errors.Is(err, ErrGasUintOverflow):

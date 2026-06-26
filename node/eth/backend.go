@@ -336,9 +336,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}
-		if config.ExperimentalConcurrentCommitment {
-			statecfg.ExperimentalConcurrentCommitment = true
-		}
 		if config.ExperimentalParallelCommitment {
 			statecfg.ExperimentalParallelCommitment = true
 		}

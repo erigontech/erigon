@@ -198,7 +198,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
 	cfg := commitment.DefaultTrieConfig()
 	if bt.paraTrie {
-		cfg.Variant = commitment.VariantConcurrentHexPatricia
+		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
 	cfg.EnableTrieWarmup = bt.trieWarmup
 	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)

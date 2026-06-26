@@ -50,8 +50,8 @@ var (
 	errInvalidBlockRange               = "invalid block range params"
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
-	errExceedMaxTopics                 = "exceed max topics"
-	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
+	errExceedMaxTopics                 = fmt.Sprintf("query exceeds the maximum of %d topics", maxTopics)
+	errExceedLogQueryLimit             = fmt.Sprintf("query exceeds the maximum of %d addresses or topics per search position", logQueryLimit)
 	errExceedLogResults                = "query returns too many logs, narrow your filter"
 	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
 	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"

@@ -900,7 +900,7 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 //   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
 //     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
 //   - SYSTEM_ADDRESS remains an empty account after the call.
-//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's TxIO.
+//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's tx IO.
 //   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
 //     the zero-value transfer path.
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
@@ -979,7 +979,9 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
 	// performs the sender-side touch and no actual account access.
-	bal := statedb.TxIO().AsBlockAccessList()
+	var io state.VersionedIO
+	statedb.MergeTxIOInto(&io)
+	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
 		require.NotEqual(t, systemAddr, accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")

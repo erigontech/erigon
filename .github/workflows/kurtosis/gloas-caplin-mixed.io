@@ -32,4 +32,4 @@ additional_services: [assertoor]
 assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:master
+  image: ethpandaops/assertoor:master-2231b3e # pinned pre-EIP-8282 (3-list ExecutionRequests); restore :master after #22008

@@ -8,12 +8,14 @@ name: Cache Warming — Kurtosis CL images
 # group, so warming on main/release is enough.
 #
 # Triggers:
-#   - push to a protected branch touching test-kurtosis-assertoor.yml -> warm on a version bump
-#   - schedule (daily)                                                -> safety net if LRU-evicted
-#   - workflow_dispatch                                               -> manual (use once to bootstrap)
+#   - push to a protected branch touching test-kurtosis-assertoor.yml or a kurtosis
+#     .io file -> warm on a version bump
+#   - schedule (daily) -> safety net if LRU-evicted
+#   - workflow_dispatch -> manual (use once to bootstrap)
 #
-# The cache key is derived from the pinned image versions, which all live in
-# test-kurtosis-assertoor.yml — hence the paths filter on that file.
+# The cache key is derived from the pinned image versions: the kurtosis-infra and
+# eth2-val-tools tags in test-kurtosis-assertoor.yml plus the CL / assertoor tags it
+# reads from the kurtosis .io files — hence the paths filter covers both.
 
 on:
   push:
@@ -22,6 +24,7 @@ on:
       - 'release/**'
     paths:
       - '.github/workflows/test-kurtosis-assertoor.yml'
+      - '.github/workflows/kurtosis/**'
   schedule:
     - cron: '27 5 * * *'
   workflow_dispatch:

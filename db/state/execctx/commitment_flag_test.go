@@ -35,15 +35,12 @@ func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	t.Helper()
 	origStream := statecfg.ExperimentalStreamingCommitment
 	origPar := statecfg.ExperimentalParallelCommitment
-	origConc := statecfg.ExperimentalConcurrentCommitment
 	t.Cleanup(func() {
 		statecfg.ExperimentalStreamingCommitment = origStream
 		statecfg.ExperimentalParallelCommitment = origPar
-		statecfg.ExperimentalConcurrentCommitment = origConc
 	})
 	statecfg.ExperimentalStreamingCommitment = variant == commitment.VariantStreamingHexPatricia
 	statecfg.ExperimentalParallelCommitment = variant == commitment.VariantParallelHexPatricia
-	statecfg.ExperimentalConcurrentCommitment = false
 }
 
 // Update set is identical across calls so the returned roots can be compared.
@@ -119,7 +116,6 @@ func TestPickTrieVariant_StreamingFlag(t *testing.T) {
 	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
 
 	statecfg.ExperimentalParallelCommitment = true
-	statecfg.ExperimentalConcurrentCommitment = true
 	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
 
 	statecfg.ExperimentalStreamingCommitment = false

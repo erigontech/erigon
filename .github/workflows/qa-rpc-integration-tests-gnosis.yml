@@ -41,6 +41,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Set up job-scoped build temp dir
+        run: |
+          # Confine build temp (Go work dirs + cgo/gcc cc* files) to one job-scoped dir
+          # outside the checkout, so it can be removed wholesale when the job exits.
+          BUILD_TMP="${RUNNER_TEMP}/erigon-build-tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Drop leftovers from a previously cancelled run (this runner builds serially).
+          find "${RUNNER_TEMP}" -maxdepth 1 -name 'erigon-build-tmp-*' -exec rm -rf {} + 2>/dev/null || true
+          mkdir -p "${BUILD_TMP}"
+          {
+            echo "BUILD_TMP=${BUILD_TMP}"
+            echo "TMPDIR=${BUILD_TMP}"
+            echo "GOTMPDIR=${BUILD_TMP}"
+          } >> "${GITHUB_ENV}"
+
       - name: Read RPC version
         run: |
           source .github/workflows/scripts/rpc_version.env
@@ -75,7 +89,7 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Restore rpc-tests cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ runner.workspace }}/rpc-tests
           key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-${{ env.RPC_VERSION }}
@@ -178,4 +192,17 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
+
+      - name: Clean up job-scoped build temp dir
+        if: always()
+        run: |
+          # Only delete a path of the exact shape we created under RUNNER_TEMP; never a bare/empty var.
+          case "${BUILD_TMP}" in
+            "${RUNNER_TEMP}/erigon-build-tmp-"*)
+              rm -rf -- "${BUILD_TMP}"
+              ;;
+            *)
+              echo "Skipping cleanup: BUILD_TMP='${BUILD_TMP:-}' is empty or unexpected"
+              ;;
+          esac
 

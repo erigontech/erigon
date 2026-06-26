@@ -249,7 +249,7 @@ jobs:
       # Dockerfile extracts it for `consume --input /fixtures`.
       - name: Restore EEST fixtures cache
         id: eest-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             test-fixtures-cache/eest_stable.tar.gz

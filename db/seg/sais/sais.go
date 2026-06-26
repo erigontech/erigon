@@ -18,9 +18,7 @@ import (
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
 // also for Erigon - it's important to keep control on files reproducibility
 
-// Sais computes the suffix array of data into sa, using *buf as reusable scratch space.
-// buf is grown as needed. Callers should preserve *buf across calls to amortize allocations:
-// without it, recurse_32 allocates ~len(data)/4 ints on every call.
+// Sais computes the suffix array of data into sa.
 func Sais(data []byte, sa []int32, buf *[]int32) error {
 	n := len(data)
 	if n != len(sa) {
@@ -34,8 +32,6 @@ func Sais(data []byte, sa []int32, buf *[]int32) error {
 	}
 	clear(sa)
 
-	// Pre-size buf to n/2 so recurse_32's "len(tmp) < numLMS" check never triggers.
-	// numLMS is at most n/2, so a buf of n/2 ints is sufficient for all recursion levels.
 	needed := max(512, n/2)
 	*buf = slices.Grow((*buf)[:0], needed)[:needed]
 	sais_8_32(data, 256, sa, *buf)
