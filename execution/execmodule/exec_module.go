@@ -425,7 +425,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
-	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
@@ -477,6 +476,19 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			LatestValidHash:  common.Hash{},
 			ValidationStatus: ExecutionStatusMissingSegment,
 		}, nil
+	}
+
+	// Flashblock detection: check whether this block is a prefix-extension
+	// of an in-progress flashblock before clearing the fork validator state.
+	// body.Transactions is needed for the prefix comparison.
+	flashUpdate := e.forkValidator.CheckFlashblockUpdate(blockNumber, body.Transactions)
+	if flashUpdate.IsUpdate {
+		e.logger.Debug("[execmodule] flashblock update detected",
+			"number", blockNumber, "hash", blockHash,
+			"prevTxs", flashUpdate.PrefixLen,
+			"newTxs", len(body.Transactions))
+	} else {
+		e.forkValidator.ClearWithUnwind()
 	}
 
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
@@ -535,6 +547,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 	}
 
+	// Transfer VersionedIO/VersionMap from the previous flashblock's SD to the
+	// new SD so the executor can detect already-executed transactions.
+	if flashUpdate.IsUpdate && flashUpdate.SD != nil {
+		doms.SetVersionedIO(flashUpdate.SD.GetVersionedIO())
+		doms.SetVersionMap(flashUpdate.SD.GetVersionMap())
+	}
+
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
@@ -545,6 +564,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
+	}
+
+	// Record tx hashes for flashblock prefix detection on subsequent updates.
+	if status == engine_types.ValidStatus && body != nil {
+		e.forkValidator.RecordFlashblockTxHashes(body.Transactions)
 	}
 
 	// Clear state cache on invalid block

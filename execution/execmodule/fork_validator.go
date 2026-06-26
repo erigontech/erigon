@@ -71,6 +71,10 @@ type ForkValidator struct {
 	lock sync.Mutex
 
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
+
+	// Flashblock state: tracks tx hashes already executed for the
+	// in-progress block so we can detect prefix-extension updates.
+	flashblockTxHashes []common.Hash
 }
 
 func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
@@ -277,6 +281,7 @@ func (fv *ForkValidator) clear() {
 		fv.sharedDom.Close()
 	}
 	fv.sharedDom = nil
+	fv.flashblockTxHashes = nil
 }
 
 // ClearWithUnwind wipes out current extending fork data.
@@ -284,6 +289,68 @@ func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()
+}
+
+// FlashblockUpdate describes the result of checking whether an incoming
+// block is a flashblock update to the in-progress block.
+type FlashblockUpdate struct {
+	// IsUpdate is true when the incoming block extends the in-progress flashblock.
+	IsUpdate bool
+	// PrefixLen is the number of already-executed transactions that match.
+	// The caller should execute only transactions from PrefixLen onward.
+	PrefixLen int
+	// SD is the SharedDomains from the previous flashblock, carrying
+	// accumulated VersionedIO state. Nil when IsUpdate is false.
+	SD *execctx.SharedDomains
+}
+
+// CheckFlashblockUpdate checks whether the given block is a flashblock
+// update (prefix-extension) of the in-progress block.
+//
+// Returns IsUpdate=true when:
+//  1. The block number matches the in-progress extending fork number
+//  2. The in-progress block has flashblock tx hashes recorded
+//  3. Every previously-executed tx hash appears at the same position
+//     in the new block's transaction list (prefix match)
+//
+// When the prefix does NOT match (reordered transactions), the caller
+// should treat this as a restart: clear the old state and re-execute.
+func (fv *ForkValidator) CheckFlashblockUpdate(blockNumber uint64, txs []types.Transaction) FlashblockUpdate {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+
+	if fv.extendingForkNumber != blockNumber || len(fv.flashblockTxHashes) == 0 || fv.sharedDom == nil {
+		return FlashblockUpdate{}
+	}
+
+	prevHashes := fv.flashblockTxHashes
+	if len(txs) < len(prevHashes) {
+		return FlashblockUpdate{}
+	}
+
+	for i, h := range prevHashes {
+		if txs[i].Hash() != h {
+			return FlashblockUpdate{}
+		}
+	}
+
+	return FlashblockUpdate{
+		IsUpdate:  true,
+		PrefixLen: len(prevHashes),
+		SD:        fv.sharedDom,
+	}
+}
+
+// RecordFlashblockTxHashes records the transaction hashes executed for
+// the current in-progress flashblock so that subsequent updates can
+// detect prefix matches.
+func (fv *ForkValidator) RecordFlashblockTxHashes(txs []types.Transaction) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.flashblockTxHashes = make([]common.Hash, len(txs))
+	for i, tx := range txs {
+		fv.flashblockTxHashes[i] = tx.Hash()
+	}
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
