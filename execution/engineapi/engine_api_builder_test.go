@@ -301,19 +301,21 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 // the EL's static --miner.gaslimit when building a block — and that the
 // resulting block respects the CL target as a cap.
 //
-// Setup picks numbers so the two values produce distinguishable block contents:
-//   - parent gas limit = 42_000 (room for two 21K-gas transfers)
-//   - static --miner.gaslimit = 21_000 (would cap the block at one transfer)
-//   - CL targetGasLimit = 42_000 (room for two transfers)
+// Setup picks numbers so the two values produce distinguishable block contents
+// while respecting EIP-7928 Block Access List (BAL) constraints (limit = gasLimit / 2000):
+//   - parent gas limit = 60_000 (room for two 21K-gas transfers, allowing 30 BAL items)
+//   - static --miner.gaslimit = 50_000 (would cap the block at one transfer, allowing 25 BAL items)
+//   - CL targetGasLimit = 60_000 (room for two transfers)
 //
 // Three transfers are submitted; only two must fit. If the static target won,
-// the block would gas-limit at ~41_960 and contain a single transfer.
+// the block would contain a single transfer because the second would violate
+// the 25 BAL item limit.
 // See https://github.com/ethereum/execution-apis/pull/796.
 func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
-	const targetGasLimit uint64 = 42_000
-	const minerGasLimit uint64 = 21_000
+	const targetGasLimit uint64 = 60_000
+	const minerGasLimit uint64 = 50_000
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
 	genesis.GasLimit = targetGasLimit
@@ -334,7 +336,7 @@ func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
-		// Submit 3 transfers; only 2 should fit under the CL-supplied 42K cap.
+		// Submit 3 transfers; only 2 should fit under the CL-supplied 60K cap.
 		for i := 0; i < 3; i++ {
 			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(int64(i+1)))
 			require.NoError(t, err)
