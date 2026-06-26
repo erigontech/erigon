@@ -26,10 +26,10 @@ import (
 )
 
 // TestSuicideCoinbase pins a pre-existing contract at the coinbase that
-// SELFDESTRUCTs and is then revived by the same block's fees/reward (a value
-// transfer, no CREATE). The parallel executor keeps a stale pre-SD code hash
-// and computes a wrong state root here; it is correct under EXEC3_PARALLEL=false
-// and on Cancun, where EIP-6780 keeps the pre-existing contract in place.
+// SELFDESTRUCTs in a tx: that tx's priority fee, credited to the coinbase, must
+// be burned by the same-tx self-destruct rather than survive into the block's
+// final coinbase balance. Pre-Cancun only — EIP-6780 leaves the pre-existing
+// contract in place, so Cancun never self-destructs it.
 func TestSuicideCoinbase(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
