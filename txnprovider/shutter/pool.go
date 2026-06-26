@@ -315,7 +315,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
-			IsEIP2780:          isAmsterdam && !isAATxn,
+			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
 		if overflow {

@@ -825,7 +825,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
-			IsEIP2780:          isAmsterdam && !isAATxn,
+			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicRegularGas := intrinsicGasResult.RegularGas
@@ -1023,7 +1023,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP8037:          isAmsterdam,
-		IsEIP2780:          isAmsterdam && !isAATxn,
+		IsEIP2780:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
 	gas := mdgas.MdGas{

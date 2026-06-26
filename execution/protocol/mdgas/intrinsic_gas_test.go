@@ -371,7 +371,6 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 			expectedState:   params.StateGasNewAccount,
 		},
 	}
-
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
