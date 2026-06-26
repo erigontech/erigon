@@ -4,6 +4,11 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const versionReplace = require('./src/remark/version-replace.js');
 
+// Archived doc versions (newest-first). Single source of truth: adding an entry
+// here (via `docusaurus docs:version`) is all that's needed — version injection
+// below derives everything from this list, no per-version config edits required.
+const archivedVersions: string[] = require('./versions.json');
+
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
   if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -40,11 +45,14 @@ async function fetchLatestSeriesVersion(prefix: string): Promise<string> {
 }
 
 export default async function createConfig(): Promise<Config> {
-  const [latestVersion, v33Version, v34Version] = await Promise.all([
+  const [latestVersion, ...archivedVersionStrings] = await Promise.all([
     fetchLatestVersion(),
-    fetchLatestSeriesVersion('v3.3.'),
-    fetchLatestSeriesVersion('v3.4.'),
+    ...archivedVersions.map((v) => fetchLatestSeriesVersion(`${v}.`)),
   ]);
+  // Map each archived version id (e.g. "v3.4") to its latest patch release string.
+  const versionStrings: Record<string, string> = Object.fromEntries(
+    archivedVersions.map((v, i) => [v, archivedVersionStrings[i]]),
+  );
 
   return {
     title: 'Erigon Documentation',
@@ -128,7 +136,7 @@ export default async function createConfig(): Promise<Config> {
               badge: false,
             },
           },
-          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, v33Version, v34Version}]],
+          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, versionStrings}]],
         },
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},
