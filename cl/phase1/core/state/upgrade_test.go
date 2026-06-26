@@ -110,3 +110,41 @@ func TestOnboardBuildersFromPendingDeposits_NewFormatDeposit(t *testing.T) {
 	require.Equal(t, pubkey, s.GetBuilders().Get(0).Pubkey)
 	require.Equal(t, 0, s.GetPendingDeposits().Len(), "onboarded deposit must be removed from pending")
 }
+
+// TestOnboardBuildersFromPendingDeposits_MalformedDepositDoesNotAbort verifies
+// that a malformed pending deposit (undeserializable pubkey/signature) with a
+// PayloadBuilderVersion prefix does not abort the fork upgrade. The deposit
+// must stay in the pending queue.
+func TestOnboardBuildersFromPendingDeposits_MalformedDepositDoesNotAbort(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](
+		int(cfg.BuilderRegistryLimit),
+		new(cltypes.Builder).EncodingSizeSSZ(),
+	)
+	s.SetBuilders(builders)
+
+	// Malformed deposit: valid PayloadBuilderVersion prefix but garbage pubkey/sig.
+	var badPubkey common.Bytes48
+	badPubkey[0] = 0xFF
+	var creds common.Hash
+	creds[0] = clparams.PayloadBuilderVersion
+	creds[12] = 0xAA
+
+	pendingDeposits := solid.NewPendingDepositList(&cfg)
+	pendingDeposits.Append(&solid.PendingDeposit{
+		PubKey:                badPubkey,
+		WithdrawalCredentials: creds,
+		Amount:                cfg.MinDepositAmount,
+		Signature:             common.Bytes96{},
+		Slot:                  0,
+	})
+	s.SetPendingDeposits(pendingDeposits)
+
+	require.NoError(t, s.onboardBuildersFromPendingDeposits(),
+		"malformed deposit must not abort fork upgrade")
+	require.Equal(t, 0, s.GetBuilders().Len(), "malformed deposit must not create a builder")
+	require.Equal(t, 1, s.GetPendingDeposits().Len(), "malformed deposit must stay in pending")
+}
