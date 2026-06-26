@@ -731,6 +731,15 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		if len(auths) == 0 {
 			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
 		}
+		isAmsterdam := st.evm.ChainRules().IsAmsterdam
+		// EIP-8038/8037: a skipped authorization writes nothing, so refund its
+		// intrinsic ACCOUNT_WRITE (regular, capped) and NEW_ACCOUNT + AUTH_BASE (state) charges.
+		refundSkippedAuth := func() {
+			if isAmsterdam {
+				st.state.AddRefund(params.AccountWriteCostEIP8038)
+				stateIgasRefund += params.StateGasNewAccount + params.StateGasAuthBase
+			}
+		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
@@ -739,6 +748,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 1. chainId check
 			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 
@@ -746,6 +756,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
 				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 			authority := accounts.InternAddress(*authorityPtr)
@@ -770,6 +781,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				}
 				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					refundSkippedAuth()
 					continue
 				}
 				hasDelegation = true
@@ -782,6 +794,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if authorityNonce != auth.Nonce {
 				log.Trace("invalid nonce, skipping", "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 
@@ -794,8 +807,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
-			if st.evm.ChainRules().IsAmsterdam {
+			if isAmsterdam {
 				if exists {
+					// EIP-8038: no new account leaf is written, so the intrinsic
+					// ACCOUNT_WRITE (regular, capped) and NEW_ACCOUNT (state) are refunded.
+					st.state.AddRefund(params.AccountWriteCostEIP8038)
 					stateIgasRefund += params.StateGasNewAccount
 				}
 				if hasDelegation || auth.Address == (common.Address{}) {

@@ -26,10 +26,20 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// callValueTransferGas returns the regular gas charged for a value-bearing
+// CALL/CALLCODE: EIP-8038 raises CALL_VALUE to ACCOUNT_WRITE + CALL_STIPEND.
+func callValueTransferGas(rules *chain.Rules) uint64 {
+	if rules.IsAmsterdam {
+		return params.CallValueTransferGasEIP8038
+	}
+	return params.CallValueTransferGas
+}
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so
 // only for the memory region that is expanded, not the total memory.
@@ -418,7 +428,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 	transfersValue := !callContext.Stack.Back(2).IsZero()
 	if transfersValue {
-		gas.Regular += params.CallValueTransferGas
+		gas.Regular += callValueTransferGas(evm.ChainRules())
 	}
 	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -553,7 +563,7 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas
 		overflow bool
 	)
 	if !callContext.Stack.Back(2).IsZero() {
-		gas.Regular += params.CallValueTransferGas
+		gas.Regular += callValueTransferGas(evm.ChainRules())
 	}
 
 	if gas.Regular, overflow = math.SafeAdd(gas.Regular, memoryGas); overflow {
