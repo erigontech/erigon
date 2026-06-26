@@ -1747,6 +1747,8 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 				}
 			}
 		}
+
+		assertStrictWitness(t, []*UpdateBuilder{builder}, plainKeysToWitness, keyExists, hashedKeysToWitness...)
 	}
 
 	// buildTrieMultiRoundAndWitness processes multiple rounds of updates through
@@ -1813,6 +1815,8 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 				}
 			}
 		}
+
+		assertStrictWitness(t, builders, plainKeysToWitness, keyExists)
 	}
 
 	t.Run("JustRoot", func(t *testing.T) {
