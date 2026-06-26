@@ -52,7 +52,46 @@ func TestLegacyBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	// There is also a LegacyTests folder, containing blockchain tests generated
-	// prior to Istanbul. However, they are all derived from GeneralStateTests,
-	// which run natively, so there's no reason to run them here.
+	// The LegacyTests/Cancun snapshot's BlockchainTests are run by
+	// TestLegacyCancunBlockchain below.
+}
+
+// TestLegacyCancunBlockchain runs the LegacyTests/Cancun hand-written
+// BlockchainTests (ValidBlocks/InvalidBlocks) through the block executor — the
+// only path that surfaces parallel-exec consensus bugs (e.g. a coinbase tip not
+// burned on a same-tx SELFDESTRUCT), which TestLegacyCancunState's native
+// single-transaction path cannot.
+func TestLegacyCancunBlockchain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	if runtime.GOOS == "windows" {
+		t.Skip("see TestLegacyBlockchain")
+	}
+
+	bt := new(testutil.TestMatcher)
+	bt.SkipLoad(`.*\.meta/.*`)
+	// GeneralStateTests run natively via TestLegacyCancunState; re-running all
+	// 2865 of them through the per-test block executor here is prohibitively slow.
+	bt.SkipLoad(`GeneralStateTests`)
+	// PoW total-difficulty reorg / multi-chain / fork-transition families: the
+	// in-memory harness doesn't do TD-based fork choice, so these fail or flake
+	// regardless of executor mode. Plus refundReset's Constantinople divergence.
+	// Tracked in erigontech/erigon#22061.
+	bt.SkipLoad(`bcMultiChainTest`)
+	bt.SkipLoad(`bcForkStressTest`)
+	bt.SkipLoad(`bcTotalDifficultyTest`)
+	bt.SkipLoad(`TransitionTests`)
+	bt.SkipLoad(`bcStateTests/refundReset\.json/refundReset_Constantinople`)
+
+	dir := filepath.Join(legacyDir, "LegacyTests", "Cancun", "BlockchainTests")
+	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
+			t.Error(err)
+		}
+	})
 }
