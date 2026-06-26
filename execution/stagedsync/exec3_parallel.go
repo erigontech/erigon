@@ -3413,15 +3413,15 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// CodePath must travel with CodeHashPath; gated on raw-writeset
 	// CodePath/CodeHashPath presence to skip the fill-missing-loop case where
 	// the code is already in CodeDomain.
-	codeAddrInRaw := make(map[accounts.Address]bool)
+	codeAddrInRaw := make(map[accounts.Address]bool, len(writes))
 	for _, w := range writes {
 		switch w.Path {
 		case state.CodePath, state.CodeHashPath:
 			codeAddrInRaw[w.Address] = true
 		}
 	}
-	codeInOutput := make(map[accounts.Address]bool)
-	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	codeInOutput := make(map[accounts.Address]bool, len(filtered))
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash, len(filtered))
 	for _, w := range filtered {
 		switch w.Path {
 		case state.CodePath:

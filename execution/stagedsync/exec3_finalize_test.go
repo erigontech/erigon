@@ -1866,8 +1866,56 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 	// The regression: code was dropped while the hash survived. Code must travel
 	// with its hash so the account is never persisted with a codeHash but no code.
 	require.Equal(t, 1, countPath(result, state.CodePath),
-		"CodePath must be recovered so code is never persisted without its codeHash")
+		"CodePath must be recovered so the account is never persisted with a codeHash but no code")
 	assert.Equal(t, designator, gotCode, "recovered code is the 7702 designator bytes")
+}
+
+// Pins the stateReader fallback: when the versionMap has no CodePath for the
+// account (so the vm.Read recovery branch misses), a surviving CodeHashPath
+// whose code is an EIP-7702 designator is recovered from
+// stateReader.ReadAccountCode and re-emitted as CodePath. This is the
+// re-executing-delegation path the versionMap-hit branch cannot cover.
+func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	authority := accounts.InternAddress([20]byte{0x42})
+
+	designator := types.AddressToDelegation(accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02}))
+	designatorHash := accounts.InternCodeHash(crypto.Keccak256Hash(designator))
+
+	const txIndex = 5
+
+	// versionMap carries the codeHash and nonce but NOT the CodePath — so the
+	// vm.Read(CodePath) recovery branch misses and the stateReader fallback runs.
+	vm.FlushVersionedWrites(state.VersionedWrites{
+		{Address: authority, Path: state.CodeHashPath, Val: designatorHash,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: authority, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}, true, "")
+
+	// The committed designator lives in CodeDomain, reachable via stateReader.
+	reader := newMapStateReader()
+	reader.accounts[authority] = &accounts.Account{Nonce: 1, CodeHash: designatorHash}
+	reader.code[authority] = designator
+
+	rawWrites := state.VersionedWrites{
+		{Address: authority, Path: state.NoncePath, Val: uint64(1),
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+		{Address: authority, Path: state.CodeHashPath, Val: designatorHash,
+			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
+	}
+
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true, false)
+
+	require.Equal(t, 1, countPath(result, state.CodeHashPath),
+		"codeHash survives so recovery is eligible")
+	require.Equal(t, 1, countPath(result, state.CodePath),
+		"CodePath must be recovered from the stateReader when the versionMap misses")
+	for _, w := range result {
+		if w.Path == state.CodePath {
+			assert.Equal(t, designator, w.Val.([]byte), "recovered code is the 7702 designator bytes")
+		}
+	}
 }
 
 // Pins that recovery does NOT fire when the raw writeset has no
