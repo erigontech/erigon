@@ -557,6 +557,11 @@ func (a *Aggregator) Close() {
 	a.ctxCancel = nil
 	a.wg.Wait()
 
+	// Release the commitment BranchCache so a still-referenced closed Aggregator doesn't keep it reachable.
+	if cd := a.d[kv.CommitmentDomain]; cd != nil {
+		cd.branchCache = nil
+	}
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
