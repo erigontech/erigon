@@ -45,7 +45,7 @@ Full mode now retains state and block data for the last `262,144` blocks (~36.4 
 
 `--prune.mode=blocks` keeps the same shape as before (all block data retained), but its state history retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both block and state history retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 
-**Migration:** existing datadirs upgrade automatically and silently. To keep the old "retain all post-merge block data" behavior, switch to `--prune.mode=blocks`; the auto-upgrade is reversible with `--prune.distance.blocks=18446744073709551615`.
+**Migration:** existing datadirs upgrade automatically and silently. To keep the old "retain all post-merge block data" behavior, set `--prune.distance.blocks=18446744073709551615`.
 
 Note: physical deletion of frozen snapshot files is not implemented yet (see [#21306](https://github.com/erigontech/erigon/issues/21306)), so existing on-disk historical blocks persist for now, though the new cutoff is already recorded at the config level.
 
