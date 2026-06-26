@@ -138,7 +138,6 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 
 #### CLI & Operations
 
-- `--snap.p2p-manifest` (experimental, opt-in): decentralized snapshot distribution over P2P — peers advertise their `chain.toml` manifest via ENR, instead of the centralized `preverified.toml` (#20526, #20615) — by @mh0lt
 - `--exec.no-prune` (disable all DB pruning), `--exec.serial` (force single-threaded execution), and `--exec.*` executor-tuning flags (#20915, #20853, #20797) — by @mh0lt
 - `seg du` (snapshot disk-usage analysis, #20104) and `seg rm-blocks` (remove latest block snapshots, #20554) — by @awskii, @sudeepdino008
 
