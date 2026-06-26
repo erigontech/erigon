@@ -91,10 +91,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 				result.RegularGas += params.TransferLogCostEIP2780 + params.TxValueCostEIP2780
 			}
 		}
-	case args.IsEIP8037 && args.IsContractCreation:
-		// EIP-8037: GAS_CREATE = 112*cpsb (state) + 9000 (regular), plus TxGas (21000)
-		result.RegularGas = params.TxGas + params.CreateGasEIP8037
-		result.StateGas = params.StateGasNewAccount
 	case args.IsContractCreation && args.IsEIP2:
 		result.RegularGas = params.TxGasContractCreation
 	case args.IsAATxn:
