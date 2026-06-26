@@ -285,3 +285,43 @@ func BenchmarkGenerateWitness(b *testing.B) {
 		require.NoError(b, err)
 	}
 }
+
+func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
+	b.Helper()
+	ms := NewMockState(b)
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	hph.SetTrace(false)
+	builder := NewUpdateBuilder()
+	accounts := make([][]byte, 0, 128)
+	for i := 0; i < 128; i++ {
+		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+		accounts = append(accounts, a)
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		for j := 0; j < 4; j++ {
+			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
+			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+	}
+	plainKeys, updates := builder.Build()
+	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
+	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+	_, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
+	require.NoError(b, err)
+	return hph, accounts[:16]
+}
+
+func BenchmarkWitnesses(b *testing.B) {
+	ctx := context.Background()
+	hph, targets := benchWitnessTrie(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		for _, a := range targets {
+			toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
+		}
+		_, _, err := hph.Witnesses(ctx, toWitness, false, "")
+		toWitness.Close()
+		require.NoError(b, err)
+	}
+}
