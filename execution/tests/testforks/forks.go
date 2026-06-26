@@ -106,7 +106,8 @@ func init() {
 
 	c = configCopy(c)
 	c.ConstantinopleBlock = common.NewUint64(0)
-	c.PetersburgBlock = nil
+	// A nil PetersburgBlock makes IsPetersburg fall back to ConstantinopleBlock, which would disable EIP-1283 net-metered SSTORE; keep Petersburg in the future so this fork actually exercises it.
+	c.PetersburgBlock = common.NewUint64(10_000_000)
 	Forks["Constantinople"] = c
 
 	c = configCopy(c)
