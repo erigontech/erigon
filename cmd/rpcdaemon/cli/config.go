@@ -660,25 +660,26 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
-		srv, err := PrepareRpcServer(cfg, rpcAPI, logger)
+		srv, filteredAPIs, err := PrepareRpcServer(cfg, rpcAPI, logger)
 		if err != nil {
 			return err
 		}
-		return ServeRpcServer(ctx, cfg, srv, logger, rpcAPI)
+		return ServeRpcServer(ctx, cfg, srv, filteredAPIs, logger)
 	}
 
 	return nil
 }
 
 // PrepareRpcServer creates the RPC server instance, registers APIs, and sets
-// cfg.InProcServer. It returns before starting any network listeners, so the
-// in-process server is usable immediately after this call returns.
-func PrepareRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*rpc.Server, error) {
+// cfg.InProcServer. It returns the server and the engine-filtered API list
+// (which ServeRpcServer needs for graphql/healthcheck). The in-process server
+// is usable immediately after this call returns.
+func PrepareRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*rpc.Server, []rpc.API, error) {
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	srv.SetAllowList(allowListForRPC)
 	srv.SetBatchLimit(cfg.BatchLimit)
@@ -704,11 +705,11 @@ func PrepareRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger)
 	}
 
 	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
-		return nil, fmt.Errorf("could not start register RPC apis: %w", err)
+		return nil, nil, fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
 	cfg.InProcServer = srv
-	return srv, nil
+	return srv, defaultAPIList, nil
 }
 
 func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -735,19 +736,13 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpC
 }
 
 // ServeRpcServer starts the HTTP/WS/gRPC listeners for an already-prepared
-// RPC server and blocks until ctx is cancelled. Use PrepareRpcServer to
-// create the server first.
-func ServeRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, srv *rpc.Server, logger log.Logger, rpcAPI ...[]rpc.API) error {
+// RPC server and blocks until ctx is cancelled. filteredAPIs is the
+// engine-filtered API list returned by PrepareRpcServer — it is used for
+// graphql and healthcheck handlers.
+func ServeRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, srv *rpc.Server, filteredAPIs []rpc.API, logger log.Logger) error {
 	defer srv.Stop()
 
-	var defaultAPIList []rpc.API
-	if len(rpcAPI) > 0 {
-		for _, api := range rpcAPI[0] {
-			if api.Namespace != "engine" {
-				defaultAPIList = append(defaultAPIList, api)
-			}
-		}
-	}
+	defaultAPIList := filteredAPIs
 
 	info := []any{
 		"grpc", cfg.GRPCServerEnabled,

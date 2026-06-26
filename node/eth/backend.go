@@ -1167,12 +1167,12 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	// Create the RPC server and register APIs synchronously so
 	// InProcServer() is available immediately after Init returns.
 	if httpRpcCfg.Enabled {
-		rpcSrv, err := rpcdaemoncli.PrepareRpcServer(&httpRpcCfg, s.apiList, s.logger)
+		rpcSrv, filteredAPIs, err := rpcdaemoncli.PrepareRpcServer(&httpRpcCfg, s.apiList, s.logger)
 		if err != nil {
 			return err
 		}
 		s.bgComponentsEg.Go(func() error {
-			err := rpcdaemoncli.ServeRpcServer(ctx, &httpRpcCfg, rpcSrv, s.logger, s.apiList)
+			err := rpcdaemoncli.ServeRpcServer(ctx, &httpRpcCfg, rpcSrv, filteredAPIs, s.logger)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("cli.ServeRpcServer error", "err", err)
 			}

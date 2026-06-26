@@ -122,7 +122,7 @@ type HttpCfg struct {
 	HttpListener    net.Listener
 	AuthRpcListener net.Listener
 
-	// InProcServer is set by startRegularRpcServer once the RPC server is
+	// InProcServer is set by PrepareRpcServer once the RPC server is
 	// created and APIs are registered. Embedding applications can use
 	// rpc.DialInProc(srv) to get a zero-copy in-process client.
 	InProcServer *rpc.Server
