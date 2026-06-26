@@ -732,8 +732,6 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
 		}
 		isAmsterdam := st.evm.ChainRules().IsAmsterdam
-		// EIP-8038/8037: a skipped authorization writes nothing, so refund its
-		// intrinsic ACCOUNT_WRITE (regular, capped) and NEW_ACCOUNT + AUTH_BASE (state) charges.
 		refundSkippedAuth := func() {
 			if isAmsterdam {
 				st.state.AddRefund(params.AccountWriteCostEIP8038)
@@ -809,8 +807,6 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if isAmsterdam {
 				if exists {
-					// EIP-8038: no new account leaf is written, so the intrinsic
-					// ACCOUNT_WRITE (regular, capped) and NEW_ACCOUNT (state) are refunded.
 					st.state.AddRefund(params.AccountWriteCostEIP8038)
 					stateIgasRefund += params.StateGasNewAccount
 				}

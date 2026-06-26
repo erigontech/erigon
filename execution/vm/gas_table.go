@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// callValueTransferGas returns the regular gas charged for a value-bearing
-// CALL/CALLCODE: EIP-8038 raises CALL_VALUE to ACCOUNT_WRITE + CALL_STIPEND.
 func callValueTransferGas(rules *chain.Rules) uint64 {
 	if rules.IsAmsterdam {
 		return params.CallValueTransferGasEIP8038

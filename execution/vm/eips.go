@@ -390,11 +390,7 @@ func enable8037(jt *JumpTable) {
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
 }
 
-// enable8038 applies EIP-8038 (State-access gas cost update). The repriced
-// cold/warm state-access and SSTORE/SLOAD/CALL/SELFDESTRUCT costs are selected
-// inline by the dynamic-gas functions via rules.IsAmsterdam; this enabler only
-// adjusts the jump-table constant gas: the second-read WARM_ACCESS on
-// EXTCODESIZE/EXTCODECOPY and the CREATE_ACCESS cost on CREATE/CREATE2.
+// enable8038 applies EIP-8038 (State-access gas cost update)
 func enable8038(jt *JumpTable) {
 	jt[EXTCODESIZE].constantGas = 2 * params.WarmStorageReadCostEIP2929
 	jt[EXTCODECOPY].constantGas = 2 * params.WarmStorageReadCostEIP2929
