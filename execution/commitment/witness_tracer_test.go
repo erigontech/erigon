@@ -24,37 +24,72 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-type countingWitnessTracer struct{ branches, exts, leaves int }
+type nodeCollector struct{ byHash map[string][]byte }
 
-func (c *countingWitnessTracer) onBranch([]byte, int16, uint16, *[16]cellEncodeData, []byte) {
-	c.branches++
+func newNodeCollector() *nodeCollector { return &nodeCollector{byHash: make(map[string][]byte)} }
+
+func (c *nodeCollector) onNode(rlp, hash []byte) {
+	k := string(hash)
+	if _, ok := c.byHash[k]; ok {
+		return
+	}
+	c.byHash[k] = common.Copy(rlp)
 }
-func (c *countingWitnessTracer) onExtensionLeaf([]byte, int16, []byte, *cell) { c.exts++ }
-func (c *countingWitnessTracer) onLeaf(int16, *cell, []byte)                  { c.leaves++ }
 
-func Test_WitnessTracer_HooksFire(t *testing.T) {
+func (c *nodeCollector) nodesRootFirst(root []byte) [][]byte {
+	out := make([][]byte, 0, len(c.byHash))
+	if r, ok := c.byHash[string(root)]; ok {
+		out = append(out, r)
+	}
+	for k, v := range c.byHash {
+		if k != string(root) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// Test_WitnessTracer_CapturedNodesReconstructRoot proves the fold-time tap captures
+// the exact consensus node bytes: decoding the full captured node-set rebuilds the
+// commitment root. memoizationOff forces every node to be re-hashed so the capture is
+// complete.
+func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTrace(false)
+	hph.memoizationOff = true
 
 	builder := NewUpdateBuilder()
-	for i := 0; i < 12; i++ {
-		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+	extAccts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 3)
+	for i, a := range extAccts {
 		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
 	}
+	for i := 0; i < 16; i++ {
+		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+		builder.Balance(common.Bytes2Hex(a), uint64(100+i))
+	}
+	storer := extAccts[0]
+	slots, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Hash, 2, 3)
+	for _, sk := range slots {
+		builder.Storage(common.Bytes2Hex(storer), common.Bytes2Hex(sk), common.Bytes2Hex(sk))
+	}
+
 	plainKeys, updates := builder.Build()
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess.Close()
 
-	ct := &countingWitnessTracer{}
-	hph.witnessTracer = ct
-	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+	c := newNodeCollector()
+	hph.witnessTracer = c
+	root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 	require.NoError(t, err)
+	require.NotEmpty(t, c.byHash, "tracer must capture nodes")
 
-	require.Positive(t, ct.branches, "onBranch must fire during fold")
-	require.Positive(t, ct.leaves, "onLeaf must fire for account leaves")
+	tr, err := trie.RLPDecode(c.nodesRootFirst(root))
+	require.NoError(t, err)
+	require.Equal(t, root, tr.Root(), "captured node-set must reconstruct the commitment root")
 }
