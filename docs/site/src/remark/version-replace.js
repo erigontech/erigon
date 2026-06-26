@@ -1,10 +1,11 @@
 // Remark plugin — replaces {ERIGON_VERSION} in text, inlineCode, code nodes,
 // and also in mdxTextExpression nodes (plain-text {ERIGON_VERSION} in MDX files).
 // Uses vfile.path to pick the right version: v3.3 versioned docs get v33Version,
-// everything else (current docs) gets currentVersion.
+// v3.4 versioned docs get v34Version, everything else (current docs) gets currentVersion.
 function versionReplace(options) {
   const currentVersion = (options && options.currentVersion) || 'latest';
   const v33Version = (options && options.v33Version) || 'latest';
+  const v34Version = (options && options.v34Version) || 'latest';
 
   function visit(node, version) {
     if (
@@ -26,8 +27,11 @@ function versionReplace(options) {
   }
 
   return function (tree, vfile) {
-    const isV33 = vfile && vfile.path && vfile.path.split('/').includes('version-v3.3');
-    visit(tree, isV33 ? v33Version : currentVersion);
+    const segments = (vfile && vfile.path && vfile.path.split('/')) || [];
+    let version = currentVersion;
+    if (segments.includes('version-v3.3')) version = v33Version;
+    else if (segments.includes('version-v3.4')) version = v34Version;
+    visit(tree, version);
   };
 }
 

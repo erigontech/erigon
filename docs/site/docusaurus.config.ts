@@ -24,7 +24,7 @@ async function fetchLatestVersion(): Promise<string> {
   }
 }
 
-async function fetchLatestV33Version(): Promise<string> {
+async function fetchLatestSeriesVersion(prefix: string): Promise<string> {
   try {
     const res = await fetch(
       'https://api.github.com/repos/erigontech/erigon/releases?per_page=50',
@@ -32,7 +32,7 @@ async function fetchLatestV33Version(): Promise<string> {
     );
     if (!res.ok) return 'latest';
     const releases = await res.json() as Array<{tag_name: string; prerelease: boolean}>;
-    const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith('v3.3.'));
+    const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith(prefix));
     return latest?.tag_name.replace(/^v/, '') ?? 'latest';
   } catch {
     return 'latest';
@@ -40,9 +40,10 @@ async function fetchLatestV33Version(): Promise<string> {
 }
 
 export default async function createConfig(): Promise<Config> {
-  const [latestVersion, v33Version] = await Promise.all([
+  const [latestVersion, v33Version, v34Version] = await Promise.all([
     fetchLatestVersion(),
-    fetchLatestV33Version(),
+    fetchLatestSeriesVersion('v3.3.'),
+    fetchLatestSeriesVersion('v3.4.'),
   ]);
 
   return {
@@ -123,11 +124,11 @@ export default async function createConfig(): Promise<Config> {
           lastVersion: 'current',
           versions: {
             current: {
-              label: 'v3.4',
+              label: 'v3.5',
               badge: false,
             },
           },
-          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, v33Version}]],
+          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, v33Version, v34Version}]],
         },
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},
