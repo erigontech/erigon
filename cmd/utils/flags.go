@@ -1091,25 +1091,20 @@ var (
 		Name:  "polygon.wit-protocol",
 		Usage: "Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains)",
 	}
-	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.concurrent-commitment",
-		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
-		Value: false,
-	}
 	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
 	// (ModeParallel) for commitment computation. Default off; flip to compare
 	// root hashes against a sequential sync before enabling broadly.
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
-		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed). Takes precedence over --experimental.concurrent-commitment if both are set.",
+		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
 		Value: false,
 	}
 	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
 	// overlaps commitment fold work with block execution. Default off; takes
-	// precedence over the parallel/concurrent flags when set.
+	// precedence over the parallel flag when set.
 	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.streaming-commitment",
-		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment and --experimental.concurrent-commitment if set.",
+		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
 		Value: false,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -1973,10 +1968,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
-
-	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
-		cfg.ExperimentalConcurrentCommitment = true
-	}
 
 	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
 		cfg.ExperimentalParallelCommitment = true

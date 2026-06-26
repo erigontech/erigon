@@ -409,9 +409,8 @@ func (s *RecordingState) CreateContract(address accounts.Address) error {
 }
 
 // accountExists reports whether the account exists in the post-state: present and
-// non-nil in the write overlay, otherwise not deleted and present in the inner
-// (pre-block) reader. The inner reader is read directly so the check does not
-// re-mark AccessedAccounts.
+// non-nil in the write overlay, otherwise not deleted and present in the pre-block
+// (inner) reader.
 func (s *RecordingState) accountExists(addr common.Address) bool {
 	if _, deleted := s.DeletedAccounts[addr]; deleted {
 		return false
@@ -419,18 +418,28 @@ func (s *RecordingState) accountExists(addr common.Address) bool {
 	if acc, ok := s.accountOverlay[addr]; ok {
 		return acc != nil
 	}
+	return s.innerExists(addr)
+}
+
+// innerExists reports parent-state (pre-block) presence by reading the inner reader
+// directly, so the check does not re-mark AccessedAccounts. A read error counts as
+// existence: over-inclusion is harmless, a dropped key would make the witness incomplete.
+func (s *RecordingState) innerExists(addr common.Address) bool {
 	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
-	// A read error is unexpected for an account accessed this block; include the key
-	// rather than silently drop it — over-inclusion is harmless, a missing key would
-	// make the witness incomplete.
 	return err != nil || acc != nil
 }
 
-// existedPreBlock reports parent-state presence regardless of in-block deletion, so a
-// pre-existing-but-deleted account still contributes its witness-trie preimage.
-func (s *RecordingState) existedPreBlock(addr common.Address) bool {
-	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
-	return err != nil || acc != nil
+// hasWitnessLeaf reports whether addr has a leaf in the witness trie needing a keys[]
+// preimage: it exists in the post-state, or it existed pre-block (so an account emptied
+// and EIP-161 state-cleared in-block still contributes its parent-trie leaf). The inner
+// reader is consulted at most once.
+func (s *RecordingState) hasWitnessLeaf(addr common.Address) bool {
+	if _, deleted := s.DeletedAccounts[addr]; !deleted {
+		if acc, ok := s.accountOverlay[addr]; ok && acc != nil {
+			return true
+		}
+	}
+	return s.innerExists(addr)
 }
 
 // --- Query methods ---
@@ -951,7 +960,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	}
 	witnessKeys := make([]hexutil.Bytes, 0, len(out.Addresses)+len(slotSet))
 	for addr := range out.Addresses {
-		if !rs.accountExists(addr) && !rs.existedPreBlock(addr) {
+		if !rs.hasWitnessLeaf(addr) {
 			continue
 		}
 		witnessKeys = append(witnessKeys, bytes.Clone(addr[:]))
@@ -1344,7 +1353,13 @@ func checkWitnessKeysComplete(usedAddrs map[common.Address]struct{}, usedSlots m
 		return nil
 	}
 	slices.Sort(missing)
-	return fmt.Errorf("witness keys[] incomplete: %d preimage(s) for leaves present in state[] missing: %v", len(missing), missing)
+	const maxListed = 16
+	listed, suffix := missing, ""
+	if len(missing) > maxListed {
+		listed = missing[:maxListed]
+		suffix = fmt.Sprintf(" (+%d more)", len(missing)-maxListed)
+	}
+	return fmt.Errorf("witness keys[] incomplete: %d preimage(s) for leaves present in state[] missing: %v%s", len(missing), listed, suffix)
 }
 
 // buildExpectedPostState queries the actual state DB to build expected post-state for verification.
