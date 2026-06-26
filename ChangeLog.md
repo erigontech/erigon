@@ -1,5 +1,3 @@
-# Changelog
-
 # Erigon v3.6.0 — Upstream Underbelly — TBD
 
 ### Breaking Changes
@@ -93,12 +91,10 @@ Aligns Erigon with the execution-apis specification ([ethereum/execution-apis#76
 
 Both the key and its default changed: `disable*` → `enable*`, and memory and return data are now **excluded** unless explicitly enabled — matching the spec and Geth.
 
-**Migration:**
+**Migration:** memory and return data are now excluded by default. To include them, add the new opt-in key (omit it to keep the default):
 
-```jsonc
-{ "disableMemory": true }  // before: opt out of memory (on by default)
-{ "enableMemory": true }   // after:  opt in to memory (off by default)
-```
+- Memory: `{ "enableMemory": true }`
+- Return data: `{ "enableReturnData": true }`
 
 Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceCall`.
 
@@ -551,7 +547,7 @@ Gnosis hardfork support.
 
 ---
 
-# Erigon v3.3.0 — 2025-11-27
+# Erigon v3.3.0 — Rocky Romp — 2025-11-27
 
 ### Added
 
@@ -689,7 +685,3 @@ test nets (#17197):
 - RPC: impl admin_RemovePeer (#16292) by @lupin012
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.1.0...v3.2.0
- 
------
-
-File following Keep a Changelog spec: https://keepachangelog.com/en/1.1.0/
