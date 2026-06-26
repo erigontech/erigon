@@ -91,6 +91,74 @@ func TestReconcileOneMissing(t *testing.T) {
 		"the hash from preverified.toml must be carried into the download request")
 }
 
+// TestReconcileSkipsCoveredByLocalWiderFile pins the post-bootstrap
+// invariant: once the local node has produced a wider file that fully
+// covers a preverified entry's [From, To) range (same subdir +
+// version + type + extension), the reconcile pass must NOT re-request
+// the narrower preverified file. Without this, every reconcile pass
+// undoes the local merge: the broad locally-built file remains AND the
+// publisher-narrow files reappear, leaving the aggregator visibility
+// set with both — manifesting as wrong-trie-root ~209 blocks past a
+// Mode-B unwind target.
+func TestReconcileSkipsCoveredByLocalWiderFile(t *testing.T) {
+	dir := t.TempDir()
+	domainDir := filepath.Join(dir, "domain")
+	// Local merge produced a broad 272-280 .kv (covers all of 272-279).
+	touch(t, domainDir, "v2.0-accounts.272-280.kv")
+	// Preverified.toml advertises three narrow chunks that union to
+	// match the broad file's coverage. They were on disk at boot
+	// (from OtterSync) but were consumed by the local merge.
+	items := snapcfg.PreverifiedItems{
+		{Name: "domain/v2.0-accounts.272-276.kv", Hash: "h-narrow-272"},
+		{Name: "domain/v2.0-accounts.276-278.kv", Hash: "h-narrow-276"},
+		{Name: "domain/v2.0-accounts.278-279.kv", Hash: "h-narrow-278"},
+	}
+	missing := ReconcilePreverifiedAgainstDisk(items, dir)
+	require.Empty(t, missing,
+		"narrow preverified entries fully covered by the local wider file must not be re-requested")
+}
+
+// TestReconcilePartialCoverageStillReports pins the boundary case:
+// a local file that only partially covers the preverified range does
+// NOT subsume it. The missing preverified entry must still be
+// reported so the downloader can fetch it.
+func TestReconcilePartialCoverageStillReports(t *testing.T) {
+	dir := t.TempDir()
+	domainDir := filepath.Join(dir, "domain")
+	// Local file ends at step 278; preverified entry extends to 279.
+	touch(t, domainDir, "v2.0-accounts.272-278.kv")
+	items := snapcfg.PreverifiedItems{
+		{Name: "domain/v2.0-accounts.272-279.kv", Hash: "h-wider"},
+	}
+	missing := ReconcilePreverifiedAgainstDisk(items, dir)
+	require.Equal(t,
+		[]string{"domain/v2.0-accounts.272-279.kv"},
+		names(missing),
+		"partial coverage (local 272-278 vs preverified 272-279) must NOT mask the missing wider entry")
+}
+
+// TestReconcileCoverageRespectsClass pins: a local file of a different
+// type/extension does NOT cover a preverified entry. Same range but
+// different domain (e.g., v2.0-storage vs v2.0-accounts) is independent
+// coverage. Without this guard, the local accounts file would suppress
+// a missing storage file.
+func TestReconcileCoverageRespectsClass(t *testing.T) {
+	dir := t.TempDir()
+	domainDir := filepath.Join(dir, "domain")
+	// Local has accounts data covering 272-280.
+	touch(t, domainDir, "v2.0-accounts.272-280.kv")
+	// Preverified asks for storage data at a covered range — must still
+	// report missing because the local file is a DIFFERENT class.
+	items := snapcfg.PreverifiedItems{
+		{Name: "domain/v2.0-storage.272-276.kv", Hash: "h-storage"},
+	}
+	missing := ReconcilePreverifiedAgainstDisk(items, dir)
+	require.Equal(t,
+		[]string{"domain/v2.0-storage.272-276.kv"},
+		names(missing),
+		"a local accounts file must not be treated as coverage for a preverified storage entry")
+}
+
 // TestReconcileAllMissing: nothing on disk → every preverified entry
 // reported as missing.
 func TestReconcileAllMissing(t *testing.T) {
