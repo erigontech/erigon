@@ -21,7 +21,12 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,4 +46,67 @@ func TestUpgradeAndExpectedWithdrawals(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, w.Withdrawals)
 
+}
+
+// TestOnboardBuildersFromPendingDeposits_NewFormatDeposit verifies that a
+// pending deposit with PayloadBuilderVersion (0x00) prefix and
+// DomainBuilderDeposit signature is onboarded as a builder during the
+// GLOAS fork upgrade — not left in the pending queue.
+func TestOnboardBuildersFromPendingDeposits_NewFormatDeposit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](
+		int(cfg.BuilderRegistryLimit),
+		new(cltypes.Builder).EncodingSizeSSZ(),
+	)
+	s.SetBuilders(builders)
+
+	// Create a valid new-format builder deposit (0x00 prefix, DomainBuilderDeposit).
+	privKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	var pubkey common.Bytes48
+	copy(pubkey[:], bls.CompressPublicKey(privKey.PublicKey()))
+
+	feeRecipient := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	var creds common.Hash
+	creds[0] = clparams.PayloadBuilderVersion
+	copy(creds[12:], feeRecipient[:])
+	amount := cfg.MinDepositAmount
+
+	dd := &cltypes.DepositData{
+		PubKey:                pubkey,
+		WithdrawalCredentials: creds,
+		Amount:                amount,
+	}
+	msgHash, err := dd.MessageHash()
+	require.NoError(t, err)
+	domain, err := fork.ComputeDomain(
+		cfg.DomainBuilderDeposit[:],
+		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
+		[32]byte{},
+	)
+	require.NoError(t, err)
+	signingRoot := utils.Sha256(msgHash[:], domain)
+	sigObj := privKey.Sign(signingRoot[:])
+	var sig common.Bytes96
+	copy(sig[:], sigObj.Bytes())
+
+	// Seed the pending deposits with this builder deposit.
+	pendingDeposits := solid.NewPendingDepositList(&cfg)
+	pendingDeposits.Append(&solid.PendingDeposit{
+		PubKey:                pubkey,
+		WithdrawalCredentials: creds,
+		Amount:                amount,
+		Signature:             sig,
+		Slot:                  0,
+	})
+	s.SetPendingDeposits(pendingDeposits)
+
+	require.NoError(t, s.onboardBuildersFromPendingDeposits())
+
+	require.Equal(t, 1, s.GetBuilders().Len(), "new-format builder deposit must be onboarded")
+	require.Equal(t, pubkey, s.GetBuilders().Get(0).Pubkey)
+	require.Equal(t, 0, s.GetPendingDeposits().Len(), "onboarded deposit must be removed from pending")
 }

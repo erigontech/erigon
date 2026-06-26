@@ -397,9 +397,17 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 
 		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
 		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
+		hasBuilderSignature := false
+		if !isExistingBuilder && HasValidBuilderDepositPrefix(deposit.WithdrawalCredentials) {
+			valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
+			if err != nil {
+				return fmt.Errorf("UpgradeToGloas: validate builder deposit signature: %w", err)
+			}
+			hasBuilderSignature = valid
+		}
 
 		if !isExistingBuilder {
-			if !hasBuilderCredentials {
+			if !hasBuilderCredentials && !hasBuilderSignature {
 				newPendingDeposits.Append(deposit)
 				continue
 			}
