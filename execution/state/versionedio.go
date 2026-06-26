@@ -21,7 +21,10 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/db/state/execctx"
 )
+
+var _ execctx.VersionedIO = (*VersionedIO)(nil)
 
 type ReadSource int
 

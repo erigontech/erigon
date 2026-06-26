@@ -9,8 +9,11 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var _ execctx.VersionMap = (*VersionMap)(nil)
 
 type statusFlag uint
 

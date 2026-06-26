@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -1091,7 +1092,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, pe.doms)
 			}
 		}
 
@@ -2155,8 +2156,26 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err err
 	return nil
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
-	return &blockExecutor{
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, doms *execctx.SharedDomains) *blockExecutor {
+	var blockIO *state.VersionedIO
+	var versionMap *state.VersionMap
+
+	if doms != nil {
+		if v := doms.GetVersionedIO(); v != nil {
+			blockIO = v.(*state.VersionedIO)
+		}
+		if v := doms.GetVersionMap(); v != nil {
+			versionMap = v.(*state.VersionMap)
+		}
+	}
+	if blockIO == nil {
+		blockIO = &state.VersionedIO{}
+	}
+	if versionMap == nil {
+		versionMap = state.NewVersionMap(accessList)
+	}
+
+	be := &blockExecutor{
 		blockNum:         blockNum,
 		blockHash:        blockHash,
 		begin:            time.Now(),
@@ -2165,8 +2184,8 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		settledInput:     map[int]bool{},
 		estimateDeps:     map[int][]int{},
 		preValidated:     map[int]bool{},
-		blockIO:          &state.VersionedIO{},
-		versionMap:       state.NewVersionMap(accessList),
+		blockIO:          blockIO,
+		versionMap:       versionMap,
 		profile:          profile,
 		applyResults:     applyResults,
 		commitResults:    commitResults,
@@ -2174,6 +2193,13 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		blockStateCache:  state.NewBlockStateCache(),
 		exhausted:        exhausted,
 	}
+
+	if doms != nil {
+		doms.SetVersionedIO(blockIO)
+		doms.SetVersionMap(versionMap)
+	}
+
+	return be
 }
 
 // invalidBlockResult wraps a block-validity failure (insufficient funds, gas

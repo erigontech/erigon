@@ -48,6 +48,18 @@ var (
 	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 )
 
+// VersionedIO is the read/write tracking for parallel block execution.
+// Implemented by execution/state.VersionedIO.
+type VersionedIO interface {
+	Len() int
+}
+
+// VersionMap is the multi-version write map for parallel block execution.
+// Implemented by execution/state.VersionMap.
+type VersionMap interface {
+	SetTrace(trace bool)
+}
+
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
 	Keys []string
@@ -129,6 +141,13 @@ type SharedDomains struct {
 
 	// Aggregator-scope commitment-branch cache, consulted only after sd.mem/parent.mem miss. Nil when AggTx is not a BranchCacheProvider.
 	branchCache *commitment.BranchCache
+
+	// versionedIO and versionMap carry the parallel executor's read/write
+	// tracking across flashblock boundaries within a slot. The executor
+	// populates them on first use (nil = fresh) and resets them at
+	// block/slot boundary. The SD is the carrier, not the decision-maker.
+	versionedIO VersionedIO
+	versionMap  VersionMap
 }
 
 // PickTrieVariant returns the commitment trie variant selected by the
@@ -579,6 +598,15 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 	return sd.stateCache
 }
 
+func (sd *SharedDomains) SetVersionedIO(v VersionedIO) { sd.versionedIO = v }
+func (sd *SharedDomains) GetVersionedIO() VersionedIO  { return sd.versionedIO }
+func (sd *SharedDomains) SetVersionMap(v VersionMap)    { sd.versionMap = v }
+func (sd *SharedDomains) GetVersionMap() VersionMap     { return sd.versionMap }
+func (sd *SharedDomains) ResetParallelExecState() {
+	sd.versionedIO = nil
+	sd.versionMap = nil
+}
+
 // ClearRam drops the in-memory batch (and, when resetCommitment, the commitment
 // context) without committing.
 //
@@ -645,6 +673,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
+	sd.ResetParallelExecState()
 
 	//sd.walLock.Lock()
 	//defer sd.walLock.Unlock()
