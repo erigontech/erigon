@@ -297,12 +297,17 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			continue
 		}
 		accessList := txn.GetAccessList()
+		isAATxn := txn.Type() == types.AccountAbstractionTxType
+		to := txn.GetTo()
+		txnSender, _ := txn.GetSender()
 		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               txn.GetData(),
 			AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
 			AccessListLen:      uint64(len(accessList)),
 			StorageKeysLen:     uint64(accessList.StorageKeys()),
 			IsContractCreation: txn.IsContractDeploy(),
+			IsSelfTransfer:     to != nil && txnSender.Value() == *to,
+			HasValue:           !txn.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
@@ -310,7 +315,8 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
-			IsAATxn:            txn.Type() == types.AccountAbstractionTxType,
+			IsEIP2780:          isAmsterdam && !isAATxn,
+			IsAATxn:            isAATxn,
 		})
 		if overflow {
 			sender, _ := txn.GetSender()

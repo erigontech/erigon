@@ -31,6 +31,8 @@ type IntrinsicGasCalcArgs struct {
 	AccessListLen      uint64
 	StorageKeysLen     uint64
 	IsContractCreation bool
+	IsSelfTransfer     bool
+	HasValue           bool
 	IsEIP2             bool
 	IsEIP2028          bool
 	IsEIP3860          bool
@@ -38,6 +40,7 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP7976          bool
 	IsEIP7981          bool
 	IsEIP8037          bool
+	IsEIP2780          bool
 	IsAATxn            bool
 }
 
@@ -71,18 +74,38 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	var result IntrinsicGasCalcResult
 	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
-	if args.IsEIP8037 && args.IsContractCreation {
+	switch {
+	case args.IsEIP2780:
+		// EIP-2780: decompose the flat intrinsic into TX_BASE plus per-recipient
+		// and per-value charges. Self-transfers skip the recipient/value charges.
+		result.RegularGas = params.TxBaseEIP2780
+		if args.IsContractCreation {
+			result.RegularGas += params.CreateAccessEIP2780
+			result.StateGas = params.StateGasNewAccount
+			if args.HasValue {
+				result.RegularGas += params.TransferLogCostEIP2780
+			}
+		} else if !args.IsSelfTransfer {
+			result.RegularGas += params.ColdAccountAccessEIP2780
+			if args.HasValue {
+				result.RegularGas += params.TransferLogCostEIP2780 + params.TxValueCostEIP2780
+			}
+		}
+	case args.IsEIP8037 && args.IsContractCreation:
 		// EIP-8037: GAS_CREATE = 112*cpsb (state) + 9000 (regular), plus TxGas (21000)
 		result.RegularGas = params.TxGas + params.CreateGasEIP8037
 		result.StateGas = params.StateGasNewAccount
-	} else if args.IsContractCreation && args.IsEIP2 {
+	case args.IsContractCreation && args.IsEIP2:
 		result.RegularGas = params.TxGasContractCreation
-	} else if args.IsAATxn {
+	case args.IsAATxn:
 		result.RegularGas = params.TxAAGas
-	} else {
+	default:
 		result.RegularGas = params.TxGas
 	}
 	result.FloorGasCost = params.TxGas
+	if args.IsEIP2780 {
+		result.FloorGasCost = params.TxBaseEIP2780
+	}
 	nz := args.DataNonZeroLen
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
