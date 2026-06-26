@@ -268,10 +268,10 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 // eliminates the interleave race between RegisterPrecompile and
 // ActivePrecompiles that two separate mutexes would allow.
 var (
-	precompilesMu      sync.RWMutex
-	chainOverrides     = make(map[uint64]PrecompiledContracts) // chainID → custom precompiles
-	activeAddrCache    = make(map[precompilesCacheKey][]accounts.Address)
-	mergedMapCache     = make(map[precompilesCacheKey]PrecompiledContracts)
+	precompilesMu   sync.RWMutex
+	chainOverrides  = make(map[uint64]PrecompiledContracts) // chainID → custom precompiles
+	activeAddrCache = make(map[precompilesCacheKey][]accounts.Address)
+	mergedMapCache  = make(map[precompilesCacheKey]PrecompiledContracts)
 )
 
 // precompilesCacheKey identifies a unique set of precompiles.
