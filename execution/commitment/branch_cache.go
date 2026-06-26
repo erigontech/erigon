@@ -84,7 +84,8 @@ type BranchCacheProvider interface {
 func u64noHash(h uint64) uint32 { return uint32(h) }
 
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
-// Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
+// tailCapacity must be in [1, math.MaxUint32] (the tail is uint32-sized); a value
+// outside that range panics — pass DefaultBranchCacheTailCapacity if unsure.
 func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 || uint64(tailCapacity) > math.MaxUint32 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be in [1, %d], got %d", uint64(math.MaxUint32), tailCapacity))
