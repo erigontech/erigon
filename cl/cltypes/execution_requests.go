@@ -23,41 +23,92 @@ var (
 //	deposits: List[DepositRequest, MAX_DEPOSIT_REQUESTS_PER_PAYLOAD]  # [New in Electra:EIP6110]
 //	withdrawals: List[WithdrawalRequest, MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD]  # [New in Electra:EIP7002:EIP7251]
 //	consolidations: List[ConsolidationRequest, MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD]  # [New in Electra:EIP7251]
+//	builder_deposits: List[BuilderDepositRequest, MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD]  # [New in Gloas:EIP8282]
+//	builder_exits: List[BuilderExitRequest, MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD]  # [New in Gloas:EIP8282]
 type ExecutionRequests struct {
-	Deposits       *solid.ListSSZ[*solid.DepositRequest]       `json:"deposits"`
-	Withdrawals    *solid.ListSSZ[*solid.WithdrawalRequest]    `json:"withdrawals"`
-	Consolidations *solid.ListSSZ[*solid.ConsolidationRequest] `json:"consolidations"`
+	Deposits        *solid.ListSSZ[*solid.DepositRequest]        `json:"deposits"`
+	Withdrawals     *solid.ListSSZ[*solid.WithdrawalRequest]     `json:"withdrawals"`
+	Consolidations  *solid.ListSSZ[*solid.ConsolidationRequest]  `json:"consolidations"`
+	BuilderDeposits *solid.ListSSZ[*solid.BuilderDepositRequest] `json:"builder_deposits"`
+	BuilderExits    *solid.ListSSZ[*solid.BuilderExitRequest]    `json:"builder_exits"`
 
-	cfg *clparams.BeaconChainConfig
+	cfg     *clparams.BeaconChainConfig
+	version clparams.StateVersion
 }
 
 func NewExecutionRequests(cfg *clparams.BeaconChainConfig) *ExecutionRequests {
-	return &ExecutionRequests{
-		Deposits:       solid.NewStaticListSSZ[*solid.DepositRequest](int(cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest),
-		Withdrawals:    solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest),
-		Consolidations: solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest),
-		cfg:            cfg,
+	return NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+}
+
+func NewExecutionRequestsWithVersion(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *ExecutionRequests {
+	e := &ExecutionRequests{cfg: cfg, version: version}
+	e.ensureLists()
+	return e
+}
+
+func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
+	if e.version == 0 {
+		return clparams.GloasVersion
+	}
+	return e.version
+}
+
+func (e *ExecutionRequests) ensureLists() {
+	if e.cfg == nil {
+		e.cfg = &clparams.MainnetBeaconConfig
+	}
+	if e.Deposits == nil {
+		e.Deposits = solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
+	}
+	if e.Withdrawals == nil {
+		e.Withdrawals = solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
+	}
+	if e.Consolidations == nil {
+		e.Consolidations = solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
+	}
+	if e.BuilderDeposits == nil {
+		e.BuilderDeposits = solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
+	}
+	if e.BuilderExits == nil {
+		e.BuilderExits = solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	}
 }
 
 func (e *ExecutionRequests) EncodingSizeSSZ() int {
-	return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ()
+	e.ensureLists()
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ()
+	}
+	return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ() + e.BuilderDeposits.EncodingSizeSSZ() + e.BuilderExits.EncodingSizeSSZ()
 }
 
 func (e *ExecutionRequests) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, e.Deposits, e.Withdrawals, e.Consolidations)
+	e.ensureLists()
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return ssz2.MarshalSSZ(buf, e.Deposits, e.Withdrawals, e.Consolidations)
+	}
+	return ssz2.MarshalSSZ(buf, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
 }
 
 func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
+	e.version = clparams.StateVersion(version)
+	e.ensureLists()
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
 }
 
 func (e *ExecutionRequests) Clone() clonable.Clonable {
-	return NewExecutionRequests(e.cfg)
+	return NewExecutionRequestsWithVersion(e.cfg, e.version)
 }
 
 func (e *ExecutionRequests) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(e.Deposits, e.Withdrawals, e.Consolidations)
+	e.ensureLists()
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return merkle_tree.HashTreeRoot(e.Deposits, e.Withdrawals, e.Consolidations)
+	}
+	return merkle_tree.HashTreeRoot(e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
 }
 
 func (e *ExecutionRequests) Static() bool {
@@ -65,14 +116,19 @@ func (e *ExecutionRequests) Static() bool {
 }
 
 func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
+	e.ensureLists()
 	c := struct {
-		Deposits       *solid.ListSSZ[*solid.DepositRequest]       `json:"deposits"`
-		Withdrawals    *solid.ListSSZ[*solid.WithdrawalRequest]    `json:"withdrawals"`
-		Consolidations *solid.ListSSZ[*solid.ConsolidationRequest] `json:"consolidations"`
+		Deposits        *solid.ListSSZ[*solid.DepositRequest]        `json:"deposits"`
+		Withdrawals     *solid.ListSSZ[*solid.WithdrawalRequest]     `json:"withdrawals"`
+		Consolidations  *solid.ListSSZ[*solid.ConsolidationRequest]  `json:"consolidations"`
+		BuilderDeposits *solid.ListSSZ[*solid.BuilderDepositRequest] `json:"builder_deposits"`
+		BuilderExits    *solid.ListSSZ[*solid.BuilderExitRequest]    `json:"builder_exits"`
 	}{
-		Deposits:       solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest),
-		Withdrawals:    solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest),
-		Consolidations: solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest),
+		Deposits:        solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest),
+		Withdrawals:     solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest),
+		Consolidations:  solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest),
+		BuilderDeposits: solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest),
+		BuilderExits:    solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest),
 	}
 	if err := json.Unmarshal(b, &c); err != nil {
 		return err
@@ -81,6 +137,8 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	e.Deposits = c.Deposits
 	e.Withdrawals = c.Withdrawals
 	e.Consolidations = c.Consolidations
+	e.BuilderDeposits = c.BuilderDeposits
+	e.BuilderExits = c.BuilderExits
 	return nil
 }
 

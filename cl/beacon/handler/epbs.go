@@ -17,21 +17,25 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -206,11 +210,16 @@ func (a *ApiHandler) GetEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
+	results := solid.NewStaticListSSZ[*cltypes.PayloadAttestation](
+		int(a.beaconChainCfg.MaxPayloadAttestations),
+		cltypes.PayloadAttestationSSZSizeWithPtcSize(a.beaconChainCfg.PtcSize),
+	)
+
 	if a.epbsPool == nil {
-		return newBeaconResponse([]any{}), nil
+		return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
 	}
 
-	var results []*cltypes.PayloadAttestationMessage
+	var messages []*cltypes.PayloadAttestationMessage
 	for _, key := range a.epbsPool.PayloadAttestations.Keys() {
 		if slot != nil && key.Slot != *slot {
 			continue
@@ -219,12 +228,145 @@ func (a *ApiHandler) GetEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter
 		if !ok || msg == nil {
 			continue
 		}
-		results = append(results, msg)
+		messages = append(messages, msg)
 	}
-	if results == nil {
-		results = make([]*cltypes.PayloadAttestationMessage, 0)
+	if len(messages) == 0 {
+		return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
 	}
-	return newBeaconResponse(results), nil
+
+	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		var err error
+		results, err = aggregatePayloadAttestationMessages(a.beaconChainCfg, s, messages)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+
+	return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
+}
+
+func aggregatePayloadAttestationMessages(
+	cfg *clparams.BeaconChainConfig,
+	ptcProvider payloadAttestationPTCProvider,
+	messages []*cltypes.PayloadAttestationMessage,
+) (*solid.ListSSZ[*cltypes.PayloadAttestation], error) {
+	result := solid.NewStaticListSSZ[*cltypes.PayloadAttestation](
+		int(cfg.MaxPayloadAttestations),
+		cltypes.PayloadAttestationSSZSizeWithPtcSize(cfg.PtcSize),
+	)
+
+	type dataKey struct {
+		BeaconBlockRoot   common.Hash
+		Slot              uint64
+		PayloadPresent    bool
+		BlobDataAvailable bool
+	}
+	type payloadAttestationGroup struct {
+		data *cltypes.PayloadAttestationData
+		sigs map[int][]byte
+	}
+
+	ptcBySlot := make(map[uint64]map[uint64]int)
+	groups := make(map[dataKey]*payloadAttestationGroup)
+	for _, msg := range messages {
+		if msg == nil || msg.Data == nil {
+			continue
+		}
+		validatorToPTCIndex, ok := ptcBySlot[msg.Data.Slot]
+		if !ok {
+			ptc, err := ptcProvider.GetPTC(msg.Data.Slot)
+			if err != nil {
+				return nil, err
+			}
+			validatorToPTCIndex = make(map[uint64]int, len(ptc))
+			for i, validatorIndex := range ptc {
+				validatorToPTCIndex[validatorIndex] = i
+			}
+			ptcBySlot[msg.Data.Slot] = validatorToPTCIndex
+		}
+		ptcIndex, ok := validatorToPTCIndex[msg.ValidatorIndex]
+		if !ok {
+			continue
+		}
+		key := dataKey{
+			BeaconBlockRoot:   msg.Data.BeaconBlockRoot,
+			Slot:              msg.Data.Slot,
+			PayloadPresent:    msg.Data.PayloadPresent,
+			BlobDataAvailable: msg.Data.BlobDataAvailable,
+		}
+		group, ok := groups[key]
+		if !ok {
+			group = &payloadAttestationGroup{
+				data: msg.Data.Clone().(*cltypes.PayloadAttestationData),
+				sigs: make(map[int][]byte),
+			}
+			groups[key] = group
+		}
+		if _, exists := group.sigs[ptcIndex]; !exists {
+			signature := make([]byte, len(msg.Signature))
+			copy(signature, msg.Signature[:])
+			group.sigs[ptcIndex] = signature
+		}
+	}
+
+	type candidate struct {
+		attestation *cltypes.PayloadAttestation
+		weight      int
+	}
+	candidates := make([]candidate, 0, len(groups))
+	for _, group := range groups {
+		bits := solid.NewBitVector(int(cfg.PtcSize))
+		signatures := make([][]byte, 0, len(group.sigs))
+		for ptcIndex, signature := range group.sigs {
+			if err := bits.SetBitAt(ptcIndex, true); err != nil {
+				return nil, err
+			}
+			signatures = append(signatures, signature)
+		}
+		if len(signatures) == 0 {
+			continue
+		}
+		aggregatedSignature, err := bls.AggregateSignatures(signatures)
+		if err != nil {
+			return nil, err
+		}
+		var signature common.Bytes96
+		copy(signature[:], aggregatedSignature)
+		candidates = append(candidates, candidate{
+			attestation: &cltypes.PayloadAttestation{
+				AggregationBits: bits,
+				Data:            group.data,
+				Signature:       signature,
+			},
+			weight: len(group.sigs),
+		})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].weight != candidates[j].weight {
+			return candidates[i].weight > candidates[j].weight
+		}
+		left := candidates[i].attestation.Data
+		right := candidates[j].attestation.Data
+		if left.Slot != right.Slot {
+			return left.Slot < right.Slot
+		}
+		if cmp := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); cmp != 0 {
+			return cmp < 0
+		}
+		if left.PayloadPresent != right.PayloadPresent {
+			return left.PayloadPresent
+		}
+		return left.BlobDataAvailable && !right.BlobDataAvailable
+	})
+	for i := 0; i < len(candidates) && result.Len() < int(cfg.MaxPayloadAttestations); i++ {
+		result.Append(candidates[i].attestation)
+	}
+	return result, nil
+}
+
+type payloadAttestationPTCProvider interface {
+	GetPTC(slot uint64) ([]uint64, error)
 }
 
 // PostEthV1BeaconPoolPayloadAttestations submits an array of PayloadAttestationMessages.
@@ -589,9 +731,34 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 // POST /eth/v1/beacon/execution_payload_bid
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request) {
-	req := &cltypes.SignedExecutionPayloadBid{}
-	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+	req := &cltypes.SignedExecutionPayloadBid{Message: new(cltypes.ExecutionPayloadBid)}
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType == "" {
+		contentType = "application/json"
+	}
+	switch contentType {
+	case "application/json":
+		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+	case "application/octet-stream":
+		octets, err := io.ReadAll(r.Body)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if err := req.DecodeSSZ(octets, int(clparams.GloasVersion)); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+	default:
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
+			fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))).WriteTo(w)
+		return
+	}
+	if req.Message == nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed execution payload bid")).WriteTo(w)
 		return
 	}
 
@@ -677,7 +844,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 			fmt.Errorf("no bid found for slot %d builder %d", slot, builderIndex))
 	}
 
-	return newBeaconResponse(bestBid).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+	return newBeaconResponse(bestBid.Message).WithVersion(clparams.GloasVersion), nil
 }
 
 // ---- Validator Execution Payload Envelope ----

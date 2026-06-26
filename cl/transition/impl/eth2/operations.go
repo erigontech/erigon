@@ -99,9 +99,12 @@ func (I *impl) ProcessProposerSlashing(
 		}
 		if clear {
 			payments := s.GetBuilderPendingPayments()
-			payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
-				Withdrawal: &cltypes.BuilderPendingWithdrawal{},
-			})
+			payment := payments.Get(paymentIndex)
+			if payment != nil && payment.ProposerIndex == h1.ProposerIndex {
+				payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
+					Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+				})
+			}
 			s.SetBuilderPendingPayments(payments)
 		}
 	}
@@ -580,6 +583,10 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 
 	// Record the pending payment if there is some payment
 	if amount > 0 {
+		proposerIndex, err := s.GetBeaconProposerIndex()
+		if err != nil {
+			return fmt.Errorf("processExecutionPayloadBid: failed to get beacon proposer index: %w", err)
+		}
 		pendingPayment := &cltypes.BuilderPendingPayment{
 			Weight: 0,
 			Withdrawal: &cltypes.BuilderPendingWithdrawal{
@@ -587,6 +594,7 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 				Amount:       amount,
 				BuilderIndex: builderIndex,
 			},
+			ProposerIndex: proposerIndex,
 		}
 		slotsPerEpoch := s.BeaconConfig().SlotsPerEpoch
 		index := int(slotsPerEpoch + bid.Slot%slotsPerEpoch)
@@ -627,6 +635,20 @@ func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *clt
 			return I.ProcessConsolidationRequest(s, req)
 		}); err != nil {
 			return fmt.Errorf("ApplyParentExecutionPayload: ProcessConsolidationRequest: %w", err)
+		}
+	}
+	if requests.BuilderDeposits != nil {
+		if err := solid.RangeErr[*solid.BuilderDepositRequest](requests.BuilderDeposits, func(_ int, req *solid.BuilderDepositRequest, _ int) error {
+			return I.ProcessBuilderDepositRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderDepositRequest: %w", err)
+		}
+	}
+	if requests.BuilderExits != nil {
+		if err := solid.RangeErr[*solid.BuilderExitRequest](requests.BuilderExits, func(_ int, req *solid.BuilderExitRequest, _ int) error {
+			return I.ProcessBuilderExitRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderExitRequest: %w", err)
 		}
 	}
 
@@ -711,7 +733,9 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 		if parentExecutionRequests != nil {
 			if (parentExecutionRequests.Deposits != nil && parentExecutionRequests.Deposits.Len() > 0) ||
 				(parentExecutionRequests.Withdrawals != nil && parentExecutionRequests.Withdrawals.Len() > 0) ||
-				(parentExecutionRequests.Consolidations != nil && parentExecutionRequests.Consolidations.Len() > 0) {
+				(parentExecutionRequests.Consolidations != nil && parentExecutionRequests.Consolidations.Len() > 0) ||
+				(parentExecutionRequests.BuilderDeposits != nil && parentExecutionRequests.BuilderDeposits.Len() > 0) ||
+				(parentExecutionRequests.BuilderExits != nil && parentExecutionRequests.BuilderExits.Len() > 0) {
 				return errors.New("ProcessParentExecutionPayload: parent was empty but parent_execution_requests is not empty")
 			}
 		}
@@ -1661,20 +1685,6 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 		}
 	}
 
-	// [New in Gloas:EIP7732] Route builder deposits immediately
-	if s.Version() >= clparams.GloasVersion {
-		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
-		_, isExistingValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
-		hasBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
-		isPendingValidator := state.IsPendingValidator(s.BeaconConfig(), s.GetPendingDeposits(), depositRequest.PubKey)
-		isValidator := isExistingValidator || isPendingValidator
-
-		if isBuilder || (hasBuilderPrefix && !isValidator) {
-			state.ApplyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
-			return nil
-		}
-	}
-
 	// Add validator deposits to the queue
 	s.AppendPendingDeposit(&solid.PendingDeposit{
 		PubKey:                depositRequest.PubKey,
@@ -1699,10 +1709,6 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify pubkey exists (check validators first, then builders)
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		// [New in Gloas:EIP7732] Check if the pubkey belongs to a builder
-		if s.Version() >= clparams.GloasVersion {
-			return I.processBuilderWithdrawalRequest(s, req)
-		}
 		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
@@ -1760,11 +1766,12 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	return nil
 }
 
-// processBuilderWithdrawalRequest handles EL-triggered withdrawal requests for builders.
-// [New in Gloas:EIP7732]
-// For full exit requests (amount == 0): initiates builder exit if active and no pending withdrawals.
-// For partial withdrawal requests (amount > 0): no-op for builders.
-func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+func (I *impl) ProcessBuilderDepositRequest(s abstract.BeaconState, req *solid.BuilderDepositRequest) error {
+	state.ApplyDepositForBuilder(s, req.PubKey, req.WithdrawalCredentials, req.Amount, req.Signature, s.Slot())
+	return nil
+}
+
+func (I *impl) ProcessBuilderExitRequest(s abstract.BeaconState, req *solid.BuilderExitRequest) error {
 	builders := s.GetBuilders()
 	if builders == nil {
 		return nil
@@ -1773,7 +1780,7 @@ func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *soli
 	// Find builder by pubkey
 	builderIndex := -1
 	for i := 0; i < builders.Len(); i++ {
-		if builders.Get(i).Pubkey == req.ValidatorPubKey {
+		if builders.Get(i).Pubkey == req.PubKey {
 			builderIndex = i
 			break
 		}
@@ -1784,22 +1791,14 @@ func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *soli
 
 	builder := builders.Get(builderIndex)
 
-	// Verify source address matches builder's execution address
 	if req.SourceAddress != builder.ExecutionAddress {
 		return nil
 	}
 
-	// Check builder is active
 	if !state.IsActiveBuilder(s, uint64(builderIndex)) {
 		return nil
 	}
 
-	// Only full exit requests (amount == 0) are supported for builders
-	if req.Amount != FullExitRequestAmount {
-		return nil
-	}
-
-	// Only exit builder if it has no pending withdrawals in the queue
 	pendingBalance := state.GetPendingBalanceToWithdrawForBuilder(s, uint64(builderIndex))
 	if pendingBalance > 0 {
 		return nil

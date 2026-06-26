@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -153,6 +154,35 @@ func TestBeaconBodyGetExecutionRequestsListDenebNil(t *testing.T) {
 
 	requests := body.GetExecutionRequestsList()
 	require.Nil(t, requests)
+}
+
+func TestGetExecutionRequestsListGloasBuilderRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequests(&cfg)
+	builderDeposit := &solid.BuilderDepositRequest{
+		Amount: 123,
+	}
+	builderDeposit.PubKey[0] = 0x11
+	builderDeposit.WithdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
+	builderDeposit.Signature[0] = 0x22
+	builderExit := &solid.BuilderExitRequest{
+		SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234"),
+	}
+	builderExit.PubKey[0] = 0x33
+	requests.BuilderDeposits.Append(builderDeposit)
+	requests.BuilderExits.Append(builderExit)
+
+	list := GetExecutionRequestsList(&cfg, requests)
+	require.Len(t, list, 2)
+	require.Equal(t, byte(cfg.BuilderDepositRequestType), list[0][0])
+	require.Equal(t, byte(cfg.BuilderExitRequestType), list[1][0])
+
+	encodedDeposit, err := builderDeposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedExit, err := builderExit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, encodedDeposit...), list[0])
+	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedExit...), list[1])
 }
 
 // TestNewBeaconBody_VersionSpecificFields verifies that NewBeaconBody creates

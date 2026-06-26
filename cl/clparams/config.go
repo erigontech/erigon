@@ -670,6 +670,8 @@ type BeaconChainConfig struct {
 	MaxDepositRequestsPerPayload          uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                     // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
 	MaxWithdrawalRequestsPerPayload       uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`               // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
 	MaxConsolidationRequestsPerPayload    uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`         // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
+	MaxBuilderDepositRequestsPerPayload   uint64 `yaml:"MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`     // MaxBuilderDepositRequestsPerPayload defines the maximum number of builder deposit requests in a block.
+	MaxBuilderExitRequestsPerPayload      uint64 `yaml:"MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD,string"`           // MaxBuilderExitRequestsPerPayload defines the maximum number of builder exit requests in a block.
 	MinSlashingPenaltyQuotientElectra     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,string"`           // MinSlashingPenaltyQuotientElectra for slashing penalties post Electra hard fork.
 	WhistleBlowerRewardQuotientElectra    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`           // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
 	MaxPendingPartialsPerWithdrawalsSweep uint64 `yaml:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,string"` // MaxPendingPartialsPerWithdrawalsSweep bounds the size of the sweep searching for pending partials per slot.
@@ -687,6 +689,8 @@ type BeaconChainConfig struct {
 	DepositRequestType             ConfigByte `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
 	WithdrawalRequestType          ConfigByte `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
 	ConsolidationRequestType       ConfigByte `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
+	BuilderDepositRequestType      ConfigByte `yaml:"BUILDER_DEPOSIT_REQUEST_TYPE" spec:"true" json:"BUILDER_DEPOSIT_REQUEST_TYPE"`                    // BuilderDepositRequestType is the type for builder deposit requests.
+	BuilderExitRequestType         ConfigByte `yaml:"BUILDER_EXIT_REQUEST_TYPE" spec:"true" json:"BUILDER_EXIT_REQUEST_TYPE"`                          // BuilderExitRequestType is the type for builder exit requests.
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
@@ -1034,6 +1038,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    2,
+	MaxBuilderDepositRequestsPerPayload:   256,
+	MaxBuilderExitRequestsPerPayload:      16,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
 	MaxPendingPartialsPerWithdrawalsSweep: 8,
@@ -1050,6 +1056,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DepositRequestType:             0x00,
 	WithdrawalRequestType:          0x01,
 	ConsolidationRequestType:       0x02,
+	BuilderDepositRequestType:      0x03,
+	BuilderExitRequestType:         0x04,
 
 	// Fulu
 	ValidatorCustodyRequirement:      8,

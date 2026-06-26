@@ -293,7 +293,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 		}
 		body.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
 		if version >= clparams.ElectraVersion {
-			body.ExecutionRequests = NewExecutionRequests(beaconCfg)
+			body.ExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 		}
 	} else {
 		// GLOAS: SignedExecutionPayloadBid and PayloadAttestations replace above
@@ -307,7 +307,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 			},
 		}
 		body.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(beaconCfg.PtcSize))
-		body.ParentExecutionRequests = NewExecutionRequests(beaconCfg)
+		body.ParentExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 	}
 
 	return body
@@ -367,7 +367,7 @@ func (b *BeaconBody) ensureNilFields() {
 	// [New in Electra] ExecutionRequests — removed in GLOAS
 	if b.ExecutionRequests == nil && b.Version.AfterOrEqual(clparams.ElectraVersion) && b.Version < clparams.GloasVersion {
 		if b.beaconCfg != nil {
-			b.ExecutionRequests = NewExecutionRequests(b.beaconCfg)
+			b.ExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 		}
 	}
 	// [New in Gloas:EIP7732] Initialize GLOAS fields if nil
@@ -387,7 +387,7 @@ func (b *BeaconBody) ensureNilFields() {
 			b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(b.beaconCfg.PtcSize))
 		}
 		if b.ParentExecutionRequests == nil {
-			b.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
+			b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 		}
 	}
 }
@@ -455,7 +455,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 			},
 		}
 		b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(b.beaconCfg.PtcSize))
-		b.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
+		b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
 		return err
@@ -617,7 +617,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
 		}
 		tmp.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
-		tmp.ExecutionRequests = NewExecutionRequests(b.beaconCfg)
+		tmp.ExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 		tmp.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 	}
 	// [New in Gloas:EIP7732] Initialize GLOAS fields
@@ -632,7 +632,7 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 			},
 		}
 		tmp.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSizeWithPtcSize(b.beaconCfg.PtcSize))
-		tmp.ParentExecutionRequests = NewExecutionRequests(b.beaconCfg)
+		tmp.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {
@@ -765,23 +765,31 @@ func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *Executio
 		return nil
 	}
 	ret := []hexutil.Bytes{}
-	for _, r := range []struct {
-		typ      byte
-		requests ssz.EncodableSSZ
-	}{
-		{byte(beaconCfg.DepositRequestType), r.Deposits},
-		{byte(beaconCfg.WithdrawalRequestType), r.Withdrawals},
-		{byte(beaconCfg.ConsolidationRequestType), r.Consolidations},
-	} {
-		ssz, err := r.requests.EncodeSSZ([]byte{})
+	appendRequests := func(typ byte, requests ssz.EncodableSSZ) bool {
+		ssz, err := requests.EncodeSSZ([]byte{})
 		if err != nil {
 			log.Warn("Error encoding deposits", "err", err)
-			return nil
+			return false
 		}
-		// type + ssz
 		if len(ssz) > 0 {
-			ret = append(ret, append(hexutil.Bytes{r.typ}, ssz...))
+			ret = append(ret, append(hexutil.Bytes{typ}, ssz...))
 		}
+		return true
+	}
+	if r.Deposits != nil && !appendRequests(byte(beaconCfg.DepositRequestType), r.Deposits) {
+		return nil
+	}
+	if r.Withdrawals != nil && !appendRequests(byte(beaconCfg.WithdrawalRequestType), r.Withdrawals) {
+		return nil
+	}
+	if r.Consolidations != nil && !appendRequests(byte(beaconCfg.ConsolidationRequestType), r.Consolidations) {
+		return nil
+	}
+	if r.BuilderDeposits != nil && !appendRequests(byte(beaconCfg.BuilderDepositRequestType), r.BuilderDeposits) {
+		return nil
+	}
+	if r.BuilderExits != nil && !appendRequests(byte(beaconCfg.BuilderExitRequestType), r.BuilderExits) {
+		return nil
 	}
 	return ret
 }
