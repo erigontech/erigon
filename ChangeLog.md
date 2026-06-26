@@ -26,7 +26,7 @@ Erigon 3.5.0 is a major release headlined by **parallel block execution becoming
 
 ### Key Features
 
-- **Parallel block execution, on by default.** Erigon now executes EVM transactions across multiple cores by default, using the Block-STM (software transactional memory) design pioneered by Aptos: transactions run optimistically in parallel and are re-validated against a multi-version state, re-executing only on conflict (#21591 by @mh0lt, closes #17630). Revert to the serial path with `EXEC3_PARALLEL=false` or `--exec.serial`.
+- **Parallel block execution, on by default.** Erigon now executes EVM transactions across multiple cores by default, using the Block-STM (software transactional memory) design pioneered by Aptos: transactions run optimistically in parallel and are re-validated against a multi-version state, re-executing only on conflict (#21591 by @mh0lt, closes #17630). Revert to serial with `EXEC3_PARALLEL=false` or `--exec.serial`.
 - **Glamsterdam devnet support.** Initial implementation of Ethereum's next hardfork: Block-Level Access Lists (EIP-7928), enshrined Proposer-Builder Separation / "GLOAS" (EIP-7732) in Caplin, gas repricings (EIP-8037, EIP-7976, EIP-7981), larger contracts (EIP-7954), transfer logs (EIP-7708), and the `eth/71` Block Access List wire protocol (EIP-8159). **Devnet/testing only — not scheduled on mainnet or any public testnet.**
 - **`debug_executionWitness`.** Stateless execution-witness generation (EIP-7928/8025) with reth-compatible output, for zkEVM and stateless clients (#20205 by @antonis19, #21629 by @awskii).
 - **More aggressive history pruning by default.** `--prune.mode=full` now follows the EIP-8252 reorg-retention window (~36 days / 262,144 blocks) — see Breaking Changes.
@@ -36,7 +36,7 @@ Erigon 3.5.0 is a major release headlined by **parallel block execution becoming
 
 #### `--prune.mode=full`: EIP-8252 retention window replaces pre-merge history-expiry
 
-Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW` — the inactivity-leak-bounded non-finality window across which an EL must be able to reconstruct state to handle any reorg without external sync. Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
+Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
 
 **What changed:**
 
@@ -47,15 +47,15 @@ Full mode now retains state and block data for the last `262,144` blocks (~36.4 
 
 `--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 
-**Migration:** existing datadirs upgrade automatically. The prune-config guard now accepts finite distance changes on `History`/`Blocks` in either direction, plus either-direction transitions between a finite Distance and the `KeepPostMergeBlocksPruneMode` chain-history-expiry sentinel on `Blocks` (so the upgrade is silent, and operators can revert with `--prune.distance.blocks=18446744073709551615` even after the auto-upgrade has rewritten the persisted value). Operators who want to keep the old "retain all post-merge block data" behavior can switch to `--prune.mode=blocks` or pass the override flag.
+**Migration:** existing datadirs upgrade automatically and silently. To keep the old "retain all post-merge block data" behavior, switch to `--prune.mode=blocks`; the auto-upgrade is reversible with `--prune.distance.blocks=18446744073709551615`.
 
-Note: physical deletion of frozen `.seg` files is gated by [#21306](https://github.com/erigontech/erigon/issues/21306); existing on-disk segments persist until that lands. The config-level transition is still recorded so the new cutoff takes effect once the deletion path exists.
+Note: physical deletion of frozen `.seg` files is gated by [#21306](https://github.com/erigontech/erigon/issues/21306) — existing on-disk segments persist until it lands, though the new cutoff is already recorded at the config level.
 
 ---
 
 #### Single p2p listener: `--p2p.allowed-ports` removed, all eth versions multiplex on `--port`
 
-Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments — per-protocol Servers each signed an ENR under the same Node ID, and only the highest-`seq` one survived in the DHT, so peers dialed the wrong listener (#21335).
+Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments: per-protocol ENRs collided under one Node ID, so only one survived in the DHT and peers dialed the wrong listener (#21335).
 
 **What changed:**
 
@@ -89,24 +89,13 @@ Aligns Erigon with the execution-apis specification ([ethereum/execution-apis#76
 | Memory in trace | `disableMemory` (default: included) | `enableMemory` (default: excluded) |
 | Return data in trace | `disableReturnData` (default: included) | `enableReturnData` (default: excluded) |
 
-The change is **twofold**:
-1. The JSON key is renamed (`disable*` → `enable*`).
-2. The default value is inverted: previously memory and return data were **included** by default (opt-out model); now they are **excluded** by default (opt-in model), matching the spec and Geth.
+Both the key and its default changed: `disable*` → `enable*`, and memory and return data are now **excluded** unless explicitly enabled — matching the spec and Geth.
 
 **Migration:**
 
 ```jsonc
-// Before — disable memory explicitly
-{ "disableMemory": true }
-
-// After — enable memory explicitly
-{ "enableMemory": true }
-
-// Before — memory included by default (no flag needed)
-{}
-
-// After — must opt in
-{ "enableMemory": true }
+{ "disableMemory": true }  // before: opt out of memory (on by default)
+{ "enableMemory": true }   // after:  opt in to memory (off by default)
 ```
 
 Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceCall`.
