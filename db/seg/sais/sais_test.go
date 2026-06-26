@@ -190,7 +190,7 @@ func TestSais16MatchesSuperstring(t *testing.T) {
 	var buf []int32
 	rng := rand.New(rand.NewSource(99))
 	for iter := 0; iter < 300; iter++ {
-		var super []byte // 2-byte cells: real char = {1,b}, separator = {0,0}
+		var super []byte  // 2-byte cells: real char = {1,b}, separator = {0,0}
 		var code []uint16 // one symbol per cell
 		nwords := 1 + rng.Intn(8)
 		for w := 0; w < nwords; w++ {
