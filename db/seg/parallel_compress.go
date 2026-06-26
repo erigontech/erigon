@@ -971,6 +971,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	saisBuf := saisBufPool.Get().(*[]int32)
 	defer saisBufPool.Put(saisBuf)
 	var lcp, sa, inv []int32
+	var code []uint16
 	for {
 		var (
 			superstring []byte
@@ -985,28 +986,30 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 			}
 		}
 
-		if cap(sa) < len(superstring) {
-			sa = make([]int32, len(superstring))
+		// Remap the 2n-byte superstring to an n-length uint16 "code" array:
+		// separator -> 0, real byte b -> b+1 (range 1..256). The suffix array of code
+		// equals the even-position-filtered SA of the superstring (the per-cell symbol
+		// order matches the (marker,value) byte-pair order), but SAIS runs over half the
+		// positions, each half the width.
+		n := len(superstring) / 2
+		if cap(code) < n {
+			code = make([]uint16, n)
 		} else {
-			sa = sa[:len(superstring)]
+			code = code[:n]
 		}
-		//log.Info("Superstring", "len", len(superstring))
-		//start := time.Now()
-		if err := sais.Sais(superstring, sa, saisBuf); err != nil {
+		for p := 0; p < n; p++ {
+			code[p] = uint16(superstring[2*p]) * (uint16(superstring[2*p+1]) + 1)
+		}
+		if cap(sa) < n {
+			sa = make([]int32, n)
+		} else {
+			sa = sa[:n]
+		}
+		if err := sais.Sais16(code, 257, sa, saisBuf); err != nil {
 			panic(err)
 		}
-		//log.Info("Suffix array built", "in", time.Since(start))
-		// filter out suffixes that start with odd positions
-		n := len(sa) / 2
-		filtered := sa[:n]
-		//filtered := make([]int32, n)
 		var j int
-		for i := 0; i < len(sa); i++ {
-			if sa[i]&1 == 0 {
-				filtered[j] = sa[i] >> 1
-				j++
-			}
-		}
+		filtered := sa
 		// Now create an inverted array
 		if cap(inv) < n {
 			inv = make([]int32, n)
@@ -1042,7 +1045,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 			// Directly start matching from k'th index as
 			// at-least k-1 characters will match
-			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
+			for i+k < n && j+k < n && code[i+k] != 0 && code[i+k] == code[j+k] {
 				k++
 			}
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
@@ -1062,9 +1065,8 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				p2 := int(filtered[i+1])
 				for p1+prefixLen < n &&
 					p2+prefixLen < n &&
-					superstring[(p1+prefixLen)*2] != 0 &&
-					superstring[(p2+prefixLen)*2] != 0 &&
-					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+					code[p1+prefixLen] != 0 &&
+					code[p1+prefixLen] == code[p2+prefixLen] {
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
@@ -1131,7 +1133,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 				dictKey = dictKey[:l]
 				for s := 0; s < l; s++ {
-					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
+					dictKey[s] = byte(code[int(filtered[i])+s] - 1)
 				}
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
