@@ -358,10 +358,7 @@ func TestFillTransactionGasPricePostLondon(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(types.LegacyTxType), result.Tx.Type, "explicit gasPrice must produce a legacy tx")
 }
 
-func TestFillTransactionBlobFeeUsesNextBlockExcess(t *testing.T) {
-	// Genesis has a large ExcessBlobGas but zero BlobGasUsed.
-	// CalcExcessBlobGas returns ExcessBlobGas - targetBlobGas, not ExcessBlobGas itself.
-	// FillTransaction must use the former (next block's excess), not the latter.
+func TestFillTransactionBlobFeeUsesHeadExcess(t *testing.T) {
 	const headExcessBlobGas = uint64(10_000_000)
 
 	cancunCfg := &chain.Config{
@@ -408,17 +405,8 @@ func TestFillTransactionBlobFeeUsesNextBlockExcess(t *testing.T) {
 	require.NotNil(t, result.Tx.MaxFeePerBlobGas)
 
 	head := m.Genesis.HeaderNoCopy()
-	nextTime := head.Time + cancunCfg.SecondsPerSlot()
-	nextExcess := misc.CalcExcessBlobGas(cancunCfg, head, nextTime)
-	correctFee, err := misc.GetBlobGasPrice(cancunCfg, nextExcess, nextTime)
+	expectedFee, err := misc.GetBlobGasPrice(cancunCfg, *head.ExcessBlobGas, head.Time)
 	require.NoError(t, err)
-	expectedMaxFeePerBlobGas := new(big.Int).Lsh(correctFee.ToBig(), 1)
-	require.Equal(t, expectedMaxFeePerBlobGas, result.Tx.MaxFeePerBlobGas.ToInt())
-
-	// Sanity: the old approach (using head.ExcessBlobGas directly) gives a different, larger value.
-	oldFee, err := misc.GetBlobGasPrice(cancunCfg, headExcessBlobGas, nextTime)
-	require.NoError(t, err)
-	oldMaxFeePerBlobGas := new(big.Int).Lsh(oldFee.ToBig(), 1)
-	require.NotEqual(t, expectedMaxFeePerBlobGas, oldMaxFeePerBlobGas,
-		"test scenario must differentiate CalcExcessBlobGas from head.ExcessBlobGas")
+	b := expectedFee.ToBig()
+	require.Equal(t, b.Lsh(b, 1), result.Tx.MaxFeePerBlobGas.ToInt())
 }

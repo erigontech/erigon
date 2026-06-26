@@ -111,13 +111,12 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			return nil, errors.New("blob transactions not supported before Cancun")
 		}
 		if args.MaxFeePerBlobGas == nil {
-			nextBlockTime := head.Time + cc.SecondsPerSlot()
-			nextExcessBlobGas := misc.CalcExcessBlobGas(cc, head, nextBlockTime)
-			blobFee, err := misc.GetBlobGasPrice(cc, nextExcessBlobGas, nextBlockTime)
+			blobFee, err := misc.GetBlobGasPrice(cc, *head.ExcessBlobGas, head.Time)
 			if err != nil {
 				return nil, err
 			}
-			args.MaxFeePerBlobGas = (*hexutil.Big)(new(big.Int).Lsh(blobFee.ToBig(), 1))
+			b := blobFee.ToBig()
+			args.MaxFeePerBlobGas = (*hexutil.Big)(b.Lsh(b, 1))
 		}
 	}
 
