@@ -27,7 +27,7 @@ Erigon 3.5.0 is a major release headlined by **parallel block execution becoming
 ### Key Features
 
 - **Parallel block execution, on by default.** Erigon now executes EVM transactions across multiple cores by default, using the Block-STM (software transactional memory) design pioneered by Aptos: transactions run optimistically in parallel and are re-validated against a multi-version state, re-executing only on conflict (#21591 by @mh0lt, closes #17630). Revert to serial with `EXEC3_PARALLEL=false` or `--exec.serial`.
-- **Glamsterdam devnet support.** Initial implementation of Ethereum's next hardfork: Block-Level Access Lists (EIP-7928), enshrined Proposer-Builder Separation / "GLOAS" (EIP-7732) in Caplin, gas repricings (EIP-8037, EIP-7976, EIP-7981), larger contracts (EIP-7954), transfer logs (EIP-7708), and the `eth/71` Block Access List wire protocol (EIP-8159). **Devnet/testing only — not scheduled on mainnet or any public testnet.**
+- **Glamsterdam devnet support.** Initial implementation of Ethereum's next hardfork: Block-Level Access Lists (EIP-7928), enshrined Proposer-Builder Separation / "Gloas" (EIP-7732) in Caplin, gas repricings (EIP-8037, EIP-7976, EIP-7981), larger contracts (EIP-7954), transfer logs (EIP-7708), and the `eth/71` Block Access List wire protocol (EIP-8159). **Devnet/testing only — not scheduled on mainnet or any public testnet.**
 - **`debug_executionWitness`.** Stateless execution-witness generation (EIP-7928/8025) with reth-compatible output, for zkEVM and stateless clients (#20205 by @antonis19, #21629 by @awskii).
 - **More aggressive history pruning by default.** `--prune.mode=full` now follows the EIP-8252 reorg-retention window (~36 days / 262,144 blocks) — see Breaking Changes.
 - **GraphQL API revival.** Broad resolver coverage restored — queries, logs, `call`, `sendRawTransaction`, `estimateGas`, `gasPrice`, storage, and EIP-4844 fields.
@@ -45,7 +45,7 @@ Full mode now retains state and block data for the last `262,144` blocks (~36.4 
 | State history retention | last 100,000 blocks | last 262,144 blocks |
 | Block data retention | pre-merge pruned, all post-merge kept (EIP-4444) | last 262,144 blocks |
 
-`--prune.mode=blocks` keeps the same shape as before (all block data retained) but its state history retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both block and state history retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+`--prune.mode=blocks` keeps the same shape as before (all block data retained), but its state history retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both block and state history retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 
 **Migration:** existing datadirs upgrade automatically and silently. To keep the old "retain all post-merge block data" behavior, switch to `--prune.mode=blocks`; the auto-upgrade is reversible with `--prune.distance.blocks=18446744073709551615`.
 
@@ -121,10 +121,10 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 3.5.0 adds an initial implementation of Ethereum's next hardfork — **Glamsterdam** (consensus-layer "Gloas" + execution-layer "Amsterdam") — for devnet testing and validation. **It is not scheduled on mainnet or any public testnet**, and these code paths are inert on production networks until an activation time is configured.
 
 - **EIP-7928 — Block-Level Access Lists (BAL):** records every account and storage slot a block touches, enabling deterministic parallel validation. Full builder, validator, and strict-validation support (#19627, #19656, #20602, #20776), plus the `eth_getBlockAccessList` RPC method (#19929) — by @mh0lt, @yperbasis, @Sahil-4555
-- **EIP-7732 — Enshrined Proposer-Builder Separation (ePBS / "GLOAS"):** implemented in Caplin — execution-payload envelope, PTC, and builder payments (#18956) — with follow-up audit and fork-choice fixes (#21248, #21228) — by @domiwei
+- **EIP-7732 — Enshrined Proposer-Builder Separation (ePBS / "Gloas"):** implemented in Caplin — execution-payload envelope, PTC, and builder payments (#18956) — with follow-up audit and fork-choice fixes (#21248, #21228) — by @domiwei
 - **Gas repricings:** EIP-8037 State Creation Gas Cost Increase (#19596), EIP-7976 calldata floor cost (#20613), EIP-7981 access-list cost (#20671) — by @taratorio
 - **EIP-7954 — Increase Maximum Contract Size** (#19624) — by @yperbasis
-- **EIP-7843 — slot-number system contract**, wired into Caplin block production and `engine_forkchoiceUpdatedV4` (#20175) — by @yperbasis
+- **EIP-7843 — slot-number opcode (`SLOTNUM`)**, wired into Caplin block production and `engine_forkchoiceUpdatedV4` (#20175) — by @yperbasis
 - **Networking:** `eth/71` Block Access List exchange (EIP-8159, #20793, #20794, #20795) — by @mh0lt
 
 ### Added
@@ -169,7 +169,7 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 #### Caplin (Consensus Layer)
 
 - Unified Engine API client for standalone mode (#20035) — by @mh0lt
-- Fork-choice and ENR-stability fixes — recovery from a post-GLOAS fork-choice stall and a persistent node key for stable ENR across restarts (#21228, #21276) — by @domiwei
+- Fork-choice and ENR-stability fixes — recovery from a post-Gloas fork-choice stall and a persistent node key for stable ENR across restarts (#21228, #21276) — by @domiwei
 - Block production: give the EL builder a build window before stopping it, fixing near-empty proposed blocks (~0–2% gas) on otherwise-healthy validators (#21990) — by @lystopad
 
 #### Storage & Performance
