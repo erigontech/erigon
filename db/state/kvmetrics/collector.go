@@ -173,6 +173,14 @@ func (c *Collector) TrySend(source Source, m *DomainMetrics) bool {
 	if c == nil || m == nil {
 		return false
 	}
+	// Once Stop() has closed quit the collector goroutine is gone, so a queued
+	// sample would never be drained (silent loss) and could fill the buffer
+	// during shutdown. Mirror Send() and refuse — the caller keeps its data.
+	select {
+	case <-c.quit:
+		return false
+	default:
+	}
 	select {
 	case c.in <- sample{source: source, m: m}:
 		return true

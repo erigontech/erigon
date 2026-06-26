@@ -85,6 +85,15 @@ type addrCodeHashEntry struct {
 	epoch uint32
 }
 
+// Per-entry residency of the two addr-keyed LRUs: a 20-byte key plus the
+// value struct (which carries codeHash/txNum/epoch, not just an 8-byte ID).
+// Used both to size the LRUs against the byte budget and to report residency.
+const (
+	addrToHashEntryBytes     = 20 + int(unsafe.Sizeof(versionedAddressID{}))
+	addrToCodeHashEntryBytes = 20 + int(unsafe.Sizeof(addrCodeHashEntry{}))
+	addrEntryBytes           = addrToHashEntryBytes + addrToCodeHashEntryBytes
+)
+
 type codeEntry struct {
 	code []byte
 	// keyHash is the keccak codeHash this entry is keyed under. maphash.Map
@@ -165,7 +174,10 @@ func (c *CodeCache) isStale(txNum uint64, epoch uint32) bool {
 
 // NewCodeCache creates a new CodeCache with the specified byte capacities.
 func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeCache {
-	addrEntries := int(addrCapacityBytes) / 28
+	// The addr budget is shared by both addr-keyed LRUs, so each "slot" costs
+	// addrEntryBytes (both entries combined). Divide in ByteSize space so the
+	// budget isn't truncated to int before the division.
+	addrEntries := int(addrCapacityBytes / datasize.ByteSize(addrEntryBytes))
 	if addrEntries < 1024 {
 		addrEntries = 1024
 	}
@@ -512,10 +524,12 @@ func (c *CodeCache) CodeLen() int {
 	return c.hashToCode.Len()
 }
 
-// AddrSizeBytes returns the estimated size of the address cache in bytes.
-// LRU-based; estimate uses ~28 bytes per entry (20-byte addr + 8-byte codeID).
+// AddrSizeBytes returns the estimated size of the address cache in bytes,
+// counting both addr-keyed LRUs (addr→codeID and addr→codeHash) at their real
+// per-entry residency, not just the addr+codeID pair.
 func (c *CodeCache) AddrSizeBytes() int64 {
-	return int64(c.addrToHash.Len() * 28)
+	return int64(c.addrToHash.Len())*int64(addrToHashEntryBytes) +
+		int64(c.addrToCodeHash.Len())*int64(addrToCodeHashEntryBytes)
 }
 
 // CodeSizeBytes returns the current size of the code cache in bytes.

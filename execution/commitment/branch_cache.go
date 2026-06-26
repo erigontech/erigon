@@ -232,10 +232,12 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 }
 
 // Unwind invalidates entries that reflect dead-fork state. unwindToTxN is the
-// txN the chain is rewound to. O(1) and scan-free: bump the epoch (so entries
-// written in the new, live epoch stay valid) and lower the unwind floor to
-// unwindToTxN (so old-epoch entries at or above it are dropped lazily on their
-// next Get). The floor only ever decreases, so a shallow unwind cannot
+// unwind floor — the first rolled-back txNum (SharedDomains passes
+// Min(unwindPoint+1)), not the rewind target — because the stale check is
+// txN >= floor. O(1) and scan-free: bump the epoch (so entries written in the
+// new, live epoch stay valid) and lower the unwind floor to unwindToTxN (so
+// old-epoch entries at or above it are dropped lazily on their next Get). The
+// floor only ever decreases, so a shallow unwind cannot
 // resurrect entries a deeper one invalidated. Mirrors GenericCache.Unwind so
 // branch and state caches honor one (txN, epoch) model (#21752).
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
