@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.6.0] 
+# Erigon v3.6.0 — Upstream Underbelly — TBD
 
 ### Breaking Changes
 
@@ -20,7 +20,7 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 ---
 
-## [3.5.0] "Tidal Tails" – TBD
+# Erigon v3.5.0 — Tidal Tails — 2026-06-26
 
 Erigon 3.5.0 is a major release headlined by **parallel block execution becoming the default** and **initial support for Ethereum's upcoming Glamsterdam hardfork**. It is a drop-in upgrade for 3.4.x users — no re-sync required; existing datadirs upgrade their prune configuration automatically (see Breaking Changes).
 
@@ -189,7 +189,7 @@ The optional Silkworm C++ execution-backend integration and its `--silkworm.*` f
 
 ---
 
-## [3.4.4] "Splashing Saga" – 2026-06-18
+# Erigon v3.4.4 — Splashing Saga — 2026-06-18
 
 v3.4.4 is a bugfix release recommended for all users.
 
@@ -202,7 +202,7 @@ v3.4.4 is a bugfix release recommended for all users.
 
 ---
 
-## [3.4.3] "Splashing Saga" – 2026-06-02
+# Erigon v3.4.3 — Splashing Saga — 2026-06-02
 
 v3.4.3 is a bugfix release recommended for all users.
 
@@ -231,7 +231,7 @@ v3.4.3 is a bugfix release recommended for all users.
 
 ---
 
-## [3.4.2] "Splashing Saga" – 2026-05-22
+# Erigon v3.4.2 — Splashing Saga — 2026-05-22
 
 v3.4.2 is a bugfix release recommended for all users.
 
@@ -254,7 +254,7 @@ v3.4.2 is a bugfix release recommended for all users.
 
 ---
 
-## [3.4.1] "Splashing Saga" – 2026-05-11
+# Erigon v3.4.1 — Splashing Saga — 2026-05-11
 
 **Bugfixes**
 
@@ -264,7 +264,7 @@ v3.4.2 is a bugfix release recommended for all users.
 
 ---
 
-## [3.4.0] "Splashing Saga" – 2026-04-28
+# Erigon v3.4.0 — Splashing Saga — 2026-04-28
 
 Erigon 3.4.0 is a major update for node operators and validators, focused on stability, performance, and
 efficiency at ChainTip. It is a drop-in upgrade for 3.3.x users — no data migration or re-sync required.
@@ -388,7 +388,7 @@ efficiency at ChainTip. It is a drop-in upgrade for 3.3.x users — no data migr
 
 ---
 
-## [3.3.10] "Rocky Romp" – 2026-03-27
+# Erigon v3.3.10 — Rocky Romp — 2026-03-27
 
 This release schedules Fusaka on **Gnosis Chain mainnet** at **Tue 14 April 2026, 12:06:20 UTC** and
 thus is **mandatory for all Gnosis users**. It is also recommended for all users in general.
@@ -407,7 +407,7 @@ thus is **mandatory for all Gnosis users**. It is also recommended for all users
 
 ---
 
-## [3.3.9] "Rocky Romp" – 2026-03-09
+# Erigon v3.3.9 — Rocky Romp — 2026-03-09
 
 This release schedules Fusaka on Chiado on **Mon 16 March 2026, 09:33:00 UTC** and thus is mandatory
 for all Chiado users.
@@ -425,7 +425,7 @@ for all Chiado users.
 
 ---
 
-## [3.3.8] "Rocky Romp" – 2026-02-20
+# Erigon v3.3.8 — Rocky Romp — 2026-02-20
 
 **Changes**
 
@@ -452,7 +452,7 @@ for all Chiado users.
 
 ---
 
-## [3.3.7] "Rocky Romp" – 2026-01-30
+# Erigon v3.3.7 — Rocky Romp — 2026-01-30
 
 P2P stability. Prune performance.
 
@@ -470,7 +470,7 @@ P2P stability. Prune performance.
 
 ---
 
-## [3.3.4] "Rocky Romp" – 2026-01-23
+# Erigon v3.3.4 — Rocky Romp — 2026-01-23
 
 v3.3.4 is a bugfix release recommended for all users.
 
@@ -487,7 +487,7 @@ v3.3.4 is a bugfix release recommended for all users.
 
 ---
 
-## [3.3.3] "Rocky Romp" – 2026-01-14
+# Erigon v3.3.3 — Rocky Romp — 2026-01-14
 
 v3.3.3 is a bugfix release recommended for all users.
 
@@ -507,7 +507,7 @@ v3.3.3 is a bugfix release recommended for all users.
 
 ---
 
-## [3.3.2] "Rocky Romp" – 2025-12-13
+# Erigon v3.3.2 — Rocky Romp — 2025-12-13
 
 Gnosis hardfork support.
 
@@ -523,7 +523,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.3.1] "Rocky Romp" – 2025-12-07
+# Erigon v3.3.1 — Rocky Romp — 2025-12-07
 
 - We have new Docs and HelpCenter: https://docs.erigon.tech/
 - Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires
@@ -549,7 +549,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.3.0] – 2025-11-27
+# Erigon v3.3.0 — 2025-11-27
 
 ### Added
 
@@ -606,7 +606,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.2.3] "Quirky Quests" – 2025-11-25
+# Erigon v3.2.3 — Quirky Quests — 2025-11-25
 
 **Changes**
 
@@ -616,7 +616,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.2.2] "Quirky Quests" – 2025-11-03
+# Erigon v3.2.2 — Quirky Quests — 2025-11-03
 
 v3.2.2 schedules Fusaka on Ethereum mainnet on December 3, 2025 at 09:49:11pm UTC. Thus it is a mandatory update for all Ethereum mainnet users.
 
@@ -629,7 +629,7 @@ v3.2.2 schedules Fusaka on Ethereum mainnet on December 3, 2025 at 09:49:11pm UT
 
 ---
 
-## [3.2.1] "Quirky Quests" – 2025-10-20
+# Erigon v3.2.1 — Quirky Quests — 2025-10-20
 
 v3.2.1 is a bugfix release recommended for all users, especially validators.
 
@@ -650,7 +650,7 @@ v3.2.1 is a bugfix release recommended for all users, especially validators.
 
 ---
 
-## [3.2.0] "Quirky Quests" – 2025-10-02
+# Erigon v3.2.0 — Quirky Quests — 2025-10-02
 
 Erigon 3.2.0 has a complete implementation of [Fusaka](https://eips.ethereum.org/EIPS/eip-7607) and schedules it on the
 test nets (#17197):
