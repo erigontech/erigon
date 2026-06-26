@@ -98,9 +98,10 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	default:
 		result.RegularGas = params.TxGas
 	}
-	result.FloorGasCost = params.TxGas
 	if args.IsEIP2780 {
 		result.FloorGasCost = params.TxBaseEIP2780
+	} else {
+		result.FloorGasCost = params.TxGas
 	}
 	nz := args.DataNonZeroLen
 	// Bump the required gas by the amount of transactional data
