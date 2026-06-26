@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -52,6 +53,37 @@ func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint
 func (r *fakeStateReader) SetTrace(_ bool, _ string) {}
 func (r *fakeStateReader) Trace() bool               { return false }
 func (r *fakeStateReader) TracePrefix() string       { return "" }
+
+// countingStateReader counts ReadAccountData calls per address so a test can pin that the
+// witness-keys gate consults the pre-block reader at most once.
+type countingStateReader struct {
+	*fakeStateReader
+	reads map[common.Address]int
+}
+
+func (r *countingStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	r.reads[address.Value()]++
+	return r.fakeStateReader.ReadAccountData(address)
+}
+
+// TestRecordingState_hasWitnessLeaf_SingleInnerRead pins the gate's single-read property:
+// an account absent from both pre- and post-state is excluded with exactly one inner read,
+// not the two a plain accountExists() || existedPreBlock() composition would issue.
+func TestRecordingState_hasWitnessLeaf_SingleInnerRead(t *testing.T) {
+	never := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	reader := &countingStateReader{
+		fakeStateReader: &fakeStateReader{accounts: map[common.Address]*accounts.Account{}},
+		reads:           map[common.Address]int{},
+	}
+	rs := NewRecordingState(reader)
+
+	if rs.hasWitnessLeaf(never) {
+		t.Fatal("account absent from pre- and post-state must be excluded from keys[]")
+	}
+	if got := reader.reads[never]; got != 1 {
+		t.Fatalf("hasWitnessLeaf consulted the pre-block reader %d times, want 1", got)
+	}
+}
 
 func TestRecordingState_accountExists(t *testing.T) {
 	existing := common.HexToAddress("0x1111111111111111111111111111111111111111")
@@ -294,6 +326,28 @@ func TestCheckWitnessKeysComplete(t *testing.T) {
 		usedS := map[common.Hash]struct{}{slotS: {}}
 		if err := checkWitnessKeysComplete(nil, usedS, []hexutil.Bytes{key32(slotS)}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	t.Run("large missing list truncated, total preserved", func(t *testing.T) {
+		used := make(map[common.Address]struct{})
+		for i := 0; i < 50; i++ {
+			var a common.Address
+			a[19] = byte(i)
+			used[a] = struct{}{}
+		}
+		err := checkWitnessKeysComplete(used, nil, nil)
+		if err == nil {
+			t.Fatal("expected error: 50 accessed account leaves missing from keys[]")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "50 preimage(s)") {
+			t.Errorf("error must report the full count; got: %s", msg)
+		}
+		if !strings.Contains(msg, "more)") {
+			t.Errorf("error must mark the list as truncated; got: %s", msg)
+		}
+		if n := strings.Count(msg, "0x"); n > 16 {
+			t.Errorf("error listed %d preimages; want the list capped at 16", n)
 		}
 	})
 }

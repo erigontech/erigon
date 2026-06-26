@@ -6,9 +6,10 @@ env:
   # Pinned versions of third-party containers — bump here when upgrading.
   # These are cached via actions/cache (docker save/load) to avoid re-pulling
   # on every run and to eliminate Docker Hub rate-limit exposure.
-  LIGHTHOUSE_IMAGE: "sigp/lighthouse:v8.1.3"
-  TEKU_IMAGE: "consensys/teku:26.4.0"
-  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.1.2"
+  # LIGHTHOUSE_IMAGE, TEKU_IMAGE, LIGHTHOUSE_VC_IMAGE and the ASSERTOOR_* tags are
+  # loaded at job start from the suite .io files (single source of truth) by the
+  # "Load image versions" step, so they can't drift from what kurtosis runs. The
+  # remaining third-party tags below aren't pinned in any .io, so they stay here.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -30,6 +31,12 @@ env:
   # Cached and pre-loaded so buildx can fall back to the local copy when its
   # Docker Hub pull fails.
   BUILDKIT_IMAGE: "moby/buildkit:v0.30.0"
+  # eth2-val-tools is the validator-keystore generator pulled during `kurtosis run`;
+  # it publishes only :latest, so the cache serves the `latest` digest from the last
+  # warm rather than tracking live `latest`. (genesis-generator is pulled live: its
+  # version is the ethereum-package default, which varies per ethereum_package_branch,
+  # so it isn't cached here.)
+  ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
 
 on:
   workflow_dispatch:
@@ -185,12 +192,35 @@ jobs:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
+      - name: Checkout kurtosis .io files
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/workflows/kurtosis
+
+      - name: Load image versions from the .io files (single source of truth)
+        run: |
+          reg=.github/workflows/kurtosis/regular-assertoor.io
+          assertoor=$(yq -e '.assertoor_params.image' "$reg")
+          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
+          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
+          teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
+          {
+            echo "ASSERTOOR_IMAGE=$assertoor"
+            echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
+            echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
+            echo "LIGHTHOUSE_IMAGE=$lighthouse"
+            echo "TEKU_IMAGE=$teku"
+            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
+          } >> "$GITHUB_ENV"
+
       - name: Check whether third-party containers are already cached
         id: cache-cl-images
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -206,8 +236,11 @@ jobs:
             return 1
           }
           pull "${LIGHTHOUSE_IMAGE}"
+          pull "${LIGHTHOUSE_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
+          pull "${ASSERTOOR_PECTRA_IMAGE}"
+          pull "${ASSERTOOR_GLAMSTERDAM_IMAGE}"
           pull "kurtosistech/engine:${KURTOSIS_VERSION}"
           pull "kurtosistech/core:${KURTOSIS_VERSION}"
           pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
@@ -216,9 +249,13 @@ jobs:
           pull "${KURTOSIS_CURL_JQ_IMAGE}"
           pull "${KURTOSIS_TRAEFIK_IMAGE}"
           pull "${KURTOSIS_ALPINE_IMAGE}"
+          pull "${ETH2_VAL_TOOLS_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
+          docker save "${ASSERTOOR_GLAMSTERDAM_IMAGE}" -o /tmp/docker-cache/assertoor-glamsterdam.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
           docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
           docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
@@ -227,13 +264,14 @@ jobs:
           docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
           docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
           docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
+          docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -351,19 +389,40 @@ jobs:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
+      - name: Load image versions from the .io files (single source of truth)
+        run: |
+          reg=.github/workflows/kurtosis/regular-assertoor.io
+          assertoor=$(yq -e '.assertoor_params.image' "$reg")
+          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
+          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
+          teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
+          {
+            echo "ASSERTOOR_IMAGE=$assertoor"
+            echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
+            echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
+            echo "LIGHTHOUSE_IMAGE=$lighthouse"
+            echo "TEKU_IMAGE=$teku"
+            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
+          } >> "$GITHUB_ENV"
+
       - name: Restore cached third-party containers
         id: cache-cl-images
         uses: actions/cache@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
         run: |
           docker load -i /tmp/docker-cache/lighthouse.tar
+          docker load -i /tmp/docker-cache/lighthouse-vc.tar
           docker load -i /tmp/docker-cache/teku.tar
           docker load -i /tmp/docker-cache/assertoor.tar
+          docker load -i /tmp/docker-cache/assertoor-pectra.tar
+          docker load -i /tmp/docker-cache/assertoor-glamsterdam.tar
           docker load -i /tmp/docker-cache/kurtosis-engine.tar
           docker load -i /tmp/docker-cache/kurtosis-core.tar
           docker load -i /tmp/docker-cache/kurtosis-expander.tar
@@ -372,6 +431,7 @@ jobs:
           docker load -i /tmp/docker-cache/curl-jq.tar
           docker load -i /tmp/docker-cache/traefik.tar
           docker load -i /tmp/docker-cache/alpine.tar
+          docker load -i /tmp/docker-cache/eth2-val-tools.tar
 
       - name: Pull third-party containers and save to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
@@ -386,8 +446,11 @@ jobs:
             return 1
           }
           pull "${LIGHTHOUSE_IMAGE}"
+          pull "${LIGHTHOUSE_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
+          pull "${ASSERTOOR_PECTRA_IMAGE}"
+          pull "${ASSERTOOR_GLAMSTERDAM_IMAGE}"
           pull "kurtosistech/engine:${KURTOSIS_VERSION}"
           pull "kurtosistech/core:${KURTOSIS_VERSION}"
           pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
@@ -396,9 +459,13 @@ jobs:
           pull "${KURTOSIS_CURL_JQ_IMAGE}"
           pull "${KURTOSIS_TRAEFIK_IMAGE}"
           pull "${KURTOSIS_ALPINE_IMAGE}"
+          pull "${ETH2_VAL_TOOLS_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
+          docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
+          docker save "${ASSERTOOR_GLAMSTERDAM_IMAGE}" -o /tmp/docker-cache/assertoor-glamsterdam.tar
           docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
           docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
           docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
@@ -407,6 +474,7 @@ jobs:
           docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
           docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
           docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
+          docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
 
       - name: Install Kurtosis CLI and start engine
         # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
