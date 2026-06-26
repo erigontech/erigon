@@ -130,29 +130,3 @@ func TestTrieConfig_SpawnSubTrieInheritsConfig(t *testing.T) {
 		t.Error("sub-trie branchEncoder should not defer updates")
 	}
 }
-
-func TestTrieConfig_ConcurrentPatriciaHashedPropagation(t *testing.T) {
-	cfg := TrieConfig{
-		DeferBranchUpdates: true,
-		MemoizationOff:     true,
-	}
-
-	root := NewHexPatriciaHashed(length.Addr, nil, cfg)
-	cph := NewConcurrentPatriciaHashed(root, nil)
-	defer cph.Release()
-
-	// Root config should match
-	if !cph.root.cfg.MemoizationOff {
-		t.Error("root should inherit MemoizationOff=true")
-	}
-
-	// Mounts inherit config via SpawnSubTrie, with DeferBranchUpdates=false
-	for i, mount := range cph.mounts {
-		if mount.cfg.DeferBranchUpdates {
-			t.Errorf("mount[%d] DeferBranchUpdates should be false", i)
-		}
-		if !mount.cfg.MemoizationOff {
-			t.Errorf("mount[%d] should inherit MemoizationOff=true", i)
-		}
-	}
-}

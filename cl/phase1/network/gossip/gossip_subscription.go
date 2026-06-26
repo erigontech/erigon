@@ -154,7 +154,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		if err != nil {
 			return err
 		}
-		log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
+		log.Debug("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
 		sub.sub = s
 
 		// update ENR only on first subscription, not on expiry renewal
