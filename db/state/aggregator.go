@@ -1228,6 +1228,19 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
+	// Mode-B unwind gate: same as buildFilesInBackground. mergeLoop is
+	// spawned from inside buildFilesInBackground after a successful
+	// build; if mode-B starts while that goroutine is still in flight,
+	// the gate at buildFilesInBackground's entry already missed it. The
+	// merge produces wider files (e.g. v2.0-accounts.272-276.kv) that
+	// overlap the pre-mode-B broad boundary file, then forward exec
+	// reads through the overlapped visibility set and wedges with
+	// wrong-trie-root ~209 blocks past the target.
+	if a.unwindInProgress.Load() {
+		a.mergingFiles.Store(false)
+		a.logger.Debug("[snapshots] mergeLoop: skipped (mode-B unwind in progress)")
+		return nil
+	}
 
 	// Merge is background operation. It must not crush application.
 	// Convert panic to error.
@@ -2100,12 +2113,30 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 }
 
 // SetUnwindInProgress is the gate setHeadModeB uses to suppress
-// buildFilesInBackground during a mode-B unwind tx window. While set,
-// buildFilesInBackground returns immediately without collating or
-// writing any per-step files — preventing narrow files from racing
-// the unwind and overlapping the pre-mode-B broad boundary file.
+// buildFilesInBackground + mergeLoop during a mode-B unwind tx window.
+// While set, both return immediately without writing any per-step
+// files — preventing narrow files from racing the unwind and
+// overlapping the pre-mode-B broad boundary file.
 func (a *Aggregator) SetUnwindInProgress(v bool) {
 	a.unwindInProgress.Store(v)
+}
+
+// WaitForBuildAndMergeQuiescence blocks until any in-flight
+// buildFilesInBackground goroutine AND mergeLoop goroutine have
+// exited, or the timeout elapses. setHeadModeB calls this after
+// SetUnwindInProgress(true) so the gate's "no new builds" guarantee
+// extends to "no in-flight builds either" before Provider.Unwind
+// starts. Returns nil if quiescent, error on timeout.
+func (a *Aggregator) WaitForBuildAndMergeQuiescence(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !a.buildingFiles.Load() && !a.mergingFiles.Load() {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("WaitForBuildAndMergeQuiescence: timed out after %s (buildingFiles=%v mergingFiles=%v)",
+		timeout, a.buildingFiles.Load(), a.mergingFiles.Load())
 }
 
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {

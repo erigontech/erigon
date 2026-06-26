@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -48,6 +49,9 @@ func (stubAggregator) DomainCompression(_ kv.Domain) seg.FileCompression {
 }
 func (stubAggregator) Unwind(_ uint64)            {}
 func (stubAggregator) SetUnwindInProgress(_ bool) {}
+func (stubAggregator) WaitForBuildAndMergeQuiescence(_ time.Duration) error {
+	return nil
+}
 
 // TestCollectFilesPastBlock_StraddleFileSurvives pins the contract
 // that fixed live-rig issue #2 from the 2026-06-01 cycle: the block

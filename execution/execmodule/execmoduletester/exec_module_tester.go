@@ -1064,3 +1064,7 @@ func (a testProviderUnwinder) FinalizeUnwind() error { return a.p.FinalizeUnwind
 func (a testProviderUnwinder) AbortUnwind() { a.p.AbortUnwind() }
 
 func (a testProviderUnwinder) BlockBuildFiles(v bool) { a.p.BlockBuildFiles(v) }
+
+func (a testProviderUnwinder) WaitForBuildAndMergeQuiescence(timeout time.Duration) error {
+	return a.p.WaitForBuildAndMergeQuiescence(timeout)
+}

@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	rules "github.com/erigontech/erigon/execution/protocol/rules"
@@ -85,13 +86,18 @@ type Unwinder interface {
 	AbortUnwind()
 
 	// BlockBuildFiles toggles the aggregator's gate on
-	// buildFilesInBackground. setHeadModeB sets it true before
-	// Provider.Unwind and clears it in deferred cleanup so the
-	// background per-step file build cannot race the unwind tx and
-	// produce narrow files that overlap the pre-mode-B broad
-	// boundary file. No-op when the Unwinder has no aggregator
-	// handle (harness paths).
+	// buildFilesInBackground + mergeLoop. setHeadModeB sets it true
+	// before Provider.Unwind and clears it in deferred cleanup so
+	// neither path can race the unwind tx and produce narrow files
+	// that overlap the pre-mode-B broad boundary file. No-op when
+	// the Unwinder has no aggregator handle (harness paths).
 	BlockBuildFiles(v bool)
+
+	// WaitForBuildAndMergeQuiescence blocks until any in-flight
+	// build/merge goroutines exit. setHeadModeB calls this AFTER
+	// BlockBuildFiles(true) so the gate's "no new builds" guarantee
+	// extends to "no in-flight build" before Provider.Unwind starts.
+	WaitForBuildAndMergeQuiescence(timeout time.Duration) error
 }
 
 // Reference rules.EngineReader to keep the import used until / unless we

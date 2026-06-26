@@ -18,6 +18,7 @@ package eth
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/execution/execmodule"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
@@ -58,3 +59,7 @@ func (a providerUnwinderAdapter) FinalizeUnwind() error { return a.p.FinalizeUnw
 func (a providerUnwinderAdapter) AbortUnwind() { a.p.AbortUnwind() }
 
 func (a providerUnwinderAdapter) BlockBuildFiles(v bool) { a.p.BlockBuildFiles(v) }
+
+func (a providerUnwinderAdapter) WaitForBuildAndMergeQuiescence(timeout time.Duration) error {
+	return a.p.WaitForBuildAndMergeQuiescence(timeout)
+}

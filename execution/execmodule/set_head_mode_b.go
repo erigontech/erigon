@@ -43,6 +43,14 @@ const modeBQuiescencePoll = 50 * time.Millisecond
 // timeout is comfortably above one segment's typical build window.
 const modeBRetireCancelTimeout = 60 * time.Second
 
+// modeBBuildQuiescenceTimeout bounds how long SetHead waits for an
+// in-flight Aggregator buildFilesInBackground + mergeLoop pair to
+// drain. The build path collates per-step files then spawns mergeLoop
+// to fold them; on a heavy build the whole sequence can run for
+// many seconds. Cap generously so legitimate builds finish, but
+// short enough that a wedged pipeline surfaces.
+const modeBBuildQuiescenceTimeout = 120 * time.Second
+
 // setHeadModeB runs the past-diffset admin unwind path. Entered when
 // targetBlock < minUnwindableBlock AND the chain is aligned-mode AND
 // an Unwinder is wired. Delegates the storage-layer + DB-reset
@@ -60,15 +68,24 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 	e.adminUnwindInProgress.Store(true)
 	defer e.adminUnwindInProgress.Store(false)
 
-	// Gate buildFilesInBackground for the full mode-B window. Without
-	// this, the async per-step file builder races the unwind tx and
-	// writes narrow .kv files that overlap the pre-mode-B broad
-	// boundary file — the aggregator's visibility set then serves
-	// reads from a mix, producing wrong-trie-root ~209 blocks past
-	// the unwind target. quiesceRetireIfPastTarget below only covers
-	// BlockRetire; this gate covers state-domain file build.
+	// Gate buildFilesInBackground + mergeLoop for the full mode-B
+	// window. Without this, the async per-step file builder races
+	// the unwind tx and writes narrow .kv files that overlap the
+	// pre-mode-B broad boundary file — the aggregator's visibility
+	// set then serves reads from a mix, producing wrong-trie-root
+	// ~209 blocks past the unwind target. quiesceRetireIfPastTarget
+	// below only covers BlockRetire; this gate covers state-domain
+	// build+merge. Wait for any in-flight build/merge to drain after
+	// setting the gate — without the wait, a goroutine that was
+	// already past the gate's entry check (or spawned from
+	// buildFilesInBackground as its tail mergeLoop) can still emit
+	// narrow files during the unwind tx.
 	e.unwinder.BlockBuildFiles(true)
 	defer e.unwinder.BlockBuildFiles(false)
+	if err := e.unwinder.WaitForBuildAndMergeQuiescence(modeBBuildQuiescenceTimeout); err != nil {
+		e.unwinder.AbortUnwind()
+		return fmt.Errorf("SetHead mode B: %w", err)
+	}
 
 	// Cancel any in-flight BlockRetire whose range crosses
 	// targetBlock — that work is, by definition, producing

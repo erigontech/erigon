@@ -18,6 +18,7 @@ package harness
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -45,6 +46,9 @@ func (mockAggregator) WipeWritableShadowPast(context.Context, kv.TemporalRwTx, u
 func (mockAggregator) DomainCompression(kv.Domain) seg.FileCompression { return seg.CompressNone }
 func (mockAggregator) Unwind(uint64)                                   {}
 func (mockAggregator) SetUnwindInProgress(bool)                        {}
+func (mockAggregator) WaitForBuildAndMergeQuiescence(time.Duration) error {
+	return nil
+}
 
 // noopDBEventNotifier is the harness stand-in for shards.Events — the
 // Provider only forwards OnNewSnapshot through it, which the harness has

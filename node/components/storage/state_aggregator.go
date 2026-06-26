@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -68,10 +69,18 @@ type StateAggregator interface {
 	// applies to both unwind paths automatically.
 	Unwind(txN uint64)
 
-	// SetUnwindInProgress gates buildFilesInBackground from running
-	// during a mode-B unwind. setHeadModeB sets true before
-	// Provider.Unwind and clears it in deferred cleanup so the
-	// per-step file build cannot race the unwind and write narrow
+	// SetUnwindInProgress gates buildFilesInBackground + mergeLoop
+	// from running during a mode-B unwind. setHeadModeB sets true
+	// before Provider.Unwind and clears it in deferred cleanup so
+	// neither build nor merge can race the unwind and write narrow
 	// files that overlap the pre-mode-B broad boundary file.
 	SetUnwindInProgress(v bool)
+
+	// WaitForBuildAndMergeQuiescence blocks until any in-flight
+	// build/merge goroutines exit, or the timeout elapses.
+	// setHeadModeB calls this after SetUnwindInProgress(true) so
+	// the gate covers BOTH "no new builds" (the entry check) and
+	// "no in-flight build" (this wait) before Provider.Unwind
+	// starts.
+	WaitForBuildAndMergeQuiescence(timeout time.Duration) error
 }
