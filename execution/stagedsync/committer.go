@@ -253,8 +253,13 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	//
 	// blockRequests is multiplexed alongside cc.in so a blockRequest never
 	// waits behind a block's txResults. When it closes (dispatch done) it
-	// is set to nil so the select ignores it; the loop still runs until
-	// cc.in closes and drains.
+	// is set to nil so the select ignores it. The loop is gated on cc.in
+	// alone: a blockRequest is only a heads-up for fold-ahead, and any still
+	// buffered when cc.in closes is for a block whose result was already
+	// processed (so it computed incrementally — correct) or one that never
+	// executed. Draining them after cc.in closes would be wrong, not right:
+	// handleBlockRequest would re-fold a block already finalized at its
+	// boundary (foldedAhead was cleared there), recomputing committed state.
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
 		select {
@@ -470,6 +475,14 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// result was already published by foldBlockFromBAL.
 			if dbg.BALShadowCompute {
 				cc.shadowCrossCheck(ctx, r)
+			} else {
+				// The block's txResults still streamed into cc.state and
+				// set per-block dirty flags. The incremental compute is
+				// intentionally skipped here, so clear those flags — left
+				// set they would leak into the next block's incremental
+				// compute and flush extra updates. (shadowCrossCheck does
+				// this via its own FlushToUpdates+ResetBlockFlags.)
+				cc.state.ResetBlockFlags()
 			}
 		case !dbg.BatchCommitments || cc.forcePerBlockCompute || r.BlockNum >= cc.perBlockFrom:
 			// Per-block mode. `forcePerBlockCompute` overrides

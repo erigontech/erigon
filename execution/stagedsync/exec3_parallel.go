@@ -95,10 +95,6 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
-	// blockRequestsCh feeds the calculator per-block heads-up messages on
-	// its own channel, so a blockRequest is never trapped behind a block's
-	// txResults on the result fan-out. Closed by closeApplyChannels.
-	blockRequestsCh chan *blockRequest
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
 	// reachedMaxBlock is set by the exec loop when it exits cleanly because
 	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
@@ -256,9 +252,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
 
 	// Store channels and limits on pe so execLoop can access them.
+	// blockRequests is intentionally not stashed here: it is closed by its
+	// sole sender (the executeBlocks dispatch goroutine), not by execLoop —
+	// closing it from execLoop would race the dispatch goroutine's send.
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
-	pe.blockRequestsCh = blockRequests
 	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE
@@ -1322,13 +1320,9 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 		safeClose(pe.commitResultsCh, "commitResults")
 		pe.commitResultsCh = nil
 	}
-	// blockRequests has a single sender (executeBlocks), so a plain close is
-	// race-free; the nil-guard keeps closeApplyChannels idempotent.
-	if pe.blockRequestsCh != nil {
-		close(pe.blockRequestsCh)
-		pe.blockRequestsCh = nil
-		closedOrder = append(closedOrder, "blockRequests")
-	}
+	// blockRequests is closed by its sole sender (the executeBlocks dispatch
+	// goroutine), not here — closing it from this goroutine would race that
+	// goroutine's send select and panic on "send on closed channel".
 	if pe.applyResultsCh != nil {
 		safeClose(pe.applyResultsCh, "applyResults")
 		pe.applyResultsCh = nil
