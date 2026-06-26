@@ -270,13 +270,39 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
+// WitnessNodes builds the execution-witness node set on the fly during the fold
+// traversal, returning the RLP node bytes (root first) and the root hash.
+func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix, produceExclusionProofs)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 	}
+	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
+}
 
-	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+// Witness builds the proof trie from the witness node set and re-attaches codeReads
+// to the present account nodes, since the consensus node RLP carries only the code hash.
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	nodes, rootHash, err := sdc.WitnessNodes(ctx, produceExclusionProofs, logPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	proofTrie, err = trie.RLPDecode(nodes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
+	}
+	for addrHash, codeWithHash := range codeReads {
+		if len(codeWithHash.Code) == 0 {
+			continue
+		}
+		if _, present := proofTrie.GetAccount(addrHash[:]); !present {
+			continue
+		}
+		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
+			return nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
+		}
+	}
+	return proofTrie, rootHash, nil
 }
 
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs

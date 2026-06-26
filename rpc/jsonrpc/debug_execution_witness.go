@@ -1127,9 +1127,9 @@ func detectCollapseSiblings(
 
 // buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
 // against the parent-state reader, touch every accessed key plus the sibling
-// paths collected during collapse detection, then generate the witness trie and
-// RLP-encode it. The pre-state root is verified against expectedParentRoot
-// before the encoded nodes are returned.
+// paths collected during collapse detection, then build the witness node set on
+// the fly. The pre-state root is verified against expectedParentRoot before the
+// nodes are returned.
 //
 // Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
 func buildWitnessTrie(
@@ -1161,7 +1161,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction", produceExclusionProofs)
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1169,11 +1169,7 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	allNodes, err := witnessTrie.RLPEncode()
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
-	}
-	for _, node := range allNodes {
+	for _, node := range witnessNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
 	}
 	return encodedNodes, nil
