@@ -2793,6 +2793,88 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
+// Witnesses builds the execution-witness node set on the fly during the fold
+// traversal, capturing consensus node bytes as they are hashed instead of
+// reconstructing a trie from the grid (toWitnessTrie). It returns the node set
+// (root first) and the root hash. Positioning mirrors GenerateWitness.
+func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
+	hph.memoizationOff = true
+	set := newWitnessNodeSet()
+	hph.witnessTracer = set
+	defer func() { hph.witnessTracer = nil }()
+
+	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		if len(plainKey) > 0 {
+			if int16(len(plainKey)) == hph.accountKeyLen {
+				if _, err := hph.accountFromCacheOrDB(plainKey); err != nil {
+					return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
+				}
+			} else {
+				if _, err := hph.storageFromCacheOrDB(plainKey); err != nil {
+					return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
+				}
+			}
+		}
+
+		for hph.needFolding(hashedKey) {
+			if err := hph.fold(); err != nil {
+				return fmt.Errorf("fold: %w", err)
+			}
+		}
+		// fold back non-branch virtual rows left by previous extension splits
+		for hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] {
+			if err := hph.fold(); err != nil {
+				return fmt.Errorf("fold non-branch: %w", err)
+			}
+		}
+
+		for hph.currentKeyLen < int16(len(hashedKey)) {
+			unfolding := hph.needUnfolding(hashedKey)
+			if unfolding <= 0 {
+				break
+			}
+			if err := hph.unfold(hashedKey, unfolding); err != nil {
+				return fmt.Errorf("unfold: %w", err)
+			}
+		}
+		if hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] &&
+			hph.currentKeyLen < int16(len(hashedKey)) {
+			divergeNibble := hashedKey[hph.currentKeyLen]
+			if hph.grid[hph.activeRows-1][divergeNibble].IsEmpty() {
+				if err := hph.fold(); err != nil {
+					return fmt.Errorf("fold empty diverging row: %w", err)
+				}
+			}
+		}
+
+		if hph.currentKeyLen < int16(len(hashedKey)) {
+			lastNibble := int(hashedKey[hph.currentKeyLen])
+			lastCell := &hph.grid[hph.activeRows-1][lastNibble]
+			if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
+				if err := hph.unfold(hashedKey, 1); err != nil {
+					return fmt.Errorf("extra unfold: %w", err)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash sort failed: %w", err)
+	}
+
+	for hph.activeRows > 0 {
+		if err := hph.fold(); err != nil {
+			return nil, nil, fmt.Errorf("final fold: %w", err)
+		}
+	}
+
+	rootHash, err = hph.RootHash()
+	if err != nil {
+		return nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	return set.nodes(rootHash), rootHash, nil
+}
+
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats

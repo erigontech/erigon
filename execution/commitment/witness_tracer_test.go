@@ -27,31 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-type nodeCollector struct{ byHash map[string][]byte }
-
-func newNodeCollector() *nodeCollector { return &nodeCollector{byHash: make(map[string][]byte)} }
-
-func (c *nodeCollector) onNode(rlp, hash []byte) {
-	k := string(hash)
-	if _, ok := c.byHash[k]; ok {
-		return
-	}
-	c.byHash[k] = common.Copy(rlp)
-}
-
-func (c *nodeCollector) nodesRootFirst(root []byte) [][]byte {
-	out := make([][]byte, 0, len(c.byHash))
-	if r, ok := c.byHash[string(root)]; ok {
-		out = append(out, r)
-	}
-	for k, v := range c.byHash {
-		if k != string(root) {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 // Test_WitnessTracer_CapturedNodesReconstructRoot proves the fold-time tap captures
 // the exact consensus node bytes: decoding the full captured node-set rebuilds the
 // commitment root. memoizationOff forces every node to be re-hashed so the capture is
@@ -83,13 +58,13 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess.Close()
 
-	c := newNodeCollector()
+	c := newWitnessNodeSet()
 	hph.witnessTracer = c
 	root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEmpty(t, c.byHash, "tracer must capture nodes")
 
-	tr, err := trie.RLPDecode(c.nodesRootFirst(root))
+	tr, err := trie.RLPDecode(c.nodes(root))
 	require.NoError(t, err)
 	require.Equal(t, root, tr.Root(), "captured node-set must reconstruct the commitment root")
 }
