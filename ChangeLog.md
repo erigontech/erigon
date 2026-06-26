@@ -45,11 +45,13 @@ Full mode now retains state and block data for the last `262,144` blocks (~36.4 
 | State history retention | last 100,000 blocks | last 262,144 blocks |
 | Block data retention | pre-merge pruned, all post-merge kept (EIP-4444) | last 262,144 blocks |
 
-`--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+`--prune.mode=blocks` keeps the same shape as before (all block data retained) but its state history retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both block and state history retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 
 **Migration:** existing datadirs upgrade automatically and silently. To keep the old "retain all post-merge block data" behavior, switch to `--prune.mode=blocks`; the auto-upgrade is reversible with `--prune.distance.blocks=18446744073709551615`.
 
-Note: physical deletion of frozen `.seg` files is gated by [#21306](https://github.com/erigontech/erigon/issues/21306) — existing on-disk segments persist until it lands, though the new cutoff is already recorded at the config level.
+Note: physical deletion of frozen snapshot files is not implemented yet (see [#21306](https://github.com/erigontech/erigon/issues/21306)), so existing on-disk historical blocks persist for now, though the new cutoff is already recorded at the config level.
+
+_In practice, this means only freshly synced `full` nodes will have a reduced disk footprint._
 
 ---
 
