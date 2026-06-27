@@ -239,14 +239,12 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	started := time.Now()
 	var deleted uint64
 	for i := 0; i+1 < len(bounds); i++ {
+		ra.SetPos(bounds[i])
 		n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
 		if err != nil {
 			return err
 		}
 		deleted += n
-		if i+2 < len(bounds) {
-			ra.SetPos(bounds[i+1]) // next chunk's lower bound (interior, non-nil)
-		}
 
 		select {
 		case <-ctx.Done():
