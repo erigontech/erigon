@@ -472,6 +472,12 @@ func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
 }
 
 func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Produce) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	var tables []string
 	if produce.ReceiptDomain {
 		tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
@@ -491,5 +497,16 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if produce.TraceTo {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 	}
-	return backup.ClearTables(ctx, db, tables...)
+	if err := backup.ClearTables(ctx, db, tx, tables...); err != nil {
+		return err
+	}
+	// Clearing the data tables alone is not enough: the prune-progress bookmark in
+	// TblPruningValsProg survives and would make the post-rebuild prune short-circuit
+	// (prs.TxTo >= txTo && Done), so the re-written history never gets pruned.
+	for _, table := range tables {
+		if err := dbstate.InvalidatePruneProgress(tx, table); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
