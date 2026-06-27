@@ -20,6 +20,16 @@ import (
 	"sort"
 )
 
+// Match is a single pattern occurrence: its associated value and the [Start, End)
+// byte range it covers in the searched data.
+type Match struct {
+	Val   any
+	Start int
+	End   int
+}
+
+type Matches []Match
+
 // AhoCorasick is a byte-level multi-pattern automaton. Build it once from a
 // pattern dictionary, then share it read-only across any number of ACMatcher
 // instances (one per goroutine).
@@ -194,8 +204,7 @@ func NewACMatcher(ac *AhoCorasick) *ACMatcher {
 }
 
 // FindLongestMatches returns the maximal pattern matches in data: sorted by
-// Start, End strictly increasing, no match contained in another. Identical
-// output to MatchFinder3.FindLongestMatches after deduplication.
+// Start, End strictly increasing, no match contained in another.
 func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 	ac := m.ac
 	n := len(data)
