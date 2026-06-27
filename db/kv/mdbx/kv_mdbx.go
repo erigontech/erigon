@@ -930,8 +930,8 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
 	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
 	deepness := uint(42)
-	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
-		deepness = st.Depth - 2
+	if st, err := tx.BucketStat(table); err == nil && st.Depth > 3 {
+		deepness = st.Depth - 3
 	}
 	if _, err := mdbx.DistributeCursors(first, nil, cursors, deepness); err != nil {
 		return nil, err
