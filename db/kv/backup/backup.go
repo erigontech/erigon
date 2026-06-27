@@ -258,11 +258,15 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		case <-logEvery.C:
 			secs := time.Since(started).Seconds()
 			clearedBytes := float64(i+1) / float64(len(bounds)-1) * float64(size) // estimate: chunks are count-balanced, not byte-balanced
+			remaining, err := tx.BucketSize(table)
+			if err != nil {
+				return err
+			}
 			log.Info("[clear]", "table", table,
 				"speed", common.ByteCount(uint64(clearedBytes/secs))+"/s",
 				"keys", common.PrettyCounter(uint64(float64(deleted)/secs))+"/s",
 				"progress", fmt.Sprintf("%d/%d", i+1, len(bounds)-1),
-				"size", common.ByteCount(size),
+				"size", common.ByteCount(remaining),
 			)
 		default:
 		}
@@ -271,8 +275,7 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 }
 
 // chunkBounds splits table into count-balanced ranges and returns the cloned
-// boundaries (nil if the backend can't count-split). Uses entry count too: dupsort
-// tables report size ~0.
+// boundaries (nil if the backend can't count-split).
 func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err error) {
 	s, ok := tx.(kv.DBWithDistributionSupport)
 	if !ok {
