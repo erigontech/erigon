@@ -87,8 +87,23 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte,
 	r.bounds.Store(&bounds)
 
 	var doneChunks, warming, idle atomic.Int64
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+
+	// log from a dedicated goroutine: a worker logging after its own warming.Add(-1) would never count itself
+	logDone := make(chan struct{})
+	go func() {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-logDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				log.Log(log.Lvl(r.logLvl.Load()), "["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "warming", warming.Load(), "idle", idle.Load(), "workers", workers)
+			}
+		}
+	}()
 
 	var g errgroup.Group // not WithContext: one chunk's read error must not cancel the rest
 	g.SetLimit(workers)
@@ -104,15 +119,11 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte,
 			r.warm(ctx, db, table, bounds[idx], bounds[idx+1])
 			warming.Add(-1)
 			doneChunks.Add(1) // count only chunks actually warmed, not the skipped ones
-			select {
-			case <-logEvery.C:
-				log.Log(log.Lvl(r.logLvl.Load()), "["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "warming", warming.Load(), "idle", idle.Load(), "workers", workers)
-			default:
-			}
 			return nil
 		})
 	}
 	_ = g.Wait()
+	close(logDone)
 }
 
 // plan splits the table into ~chunkSize chunks and returns the boundaries (nil if
