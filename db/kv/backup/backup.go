@@ -223,7 +223,7 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	}
 	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
 
-	bounds, err := chunkBounds(ctx, db, table, size)
+	bounds, err := chunkBounds(tx, table, size)
 	if err != nil {
 		return err
 	}
@@ -270,33 +270,21 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	return nil
 }
 
-// tableSize returns the table's on-disk size.
-func tableSize(ctx context.Context, db kv.RoDB, table string) (size uint64, err error) {
-	err = db.View(ctx, func(tx kv.Tx) error {
-		size, err = tx.BucketSize(table)
-		return err
-	})
-	return size, err
-}
-
 // chunkBounds splits table into ~clearChunkSize count-balanced ranges and
 // returns the cloned boundaries (nil if the backend can't count-split).
-func chunkBounds(ctx context.Context, db kv.RoDB, table string, size uint64) (bounds [][]byte, err error) {
-	err = db.View(ctx, func(tx kv.Tx) error {
-		s, ok := tx.(kv.DBWithDistributionSupport)
-		if !ok {
-			return nil
-		}
-		const clearChunkSize = 1 * datasize.GB
-		b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
-		if err != nil {
-			return err
-		}
-		bounds = make([][]byte, len(b)) // interior keys are zero-copy, valid only until tx end
-		for i, k := range b {
-			bounds[i] = bytes.Clone(k)
-		}
-		return nil
-	})
-	return bounds, err
+func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err error) {
+	s, ok := tx.(kv.DBWithDistributionSupport)
+	if !ok {
+		return nil, nil
+	}
+	const clearChunkSize = 1 * datasize.GB
+	b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
+	if err != nil {
+		return nil, err
+	}
+	bounds = make([][]byte, len(b)) // interior keys are zero-copy, valid only until tx end
+	for i, k := range b {
+		bounds[i] = bytes.Clone(k)
+	}
+	return bounds, nil
 }
