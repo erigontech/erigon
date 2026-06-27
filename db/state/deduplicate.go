@@ -72,13 +72,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 			var g2 *seg.PagedReader
 			for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 				if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-					compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
-
-					if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-						compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-					}
-
-					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
+					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), true)
 					break
 				}
 			}

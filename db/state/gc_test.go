@@ -20,12 +20,190 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 )
+
+func TestGCReadAfterRemoveFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := t.Context()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		t.Run("read after: remove when have reader", func(t *testing.T) {
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			// - create immutable view
+			// - del cold file
+			// - read from canDelete file
+			// - close view
+			// - open new view
+			// - make sure there is no canDelete file
+			hc := h.beginForTests()
+
+			lastOnFs, _ := h.dirtyFiles.Max()
+			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
+			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
+			require.NotNil(lastOnFs.decompressor)
+
+			lastInView := hc.files[len(hc.files)-1]
+
+			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), true)
+			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
+			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
+			if g.HasNext() {
+				k, _ := g.Next(nil)
+				require.Len(k, 8)
+				v, _ := g.Next(nil)
+				require.Len(v, 8)
+			}
+
+			require.NotNil(lastOnFs.decompressor)
+			//replace of locality index must not affect current HistoryRoTx, but expect to be closed after last reader
+			hc.Close()
+			require.Nil(lastOnFs.decompressor)
+
+			nonDeletedOnFs, _ := h.dirtyFiles.Max()
+			require.False(nonDeletedOnFs.frozen)
+			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
+
+			hc = h.beginForTests()
+			newLastInView := hc.files[len(hc.files)-1]
+			require.False(lastOnFs.frozen)
+			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
+
+			hc.Close()
+		})
+
+		t.Run("read after: remove when no btReaders", func(t *testing.T) {
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			// - del cold file
+			// - new reader must not see canDelete file
+			hc := h.beginForTests()
+			lastOnFs, _ := h.dirtyFiles.Max()
+			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
+			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
+
+			require.NotNil(lastOnFs.decompressor)
+			hc.Close()
+			require.Nil(lastOnFs.decompressor)
+		})
+	}
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
+}
+
+func TestDomainGCReadAfterRemoveFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := t.Context()
+
+	test := func(t *testing.T, h *Domain, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+		err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			collateAndMerge(t, tx, h, txs)
+			return nil
+		})
+		require.NoError(err)
+
+		t.Run("read after: remove when have reader", func(t *testing.T) {
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			// - create immutable view
+			// - del cold file
+			// - read from canDelete file
+			// - close view
+			// - open new view
+			// - make sure there is no canDelete file
+			hc := h.beginForTests()
+			_ = hc
+			lastOnFs, _ := h.dirtyFiles.Max()
+			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
+
+			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
+
+			require.NotNil(lastOnFs.decompressor)
+
+			lastInView := hc.files[len(hc.files)-1]
+			g := lastInView.src.decompressor.MakeGetter()
+			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
+			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
+			if g.HasNext() {
+				k, _ := g.Next(nil)
+				require.Len(k, 8)
+				v, _ := g.Next(nil)
+				require.Len(v, 8)
+			}
+
+			require.NotNil(lastOnFs.decompressor)
+			hc.Close()
+			require.Nil(lastOnFs.decompressor)
+
+			nonDeletedOnFs, _ := h.dirtyFiles.Max()
+			require.False(nonDeletedOnFs.frozen)
+			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
+
+			hc = h.beginForTests()
+			newLastInView := hc.files[len(hc.files)-1]
+			require.False(lastOnFs.frozen)
+			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
+
+			hc.Close()
+		})
+
+		t.Run("read after: remove when no btReaders", func(t *testing.T) {
+			tx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer tx.Rollback()
+
+			// - del cold file
+			// - new reader must not see canDelete file
+			hc := h.beginForTests()
+			lastOnFs, _ := h.dirtyFiles.Max()
+			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
+			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
+
+			require.NotNil(lastOnFs.decompressor)
+			hc.Close()
+			require.Nil(lastOnFs.decompressor)
+		})
+	}
+	logger := log.New()
+	db, d, txs := filledDomain(t, logger)
+	test(t, d, db, txs)
+}
 
 // generateAllDomainsOverlap writes {0,1},{1,2} subset files shadowed by a {0,2}
 // covering file for every state domain, so that overlap-cleanup has garbage to
