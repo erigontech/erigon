@@ -338,6 +338,13 @@ func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, err
 	return [][]byte{from, nil}, nil
 }
 
+func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return [][]byte{from, nil}, nil
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx

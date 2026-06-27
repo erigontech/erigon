@@ -43,6 +43,7 @@ type DBWithDistributionSupport interface {
 type ReadAhead struct {
 	bounds        atomic.Pointer[[][]byte]
 	consumerChunk atomic.Int64
+	logLvl        atomic.Int32
 	cancel        context.CancelFunc
 	done          chan struct{}
 	label         string
@@ -60,8 +61,17 @@ func newReadAhead(ctx context.Context, db RoDB, table string, from []byte, worke
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	r := &ReadAhead{cancel: cancel, done: make(chan struct{}), label: label, full: full}
+	r.logLvl.Store(int32(log.LvlInfo))
 	go r.run(ctx, db, table, from, workers)
 	return r
+}
+
+// SetLogLevel sets the level of the periodic progress line (default Info); nil-safe.
+func (r *ReadAhead) SetLogLevel(lvl log.Lvl) {
+	if r == nil {
+		return
+	}
+	r.logLvl.Store(int32(lvl))
 }
 
 func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte, workers int) {
@@ -76,30 +86,44 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte,
 	}
 	r.bounds.Store(&bounds)
 
-	var doneChunks, alive atomic.Int64
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+	var doneChunks, warming, idle atomic.Int64
+
+	// log from a dedicated goroutine: a worker logging after its own warming.Add(-1) would never count itself
+	logDone := make(chan struct{})
+	go func() {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-logDone:
+				return
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				log.Log(log.Lvl(r.logLvl.Load()), "["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "warming", warming.Load(), "idle", idle.Load(), "workers", workers)
+			}
+		}
+	}()
 
 	var g errgroup.Group // not WithContext: one chunk's read error must not cancel the rest
 	g.SetLimit(workers)
 	for idx := 0; idx+1 < len(bounds) && ctx.Err() == nil; idx++ {
 		g.Go(func() error {
-			alive.Add(1)
-			defer alive.Add(-1)
-			if !r.waitTurn(ctx, idx, ahead) { // consumer passed it, or ctx cancelled
+			idle.Add(1)
+			turn := r.waitTurn(ctx, idx, ahead) // throttled here until the consumer is close enough
+			idle.Add(-1)
+			if !turn { // consumer passed it, or ctx cancelled
 				return nil
 			}
+			warming.Add(1)
 			r.warm(ctx, db, table, bounds[idx], bounds[idx+1])
+			warming.Add(-1)
 			doneChunks.Add(1) // count only chunks actually warmed, not the skipped ones
-			select {
-			case <-logEvery.C:
-				log.Info("["+r.label+"]", "table", table, "consumer-chunk", r.consumerChunk.Load(), "done", doneChunks.Load(), "chunks", len(bounds)-1, "alive", alive.Load(), "workers", workers)
-			default:
-			}
 			return nil
 		})
 	}
 	_ = g.Wait()
+	close(logDone)
 }
 
 // plan splits the table into ~chunkSize chunks and returns the boundaries (nil if
