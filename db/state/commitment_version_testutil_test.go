@@ -27,10 +27,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -264,4 +266,87 @@ func buildMixedRegimeDatadir(t *testing.T, stepSize, frozenSteps uint64) (kv.Tem
 	require.NoError(t, agg.OpenFolder())
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
 	return db, agg, dirs, setA, setB
+}
+
+// collectCommitmentFiles returns a map of filename→size for all commitment .kv files in the domain
+// snapshot directory.
+func collectCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]int64 {
+	t.Helper()
+	result := make(map[string]int64)
+	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+	require.NoError(t, err)
+	commitStr := kv.CommitmentDomain.String()
+	for _, p := range paths {
+		name := filepath.Base(p)
+		if !strings.Contains(name, commitStr) {
+			continue
+		}
+		info, err := os.Stat(p)
+		require.NoError(t, err)
+		result[name] = info.Size()
+	}
+	return result
+}
+
+// wipeCommitment removes all commitment state from both database tables and snapshot files,
+// then returns a freshly reopened db and aggregator over the wiped folder.
+func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggregator) {
+	t.Helper()
+	stepSize := agg.StepSize()
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	buckets, err := rwTx.ListTables()
+	require.NoError(t, err)
+
+	commitStr := kv.CommitmentDomain.String()
+	for _, b := range buckets {
+		if strings.Contains(strings.ToLower(b), commitStr) {
+			err = rwTx.ClearTable(b)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, rwTx.Commit())
+
+	// Release the aggregator's file handles before deleting the .kv files: Windows refuses to
+	// remove a still-mapped file, while Unix allows unlink-while-open.
+	agg.Close()
+
+	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+	require.NoError(t, err, "listing snapshot domain files")
+	for _, p := range paths {
+		if !strings.Contains(filepath.Base(p), commitStr) {
+			continue
+		}
+		err = dir.RemoveFile(p)
+		require.NoError(t, err, "removing commitment file: %s", p)
+		base := strings.TrimSuffix(p, ".kv")
+		for _, ext := range []string{".kvi", ".kvei", ".bt"} {
+			_ = dir.RemoveFile(base + ext) // best-effort, may not exist
+		}
+	}
+
+	newAgg := testAgg(t, db, dirs, stepSize, log.New())
+	newDB, err := temporal.New(db, newAgg)
+	require.NoError(t, err)
+	require.NoError(t, newAgg.OpenFolder())
+
+	remaining := collectCommitmentFiles(t, dirs)
+	require.Empty(t, remaining, "commitment files must be fully removed after wipe")
+	return newDB, newAgg
+}
+
+// reopenAggregator closes the current aggregator and reopens it with a fresh temporal DB wrapper.
+func reopenAggregator(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator) {
+	t.Helper()
+	dirs := agg.Dirs()
+	agg.Close()
+
+	newAgg := testAgg(t, db, dirs, stepSize, log.New())
+	newDB, err := temporal.New(db, newAgg)
+	require.NoError(t, err)
+
+	return newDB, newAgg
 }

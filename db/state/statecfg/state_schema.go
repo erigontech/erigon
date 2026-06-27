@@ -187,8 +187,6 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
-
 // commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
 // default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
