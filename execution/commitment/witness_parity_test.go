@@ -87,7 +87,7 @@ func Test_Witnesses_ParityWithToWitnessTrie(t *testing.T) {
 
 	// New path: Witnesses() on-the-fly node set.
 	hphB, rootB := processFreshTrie(t, plainKeys, updates)
-	setB, rootWB, err := hphB.Witnesses(context.Background(), touchUpdates(touchAccts, touchStor), true, "")
+	setB, _, rootWB, err := hphB.Witnesses(context.Background(), touchUpdates(touchAccts, touchStor), true, "")
 	require.NoError(t, err)
 	require.Equal(t, rootB, rootWB, "Witnesses root must equal commitment root")
 	require.Equal(t, rootA, rootB, "both paths build the same trie")
@@ -155,7 +155,7 @@ func Test_Witnesses_ExclusionAcrossFoldedExtension(t *testing.T) {
 	absentStorageKey := storageKey(acctPlain, absentSlotPlain)
 
 	hph, root := processFreshTrie(t, plainKeys, updates)
-	setB, rootW, err := hph.Witnesses(context.Background(),
+	setB, _, rootW, err := hph.Witnesses(context.Background(),
 		touchUpdates([][]byte{acctPlain}, [][]byte{absentStorageKey}), true, "")
 	require.NoError(t, err)
 	require.Equal(t, root, rootW)

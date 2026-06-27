@@ -2844,15 +2844,17 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // Witnesses builds the execution-witness node set on the fly during the fold
 // traversal, capturing consensus node bytes as they are hashed instead of
 // reconstructing a trie from the grid (toWitnessTrie). produceExclusionProofs
-// adds materialized diverging branches for legacy mode. It returns the node set
-// (root first) and the root hash. Positioning mirrors GenerateWitness.
-func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
+// adds materialized diverging branches for legacy mode. It returns the captured
+// superset node set (root first), the fold's hashed keys (proof-path anchors),
+// and the root hash; callers prune to the lean set themselves. Positioning
+// mirrors GenerateWitness.
+func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
 	set := newWitnessNodeSet()
 	hph.witnessTracer = set
 	defer func() { hph.witnessTracer = nil }()
 
-	provedKeys := make([][]byte, 0, updates.Size())
+	provedKeys = make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		provedKeys = append(provedKeys, common.Copy(hashedKey))
 		if len(plainKey) > 0 {
@@ -2915,28 +2917,20 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 		return nil
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("hash sort failed: %w", err)
+		return nil, nil, nil, fmt.Errorf("hash sort failed: %w", err)
 	}
 
 	for hph.activeRows > 0 {
 		if err := hph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
+			return nil, nil, nil, fmt.Errorf("final fold: %w", err)
 		}
 	}
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
-		return nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
+		return nil, nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	witnessTrie, err := trie.RLPDecode(set.nodes(rootHash))
-	if err != nil {
-		return nil, nil, fmt.Errorf("witness prune decode: %w", err)
-	}
-	lean, err := witnessTrie.WitnessNodesForKeys(provedKeys)
-	if err != nil {
-		return nil, nil, fmt.Errorf("witness prune: %w", err)
-	}
-	return lean, rootHash, nil
+	return set.nodes(rootHash), provedKeys, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
