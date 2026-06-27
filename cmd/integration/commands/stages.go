@@ -379,7 +379,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(tx, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -434,7 +434,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(tx, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -501,7 +501,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 
 	if reset {
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger)
+			return rawdbreset.ResetBlocks(tx, br, bw, dirs, logger)
 		})
 	}
 
