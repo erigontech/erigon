@@ -82,9 +82,21 @@ const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
+// dbgCommitmentValFileThreshold>0 externalizes commitment values of at least this
+// size to .cvl files; 0 (default) keeps them inline in MDBX (no format change).
+var dbgCommitmentValFileThreshold = dbg.EnvInt("COMMITMENT_VALFILE_THRESHOLD", 0)
+
+// dbgCommitmentValFileMinKeyLen keeps commitment values with key length <= this
+// inline (top-of-trie nodes are hot and would bloat the value-file).
+var dbgCommitmentValFileMinKeyLen = dbg.EnvInt("COMMITMENT_VALFILE_MIN_KEYLEN", 0)
+
 func init() {
 	if dbgCommBtIndex {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
+	}
+	if dbgCommitmentValFileThreshold > 0 {
+		Schema.CommitmentDomain.ValueFileThreshold = dbgCommitmentValFileThreshold
+		Schema.CommitmentDomain.ValueFileMinKeyLen = dbgCommitmentValFileMinKeyLen
 	}
 	InitSchemas()
 }

@@ -20,6 +20,17 @@ type DomainCfg struct {
 	// for commitment domain only
 	ReplaceKeysInValues bool
 
+	// ValueFileThreshold, when >0, moves DB values of at least this many bytes out of
+	// the MDBX ValuesTable into an external per-step value-file, storing only an
+	// offset+len handle in MDBX. 0 disables (values stay inline in MDBX, as before).
+	ValueFileThreshold int
+
+	// ValueFileMinKeyLen keeps values with key length <= this inline regardless of
+	// ValueFileThreshold. For commitment, short keys are top-of-trie nodes that are
+	// rewritten almost every block, so externalizing them bloats the append-only
+	// value-file with dead versions; keeping them inline lets MDBX overwrite in place.
+	ValueFileMinKeyLen int
+
 	ExistenceFilter ExistenceFilterMode
 
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)

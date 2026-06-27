@@ -2578,7 +2578,7 @@ func TestDomain_Unwind(t *testing.T) {
 			et, err := ectx.RangeAsOf(t.Context(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.RangeAsOf(t.Context(), etx, nil, nil, unwindTo, order.Asc, -1)
+			ut, err := uc.RangeAsOf(t.Context(), utx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
