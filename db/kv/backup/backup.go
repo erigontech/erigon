@@ -251,12 +251,13 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 			return ctx.Err()
 		case <-logEvery.C:
 			secs := time.Since(started).Seconds()
-			frac := float64(i+1) / float64(len(bounds)-1)
+			clearedBytes := float64(i+1) / float64(len(bounds)-1) * float64(size) // estimate: chunks are count-balanced, not byte-balanced
 			log.Info("[clear]", "table", table,
+				"speed", common.ByteCount(uint64(clearedBytes/secs))+"/s",
+				"keys/s", common.PrettyCounter(uint64(float64(deleted)/secs)),
 				"progress", fmt.Sprintf("%d/%d", i+1, len(bounds)-1),
 				"size", common.ByteCount(size),
-				"keys/s", common.PrettyCounter(uint64(float64(deleted)/secs)),
-				"speed", common.ByteCount(uint64(frac*float64(size)/secs))+"/s")
+			)
 		default:
 		}
 	}
