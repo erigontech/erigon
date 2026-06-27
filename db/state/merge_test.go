@@ -1450,7 +1450,7 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 	inputFiles := ic.staticFilesInRange(mr.from, mr.to)
 	require.Len(t, inputFiles, numFiles)
 
-	out, err := ic.mergeFiles(ctx, inputFiles, mr.from, mr.to, true, ps)
+	out, err := ic.mergeFiles(ctx, inputFiles, mr.from, mr.to, ps)
 	require.NoError(t, err)
 	t.Cleanup(out.closeFilesAndRemove)
 

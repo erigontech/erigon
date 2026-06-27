@@ -586,7 +586,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, seqReadahead bool, ps *background.ProgressSet) (*FilesItem, error) {
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
 	if startTxNum == endTxNum {
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
@@ -634,6 +634,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var cp CursorHeap
 	heap.Init(&cp)
 
+	seqReadahead := true
 	for _, item := range files {
 		view, err := item.decompressor.OpenSequentialView(seqReadahead)
 		if err != nil {
@@ -753,7 +754,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	}()
 
 	if r.index.needMerge {
-		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, true, ps); err != nil {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
 			return nil, nil, err
 		}
 	}
