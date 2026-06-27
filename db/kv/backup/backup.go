@@ -230,6 +230,7 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 {
 		ra = kv.NewReadAhead(ctx, db, table, nil, workers)
+		ra.SetLogLevel(log.LvlDebug) // [clear] already logs progress; keep read-ahead quiet
 	}
 	defer ra.Close()
 

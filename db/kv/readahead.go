@@ -43,6 +43,7 @@ type DBWithDistributionSupport interface {
 type ReadAhead struct {
 	bounds        atomic.Pointer[[][]byte]
 	consumerChunk atomic.Int64
+	logLvl        atomic.Int32
 	cancel        context.CancelFunc
 	done          chan struct{}
 	label         string
@@ -60,8 +61,17 @@ func newReadAhead(ctx context.Context, db RoDB, table string, from []byte, worke
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	r := &ReadAhead{cancel: cancel, done: make(chan struct{}), label: label, full: full}
+	r.logLvl.Store(int32(log.LvlInfo))
 	go r.run(ctx, db, table, from, workers)
 	return r
+}
+
+// SetLogLevel sets the level of the periodic progress line (default Info); nil-safe.
+func (r *ReadAhead) SetLogLevel(lvl log.Lvl) {
+	if r == nil {
+		return
+	}
+	r.logLvl.Store(int32(lvl))
 }
 
 func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte, workers int) {
@@ -91,7 +101,7 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte,
 			doneChunks.Add(1) // count only chunks actually warmed, not the skipped ones
 			select {
 			case <-logEvery.C:
-				log.Debug("["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "workers", workers)
+				log.Log(log.Lvl(r.logLvl.Load()), "["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "workers", workers)
 			default:
 			}
 			return nil
