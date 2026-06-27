@@ -86,7 +86,7 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte,
 	}
 	r.bounds.Store(&bounds)
 
-	var doneChunks atomic.Int64
+	var doneChunks, warming, idle atomic.Int64
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -94,14 +94,19 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, from []byte,
 	g.SetLimit(workers)
 	for idx := 0; idx+1 < len(bounds) && ctx.Err() == nil; idx++ {
 		g.Go(func() error {
-			if !r.waitTurn(ctx, idx, ahead) { // consumer passed it, or ctx cancelled
+			idle.Add(1)
+			turn := r.waitTurn(ctx, idx, ahead) // throttled here until the consumer is close enough
+			idle.Add(-1)
+			if !turn { // consumer passed it, or ctx cancelled
 				return nil
 			}
+			warming.Add(1)
 			r.warm(ctx, db, table, bounds[idx], bounds[idx+1])
+			warming.Add(-1)
 			doneChunks.Add(1) // count only chunks actually warmed, not the skipped ones
 			select {
 			case <-logEvery.C:
-				log.Log(log.Lvl(r.logLvl.Load()), "["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "workers", workers)
+				log.Log(log.Lvl(r.logLvl.Load()), "["+r.label+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "warming", warming.Load(), "idle", idle.Load(), "workers", workers)
 			default:
 			}
 			return nil

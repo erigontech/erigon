@@ -270,15 +270,17 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	return nil
 }
 
-// chunkBounds splits table into ~clearChunkSize count-balanced ranges and
-// returns the cloned boundaries (nil if the backend can't count-split).
+// chunkBounds splits table into count-balanced ranges and returns the cloned
+// boundaries (nil if the backend can't count-split). Uses entry count too: dupsort
+// tables report size ~0.
 func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err error) {
 	s, ok := tx.(kv.DBWithDistributionSupport)
 	if !ok {
 		return nil, nil
 	}
-	const clearChunkSize = 1 * datasize.GB
-	b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
+	const clearChunkSize = 256 * datasize.MB
+	chunks := size / clearChunkSize.Bytes()
+	b, err := s.DistributeCursors(table, nil, int(chunks))
 	if err != nil {
 		return nil, err
 	}
