@@ -266,8 +266,7 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 			log.Info("[clear]", "table", table,
 				"speed", common.ByteCount(uint64(float64(lastSize-remaining)/secs))+"/s",
 				"keys", common.PrettyCounter(uint64(float64(deleted-lastDeleted)/secs))+"/s",
-				"progress", fmt.Sprintf("%d/%d", i+1, len(bounds)-1),
-				"size", common.ByteCount(remaining),
+				"remaining", common.ByteCount(remaining),
 			)
 			lastLog, lastSize, lastDeleted = now, remaining, deleted
 		default:
