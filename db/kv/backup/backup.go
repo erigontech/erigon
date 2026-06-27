@@ -217,11 +217,16 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		return tx.ClearTable(table)
 	}
 
-	bounds, size, err := chunkBounds(ctx, db, table)
+	size, err := tableSize(ctx, db, table)
 	if err != nil {
 		return err
 	}
 	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
+
+	bounds, err := chunkBounds(ctx, db, table, size)
+	if err != nil {
+		return err
+	}
 	if len(bounds) < 2 { // backend can't count-split: clear in one shot
 		_, err := dr.DeleteRange(table, nil, nil)
 		return err
