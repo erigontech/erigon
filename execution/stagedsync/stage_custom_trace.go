@@ -491,5 +491,7 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if produce.TraceTo {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 	}
-	return backup.ClearTables(ctx, db, tables...)
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return backup.ClearTables(ctx, db, tx, tables...)
+	})
 }

@@ -17,7 +17,6 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -197,16 +196,11 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return i, nil
 }
 
-// ClearTables empties each table with mdbx's native bulk range-delete instead of
-// dropping it, owning its own write transactions and committing roughly every
-// 20s so a single huge table can't blow up one transaction. When
-// WARMUP_TABLE_WORKERS>0 it keeps pages warm just ahead of the delete cursor.
-//
-// It must NOT be called inside an open write tx: it opens its own (mdbx
-// serializes writers, so a caller holding one would deadlock).
-func ClearTables(ctx context.Context, db kv.RwDB, tables ...string) error {
+// ClearTables empties each table in the caller's write transaction.
+// db (read-only) is used only for optional warmup read-ahead when WARMUP_TABLE_WORKERS>0.
+func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
 	for _, table := range tables {
-		if err := clearTable(ctx, db, table); err != nil {
+		if err := clearTableInTx(ctx, db, tx, table); err != nil {
 			return fmt.Errorf("clearing %s: %w", table, err)
 		}
 	}
@@ -214,109 +208,24 @@ func ClearTables(ctx context.Context, db kv.RwDB, tables ...string) error {
 }
 
 // ClearTableInTx empties one table inside the caller's transaction using mdbx's
-// native range-delete, for call sites that must stay atomic with surrounding
-// work and so can't use the self-committing ClearTables. Falls back to a table
-// drop when the backend has no range-delete.
+// native range-delete, falling back to a table drop when the backend has no range-delete.
 func ClearTableInTx(tx kv.RwTx, table string) error {
 	if dr, ok := tx.(kv.HasDeleteRange); ok {
 		_, err := dr.DeleteRange(table, nil, nil)
 		return err
 	}
+	log.Warn("[clear] tx type does not support DeleteRange", "table", table)
 	return tx.ClearTable(table)
 }
 
-func clearTable(ctx context.Context, db kv.RwDB, table string) error {
-	bounds, size, err := chunkBounds(ctx, db, table)
-	if err != nil {
-		return err
-	}
-	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
-	if len(bounds) < 2 { // backend can't count-split: clear in one shot
-		return db.Update(ctx, func(tx kv.RwTx) error { return ClearTableInTx(tx, table) })
-	}
-
+func clearTableInTx(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 {
-		ra = kv.NewReadAhead(ctx, db, table, nil, workers)
+		size, _ := tx.BucketSize(table)
+		if size > 0 {
+			ra = kv.NewReadAhead(ctx, db, table, nil, workers)
+		}
 	}
 	defer ra.Close()
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	commitEvery := time.NewTicker(20 * time.Second)
-	defer commitEvery.Stop()
-
-	started := time.Now()
-	var deleted uint64
-
-	i := 0
-	for i+1 < len(bounds) {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			dr, ok := tx.(kv.HasDeleteRange)
-			if !ok {
-				i = len(bounds) // no native range-delete: clear whole table once and stop
-				return ClearTableInTx(tx, table)
-			}
-
-			for i+1 < len(bounds) {
-				n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
-				if err != nil {
-					return err
-				}
-				deleted += n
-				i++
-				if i+1 < len(bounds) {
-					ra.SetPos(bounds[i]) // next chunk's lower bound (interior, non-nil)
-				}
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					secs := time.Since(started).Seconds()
-					frac := float64(i) / float64(len(bounds)-1)
-					log.Info("[clear]", "table", table,
-						"progress", fmt.Sprintf("%d/%d", i, len(bounds)-1),
-						"size", common.ByteCount(size),
-						"keys/s", common.PrettyCounter(uint64(float64(deleted)/secs)),
-						"speed", common.ByteCount(uint64(frac*float64(size)/secs))+"/s")
-				case <-commitEvery.C:
-					return nil // commit and reopen a fresh tx
-				default:
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// chunkBounds splits table into ~clearChunkSize count-balanced ranges and
-// returns the cloned boundaries (nil if the backend can't count-split) plus the
-// table's on-disk size.
-func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte, size uint64, err error) {
-	err = db.View(ctx, func(tx kv.Tx) error {
-		s, ok := tx.(kv.DBWithDistributionSupport)
-		if !ok {
-			return nil
-		}
-		var sizeErr error
-		if size, sizeErr = tx.BucketSize(table); sizeErr != nil {
-			return sizeErr
-		}
-
-		const clearChunkSize = 1 * datasize.GB
-		b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
-		if err != nil {
-			return err
-		}
-		bounds = make([][]byte, len(b)) // interior keys are zero-copy, valid only until tx end
-		for i, k := range b {
-			bounds[i] = bytes.Clone(k)
-		}
-		return nil
-	})
-	return bounds, size, err
+	return ClearTableInTx(tx, table)
 }

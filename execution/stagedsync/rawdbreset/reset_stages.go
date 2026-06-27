@@ -158,10 +158,12 @@ func ResetBlocks(tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWrite
 }
 
 func ResetSenders(ctx context.Context, db kv.RwDB) error {
-	if err := backup.ClearTables(ctx, db, kv.Senders); err != nil {
-		return fmt.Errorf("clearing senders table: %w", err)
-	}
-	return db.Update(ctx, func(tx kv.RwTx) error { return clearStageProgress(tx, stages.Senders) })
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
+			return fmt.Errorf("clearing senders table: %w", err)
+		}
+		return clearStageProgress(tx, stages.Senders)
+	})
 }
 
 func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
@@ -180,7 +182,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	}
 
 	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
-	if err := backup.ClearTables(ctx, db, cleanupList...); err != nil {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return backup.ClearTables(ctx, db, tx, cleanupList...)
+	}); err != nil {
 		return fmt.Errorf("clearing exec state tables: %w", err)
 	}
 
@@ -260,12 +264,14 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 }
 
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
-	for _, st := range stagesList {
-		if err := backup.ClearTables(ctx, db, Tables[st]...); err != nil {
-			return err
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		for _, st := range stagesList {
+			if err := backup.ClearTables(ctx, db, tx, Tables[st]...); err != nil {
+				return err
+			}
 		}
-	}
-	return db.Update(ctx, func(tx kv.RwTx) error { return clearStageProgress(tx, stagesList...) })
+		return clearStageProgress(tx, stagesList...)
+	})
 }
 
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
