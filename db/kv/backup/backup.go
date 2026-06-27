@@ -242,8 +242,9 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	started := time.Now()
-	var deleted uint64
+	lastLog := time.Now()
+	lastSize := size
+	var deleted, lastDeleted uint64
 	for i := 0; i+1 < len(bounds); i++ {
 		ra.SetPos(bounds[i])
 		n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
@@ -256,18 +257,19 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			secs := time.Since(started).Seconds()
-			clearedBytes := float64(i+1) / float64(len(bounds)-1) * float64(size) // estimate: chunks are count-balanced, not byte-balanced
+			now := time.Now()
+			secs := now.Sub(lastLog).Seconds()
 			remaining, err := tx.BucketSize(table)
 			if err != nil {
 				return err
 			}
 			log.Info("[clear]", "table", table,
-				"speed", common.ByteCount(uint64(clearedBytes/secs))+"/s",
-				"keys", common.PrettyCounter(uint64(float64(deleted)/secs))+"/s",
+				"speed", common.ByteCount(uint64(float64(lastSize-remaining)/secs))+"/s",
+				"keys", common.PrettyCounter(uint64(float64(deleted-lastDeleted)/secs))+"/s",
 				"progress", fmt.Sprintf("%d/%d", i+1, len(bounds)-1),
 				"size", common.ByteCount(remaining),
 			)
+			lastLog, lastSize, lastDeleted = now, remaining, deleted
 		default:
 		}
 	}
