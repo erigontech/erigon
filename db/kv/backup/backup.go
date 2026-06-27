@@ -283,7 +283,7 @@ func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err er
 	if !ok {
 		return nil, nil
 	}
-	const clearChunkSize = 64 * datasize.MB
+	const clearChunkSize = 32 * datasize.MB
 	chunks := size / clearChunkSize.Bytes()
 	started := time.Now()
 	b, err := s.DistributeCursors(table, nil, int(chunks))
