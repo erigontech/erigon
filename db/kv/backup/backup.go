@@ -289,7 +289,9 @@ func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err er
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took", time.Since(started))
+	if took := time.Since(started); took > time.Second {
+		log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took")
+	}
 	bounds = make([][]byte, len(b)) // interior keys are zero-copy, valid only until tx end
 	for i, k := range b {
 		bounds[i] = bytes.Clone(k)
