@@ -120,6 +120,10 @@ type DomainLatestIterFile struct {
 	nextKey, nextVal       []byte
 	k, v, kBackup, vBackup []byte
 
+	// decodeVal resolves a DB `flag||[inline|handle]` payload to the real value;
+	// nil unless the domain externalizes values (commitment value-files).
+	decodeVal func(step kv.Step, payload []byte) ([]byte, error)
+
 	logger log.Logger
 }
 
@@ -164,6 +168,9 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
 	hi.largeVals = domainRoTx.d.LargeValues
 	hi.filesEndTxNum = domainRoTx.files.EndTxNum()
+	if domainRoTx.d.valFiles != nil {
+		hi.decodeVal = domainRoTx.decodeVal
+	}
 	heap.Init(hi.h)
 	var key, value []byte
 
@@ -271,6 +278,11 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			step := ^binary.BigEndian.Uint64(stepBytes)
 			endTxNum := step * domainRoTx.d.stepSize
 			if endTxNum >= hi.filesEndTxNum {
+				if hi.decodeVal != nil {
+					if val, err = hi.decodeVal(kv.Step(step), val); err != nil {
+						return err
+					}
+				}
 				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(val), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
 				break
@@ -348,6 +360,11 @@ func (hi *DomainLatestIterFile) advanceDupSortDBCursor(ci1 *CursorItem) error {
 		step := ^binary.BigEndian.Uint64(stepBytes)
 		endTxNum := step * hi.aggStep
 		if endTxNum >= hi.filesEndTxNum {
+			if hi.decodeVal != nil {
+				if v, err = hi.decodeVal(kv.Step(step), v); err != nil {
+					return err
+				}
+			}
 			ci1.key = common.Copy(k)
 			ci1.endTxNum = endTxNum
 			ci1.val = common.Copy(v)
@@ -497,6 +514,11 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
 		if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
 			val := v[8:]
+			if dt.d.valFiles != nil {
+				if val, err = dt.decodeVal(step, val); err != nil {
+					return err
+				}
+			}
 			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
 			break
 		}
@@ -579,9 +601,15 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 					}
 					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
 					if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+						val := v[8:]
+						if dt.d.valFiles != nil {
+							if val, err = dt.decodeVal(step, val); err != nil {
+								return err
+							}
+						}
 						ci1.key = common.Copy(k)
 						ci1.endTxNum = step.ToTxNum(dt.stepSize)
-						ci1.val = common.Copy(v[8:])
+						ci1.val = common.Copy(val)
 						heap.Push(cpPtr, ci1)
 						pushed = true
 						break

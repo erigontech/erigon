@@ -25,7 +25,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
@@ -844,8 +846,21 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if w == nil {
 			continue
 		}
+		flushStart := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
+		}
+		if kv.Domain(di) == kv.CommitmentDomain && w.lastFlushKeys > 1_000 {
+			valsTbl, _ := tx.BucketSize(aggTx.d[di].d.ValuesTable)
+			histTbl, _ := tx.BucketSize(aggTx.d[di].d.History.ValuesTable)
+			var keysPerSec uint64
+			if w.lastFlushVals > 0 {
+				keysPerSec = uint64(float64(w.lastFlushKeys) / w.lastFlushVals.Seconds())
+			}
+			aggTx.d[di].d.logger.Warn("[dbg] domain flush", "domain", kv.Domain(di).String(), "valFile", w.valFiles != nil,
+				"entries", w.lastFlushEntries, "keys", w.lastFlushKeys, "keys/s", common.PrettyCounter(keysPerSec),
+				"hist", w.lastFlushHist, "vals", w.lastFlushVals, "cvl", w.lastFlushCvl, "total", time.Since(flushStart),
+				"valsTable", datasize.ByteSize(valsTbl).HR(), "histTable", datasize.ByteSize(histTbl).HR())
 		}
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()

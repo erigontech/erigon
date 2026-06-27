@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/state/valfile"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -118,7 +119,8 @@ type FilesItem struct {
 	index                *recsplit.Index
 	bindex               *btindex.BtIndex
 	existence            *existence.Filter
-	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
+	valReader            *valfile.Reader // set instead of decompressor for per-step external value-files (.cvl)
+	startTxNum, endTxNum uint64          //[startTxNum, endTxNum)
 
 	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
 	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
@@ -301,6 +303,14 @@ func (i *FilesItem) closeFilesAndRemove() {
 			}
 		}
 		i.decompressor = nil
+	}
+	if i.valReader != nil {
+		path := i.valReader.FilePath()
+		i.valReader.Close()
+		if err := dir.RemoveFile(path); err != nil {
+			log.Trace("remove after close", "err", err, "file", path)
+		}
+		i.valReader = nil
 	}
 }
 

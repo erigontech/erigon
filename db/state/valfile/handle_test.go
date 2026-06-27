@@ -1,0 +1,61 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package valfile
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestHandleRoundTrip(t *testing.T) {
+	t.Parallel()
+	cases := []Handle{
+		{Offset: 4, Len: 12},
+		{Offset: 0, Len: 0},
+		{Offset: 1 << 20, Len: 4096},
+		{Offset: 1<<40 - 1, Len: 1<<32 - 1},
+	}
+	for _, h := range cases {
+		enc := h.AppendTo(nil)
+		got, n, err := DecodeHandle(enc)
+		require.NoError(t, err)
+		require.Equal(t, len(enc), n)
+		require.Equal(t, h, got)
+	}
+}
+
+func TestHandleAppendPreservesPrefix(t *testing.T) {
+	t.Parallel()
+	prefix := []byte{0xde, 0xad}
+	h := Handle{Offset: 99, Len: 3}
+	enc := h.AppendTo(prefix)
+	require.Equal(t, prefix, enc[:2])
+	got, n, err := DecodeHandle(enc[2:])
+	require.NoError(t, err)
+	require.Equal(t, len(enc)-2, n)
+	require.Equal(t, h, got)
+}
+
+func TestDecodeHandleTruncated(t *testing.T) {
+	t.Parallel()
+	enc := Handle{Offset: 1 << 30, Len: 300}.AppendTo(nil)
+	_, _, err := DecodeHandle(enc[:1]) // not enough bytes for both varints
+	require.Error(t, err)
+	_, _, err = DecodeHandle(nil)
+	require.Error(t, err)
+}

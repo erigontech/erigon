@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/state/valfile"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -93,6 +95,9 @@ type Domain struct {
 	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
 	branchCache *commitment.BranchCache
 
+	// External per-step value-files; non-nil only when ValueFileThreshold>0.
+	valFiles *domainValFiles
+
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
 }
@@ -101,6 +106,10 @@ type domainVisible struct {
 	files  visibleFiles
 	name   kv.Domain
 	caches *sync.Pool
+
+	// valFiles holds per-step external value-files (.cvl), keyed by step (resolved
+	// from an MDBX handle, not by key).
+	valFiles map[kv.Step]*FilesItem
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -132,6 +141,13 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 	}
 	if d.Accessors.Has(statecfg.AccessorExistence) && d.FileVersion.AccessorKVEI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.Name))
+	}
+
+	if d.ValueFileThreshold > 0 {
+		if d.LargeValues {
+			panic(fmt.Sprintf("assert: ValueFileThreshold unsupported with LargeValues (domain %s)", d.Name))
+		}
+		d.valFiles = newDomainValFiles(d.Name, d.dirs.SnapDomain, d.FilenameBase, d.FileVersion.DataKV.String(), d.ValueFileThreshold, d.ValueFileMinKeyLen, dbg.MdbxNoSync || dbg.MdbxNoSyncUnsafe, stepSize, stepsInFrozenFile, d.logger)
 	}
 
 	return d, nil
@@ -317,6 +333,12 @@ func (d *Domain) OpenList(scanResult ScanDirsResult) error {
 		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
+	if d.valFiles != nil {
+		firstStepNotInFiles := kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize)
+		if err := d.valFiles.openFolder(firstStepNotInFiles, d.logger); err != nil {
+			return fmt.Errorf("Domain(%s).openList valFiles: %w", d.FilenameBase, err)
+		}
+	}
 	return nil
 }
 
@@ -380,6 +402,9 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		}
 	}
 	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	if d.valFiles != nil {
+		dv.valFiles = d.valFiles.visibleValFiles()
+	}
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
@@ -392,6 +417,9 @@ func (d *Domain) Close() {
 	}
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
+	if d.valFiles != nil {
+		d.valFiles.Close()
+	}
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte) error {
@@ -435,6 +463,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
+		valFiles:  dt.d.valFiles,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	if !discard {
@@ -452,10 +481,21 @@ type DomainBufferedWriter struct {
 	valsTable string
 	largeVals bool
 
+	valFiles *domainValFiles // external value-files; nil unless ValueFileThreshold>0
+	valBuf   []byte          // scratch for the encoded `^step || payload` MDBX value
+
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
 	aux2      []byte  // auxilary buffer for step + val
 	diff      *kv.DomainDiff
+
+	// per-Flush phase timings, read by flushWriters for debug logs
+	lastFlushHist time.Duration
+	lastFlushVals time.Duration
+	lastFlushCvl  time.Duration
+	// per-Flush values-load counters: total entries vs distinct keys (dup proof)
+	lastFlushEntries uint64
+	lastFlushKeys    uint64
 
 	h *historyBufferedWriter
 }
@@ -471,17 +511,23 @@ func (w *DomainBufferedWriter) Close() {
 }
 
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	w.lastFlushHist, w.lastFlushVals, w.lastFlushCvl = 0, 0, 0
+	w.lastFlushEntries, w.lastFlushKeys = 0, 0
 	if w.discard {
 		return nil
 	}
+	histStart := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	w.lastFlushHist = time.Since(histStart)
 
 	if w.largeVals {
+		valsStart := time.Now()
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
+		w.lastFlushVals = time.Since(valsStart)
 		w.Close()
 		return nil
 	}
@@ -491,7 +537,25 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	valsStart := time.Now()
+	var prevKeyBuf []byte
+	hasPrevKey := false
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		w.lastFlushEntries++
+		if !hasPrevKey || !bytes.Equal(k, prevKeyBuf) {
+			w.lastFlushKeys++
+			prevKeyBuf = append(prevKeyBuf[:0], k...)
+			hasPrevKey = true
+		}
+		if w.valFiles != nil { // replace value bytes with an inline/handle payload
+			step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
+			payload, err := w.valFiles.encode(step, k, v[8:])
+			if err != nil {
+				return err
+			}
+			w.valBuf = append(append(w.valBuf[:0], v[:8]...), payload...)
+			v = w.valBuf
+		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -502,6 +566,17 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
+	}
+	w.lastFlushVals = time.Since(valsStart)
+	if w.valFiles != nil { // referenced bytes must be durable before the tx commits
+		cvlStart := time.Now()
+		if err := w.valFiles.sync(); err != nil {
+			return err
+		}
+		if err := w.valFiles.ensureFilesItems(); err != nil { // publish per-step .cvl FilesItems
+			return err
+		}
+		w.lastFlushCvl = time.Since(cvlStart)
 	}
 	w.Close()
 
@@ -540,10 +615,6 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 		}
 	}
 
-	//defer func() {
-	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
-	//}()
-
 	if err := w.values.Collect(k, w.aux2); err != nil {
 		return err
 	}
@@ -572,6 +643,16 @@ type DomainRoTx struct {
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
 
 	getFromFileCache *DomainGetFromFileCache
+
+	// .cvl FilesItems retired during prune; drained by AggregatorRoTx.prune into
+	// recalcVisibleFiles(retired) for reader-safe (drain) deletion.
+	retiredValFiles []*FilesItem
+}
+
+func (dt *DomainRoTx) takeRetiredValFiles() []*FilesItem {
+	r := dt.retiredValFiles
+	dt.retiredValFiles = nil
+	return r
 }
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
@@ -706,7 +787,9 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 }
 
 // [stepFrom; stepTo)
-// In contrast to collate function collateETL puts contents of wal into file.
+// collateETL dumps the in-memory wal, which holds pre-encode raw values, straight
+// to the file; unlike collate (which reads encoded payloads from MDBX) it must not
+// run a value-file decode.
 // dstDir overrides the output directory; empty means d.dirs.SnapDomain.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
 	if d.Disable {
@@ -859,11 +942,18 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 				k, v, err = valsCursor.Next()
 				continue
 			}
+			writeVal := v[8:]
+			if d.valFiles != nil { // resolve inline/handle payload to the real bytes
+				writeVal, err = d.valFiles.decode(step, v[8:], nil)
+				if err != nil {
+					return coll, err
+				}
+			}
 			if _, err = comp.Write(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 			}
-			if _, err = comp.Write(v[8:]); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
+			if _, err = comp.Write(writeVal); err != nil {
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, writeVal, err)
 			}
 			k, v, err = valsCursor.NextNoDup()
 		}
@@ -956,6 +1046,9 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	valuesDecomp, err = seg.NewDecompressor(collation.valuesPath)
 	if err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.FilenameBase, err)
+	}
+	if d.Name == kv.CommitmentDomain {
+		d.logger.Warn("[dbg] .kv created", "file", filepath.Base(collation.valuesPath), "size", datasize.ByteSize(valuesDecomp.Size()).HR())
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
@@ -1060,6 +1153,9 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	valuesComp = nil
 	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.FilenameBase, err)
+	}
+	if d.Name == kv.CommitmentDomain {
+		d.logger.Warn("[dbg] .kv created", "file", filepath.Base(collation.valuesPath), "size", datasize.ByteSize(valuesDecomp.Size()).HR())
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
@@ -1335,6 +1431,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	var unwindBuf []byte // scratch for `^unwindStep || payload`
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
@@ -1376,9 +1473,40 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
 		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
 		if value != nil && lastForKey {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
+			// A key has one value per step: replace any existing unwind-step entry
+			// rather than accumulate dups (repeated unwinds), whose DupSort order no
+			// longer reflects value recency once values are externalized to handles.
+			for {
+				cur, err := valsCursor.SeekBothRange(fullKey, unwindStepBytes)
+				if err != nil {
+					return err
+				}
+				if len(cur) < 8 || !bytes.Equal(cur[:8], unwindStepBytes) {
+					break
+				}
+				if err := valsCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+			putVal := value
+			if dt.d.valFiles != nil { // restored value must use the same inline/handle encoding
+				putVal, err = dt.d.valFiles.encode(kv.Step(unwindStep), fullKey, value)
+				if err != nil {
+					return err
+				}
+			}
+			unwindBuf = append(append(unwindBuf[:0], unwindStepBytes...), putVal...)
+			if err := valsCursor.Put(fullKey, unwindBuf); err != nil {
 				return err
 			}
+		}
+	}
+	if dt.d.valFiles != nil { // restored bytes must be durable + readable before the tx commits
+		if err := dt.d.valFiles.sync(); err != nil {
+			return err
+		}
+		if err := dt.d.valFiles.ensureFilesItems(); err != nil {
+			return err
 		}
 	}
 	// Compare valsKV with prevSeenKeys
@@ -1636,6 +1764,19 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	return dt.valsC, err
 }
 
+// decodeVal resolves a `flag || [inline|handle]` payload to the real value,
+// reading the step's .cvl via the pinned bundle (fallback: the write-side map).
+func (dt *DomainRoTx) decodeVal(step kv.Step, payload []byte) ([]byte, error) {
+	return valfile.DecodePayload(payload, nil, func(h valfile.Handle, dst []byte) ([]byte, error) {
+		if dt.visible != nil {
+			if it := dt.visible.valFiles[step]; it != nil && it.valReader != nil {
+				return it.valReader.Get(h, dst)
+			}
+		}
+		return dt.d.valFiles.getHandle(step, h, dst)
+	})
+}
+
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
 	if dt == nil {
 		return nil, 0, false, nil
@@ -1685,6 +1826,12 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
+		if dt.d.valFiles != nil { // v is a `flag || [inline|handle]` payload
+			v, err = dt.decodeVal(foundStep, v)
+			if err != nil {
+				return nil, 0, false, err
+			}
+		}
 		return v, foundStep, true, nil
 	}
 
@@ -2006,6 +2153,19 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	stat.Values = pruneStat.PruneCountValues
 	stat.Dups = pruneStat.DupsDeleted
 	stat.Progress = pruneStat.ValueProgress
+
+	// Retire the .cvl of every step fully pruned from MDBX (range fully done, step
+	// fully contained). The FilesItems are routed to recalcVisibleFiles(retired) by
+	// AggregatorRoTx.prune so readers holding an older bundle keep them until drain.
+	if dt.d.valFiles != nil && pruneStat.ValueProgress == prune.Done {
+		fromStep := kv.Step((txFrom + dt.stepSize - 1) / dt.stepSize) // ceil
+		toStep := kv.Step(txTo / dt.stepSize)                         // floor (exclusive)
+		for s := fromStep; s < toStep; s++ {
+			if it := dt.d.valFiles.retire(s); it != nil {
+				dt.retiredValFiles = append(dt.retiredValFiles, it)
+			}
+		}
+	}
 
 	return stat, err
 }

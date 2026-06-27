@@ -1555,6 +1555,18 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		aggStat.Indices[at.iis[iikey].ii.FilenameBase] = stats[iikey]
 	}
 
+	// Route .cvl FilesItems retired by domain prune through the publish point so
+	// they are drain-deleted once readers holding an older bundle finish (Type-B).
+	var retired []*FilesItem
+	for _, d := range at.d {
+		retired = append(retired, d.takeRetiredValFiles()...)
+	}
+	if len(retired) > 0 {
+		at.a.dirtyFilesLock.Lock()
+		at.a.recalcVisibleFiles(retired)
+		at.a.dirtyFilesLock.Unlock()
+	}
+
 	return aggStat, nil
 }
 
