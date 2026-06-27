@@ -330,7 +330,7 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
-// SplitBucketByCount forwards to the underlying engine so kv.ReadAhead's
+// DistributeCursors forwards to the underlying engine; returns a single [from,nil) range if it has no distribution support.
 func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
 		return s.DistributeCursors(table, from, n)

@@ -32,10 +32,9 @@ import (
 )
 
 type DBWithDistributionSupport interface {
-	// DistributeCursors partitions table into n approximately equal-COUNT key
-	// ranges using mdbx's b-tree distribution.
-	// It's fast on `Table >> RAM` case because touching only bran-nodes of b-tree
-	// Returned keys valid until tx end
+	// DistributeCursors partitions table into n approximately equal-count key
+	// ranges using mdbx's b-tree distribution. Fast on Table >> RAM: it touches
+	// only the b-tree branch nodes. Returned keys are valid until tx end.
 	DistributeCursors(table string, from []byte, n int) ([][]byte, error)
 }
 
@@ -166,6 +165,7 @@ func (r *ReadAhead) plan(ctx context.Context, db RoDB, table string, from []byte
 // waitTurn blocks until chunk idx is within `ahead` of the consumer; returns
 // false if the consumer already passed it or ctx was cancelled.
 func (r *ReadAhead) waitTurn(ctx context.Context, idx int, ahead int64) bool {
+	var tick *time.Ticker
 	for {
 		cc := r.consumerChunk.Load()
 		switch {
@@ -174,10 +174,14 @@ func (r *ReadAhead) waitTurn(ctx context.Context, idx int, ahead int64) bool {
 		case int64(idx) <= cc+ahead:
 			return true
 		}
+		if tick == nil { // reused across spins instead of allocating a timer per iteration
+			tick = time.NewTicker(time.Millisecond)
+			defer tick.Stop()
+		}
 		select {
 		case <-ctx.Done():
 			return false
-		case <-time.After(time.Millisecond):
+		case <-tick.C:
 		}
 	}
 }

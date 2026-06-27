@@ -889,10 +889,9 @@ func rawCursor(c kv.Cursor) *mdbx.Cursor {
 	return c.(*MdbxCursor).c
 }
 
-// DistributeCursors partitions bucket into n approximately equal-COUNT key
-// ranges using mdbx's b-tree distribution.
-// It's fast on `db >> RAM` case because touching only bran-nodes of b-tree
-// Returned keys  valid until tx end
+// DistributeCursors partitions bucket into n approximately equal-count key
+// ranges using mdbx's b-tree distribution. Fast on db >> RAM: it touches only
+// the b-tree branch nodes. Returned keys are valid until tx end.
 func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	if n <= 1 {
 		return [][]byte{from, nil}, nil
