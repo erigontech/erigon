@@ -379,7 +379,7 @@ type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, err
 
 const DomainMinStepsToCompress = 16
 
-func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *FilesItem, err error) {
+func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, seqReadahead bool, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *FilesItem, err error) {
 	if !r.any() {
 		return
 	}
@@ -443,7 +443,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		view, err := item.decompressor.OpenSequentialView()
+		view, err := item.decompressor.OpenSequentialView(seqReadahead)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -586,7 +586,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, seqReadahead bool, ps *background.ProgressSet) (*FilesItem, error) {
 	if startTxNum == endTxNum {
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
@@ -635,7 +635,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	heap.Init(&cp)
 
 	for _, item := range files {
-		view, err := item.decompressor.OpenSequentialView()
+		view, err := item.decompressor.OpenSequentialView(seqReadahead)
 		if err != nil {
 			return nil, err
 		}
@@ -753,7 +753,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	}()
 
 	if r.index.needMerge {
-		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, true, ps); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -804,7 +804,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			idxView, err := item.decompressor.OpenSequentialView()
+			idxView, err := item.decompressor.OpenSequentialView(true)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -821,7 +821,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 						}
 
-						histView, err := hi.decompressor.OpenSequentialView()
+						histView, err := hi.decompressor.OpenSequentialView(true)
 						if err != nil {
 							return nil, nil, err
 						}

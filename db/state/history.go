@@ -225,12 +225,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	histView, err := hist.OpenSequentialView()
+	histView, err := hist.OpenSequentialView(true)
 	if err != nil {
 		return err
 	}
 	defer histView.Close()
-	efHistView, err := efHist.OpenSequentialView()
+	efHistView, err := efHist.OpenSequentialView(true)
 	if err != nil {
 		return err
 	}

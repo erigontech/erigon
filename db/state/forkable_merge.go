@@ -105,7 +105,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			startRootNum, endRootNum := item.src.Range()
 			compression := f.isCompressionUsed(RootNum(startRootNum), RootNum(endRootNum))
 
-			view, viewErr := item.src.decompressor.OpenSequentialView()
+			view, viewErr := item.src.decompressor.OpenSequentialView(true)
 			if viewErr != nil {
 				err = viewErr
 				return

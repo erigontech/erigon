@@ -342,7 +342,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		view, err := d.OpenSequentialView()
+		view, err := d.OpenSequentialView(true)
 		if err != nil {
 			return nil, err
 		}

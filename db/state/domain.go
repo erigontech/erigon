@@ -1215,7 +1215,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 }
 
 func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compression seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, testHook func(*recsplit.RecSplit)) (err error) {
-	seqView, err := decomp.OpenSequentialView()
+	seqView, err := decomp.OpenSequentialView(true)
 	if err != nil {
 		return err
 	}

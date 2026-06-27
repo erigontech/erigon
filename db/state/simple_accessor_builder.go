@@ -154,7 +154,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 		}
 	}()
 
-	seqView, err := decomp.OpenSequentialView()
+	seqView, err := decomp.OpenSequentialView(true)
 	if err != nil {
 		return nil, err
 	}

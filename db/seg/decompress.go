@@ -600,7 +600,7 @@ func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	v, err := d.OpenSequentialView()
+	v, err := d.OpenSequentialView(true)
 	if err != nil {
 		return err
 	}
@@ -712,11 +712,19 @@ type SequentialView struct {
 	data        []byte // words data region from the sequential mmap
 }
 
-// OpenSequentialView creates a separate mmap of the same file with MADV_SEQUENTIAL.
-// The caller must call Close when done.
-func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
+// OpenSequentialView returns a view for a sequential scan of the file. With separateReadahead
+// it creates a second mmap of the same file with MADV_SEQUENTIAL, isolating aggressive readahead
+// (and its deactivate-behind eviction) from the shared mmap used by concurrent random readers;
+// the caller must call Close. Without it the view shares the decompressor's mmap with MADV_NORMAL —
+// used when concurrent random readers of the same file (e.g. commitment dereference) must keep their
+// pages resident; Close is then a no-op.
+func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
+	}
+	if !separateReadahead {
+		_ = mmap.MadviseNormal(d.mmapHandle1)
+		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, h2, err := mmap.Mmap(d.f, int(d.size))
 	if err != nil {
