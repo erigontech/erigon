@@ -217,7 +217,7 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		return tx.ClearTable(table)
 	}
 
-	size, err := tableSize(ctx, db, table)
+	size, err := tx.BucketSize(table)
 	if err != nil {
 		return err
 	}
@@ -270,20 +270,23 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	return nil
 }
 
+// tableSize returns the table's on-disk size.
+func tableSize(ctx context.Context, db kv.RoDB, table string) (size uint64, err error) {
+	err = db.View(ctx, func(tx kv.Tx) error {
+		size, err = tx.BucketSize(table)
+		return err
+	})
+	return size, err
+}
+
 // chunkBounds splits table into ~clearChunkSize count-balanced ranges and
-// returns the cloned boundaries (nil if the backend can't count-split) plus the
-// table's on-disk size.
-func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte, size uint64, err error) {
+// returns the cloned boundaries (nil if the backend can't count-split).
+func chunkBounds(ctx context.Context, db kv.RoDB, table string, size uint64) (bounds [][]byte, err error) {
 	err = db.View(ctx, func(tx kv.Tx) error {
 		s, ok := tx.(kv.DBWithDistributionSupport)
 		if !ok {
 			return nil
 		}
-		var sizeErr error
-		if size, sizeErr = tx.BucketSize(table); sizeErr != nil {
-			return sizeErr
-		}
-
 		const clearChunkSize = 1 * datasize.GB
 		b, err := s.DistributeCursors(table, nil, int(size/clearChunkSize.Bytes()))
 		if err != nil {
@@ -295,5 +298,5 @@ func chunkBounds(ctx context.Context, db kv.RoDB, table string) (bounds [][]byte
 		}
 		return nil
 	})
-	return bounds, size, err
+	return bounds, err
 }
