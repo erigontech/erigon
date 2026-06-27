@@ -17,7 +17,6 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -285,16 +284,12 @@ func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err er
 	const clearChunkSize = 32 * datasize.MB
 	chunks := size / clearChunkSize.Bytes()
 	started := time.Now()
-	b, err := s.DistributeCursors(table, nil, int(chunks))
+	bounds, err = s.DistributeCursors(table, nil, int(chunks))
 	if err != nil {
 		return nil, err
 	}
 	if took := time.Since(started); took > 5*time.Second {
 		log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took")
-	}
-	bounds = make([][]byte, len(b)) // interior keys are zero-copy, valid only until tx end
-	for i, k := range b {
-		bounds[i] = bytes.Clone(k)
 	}
 	return bounds, nil
 }
