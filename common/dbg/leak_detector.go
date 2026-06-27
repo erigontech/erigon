@@ -18,6 +18,7 @@ package dbg
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,10 +29,40 @@ import (
 
 const FileCloseLogLevel = log.LvlTrace
 
+// gcLeakCheckEnabled - finalizer-based leak detection. Requires both ASSERT and SLOW_TX.
+var gcLeakCheckEnabled = AssertEnabled && SlowTx() > 0
+
+// ArmGCLeakCheck panics if obj is garbage-collected before DisarmGCLeakCheck(obj)
+// is called. No-op unless ASSERT and SLOW_TX are both enabled.
+func ArmGCLeakCheck(name string, obj any) {
+	if !gcLeakCheckEnabled {
+		return
+	}
+	armGCLeakFinalizer(name, StackSkip(2), obj)
+}
+
+// DisarmGCLeakCheck clears the finalizer set by ArmGCLeakCheck. Call it from the
+// resource's Close/Rollback path.
+func DisarmGCLeakCheck(obj any) {
+	if !gcLeakCheckEnabled {
+		return
+	}
+	runtime.SetFinalizer(obj, nil)
+}
+
+func armGCLeakFinalizer(name, stack string, obj any) {
+	typ := fmt.Sprintf("%T", obj)
+	runtime.SetFinalizer(obj, func(any) {
+		panic(fmt.Sprintf("[dbg.%s] %s garbage-collected without close — leak; created at:\n%s", name, typ, stack))
+	})
+}
+
 // LeakDetector - use it to find which resource was created but not closed (leaked)
 // periodically does print in logs resources which living longer than 1min with their creation stack trace
 // For example db transactions can call Add/Del from Begin/Commit/Rollback methods
 type LeakDetector struct {
+	name          string
+	panicOnLeak   bool
 	enabled       atomic.Bool
 	slowThreshold atomic.Pointer[time.Duration]
 	autoIncrement atomic.Uint64
@@ -50,7 +81,7 @@ func NewLeakDetector(name string, slowThreshold time.Duration) *LeakDetector {
 	if !enabled {
 		return nil
 	}
-	d := &LeakDetector{list: map[uint64]LeakDetectorItem{}}
+	d := &LeakDetector{name: name, panicOnLeak: AssertEnabled, list: map[uint64]LeakDetectorItem{}}
 	d.SetSlowThreshold(slowThreshold)
 
 	go func() {
@@ -88,15 +119,18 @@ func (d *LeakDetector) slowList() (res []string) {
 	return res
 }
 
-func (d *LeakDetector) Del(id uint64) {
+func (d *LeakDetector) Del(id uint64, obj any) {
 	if d == nil || !d.Enabled() {
 		return
+	}
+	if d.panicOnLeak {
+		runtime.SetFinalizer(obj, nil)
 	}
 	d.listLock.Lock()
 	defer d.listLock.Unlock()
 	delete(d.list, id)
 }
-func (d *LeakDetector) Add() uint64 {
+func (d *LeakDetector) Add(obj any) uint64 {
 	if d == nil || !d.Enabled() {
 		return 0
 	}
@@ -106,8 +140,11 @@ func (d *LeakDetector) Add() uint64 {
 	}
 	id := d.autoIncrement.Add(1)
 	d.listLock.Lock()
-	defer d.listLock.Unlock()
 	d.list[id] = ac
+	d.listLock.Unlock()
+	if d.panicOnLeak {
+		armGCLeakFinalizer(d.name, ac.stack, obj)
+	}
 	return id
 }
 

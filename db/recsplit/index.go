@@ -163,6 +163,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	//}
 
 	idx.sharedReader = NewIndexReader(idx)
+	dbg.ArmGCLeakCheck(fName, idx)
 	return idx, nil
 }
 
@@ -392,6 +393,7 @@ func (idx *Index) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
+	dbg.DisarmGCLeakCheck(idx)
 	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}

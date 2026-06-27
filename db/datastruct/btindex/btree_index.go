@@ -581,6 +581,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	idx.bplus.cursorGetter = idx.newCursor
 
 	validationPassed = true
+	dbg.ArmGCLeakCheck(idx.FileName(), idx)
 	return idx, nil
 }
 
@@ -645,6 +646,7 @@ func (b *BtIndex) Close() {
 	if b == nil {
 		return
 	}
+	dbg.DisarmGCLeakCheck(b)
 	if b.m != nil {
 		if err := b.m.Unmap(); err != nil {
 			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", b.FileName(), "stack", dbg.Stack())

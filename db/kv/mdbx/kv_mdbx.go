@@ -720,8 +720,8 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		db:       db,
 		tx:       tx,
 		readOnly: true,
-		traceID:  db.leakDetector.Add(),
 	}
+	mt.traceID = db.leakDetector.Add(mt)
 	db.registerLiveTx(mt, true)
 	return mt, nil
 }
@@ -759,11 +759,11 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	}
 
 	mt := &MdbxTx{
-		db:      db,
-		tx:      tx,
-		ctx:     ctx,
-		traceID: db.leakDetector.Add(),
+		db:  db,
+		tx:  tx,
+		ctx: ctx,
 	}
+	mt.traceID = db.leakDetector.Add(mt)
 	db.registerLiveTx(mt, false)
 	return mt, nil
 }
@@ -1131,7 +1131,7 @@ func (tx *MdbxTx) Commit() error {
 		} else {
 			runtime.UnlockOSThread()
 		}
-		tx.db.leakDetector.Del(tx.traceID)
+		tx.db.leakDetector.Del(tx.traceID, tx)
 	}()
 	tx.closeCursors()
 
@@ -1198,7 +1198,7 @@ func (tx *MdbxTx) Rollback() {
 	} else {
 		runtime.UnlockOSThread()
 	}
-	tx.db.leakDetector.Del(tx.traceID)
+	tx.db.leakDetector.Del(tx.traceID, tx)
 }
 
 func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {

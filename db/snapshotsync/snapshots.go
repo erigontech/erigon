@@ -506,7 +506,9 @@ func (s VisibleSegments) BeginRo() *RoTx {
 		}
 		seg.src.refcount.Add(1)
 	}
-	return &RoTx{Segments: s}
+	rotx := &RoTx{Segments: s}
+	dbg.ArmGCLeakCheck("snapshots.RoTx", rotx)
+	return rotx
 }
 
 type RoTx struct {
@@ -517,6 +519,7 @@ func (s *RoTx) Close() {
 	if s == nil || s.Segments == nil {
 		return
 	}
+	dbg.DisarmGCLeakCheck(s)
 	VisibleSegments := s.Segments
 	s.Segments = nil
 

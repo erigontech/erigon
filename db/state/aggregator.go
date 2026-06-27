@@ -2353,8 +2353,8 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		a:        a,
 		visible:  v,
 		iisCount: a.iisCount,
-		_leakID:  a.leakDetector.Add(),
 	}
+	ac._leakID = a.leakDetector.Add(ac)
 	for id, iv := range v.iis {
 		if iv == nil {
 			continue
@@ -2574,7 +2574,7 @@ func (at *AggregatorRoTx) Close() {
 		return
 	}
 	a := at.a
-	a.leakDetector.Del(at._leakID)
+	a.leakDetector.Del(at._leakID, at)
 	at.a = nil
 
 	for _, d := range at.d {

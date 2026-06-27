@@ -28,6 +28,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -83,7 +84,9 @@ func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, l
 	return c
 }
 func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Logger) *Collector {
-	return &Collector{bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
+	c := &Collector{bufType: getTypeByBuffer(sortableBuffer), buf: sortableBuffer, logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
+	dbg.ArmGCLeakCheck(logPrefix, c)
+	return c
 }
 
 func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
@@ -261,6 +264,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 }
 
 func (c *Collector) Close() {
+	dbg.DisarmGCLeakCheck(c)
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
