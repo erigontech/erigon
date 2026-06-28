@@ -352,12 +352,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		if err = env.SetSyncPeriod(500 * time.Millisecond); err != nil {
 			return nil, err
 		}
-		//if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
-		//	return nil, err
-		//}
 		if err = env.SetSyncBytes(128 * 1024 * 1024); err != nil {
 			return nil, err
 		}
+		//if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
+		//	return nil, err
+		//}
 	}
 
 	//if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
@@ -750,7 +750,7 @@ func (db *MdbxKV) backgroundSyncOnce() {
 	// otherwise. MDBX_BUSY means the environment is used by other thread and
 	// nonblock=true.
 	t := time.Now()
-	if err := db.env.Sync(true, false); err != nil {
+	if err := db.env.Sync(false, true); err != nil {
 		db.log.Warn("[db] background sync", "label", db.opts.label, "err", err)
 	}
 	if took := time.Since(t); took > 10*time.Millisecond {
