@@ -44,6 +44,45 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
+// txResultFieldStream lazily writes , "result": on first value write inside a per-tx trace object.
+// If execution errors before writing anything, the "result" field is omitted entirely.
+type txResultFieldStream struct {
+	jsonstream.Stream
+	written bool
+}
+
+func (s *txResultFieldStream) ensure() {
+	if !s.written {
+		s.written = true
+		s.Stream.WriteMore()
+		s.Stream.WriteObjectField("result")
+	}
+}
+
+func (s *txResultFieldStream) WriteNil()                   { s.ensure(); s.Stream.WriteNil() }
+func (s *txResultFieldStream) WriteTrue()                  { s.ensure(); s.Stream.WriteTrue() }
+func (s *txResultFieldStream) WriteFalse()                 { s.ensure(); s.Stream.WriteFalse() }
+func (s *txResultFieldStream) WriteBool(v bool)            { s.ensure(); s.Stream.WriteBool(v) }
+func (s *txResultFieldStream) WriteInt(v int)              { s.ensure(); s.Stream.WriteInt(v) }
+func (s *txResultFieldStream) WriteInt8(v int8)            { s.ensure(); s.Stream.WriteInt8(v) }
+func (s *txResultFieldStream) WriteInt16(v int16)          { s.ensure(); s.Stream.WriteInt16(v) }
+func (s *txResultFieldStream) WriteInt32(v int32)          { s.ensure(); s.Stream.WriteInt32(v) }
+func (s *txResultFieldStream) WriteInt64(v int64)          { s.ensure(); s.Stream.WriteInt64(v) }
+func (s *txResultFieldStream) WriteUint(v uint)            { s.ensure(); s.Stream.WriteUint(v) }
+func (s *txResultFieldStream) WriteUint8(v uint8)          { s.ensure(); s.Stream.WriteUint8(v) }
+func (s *txResultFieldStream) WriteUint16(v uint16)        { s.ensure(); s.Stream.WriteUint16(v) }
+func (s *txResultFieldStream) WriteUint32(v uint32)        { s.ensure(); s.Stream.WriteUint32(v) }
+func (s *txResultFieldStream) WriteUint64(v uint64)        { s.ensure(); s.Stream.WriteUint64(v) }
+func (s *txResultFieldStream) WriteFloat32(v float32)      { s.ensure(); s.Stream.WriteFloat32(v) }
+func (s *txResultFieldStream) WriteFloat64(v float64)      { s.ensure(); s.Stream.WriteFloat64(v) }
+func (s *txResultFieldStream) WriteString(v string)        { s.ensure(); s.Stream.WriteString(v) }
+func (s *txResultFieldStream) WriteObjectStart()           { s.ensure(); s.Stream.WriteObjectStart() }
+func (s *txResultFieldStream) WriteArrayStart()            { s.ensure(); s.Stream.WriteArrayStart() }
+func (s *txResultFieldStream) WriteEmptyArray()            { s.ensure(); s.Stream.WriteEmptyArray() }
+func (s *txResultFieldStream) WriteEmptyObject()           { s.ensure(); s.Stream.WriteEmptyObject() }
+func (s *txResultFieldStream) Write(p []byte) (int, error) { s.ensure(); return s.Stream.Write(p) }
+func (s *txResultFieldStream) WriteRaw(v string)           { s.ensure(); s.Stream.WriteRaw(v) }
+
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
 func (api *DebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), config, stream)
@@ -149,6 +188,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	var gasUsed uint64
+	inner := &txResultFieldStream{Stream: stream}
 	for txnIndex, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -161,14 +201,14 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
 		stream.WriteString(txnHash.Hex())
-		stream.WriteMore()
-		stream.WriteObjectField("result")
 		select {
 		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+
+		inner.written = false
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
@@ -187,7 +227,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
-				stream,
+				inner,
 				api.evmCallTimeout,
 				stateSyncEvents,
 				txnIndex,
@@ -196,8 +236,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		} else {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				// Fail closed here because tracing needs a valid Message-derived sender/fee context.
-				stream.WriteNil()
 				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			} else {
 				txCtx := evmtypes.TxContext{
@@ -208,7 +246,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				}
 
 				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
 				gasUsed += _gasUsed
 			}
 		}
@@ -216,8 +254,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 
-		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
 		if err != nil {
+			if inner.written {
+				_ = stream.ClosePending(1)
+			}
 			stream.WriteMore()
 			rpc.HandleError(err, stream)
 		}

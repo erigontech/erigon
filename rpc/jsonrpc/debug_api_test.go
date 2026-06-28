@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
 
@@ -249,6 +250,65 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 		require.ErrorContains(t, err, "transaction not found")
 		require.NoError(t, s.Flush())
 		require.Empty(t, buf.Bytes(), "stream must be empty on early error")
+	})
+
+	from := common.Address{0xFF}
+	to := common.Address{0x01}
+	gas := hexutil.Uint64(21000)
+	gasPrice := hexutil.Big(*big.NewInt(1e9))
+	traceCallArgs := ethapi.CallArgs{From: &from, To: &to, Gas: &gas, GasPrice: &gasPrice}
+	for _, tc := range []struct {
+		name   string
+		tracer string
+	}{
+		{"streaming", ""},
+		{"callTracer", "callTracer"},
+	} {
+		t.Run("TraceCall_execution_error_"+tc.name, func(t *testing.T) {
+			var cfg *tracersConfig.TraceConfig
+			if tc.tracer != "" {
+				name := tc.tracer
+				cfg = &tracersConfig.TraceConfig{Tracer: &name}
+			}
+			buf, s := newStream()
+			err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), cfg, s)
+			require.Error(t, err)
+			require.NoError(t, s.Flush())
+			require.Empty(t, buf.Bytes(), "stream must be empty on execution error so handler omits result field")
+		})
+	}
+}
+
+// TestTxResultFieldStreamLazy verifies the lazy-write semantics of txResultFieldStream:
+// the ", result": prefix is written only on the first value write, never on error paths.
+func TestTxResultFieldStreamLazy(t *testing.T) {
+	newInner := func() (*bytes.Buffer, jsonstream.Stream) {
+		var buf bytes.Buffer
+		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	}
+
+	t.Run("no_writes_when_unused", func(t *testing.T) {
+		buf, inner := newInner()
+		_ = &txResultFieldStream{Stream: inner}
+		require.NoError(t, inner.Flush())
+		require.Empty(t, buf.Bytes())
+	})
+
+	t.Run("writes_separator_and_field_on_first_value", func(t *testing.T) {
+		buf, inner := newInner()
+		lazy := &txResultFieldStream{Stream: inner}
+		lazy.WriteNil()
+		require.NoError(t, inner.Flush())
+		require.Equal(t, `,"result":null`, buf.String())
+	})
+
+	t.Run("field_written_only_once", func(t *testing.T) {
+		buf, inner := newInner()
+		lazy := &txResultFieldStream{Stream: inner}
+		lazy.WriteString("a")
+		lazy.WriteString("b")
+		require.NoError(t, inner.Flush())
+		require.Equal(t, `,"result":"a""b"`, buf.String())
 	})
 }
 
