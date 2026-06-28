@@ -235,9 +235,14 @@ func ExecuteTraceTx(
 
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if !streaming {
-			stream.WriteNil()
-		}
+		// Always write null for the result field so the JSON response is valid.
+		// In streaming mode the JsonStreamLogger may have written a partial
+		// {"structLogs":[ … sequence if some opcodes executed before the error;
+		// WriteNil() will append the literal `null` which is still malformed in
+		// that edge-case, but it is strictly better than the previous behaviour
+		// of writing nothing at all (which produced the broken `"result":,` output
+		// that the JSON decoder rejects with "unexpected value type").
+		stream.WriteNil()
 		return fmt.Errorf("tracing failed: %w", err)
 	}
 
