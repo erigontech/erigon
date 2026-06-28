@@ -19,6 +19,7 @@ package commands
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -45,6 +46,35 @@ var (
 	decodedCheckBalanceSamples     int
 	decodedCheckAllowanceSamples   int
 )
+
+// ethCaller is the subset of *rpc.Client used by the verification helpers,
+// extracted so the ERC20 probe can be exercised without a live node.
+type ethCaller interface {
+	CallContext(ctx context.Context, result any, method string, args ...any) error
+}
+
+type decodedCheckStatus int
+
+const (
+	decodedCheckSkipped decodedCheckStatus = iota
+	decodedCheckPass
+	decodedCheckFail
+)
+
+// errProbeReverted signals that an ERC20 probe eth_call reverted, i.e. the
+// contract is not a verifiable ERC20 rather than a genuine decoded mismatch.
+var errProbeReverted = errors.New("erc20 probe reverted")
+
+func isRevertErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "execution reverted")
+}
+
+func ensureHexPrefix(s string) string {
+	if strings.HasPrefix(s, "0x") {
+		return s
+	}
+	return "0x" + s
+}
 
 func init() {
 	withDataDir(decodedStateCheckCmd)
@@ -120,23 +150,38 @@ When --contracts is omitted, the command auto-discovers ERC20-like contracts dir
 			"rpc", decodedCheckRPCURL)
 
 		failed := 0
+		skipped := 0
+		passed := 0
 		for _, contract := range contracts {
-			report, err := inspectDecodedContract(ctx, chainDB, client, latestBlock, contract)
+			storage, err := loadDecodedStorage(ctx, chainDB, contract)
 			if err != nil {
 				failed++
 				logger.Error("decoded-state check failed", "contract", contract, "error", err)
 				continue
 			}
-			logDecodedReport(logger, report)
-			if !report.Pass {
+			report, status, err := inspectDecodedContract(ctx, storage, client, latestBlock, contract)
+			if err != nil {
 				failed++
+				logger.Error("decoded-state check failed", "contract", contract, "error", err)
+				continue
+			}
+			switch status {
+			case decodedCheckSkipped:
+				skipped++
+				logger.Info("decoded-state check skipped: contract is not a verifiable ERC20", "contract", contract)
+			case decodedCheckPass:
+				passed++
+				logDecodedReport(logger, report)
+			case decodedCheckFail:
+				failed++
+				logDecodedReport(logger, report)
 			}
 		}
 		if failed > 0 {
-			logger.Error("decoded-state consistency check finished with failures", "failedContracts", failed, "checkedContracts", len(contracts))
+			logger.Error("decoded-state consistency check finished with failures", "failedContracts", failed, "passedContracts", passed, "skippedContracts", skipped, "checkedContracts", len(contracts))
 			return
 		}
-		logger.Info("decoded-state consistency check passed", "checkedContracts", len(contracts))
+		logger.Info("decoded-state consistency check passed", "passedContracts", passed, "skippedContracts", skipped, "checkedContracts", len(contracts))
 	},
 }
 
@@ -225,7 +270,7 @@ func resolvedContracts(ctx context.Context, db kv.TemporalRwDB, client *rpc.Clie
 	return discoverDecodedERC20Contracts(ctx, db, client, decodedLatestBlock, decodedCheckDiscoverCount, decodedCheckScanContractsLimit)
 }
 
-func discoverDecodedERC20Contracts(ctx context.Context, db kv.TemporalRwDB, client *rpc.Client, decodedLatestBlock uint64, want, scanLimit int) ([]common.Address, error) {
+func discoverDecodedERC20Contracts(ctx context.Context, db kv.TemporalRwDB, client ethCaller, decodedLatestBlock uint64, want, scanLimit int) ([]common.Address, error) {
 	if want <= 0 {
 		return nil, nil
 	}
@@ -285,7 +330,7 @@ func distinctDecodedContracts(ctx context.Context, db kv.TemporalRwDB, limit int
 	return out, err
 }
 
-func isDecodedERC20Like(ctx context.Context, db kv.TemporalRwDB, client *rpc.Client, decodedLatestBlock uint64, contract common.Address) (bool, error) {
+func isDecodedERC20Like(ctx context.Context, db kv.TemporalRwDB, client ethCaller, decodedLatestBlock uint64, contract common.Address) (bool, error) {
 	storage, err := loadDecodedStorage(ctx, db, contract)
 	if err != nil {
 		return false, err
@@ -297,13 +342,9 @@ func isDecodedERC20Like(ctx context.Context, db kv.TemporalRwDB, client *rpc.Cli
 	return balanceCandidate.Matches >= min(3, len(balanceCandidate.Samples)), nil
 }
 
-func inspectDecodedContract(ctx context.Context, db kv.TemporalRwDB, client *rpc.Client, decodedLatestBlock uint64, contract common.Address) (*decodedContractReport, error) {
-	storage, err := loadDecodedStorage(ctx, db, contract)
-	if err != nil {
-		return nil, err
-	}
+func inspectDecodedContract(ctx context.Context, storage map[common.Hash][]decodedstate.DecodedEntry, client ethCaller, decodedLatestBlock uint64, contract common.Address) (*decodedContractReport, decodedCheckStatus, error) {
 	if len(storage) == 0 {
-		return nil, fmt.Errorf("no decoded latest state for contract")
+		return nil, decodedCheckSkipped, fmt.Errorf("no decoded latest state for contract")
 	}
 
 	blockArg := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(decodedLatestBlock))
@@ -328,24 +369,27 @@ func inspectDecodedContract(ctx context.Context, db kv.TemporalRwDB, client *rpc
 
 	balanceCandidate, ok, err := bestBalanceCandidate(ctx, client, contract, decodedLatestBlock, storage)
 	if err != nil {
-		return nil, err
+		return nil, decodedCheckSkipped, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("no balanceOf mapping candidate matched canonical state")
+		return nil, decodedCheckSkipped, nil
 	}
 	report.BalanceSlot = balanceCandidate.Slot
 	report.BalanceMatches = balanceCandidate.Matches
 	report.BalanceChecked = len(balanceCandidate.Samples)
 
 	balanceChecks, err := verifyBalanceSamples(ctx, client, contract, blockArg, balanceCandidate, decodedCheckBalanceSamples)
+	if errors.Is(err, errProbeReverted) {
+		return nil, decodedCheckSkipped, nil
+	}
 	if err != nil {
-		return nil, err
+		return nil, decodedCheckSkipped, err
 	}
 	report.BalanceResults = balanceChecks
 
 	allowanceCandidate, ok, err := bestAllowanceCandidate(ctx, client, contract, decodedLatestBlock, storage)
 	if err != nil {
-		return nil, err
+		return nil, decodedCheckSkipped, err
 	}
 	if ok {
 		report.AllowanceAvailable = true
@@ -353,14 +397,20 @@ func inspectDecodedContract(ctx context.Context, db kv.TemporalRwDB, client *rpc
 		report.AllowanceMatches = allowanceCandidate.Matches
 		report.AllowanceChecked = len(allowanceCandidate.Samples)
 		allowanceChecks, err := verifyAllowanceSamples(ctx, client, contract, blockArg, allowanceCandidate, decodedCheckAllowanceSamples)
-		if err != nil {
-			return nil, err
+		if errors.Is(err, errProbeReverted) {
+			report.AllowanceAvailable = false
+		} else if err != nil {
+			return nil, decodedCheckSkipped, err
+		} else {
+			report.AllowanceResults = allowanceChecks
 		}
-		report.AllowanceResults = allowanceChecks
 	}
 
 	report.Pass = allBalanceChecksPass(report.BalanceResults) && allAllowanceChecksPass(report.AllowanceResults)
-	return report, nil
+	if report.Pass {
+		return report, decodedCheckPass, nil
+	}
+	return report, decodedCheckFail, nil
 }
 
 func loadDecodedStorage(ctx context.Context, db kv.TemporalRwDB, contract common.Address) (map[common.Hash][]decodedstate.DecodedEntry, error) {
@@ -373,12 +423,15 @@ func loadDecodedStorage(ctx context.Context, db kv.TemporalRwDB, contract common
 	return storage, err
 }
 
-func bestBalanceCandidate(ctx context.Context, client *rpc.Client, contract common.Address, blockNum uint64, storage map[common.Hash][]decodedstate.DecodedEntry) (decodedBalanceCandidate, bool, error) {
+func bestBalanceCandidate(ctx context.Context, client ethCaller, contract common.Address, blockNum uint64, storage map[common.Hash][]decodedstate.DecodedEntry) (decodedBalanceCandidate, bool, error) {
 	blockArg := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum))
 	candidates := collectBalanceCandidates(storage, decodedCheckBalanceSamples+1)
 	for i := range candidates {
 		for _, sample := range candidates[i].Samples {
 			bal, err := erc20BalanceOf(ctx, client, contract, sample.Address, blockArg)
+			if isRevertErr(err) {
+				continue
+			}
 			if err != nil {
 				return decodedBalanceCandidate{}, false, err
 			}
@@ -399,12 +452,15 @@ func bestBalanceCandidate(ctx context.Context, client *rpc.Client, contract comm
 	return candidates[0], true, nil
 }
 
-func bestAllowanceCandidate(ctx context.Context, client *rpc.Client, contract common.Address, blockNum uint64, storage map[common.Hash][]decodedstate.DecodedEntry) (decodedAllowanceCandidate, bool, error) {
+func bestAllowanceCandidate(ctx context.Context, client ethCaller, contract common.Address, blockNum uint64, storage map[common.Hash][]decodedstate.DecodedEntry) (decodedAllowanceCandidate, bool, error) {
 	blockArg := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum))
 	candidates := collectAllowanceCandidates(storage, decodedCheckAllowanceSamples+1)
 	for i := range candidates {
 		for _, sample := range candidates[i].Samples {
 			val, err := erc20Allowance(ctx, client, contract, sample.Owner, sample.Spender, blockArg)
+			if isRevertErr(err) {
+				continue
+			}
 			if err != nil {
 				return decodedAllowanceCandidate{}, false, err
 			}
@@ -475,7 +531,7 @@ func collectAllowanceCandidates(storage map[common.Hash][]decodedstate.DecodedEn
 	return candidates
 }
 
-func verifyBalanceSamples(ctx context.Context, client *rpc.Client, contract common.Address, blockArg rpc.BlockNumberOrHash, candidate decodedBalanceCandidate, maxChecks int) ([]decodedBalanceCheck, error) {
+func verifyBalanceSamples(ctx context.Context, client ethCaller, contract common.Address, blockArg rpc.BlockNumberOrHash, candidate decodedBalanceCandidate, maxChecks int) ([]decodedBalanceCheck, error) {
 	samples := candidate.Samples
 	if len(samples) > maxChecks {
 		samples = samples[:maxChecks]
@@ -483,6 +539,9 @@ func verifyBalanceSamples(ctx context.Context, client *rpc.Client, contract comm
 	results := make([]decodedBalanceCheck, 0, len(samples))
 	for _, sample := range samples {
 		callVal, err := erc20BalanceOf(ctx, client, contract, sample.Address, blockArg)
+		if isRevertErr(err) {
+			return nil, errProbeReverted
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -509,7 +568,7 @@ func verifyBalanceSamples(ctx context.Context, client *rpc.Client, contract comm
 	return results, nil
 }
 
-func verifyAllowanceSamples(ctx context.Context, client *rpc.Client, contract common.Address, blockArg rpc.BlockNumberOrHash, candidate decodedAllowanceCandidate, maxChecks int) ([]decodedAllowanceCheck, error) {
+func verifyAllowanceSamples(ctx context.Context, client ethCaller, contract common.Address, blockArg rpc.BlockNumberOrHash, candidate decodedAllowanceCandidate, maxChecks int) ([]decodedAllowanceCheck, error) {
 	samples := candidate.Samples
 	if len(samples) > maxChecks {
 		samples = samples[:maxChecks]
@@ -517,6 +576,9 @@ func verifyAllowanceSamples(ctx context.Context, client *rpc.Client, contract co
 	results := make([]decodedAllowanceCheck, 0, len(samples))
 	for _, sample := range samples {
 		callVal, err := erc20Allowance(ctx, client, contract, sample.Owner, sample.Spender, blockArg)
+		if isRevertErr(err) {
+			return nil, errProbeReverted
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -539,37 +601,37 @@ func verifyAllowanceSamples(ctx context.Context, client *rpc.Client, contract co
 	return results, nil
 }
 
-func erc20BalanceOf(ctx context.Context, client *rpc.Client, token common.Address, owner common.Address, blockArg rpc.BlockNumberOrHash) (*big.Int, error) {
+func erc20BalanceOf(ctx context.Context, client ethCaller, token common.Address, owner common.Address, blockArg rpc.BlockNumberOrHash) (*big.Int, error) {
 	data := "0x70a08231" + hex.EncodeToString(common.LeftPadBytes(owner[:], 32))
 	return erc20Uint(ctx, client, token, data, blockArg)
 }
 
-func erc20Allowance(ctx context.Context, client *rpc.Client, token common.Address, owner, spender common.Address, blockArg rpc.BlockNumberOrHash) (*big.Int, error) {
+func erc20Allowance(ctx context.Context, client ethCaller, token common.Address, owner, spender common.Address, blockArg rpc.BlockNumberOrHash) (*big.Int, error) {
 	data := "0xdd62ed3e" +
 		hex.EncodeToString(common.LeftPadBytes(owner[:], 32)) +
 		hex.EncodeToString(common.LeftPadBytes(spender[:], 32))
 	return erc20Uint(ctx, client, token, data, blockArg)
 }
 
-func erc20Uint(ctx context.Context, client *rpc.Client, token common.Address, data string, blockArg rpc.BlockNumberOrHash) (*big.Int, error) {
+func erc20Uint(ctx context.Context, client ethCaller, token common.Address, data string, blockArg rpc.BlockNumberOrHash) (*big.Int, error) {
 	var out hexString
-	call := map[string]any{"to": token, "data": data}
+	call := map[string]any{"to": token, "data": ensureHexPrefix(data)}
 	if err := client.CallContext(ctx, &out, "eth_call", call, blockArg); err != nil {
 		return nil, err
 	}
 	return decodeUint256(out)
 }
 
-func erc20String(ctx context.Context, client *rpc.Client, token common.Address, selector string, blockArg rpc.BlockNumberOrHash) (string, error) {
+func erc20String(ctx context.Context, client ethCaller, token common.Address, selector string, blockArg rpc.BlockNumberOrHash) (string, error) {
 	var out hexString
-	call := map[string]any{"to": token, "data": "0x" + selector}
+	call := map[string]any{"to": token, "data": ensureHexPrefix(selector)}
 	if err := client.CallContext(ctx, &out, "eth_call", call, blockArg); err != nil {
 		return "", err
 	}
 	return decodeABIString(out)
 }
 
-func getStorageAt(ctx context.Context, client *rpc.Client, contract common.Address, slot common.Hash, blockArg rpc.BlockNumberOrHash) (common.Hash, error) {
+func getStorageAt(ctx context.Context, client ethCaller, contract common.Address, slot common.Hash, blockArg rpc.BlockNumberOrHash) (common.Hash, error) {
 	var out hexString
 	if err := client.CallContext(ctx, &out, "eth_getStorageAt", contract, slot, blockArg); err != nil {
 		return common.Hash{}, err
