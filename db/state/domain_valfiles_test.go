@@ -103,7 +103,7 @@ func TestValFiles_SealedItemVisibleAndRetirable(t *testing.T) {
 	m := newDomainValFiles(kv.CommitmentDomain, dir, "commitment", "v1.0", 256, 0, false, 16, 32, log.New())
 
 	bigVal := bytes.Repeat([]byte{0x7a}, 1024)
-	payload, err := m.encode(0, []byte("k"), bigVal)
+	payload, err := m.encodeAppend(nil, 0, []byte("k"), bigVal)
 	require.NoError(t, err)
 	require.NoError(t, m.sync())
 	require.NoError(t, m.ensureFilesItems()) // publish the per-step FilesItem
@@ -140,7 +140,7 @@ func TestValFiles_OpenFolderRecovery(t *testing.T) {
 	m := newDomainValFiles(kv.CommitmentDomain, dir, "commitment", "v1.0", 256, 0, false, 16, 32, log.New())
 	payloads := map[kv.Step][]byte{}
 	for _, s := range []kv.Step{0, 1, 2} {
-		p, err := m.encode(s, []byte("k"), big)
+		p, err := m.encodeAppend(nil, s, []byte("k"), big)
 		require.NoError(t, err)
 		payloads[s] = p
 	}
