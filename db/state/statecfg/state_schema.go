@@ -187,7 +187,15 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+// ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
+// (commitment.ModeParallel + VariantParallelHexPatricia). Default false.
+var ExperimentalParallelCommitment = false
+
+// ExperimentalStreamingCommitment toggles the StreamingCommitter trie path
+// (commitment.ModeParallel + VariantStreamingHexPatricia), which overlaps
+// commitment folding with execution. Default false. Takes precedence over
+// ExperimentalParallelCommitment.
+var ExperimentalStreamingCommitment = false
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{

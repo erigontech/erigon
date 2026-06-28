@@ -173,7 +173,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 	}
 
-	valWithStep := dataWithTxNum{data: val, txNum: txNum}
+	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
+	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
+	valWithStep := dataWithTxNum{data: common.Copy(val), txNum: txNum}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {

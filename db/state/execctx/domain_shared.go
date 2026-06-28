@@ -132,14 +132,20 @@ type SharedDomains struct {
 }
 
 // PickTrieVariant returns the commitment trie variant selected by the
-// process-wide statecfg.ExperimentalConcurrentCommitment flag. Callers that
+// process-wide statecfg experimental-commitment flags. Callers that
 // build a commitment.TrieConfig inline (e.g. short-lived RPC/builder/integrity
-// SharedDomains) should use this so the flag is honored consistently across
+// SharedDomains) should use this so the flags are honored consistently across
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
-	if statecfg.ExperimentalConcurrentCommitment {
-		return commitment.VariantConcurrentHexPatricia
+	switch {
+	// Selecting more than one experimental-commitment flag is a misconfiguration;
+	// they are alternative paths. Streaming overlaps folding with execution, so it
+	// wins over parallel.
+	case statecfg.ExperimentalStreamingCommitment:
+		return commitment.VariantStreamingHexPatricia
+	case statecfg.ExperimentalParallelCommitment:
+		return commitment.VariantParallelHexPatricia
 	}
 	return commitment.VariantHexPatriciaTrie
 }
