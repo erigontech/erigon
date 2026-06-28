@@ -1436,14 +1436,15 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 					return err
 				}
 			}
-			putVal := value
+			unwindBuf = append(unwindBuf[:0], unwindStepBytes...)
 			if dt.d.valFiles != nil { // restored value must use the same inline/handle encoding
-				putVal, err = dt.d.valFiles.encode(kv.Step(unwindStep), fullKey, value)
+				unwindBuf, err = dt.d.valFiles.encodeAppend(unwindBuf, kv.Step(unwindStep), fullKey, value)
 				if err != nil {
 					return err
 				}
+			} else {
+				unwindBuf = append(unwindBuf, value...)
 			}
-			unwindBuf = append(append(unwindBuf[:0], unwindStepBytes...), putVal...)
 			if err := valsCursor.Put(fullKey, unwindBuf); err != nil {
 				return err
 			}
