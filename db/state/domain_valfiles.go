@@ -56,12 +56,6 @@ type domainValFiles struct {
 	writers map[kv.Step]*valfile.Writer
 	items   map[kv.Step]*FilesItem // per-step .cvl reader FilesItems
 
-	// Single-slot writer cache for the active append step, avoiding a mu lock per
-	// key. Touched only by the (single-threaded) flush goroutine; the active step
-	// is never the one being retired, so the cached writer can't be closed under it.
-	hotStep   kv.Step
-	hotWriter *valfile.Writer
-
 	statsMu sync.Mutex
 	stats   map[kv.Step]map[string]*cvlKeyStat // .cvl repetition debug (commitment only)
 }
@@ -210,13 +204,9 @@ func (m *domainValFiles) encodeAppend(dst []byte, step kv.Step, key, v []byte) (
 	if smallValue || hotKey {
 		return valfile.EncodeInline(dst, v), nil
 	}
-	w := m.hotWriter
-	if w == nil || m.hotStep != step {
-		var err error
-		if w, err = m.writer(step); err != nil {
-			return nil, err
-		}
-		m.hotStep, m.hotWriter = step, w
+	w, err := m.writer(step)
+	if err != nil {
+		return nil, err
 	}
 	h, err := w.Append(v)
 	if err != nil {
