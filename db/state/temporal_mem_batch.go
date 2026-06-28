@@ -876,7 +876,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		}
 		w.Close()
 	}
-	if total := time.Since(flushAllStart); total > 100*time.Millisecond {
+	if total := time.Since(flushAllStart); total > 10*time.Millisecond {
 		aggTx.d[kv.AccountsDomain].d.logger.Warn("[dbg] flush", "domain", domainTime, "history", histTime, "ii", iiTime, "total", total)
 	}
 	return nil
