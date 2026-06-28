@@ -51,11 +51,15 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 	defer dbTx.Rollback()
 
-	cc, err := api.chainConfig(ctx, dbTx)
+	// Use the overlay so ReadCurrentHeader and the gas oracle see the latest
+	// in-flight block (which may not yet be committed to MDBX).
+	overlayTx := api.filters.WithTemporalOverlay(dbTx)
+
+	cc, err := api.chainConfig(ctx, overlayTx)
 	if err != nil {
 		return nil, err
 	}
-	head := rawdb.ReadCurrentHeader(dbTx)
+	head := rawdb.ReadCurrentHeader(overlayTx)
 	if head == nil {
 		return nil, errors.New("missing current header")
 	}
@@ -102,7 +106,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		}
 	}
 
-	if err := api.fillFeeDefaults(ctx, &args, head, dbTx); err != nil {
+	if err := api.fillFeeDefaults(ctx, &args, head, overlayTx); err != nil {
 		return nil, err
 	}
 
