@@ -827,7 +827,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		}
 		histTime += w.lastFlushHist
 		domainTime += w.lastFlushVals + w.lastFlushCvl
-		if w.lastFlushKeys > 1_000 {
+		if w.lastFlushKeys > 1_000 && w.lastFlushVals > 10*time.Millisecond {
 			valsTbl, _ := tx.BucketSize(aggTx.d[di].d.ValuesTable)
 			histTbl, _ := tx.BucketSize(aggTx.d[di].d.History.ValuesTable)
 			var keysPerSec uint64
