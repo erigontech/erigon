@@ -25,11 +25,16 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/valfile"
 )
+
+// dbgValFileStats gates the per-key .cvl distribution stats (fnv1a + per-key map);
+// off by default so perf runs don't pay for debug instrumentation in Flush.
+var dbgValFileStats = dbg.EnvBool("COMMITMENT_VALFILE_STATS", false)
 
 // domainValFiles is the write-side owner of a domain's per-step external
 // value-files (.cvl): append writers plus reader FilesItems surfaced into
@@ -206,7 +211,7 @@ func (m *domainValFiles) encode(step kv.Step, key, v []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if m.name == kv.CommitmentDomain {
+	if dbgValFileStats && m.name == kv.CommitmentDomain {
 		m.recordStat(step, key, v)
 	}
 	return valfile.EncodeExternal(nil, h), nil
@@ -311,7 +316,7 @@ func (m *domainValFiles) getHandle(step kv.Step, h valfile.Handle, dst []byte) (
 func (m *domainValFiles) retire(step kv.Step) *FilesItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.name == kv.CommitmentDomain && m.logger != nil {
+	if dbgValFileStats && m.name == kv.CommitmentDomain && m.logger != nil {
 		m.reportStats(step)
 	}
 	if w := m.writers[step]; w != nil {
