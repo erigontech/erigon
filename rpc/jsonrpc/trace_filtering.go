@@ -20,10 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
@@ -42,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -66,6 +66,7 @@ type withdrawalBalanceDiff struct {
 	address common.Address
 	prev    uint256.Int
 	amount  uint256.Int
+	existed bool
 }
 
 // Transaction implements trace_transaction
@@ -193,6 +194,22 @@ func rewardKindToString(kind protocolrules.RewardKind) string {
 	}
 }
 
+func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Address, rewardType string, amount *big.Int) ParityTrace {
+	var tr ParityTrace
+	rewardAction := &RewardTraceAction{}
+	rewardAction.Author = author
+	rewardAction.RewardType = rewardType
+	rewardAction.Value.ToInt().Set(amount)
+	bh := blockHash
+	tr.Action = rewardAction
+	tr.BlockHash = &bh
+	tr.BlockNumber = new(uint64)
+	*tr.BlockNumber = blockNum
+	tr.Type = rewardTraceType
+	tr.TraceAddress = []int{}
+	return tr
+}
+
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
 	if gasBailOut == nil {
@@ -255,37 +272,16 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 
+	blockHash := block.Hash()
+	blockNum = block.NumberU64()
 	for _, r := range rewards {
-		var tr ParityTrace
-		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = r.Beneficiary.Value()
-		rewardAction.RewardType = rewardKindToString(r.Kind)
-		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
-		tr.Action = rewardAction
-		blockHash := block.Hash()
-		tr.BlockHash = &common.Hash{}
-		copy(tr.BlockHash[:], blockHash[:])
-		tr.BlockNumber = new(uint64)
-		*tr.BlockNumber = block.NumberU64()
-		tr.Type = rewardTraceType
-		tr.TraceAddress = []int{}
-		out = append(out, tr)
+		out = append(out, newRewardTrace(blockHash, blockNum, r.Beneficiary.Value(), rewardKindToString(r.Kind), r.Amount.ToBig()))
 	}
 
-	for _, wd := range wdiffs {
-		var tr ParityTrace
-		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = wd.address
-		rewardAction.RewardType = rewardTypeWithdrawal
-		rewardAction.Value.ToInt().Set(wd.amount.ToBig())
-		tr.Action = rewardAction
-		bh := block.Hash()
-		tr.BlockHash = &bh
-		tr.BlockNumber = new(uint64)
-		*tr.BlockNumber = block.NumberU64()
-		tr.Type = rewardTraceType
-		tr.TraceAddress = []int{}
-		out = append(out, tr)
+	if traceConfig.IncludeWithdrawalsEnabled() {
+		for _, wd := range wdiffs {
+			out = append(out, newRewardTrace(blockHash, blockNum, wd.address, rewardTypeWithdrawal, wd.amount.ToBig()))
+		}
 	}
 
 	return out, err
@@ -533,18 +529,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				nSeen++
-				var tr ParityTrace
-				var rewardAction = &RewardTraceAction{}
-				rewardAction.Author = lastHeader.Coinbase
-				rewardAction.RewardType = rewardTypeBlock
-				rewardAction.Value.ToInt().Set(minerReward.ToBig())
-				tr.Action = rewardAction
-				tr.BlockHash = &common.Hash{}
-				copy(tr.BlockHash[:], lastBlockHash[:])
-				tr.BlockNumber = new(uint64)
-				*tr.BlockNumber = blockNum
-				tr.Type = rewardTraceType
-				tr.TraceAddress = []int{}
+				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward.ToBig())
 				b, err := json.Marshal(tr)
 				if err != nil {
 					if first {
@@ -573,18 +558,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
 						nSeen++
-						var tr ParityTrace
-						rewardAction := &RewardTraceAction{}
-						rewardAction.Author = uncle.Coinbase
-						rewardAction.RewardType = rewardTypeUncle
-						rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-						tr.Action = rewardAction
-						tr.BlockHash = &common.Hash{}
-						copy(tr.BlockHash[:], lastBlockHash[:])
-						tr.BlockNumber = new(uint64)
-						*tr.BlockNumber = blockNum
-						tr.Type = rewardTraceType
-						tr.TraceAddress = []int{}
+						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i].ToBig())
 						b, err := json.Marshal(tr)
 						if err != nil {
 							if first {
@@ -950,15 +924,19 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, nil, cmErr
 	}
 
-	// Collect balance diffs for beacon chain withdrawals (post-Shanghai).
-	// prev is only read by callers that request stateDiff (sequential path); skip the
-	// GetBalance call for trace-only callers to avoid unnecessary state reads.
-	var wdiffs []withdrawalBalanceDiff
+	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
+	wdiffs := make([]withdrawalBalanceDiff, 0, len(block.Withdrawals()))
 	for _, w := range block.Withdrawals() {
 		var prev uint256.Int
+		var existed bool
 		if hasStateDiff {
+			addr := accounts.InternAddress(w.Address)
 			var err error
-			prev, err = ibs.GetBalance(accounts.InternAddress(w.Address))
+			prev, err = ibs.GetBalance(addr)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			existed, err = ibs.Exist(addr)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -969,6 +947,7 @@ func (api *TraceAPIImpl) callBlock(
 			address: w.Address,
 			prev:    prev,
 			amount:  amountWei,
+			existed: existed,
 		})
 	}
 

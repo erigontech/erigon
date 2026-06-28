@@ -1051,28 +1051,48 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		result[i] = tr
 	}
 
-	// Append a synthetic entry for beacon chain withdrawal balance diffs.
-	// Multiple withdrawals to the same address are collapsed into a single entry
-	// whose From is the pre-first-withdrawal balance and To accumulates all amounts.
-	if traceTypeStateDiff && len(wdiffs) > 0 {
+	// Withdrawals are surfaced only via stateDiff; trace_block emits them as reward traces
+	// in its flat output, but this per-tx result structure has no block-level slot for them.
+	if traceTypeStateDiff && traceConfig.IncludeWithdrawalsEnabled() && len(wdiffs) > 0 {
 		sdMap := make(map[accounts.Address]*StateDiffAccount, len(wdiffs))
 		for _, wd := range wdiffs {
 			addr := accounts.InternAddress(wd.address)
 			if entry, ok := sdMap[addr]; ok {
-				bal := entry.Balance.(*StateDiffBalance)
-				cur, _ := uint256.FromBig(bal.To.ToInt())
-				cur.Add(cur, &wd.amount)
-				bal.To = (*hexutil.Big)(cur.ToBig())
+				if wd.existed {
+					bal := entry.Balance.(map[string]*StateDiffBalance)["*"]
+					var cur uint256.Int
+					cur.SetFromBig(bal.To.ToInt())
+					cur.Add(&cur, &wd.amount)
+					bal.To = (*hexutil.Big)(cur.ToBig())
+				} else {
+					balMap := entry.Balance.(map[string]*hexutil.Big)
+					var cur uint256.Int
+					cur.SetFromBig(balMap["+"].ToInt())
+					cur.Add(&cur, &wd.amount)
+					balMap["+"] = (*hexutil.Big)(cur.ToBig())
+				}
 			} else {
-				to := new(uint256.Int).Add(&wd.prev, &wd.amount)
-				sdMap[addr] = &StateDiffAccount{
-					Balance: &StateDiffBalance{
-						From: (*hexutil.Big)(wd.prev.ToBig()),
-						To:   (*hexutil.Big)(to.ToBig()),
-					},
-					Code:    "=",
-					Nonce:   "=",
-					Storage: map[common.Hash]map[string]any{},
+				var to uint256.Int
+				to.Add(&wd.prev, &wd.amount)
+				if wd.existed {
+					sdMap[addr] = &StateDiffAccount{
+						Balance: map[string]*StateDiffBalance{
+							"*": {
+								From: (*hexutil.Big)(wd.prev.ToBig()),
+								To:   (*hexutil.Big)(to.ToBig()),
+							},
+						},
+						Code:    "=",
+						Nonce:   "=",
+						Storage: map[common.Hash]map[string]any{},
+					}
+				} else {
+					sdMap[addr] = &StateDiffAccount{
+						Balance: map[string]*hexutil.Big{"+": (*hexutil.Big)(to.ToBig())},
+						Code:    map[string]hexutil.Bytes{"+": {}},
+						Nonce:   map[string]hexutil.Uint64{"+": 0},
+						Storage: map[common.Hash]map[string]any{},
+					}
 				}
 			}
 		}
