@@ -774,15 +774,15 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr netip.AddrPort, p v5wire.Packet) bool {
 	ac := t.activeCallByNode[fromID]
 	if ac == nil || !bytes.Equal(p.RequestID(), ac.reqid) {
-		t.log.Trace(fmt.Sprintf("[p2p] Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace("[p2p] Unsolicited/late response", "type", p.Name(), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if fromAddr != ac.addr {
-		t.log.Trace(fmt.Sprintf("[p2p] %s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace("[p2p] Response from wrong endpoint", "type", p.Name(), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Trace(fmt.Sprintf("[p2p] Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace("[p2p] Wrong discv5 response type", "type", p.Name(), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)

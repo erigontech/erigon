@@ -14,16 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package beacontest
 
-// stripLeadingChildExt drops the leading extension nibble already implied by the branch column the cell lands in.
-func stripLeadingChildExt(c *cell) {
-	if c.hashedExtLen > 0 {
-		c.hashedExtLen--
-		copy(c.hashedExtension[:], c.hashedExtension[1:])
-	}
-	if c.extLen > 0 {
-		c.extLen--
-		copy(c.extension[:], c.extension[1:])
-	}
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestComparisonExprList(t *testing.T) {
+	// Singular expr must be evaluated, not silently dropped.
+	require.Equal(t, []string{"actual_code == 400"}, (&Comparison{Expr: "actual_code == 400"}).exprList())
+	// Plural exprs are used as-is.
+	require.Equal(t, []string{"a", "b"}, (&Comparison{Exprs: []string{"a", "b"}}).exprList())
+	// Both forms combine.
+	require.Equal(t, []string{"a", "actual_code == 400"}, (&Comparison{Exprs: []string{"a"}, Expr: "actual_code == 400"}).exprList())
+	// Neither falls back to the defaults.
+	require.Equal(t, []string{"actual_code == 200", "actual == expect"}, (&Comparison{}).exprList())
 }
