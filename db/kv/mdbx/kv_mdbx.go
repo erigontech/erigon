@@ -83,6 +83,8 @@ type MdbxOpts struct {
 
 	inMem, autoRemove bool
 
+	recovered bool // set on the retry after an Accede open failure triggered a rw-recovery reopen
+
 	// roTxsLimiter - without this limiter - it's possible to reach 10K threads (if 10K rotx will wait for IO) - and golang will crush https://groups.google.com/g/golang-dev/c/igMoDruWNwo
 	// most of db must set explicit `roTxsLimiter <= 9K`.
 	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
@@ -222,7 +224,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		return nil, err
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && env != nil {
 			env.Close()
 		}
 	}()
@@ -323,6 +325,16 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
+		if opts.HasFlag(mdbx.Accede) && exists && !opts.recovered {
+			env.Close()
+			env = nil
+			opts.log.Info("[db] accede open failed - reopening rw to recover from SafeNoSync shutdown", "label", opts.label, "err", err)
+			if recErr := opts.recoverBySafeReopen(); recErr != nil {
+				opts.log.Debug("[db] rw-recovery reopen failed, retrying accede anyway", "label", opts.label, "err", recErr)
+			}
+			opts.recovered = true
+			return opts.Open(ctx)
+		}
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
 	}
 
@@ -445,6 +457,28 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
 	}
 	return db
+}
+
+// recoverBySafeReopen opens the db rw once and closes it so mdbx can roll back a
+// torn transaction left by a SafeNoSync shutdown - which Accede/Readonly opens can't.
+func (opts MdbxOpts) recoverBySafeReopen() error {
+	exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	env, err := mdbx.NewEnv(mdbx.Default)
+	if err != nil {
+		return err
+	}
+	defer env.Close()
+	if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
+		return err
+	}
+	return env.Open(opts.path, opts.flags&^mdbx.Accede&^mdbx.Readonly, 0664)
 }
 
 type MdbxKV struct {
