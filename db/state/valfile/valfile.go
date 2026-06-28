@@ -202,7 +202,7 @@ func (r *Reader) Close() error {
 // Erigon doesn't create tons of bufio readers/writers, but it has tons of
 // parallel small unit-tests which each create many small files and bufio
 // readers/writers — pooling avoids the allocation pressure in that scenario.
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(1024*datasize.KB)) }}
 
 func getBufioWriter(w io.Writer) *bufio.Writer {
 	bw := bufioWriterPool.Get().(*bufio.Writer)

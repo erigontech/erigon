@@ -805,11 +805,15 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
+	flushAllStart := time.Now()
+	var domainTime, histTime, iiTime time.Duration
 	for _, ws := range sd.pastDomainWriters {
 		for i := len(ws) - 1; i >= 0; i-- {
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
+			histTime += ws[i].lastFlushHist
+			domainTime += ws[i].lastFlushVals + ws[i].lastFlushCvl
 			ws[i].Close()
 		}
 	}
@@ -821,6 +825,8 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		histTime += w.lastFlushHist
+		domainTime += w.lastFlushVals + w.lastFlushCvl
 		if kv.Domain(di) == kv.CommitmentDomain && w.lastFlushKeys > 1_000 {
 			valsTbl, _ := tx.BucketSize(aggTx.d[di].d.ValuesTable)
 			histTbl, _ := tx.BucketSize(aggTx.d[di].d.History.ValuesTable)
@@ -836,6 +842,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
+	iiStart := time.Now()
 	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
 		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
 			return err
@@ -851,6 +858,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		}
 		w.close()
 	}
+	iiTime = time.Since(iiStart)
 	for _, ws := range sd.pastForkableWriters {
 		for i := len(ws) - 1; i >= 0; i-- {
 			if err := ws[i].Flush(ctx, tx); err != nil {
@@ -867,6 +875,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.Close()
+	}
+	if total := time.Since(flushAllStart); total > 100*time.Millisecond {
+		aggTx.d[kv.AccountsDomain].d.logger.Warn("[dbg] flush", "domain", domainTime, "history", histTime, "ii", iiTime, "total", total)
 	}
 	return nil
 }
