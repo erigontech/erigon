@@ -657,11 +657,18 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-// Flush writes the batch to tx without committing and does not refresh the BranchCache.
+// Flush writes the batch to tx without committing.
+// Commitment-domain entries flushed are invalidated in the BranchCache so that
+// subsequent reads go to the DB instead of serving stale cached values.
 //
 // Deprecated: prefer Commit (flush+commit+cache refresh, atomic). Use Flush only when the caller must own the commit or flushes a tx it never commits.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if sd.branchCache != nil {
+		return sd.flushMemWithCallback(ctx, tx, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+			sd.branchCache.Invalidate(k)
+		})
+	}
 	return sd.flushMem(ctx, tx)
 }
 
