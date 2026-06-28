@@ -349,13 +349,28 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	if bgSync {
 		// Drive checkpoints off the hot path: disable threshold/time-based auto-sync
 		// so writer commits stay cheap, and let the background goroutine force syncs.
-		if err = env.SetSyncPeriod(0); err != nil {
+		if err = env.SetSyncPeriod(500 * time.Millisecond); err != nil {
 			return nil, err
 		}
-		if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
+		//if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
+		//	return nil, err
+		//}
+		if err = env.SetSyncBytes(128 * 1024 * 1024); err != nil {
 			return nil, err
 		}
 	}
+
+	//if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
+	//	if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
+	//		return nil, err
+	//	}
+	//}
+	//
+	//if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
+	//	if err = env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
+	//		return nil, err
+	//	}
+	//}
 
 	if opts.roTxsLimiter == nil {
 		// Golang panics over 10K threads.
