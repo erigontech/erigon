@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -984,9 +983,6 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if evm.readOnly {
-		return pc, nil, ErrWriteProtection
-	}
 	var (
 		value  = scope.Stack.pop()
 		offset = scope.Stack.pop()
@@ -1009,9 +1005,6 @@ func stCreate(_ uint64, scope *CallContext) string {
 }
 
 func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if evm.readOnly {
-		return pc, nil, ErrWriteProtection
-	}
 	var (
 		endowment    = scope.Stack.pop()
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
@@ -1023,15 +1016,6 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
-	if evm.ChainRules().IsAmsterdam {
-		// EIP-8037: charge state gas for account creation after the static-context
-		// check so that it is not consumed on early failures where no state is
-		// created (per execution-specs#2608).
-		if !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
-			return pc, nil, ErrOutOfGas
-		}
-	}
-
 	gas := scope.Gas()
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular -= gas.Regular / 64
