@@ -349,18 +349,18 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	if bgSync {
 		// Drive checkpoints off the hot path: disable threshold/time-based auto-sync
 		// so writer commits stay cheap, and let the background goroutine force syncs.
-		//if err = env.SetSyncPeriod(500 * time.Millisecond); err != nil {
-		//	return nil, err
-		//}
-		//if err = env.SetSyncBytes(128 * 1024 * 1024); err != nil {
-		//	return nil, err
-		//}
-		if err = env.SetSyncPeriod(time.Second); err != nil {
+		if err = env.SetSyncPeriod(500 * time.Millisecond); err != nil {
 			return nil, err
 		}
-		if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
+		if err = env.SetSyncBytes(128 * 1024 * 1024); err != nil {
 			return nil, err
 		}
+		//if err = env.SetSyncPeriod(time.Second); err != nil {
+		//	return nil, err
+		//}
+		//if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
+		//	return nil, err
+		//}
 	}
 
 	//if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
@@ -730,6 +730,7 @@ func backgroundSyncLoop() {
 }
 
 func (db *MdbxKV) backgroundSyncOnce() {
+	return
 	// env.Sync -> mdbx_env_sync_ex. Flush the environment data buffers to disk.
 	//
 	// Unless the environment was opened with no-sync flags (MDBX_NOMETASYNC,
