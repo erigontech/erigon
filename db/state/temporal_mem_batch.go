@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -815,8 +816,18 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if w == nil {
 			continue
 		}
+		flushStart := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
+		}
+		if w.lastFlushKeys > 1_000 && w.lastFlushVals > 100*time.Millisecond {
+			valsTbl, _ := tx.BucketSize(aggTx.d[di].d.ValuesTable)
+			histTbl, _ := tx.BucketSize(aggTx.d[di].d.History.ValuesTable)
+			keysPerSec := uint64(float64(w.lastFlushKeys) / w.lastFlushVals.Seconds())
+			aggTx.d[di].d.logger.Warn("[dbg] domain flush", "domain", kv.Domain(di).String(),
+				"entries", w.lastFlushEntries, "keys", w.lastFlushKeys, "keys/s", common.PrettyCounter(keysPerSec),
+				"hist", w.lastFlushHist, "vals", w.lastFlushVals, "total", time.Since(flushStart),
+				"valsTable", common.ByteCount(valsTbl), "histTable", common.ByteCount(histTbl))
 		}
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()

@@ -420,6 +420,11 @@ type DomainBufferedWriter struct {
 	aux2      []byte  // auxilary buffer for step + val
 	diff      *kv.DomainDiff
 
+	lastFlushHist    time.Duration
+	lastFlushVals    time.Duration
+	lastFlushEntries uint64
+	lastFlushKeys    uint64
+
 	h *historyBufferedWriter
 }
 
@@ -434,17 +439,23 @@ func (w *DomainBufferedWriter) Close() {
 }
 
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	w.lastFlushHist, w.lastFlushVals = 0, 0
+	w.lastFlushEntries, w.lastFlushKeys = 0, 0
 	if w.discard {
 		return nil
 	}
+	histStart := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	w.lastFlushHist = time.Since(histStart)
 
 	if w.largeVals {
+		valsStart := time.Now()
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
+		w.lastFlushVals = time.Since(valsStart)
 		w.Close()
 		return nil
 	}
@@ -454,7 +465,16 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	valsStart := time.Now()
+	var prevKeyBuf []byte
+	hasPrevKey := false
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		w.lastFlushEntries++
+		if !hasPrevKey || !bytes.Equal(k, prevKeyBuf) {
+			w.lastFlushKeys++
+			prevKeyBuf = append(prevKeyBuf[:0], k...)
+			hasPrevKey = true
+		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -466,6 +486,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
+	w.lastFlushVals = time.Since(valsStart)
 	w.Close()
 
 	return nil

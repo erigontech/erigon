@@ -345,14 +345,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		return nil, err
 	}
 
-	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
+	bgSync := opts.HasFlag(mdbx.SafeNoSync)
+	if bgSync {
+		// Drive checkpoints off the hot path: disable threshold/time-based auto-sync
+		// so writer commits stay cheap, and let the background goroutine force syncs.
+		if err = env.SetSyncPeriod(0); err != nil {
 			return nil, err
 		}
-	}
-
-	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
-		if err = env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
+		if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
 			return nil, err
 		}
 	}
@@ -435,6 +435,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
 		}
+	}
+	if bgSync {
+		registerBackgroundSync(db)
 	}
 	return db, nil
 }
@@ -659,12 +662,94 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	}
 }
 
+const bgSyncPeriod = 500 * time.Millisecond
+
+// One process-wide goroutine flushes all registered (SafeNoSync) databases, so
+// adding a new db doesn't add a goroutine. The loop copies the registry under
+// the lock then syncs without it (a sync holds the db write lock and is slow).
+// Registration is safe across Close: backgroundSyncOnce opens a tracked tx, so
+// a db being closed is skipped.
+var (
+	bgSyncMu      sync.Mutex
+	bgSyncDBs     []*MdbxKV
+	bgSyncStarted bool
+)
+
+func registerBackgroundSync(db *MdbxKV) {
+	bgSyncMu.Lock()
+	defer bgSyncMu.Unlock()
+	bgSyncDBs = append(bgSyncDBs, db)
+	if bgSyncStarted {
+		return
+	}
+	bgSyncStarted = true
+	go backgroundSyncLoop()
+}
+
+func unregisterBackgroundSync(db *MdbxKV) {
+	bgSyncMu.Lock()
+	defer bgSyncMu.Unlock()
+	for i, d := range bgSyncDBs {
+		if d == db {
+			bgSyncDBs = append(bgSyncDBs[:i], bgSyncDBs[i+1:]...)
+			return
+		}
+	}
+}
+
+func backgroundSyncLoop() {
+	t := time.NewTicker(bgSyncPeriod)
+	defer t.Stop()
+	var dbs []*MdbxKV
+	for range t.C {
+		bgSyncMu.Lock()
+		dbs = append(dbs[:0], bgSyncDBs...)
+		bgSyncMu.Unlock()
+		for _, db := range dbs {
+			db.backgroundSyncOnce()
+		}
+	}
+}
+
+func (db *MdbxKV) backgroundSyncOnce() {
+	// env.Sync -> mdbx_env_sync_ex. Flush the environment data buffers to disk.
+	//
+	// Unless the environment was opened with no-sync flags (MDBX_NOMETASYNC,
+	// MDBX_SAFE_NOSYNC and MDBX_UTTERLY_NOSYNC), then data is always written and
+	// flushed to disk when mdbx_txn_commit() is called. Otherwise mdbx_env_sync()
+	// may be called to manually write and flush unsynced data to disk.
+	//
+	// Besides, mdbx_env_sync_ex() with argument force=false may be used to provide
+	// polling mode for lazy/asynchronous sync in conjunction with
+	// mdbx_env_set_syncbytes() and/or mdbx_env_set_syncperiod().
+	//
+	// This call is not valid if the environment was opened with MDBX_RDONLY.
+	//
+	//	force    If non-zero, force a flush. Otherwise, if force is zero, then will
+	//	         run in polling mode, i.e. it will check the thresholds that were set
+	//	         mdbx_env_set_syncbytes() and/or mdbx_env_set_syncperiod() and perform
+	//	         flush if at least one of the thresholds is reached.
+	//	nonblock Don't wait if write transaction is running by other thread.
+	//
+	// Returns MDBX_RESULT_TRUE when there was no data pending for flush to disk, 0
+	// otherwise. MDBX_BUSY means the environment is used by other thread and
+	// nonblock=true.
+	t := time.Now()
+	if err := db.env.Sync(true, false); err != nil {
+		db.log.Warn("[db] background sync", "label", db.opts.label, "err", err)
+	}
+	if took := time.Since(t); took > 10*time.Millisecond {
+		db.log.Warn("[db] background sync", "label", db.opts.label, "took", took)
+	}
+}
+
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
+	unregisterBackgroundSync(db)
 	db.waitTxsAllDoneOnClose()
 
 	db.env.Close()
