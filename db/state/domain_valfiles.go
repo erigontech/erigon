@@ -56,6 +56,12 @@ type domainValFiles struct {
 	writers map[kv.Step]*valfile.Writer
 	items   map[kv.Step]*FilesItem // per-step .cvl reader FilesItems
 
+	// Single-slot writer cache for the active append step, avoiding a mu lock per
+	// key. Touched only by the (single-threaded) flush goroutine; the active step
+	// is never the one being retired, so the cached writer can't be closed under it.
+	hotStep   kv.Step
+	hotWriter *valfile.Writer
+
 	statsMu sync.Mutex
 	stats   map[kv.Step]map[string]*cvlKeyStat // .cvl repetition debug (commitment only)
 }
@@ -194,18 +200,23 @@ func (m *domainValFiles) filePath(step kv.Step) string {
 	return filepath.Join(m.dir, fmt.Sprintf("%s-%s.%d-%d.cvl", m.verStr, m.base, step, step+1))
 }
 
-// encode returns the MDBX payload for value v: inline when small or when the key
-// is short (hot top-of-trie), otherwise appended to the step's value-file and
-// replaced by a handle. Write path only.
-func (m *domainValFiles) encode(step kv.Step, key, v []byte) ([]byte, error) {
+// encodeAppend appends value v's MDBX payload to dst and returns the extended
+// slice: inline when small or when the key is short (hot top-of-trie), otherwise
+// the value is appended to the step's value-file and replaced by a handle. Write
+// path only; not safe for concurrent use.
+func (m *domainValFiles) encodeAppend(dst []byte, step kv.Step, key, v []byte) ([]byte, error) {
 	smallValue := len(v) < m.threshold
 	hotKey := len(key) <= m.minKeyLen // || (len(key) >= 33 && len(key) < 34)
 	if smallValue || hotKey {
-		return valfile.EncodeInline(nil, v), nil
+		return valfile.EncodeInline(dst, v), nil
 	}
-	w, err := m.writer(step)
-	if err != nil {
-		return nil, err
+	w := m.hotWriter
+	if w == nil || m.hotStep != step {
+		var err error
+		if w, err = m.writer(step); err != nil {
+			return nil, err
+		}
+		m.hotStep, m.hotWriter = step, w
 	}
 	h, err := w.Append(v)
 	if err != nil {
@@ -214,7 +225,7 @@ func (m *domainValFiles) encode(step kv.Step, key, v []byte) ([]byte, error) {
 	if dbgValFileStats && m.name == kv.CommitmentDomain {
 		m.recordStat(step, key, v)
 	}
-	return valfile.EncodeExternal(nil, h), nil
+	return valfile.EncodeExternal(dst, h), nil
 }
 
 func (m *domainValFiles) writer(step kv.Step) (*valfile.Writer, error) {

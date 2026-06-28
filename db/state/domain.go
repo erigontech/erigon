@@ -94,7 +94,6 @@ type Domain struct {
 	// External per-step value-files; non-nil only when ValueFileThreshold>0.
 	valFiles *domainValFiles
 
-
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
 }
@@ -513,11 +512,12 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 		if w.valFiles != nil { // replace value bytes with an inline/handle payload
 			step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-			payload, err := w.valFiles.encode(step, k, v[8:])
+			w.valBuf = append(w.valBuf[:0], v[:8]...)
+			nb, err := w.valFiles.encodeAppend(w.valBuf, step, k, v[8:])
 			if err != nil {
 				return err
 			}
-			w.valBuf = append(append(w.valBuf[:0], v[:8]...), payload...)
+			w.valBuf = nb
 			v = w.valBuf
 		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
