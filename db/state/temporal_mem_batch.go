@@ -31,10 +31,15 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 )
+
+// dbgWarmupBeforeFlush probes the page-residency hypothesis: warm the env into the
+// OS page cache before flushing so Put doesn't fault B-tree pages mid-write.
+var dbgWarmupBeforeFlush = dbg.EnvBool("COMMITMENT_WARMUP_BEFORE_FLUSH", false)
 
 type iodir int
 
@@ -805,6 +810,17 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
+	if dbgWarmupBeforeFlush {
+		warmStart := time.Now()
+		if wm, ok := tx.(interface{ WarmupDB(bool) error }); ok {
+			if err := wm.WarmupDB(false); err != nil {
+				return err
+			}
+		}
+		if d := time.Since(warmStart); d > 100*time.Millisecond {
+			aggTx.d[kv.AccountsDomain].d.logger.Warn("[dbg] warmup before flush", "took", d)
+		}
+	}
 	flushAllStart := time.Now()
 	var domainTime, histTime, iiTime time.Duration
 	for _, ws := range sd.pastDomainWriters {
