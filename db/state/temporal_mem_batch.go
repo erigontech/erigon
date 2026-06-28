@@ -812,14 +812,13 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 	aggTx := AggTx(tx)
 	if dbgWarmupBeforeFlush {
 		warmStart := time.Now()
-		if wm, ok := tx.(interface{ WarmupDB(bool) error }); ok {
+		wm, ok := tx.(interface{ WarmupDB(bool) error })
+		if ok {
 			if err := wm.WarmupDB(false); err != nil {
 				return err
 			}
 		}
-		if d := time.Since(warmStart); d > 100*time.Millisecond {
-			aggTx.d[kv.AccountsDomain].d.logger.Warn("[dbg] warmup before flush", "took", d)
-		}
+		aggTx.d[kv.AccountsDomain].d.logger.Warn("[dbg] warmup before flush", "ran", ok, "took", time.Since(warmStart))
 	}
 	flushAllStart := time.Now()
 	var domainTime, histTime, iiTime time.Duration
