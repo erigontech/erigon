@@ -312,9 +312,6 @@ func (m *domainValFiles) retire(step kv.Step) *FilesItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.name == kv.CommitmentDomain && m.logger != nil {
-		if fi, err := os.Stat(m.filePath(step)); err == nil {
-			m.logger.Warn("[dbg] .cvl retire (final size)", "step", step, "size", datasize.ByteSize(fi.Size()).HR())
-		}
 		m.reportStats(step)
 	}
 	if w := m.writers[step]; w != nil {
