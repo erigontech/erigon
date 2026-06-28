@@ -556,7 +556,11 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 
 	elFrozenBlocks := uint64(math.MaxUint64)
 	if b.engine != nil && b.engine.SupportInsertion() {
-		elFrozenBlocks = b.engine.FrozenBlocks(ctx)
+		fb, err := b.engine.FrozenBlocks(ctx)
+		if err != nil {
+			return fmt.Errorf("FrozenBlocks: %w", err)
+		}
+		elFrozenBlocks = fb
 	}
 
 	clFrozenBlocks := uint64(0)
@@ -575,7 +579,13 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 				clFrozenBlocks = b.sn.SegmentsMax()
 			}
 			if b.engine != nil && b.engine.SupportInsertion() {
-				elFrozenBlocks = b.engine.FrozenBlocks(ctx)
+				if fb, err := b.engine.FrozenBlocks(ctx); err == nil {
+					elFrozenBlocks = fb
+				} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				} else {
+					log.Debug("[backward-beacon-downloader] FrozenBlocks refresh failed, retaining last value", "err", err)
+				}
 			}
 		default:
 		}

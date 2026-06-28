@@ -279,3 +279,101 @@ func TestProvider_AbortUnwind_FSAndInventoryUnchanged(t *testing.T) {
 	require.ElementsMatch(t, allNames, listInventoryBlockNames(inv),
 		"AbortUnwind: Inventory unchanged — staged Inventory removals never ran")
 }
+
+// TestProvider_FinalizeUnwind_SweepRemovesNarrowStraddler pins the
+// iter-4-soak regression: when a mode-B unwind to toBlock has a wider
+// rebuilt straddler covering [0, newTo) AND a narrower pre-existing
+// straddler [From, To) with From <= toBlock < To (e.g. the original
+// 10k chunk under a previous mode-B's wide rebuilt file), the sweep
+// must remove the narrower file. The narrower file contains blocks
+// past the new tip — leaving it on disk strands the contiguous-tip
+// view and block-retire can't fill the gap.
+//
+// Predicate must be on fi.To > newTo, not fi.From > toBlock — the
+// latter skips straddlers whose From is below toBlock by definition.
+func TestProvider_FinalizeUnwind_SweepRemovesNarrowStraddler(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	inv := snapshot.NewInventory()
+
+	// Mirror the iter-4 soak layout: the rebuild has just produced
+	// `v1.1-003000-003041-headers.seg` (the canonical truncated file
+	// covering [3_000_000, 3_041_000)). On disk there's also:
+	//   - v1.1-003000-003010 ... 003030-003040 (4 narrow files fully
+	//     below newTo=3_041_000, must STAY — Inventory excludes them
+	//     when the wider file exists but they're harmless on disk)
+	//   - v1.1-003040-003050 (narrow straddler: From=3_040_000 ≤
+	//     toBlock=3_041_520, To=3_050_000 > newTo=3_041_000 — MUST
+	//     be swept because its post-newTo range is stale)
+	//   - v1.1-003050-003060 (entirely past newTo, must be swept —
+	//     the old `From > toBlock` predicate already caught this case)
+	allRanges := []struct{ from, to uint64 }{
+		{3_000_000, 3_041_000}, // the rebuild output (the new canonical tip — must STAY)
+		{3_000_000, 3_071_000}, // predecessor wide rebuild from iter 3 — explicit toRemoveStraddles
+		{3_000_000, 3_010_000}, // narrow, below newTo — STAYS
+		{3_010_000, 3_020_000}, // narrow, below newTo — STAYS
+		{3_020_000, 3_030_000}, // narrow, below newTo — STAYS
+		{3_030_000, 3_040_000}, // narrow, below newTo — STAYS
+		{3_040_000, 3_050_000}, // narrow straddler — MUST be swept (iter-4 bug)
+		{3_050_000, 3_060_000}, // entirely past — swept (was already swept by old predicate)
+	}
+	seedBlockFilesAndInventory(t, tmpDir, inv, allRanges)
+
+	p := &Provider{snapDir: tmpDir, Inventory: inv}
+
+	// Stage the predecessor wide-rebuild as the explicit
+	// toRemoveStraddles list — that's what rebuildBlockStraddles
+	// queues. The sweep then runs after the staged removals,
+	// catching narrower files the rebuild didn't pick.
+	toBlock := uint64(3_041_520)
+	stageNames := []string{
+		"v1.1-003000-003071-bodies.seg",
+		"v1.1-003000-003071-headers.seg",
+		"v1.1-003000-003071-transactions.seg",
+	}
+	stagePaths := make([]string, len(stageNames))
+	for i, n := range stageNames {
+		stagePaths[i] = filepath.Join(tmpDir, n)
+	}
+	p.pendingTrim = &pendingTrimState{
+		names:   stageNames,
+		paths:   stagePaths,
+		toBlock: toBlock,
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	surviving := listBlockSegsOnDisk(t, tmpDir)
+
+	// The rebuild output + the four below-newTo narrow files survive.
+	for _, name := range []string{
+		"v1.1-003000-003041-headers.seg",
+		"v1.1-003000-003041-bodies.seg",
+		"v1.1-003000-003041-transactions.seg",
+		"v1.1-003000-003010-headers.seg",
+		"v1.1-003010-003020-headers.seg",
+		"v1.1-003020-003030-headers.seg",
+		"v1.1-003030-003040-headers.seg",
+	} {
+		require.Contains(t, surviving, name,
+			"below-newTo or canonical-rebuild file must survive: "+name)
+	}
+
+	// The narrow straddler and the past-target file are swept.
+	for _, name := range []string{
+		"v1.1-003040-003050-headers.seg",
+		"v1.1-003040-003050-bodies.seg",
+		"v1.1-003040-003050-transactions.seg",
+		"v1.1-003050-003060-headers.seg",
+		"v1.1-003050-003060-bodies.seg",
+		"v1.1-003050-003060-transactions.seg",
+	} {
+		require.NotContains(t, surviving, name,
+			"file with To > newTo must be swept: "+name)
+	}
+
+	// Inventory tracks the FS state (lockstep invariant from the
+	// existing converge test).
+	require.ElementsMatch(t, surviving, listInventoryBlockNames(inv),
+		"post-FinalizeUnwind: Inventory matches FS")
+}

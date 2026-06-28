@@ -49,8 +49,8 @@ type ExecutionEngine interface {
 	GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error)
 	HasBlock(ctx context.Context, hash common.Hash) (bool, error)
 	// Snapshots
-	FrozenBlocks(ctx context.Context) uint64
-	HasGapInSnapshots(ctx context.Context) bool
+	FrozenBlocks(ctx context.Context) (uint64, error)
+	HasGapInSnapshots(ctx context.Context) (bool, error)
 	// Block production
 	GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)
 

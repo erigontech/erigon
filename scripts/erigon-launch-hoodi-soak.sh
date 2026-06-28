@@ -11,6 +11,8 @@ LOG="${LOG:-/tmp/erigon-hoodi.log}"
 BIN="${BIN:-./build/bin/erigon}"
 CHECKPOINT_URL="${CHECKPOINT_URL:-https://checkpoint-sync.hoodi.ethpandaops.io}"
 
+export USE_STATE_CACHE=false
+
 exec "$BIN" \
   --datadir="$DATADIR" \
   --chain=hoodi --prune.mode=minimal \

@@ -17,6 +17,8 @@
 package snapshotsync
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1165,4 +1167,105 @@ func TestOverlapNoTruncation(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxn[1].from)
 	require.Equal(uint64(1_500_000), visibleTxn[1].to)
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+}
+
+// TestRemoveOldFilesWith_AllSucceed pins the happy path: every primary
+// file's remove returns nil and the full list is reported as deleted.
+// The .torrent sidecar removals are best-effort and don't gate the
+// primary's inclusion.
+func TestRemoveOldFilesWith_AllSucceed(t *testing.T) {
+	t.Parallel()
+	files := []string{"/snap/v1.1-000000-000010-headers.seg", "/snap/v1.1-000010-000020-headers.seg"}
+	removed := []string{}
+	got := removeOldFilesWith(files, func(path string) error {
+		removed = append(removed, path)
+		return nil
+	})
+	require.ElementsMatch(t, files, got, "all primaries removed → all in returned list")
+	require.Len(t, removed, 4, "two primaries + two .torrent sidecars attempted")
+}
+
+// TestRemoveOldFilesWith_SilentFailure_ExcludedFromList is the
+// regression test for the iter-4 wedge: when the underlying remove
+// returns an error (mmap lock, permission, transient I/O), the file's
+// primary STAYS on disk but a notification firing for it would tell
+// Inventory the file is gone. Inventory then drifts from disk and
+// mode-B's straddle rebuild can't find a real file the system claims
+// gone. The returned list MUST exclude this file so callers fire the
+// notification only for primaries actually removed.
+func TestRemoveOldFilesWith_SilentFailure_ExcludedFromList(t *testing.T) {
+	t.Parallel()
+	files := []string{
+		"/snap/v1.1-000000-000010-headers.seg", // removes cleanly
+		"/snap/v1.1-000010-000020-headers.seg", // remove fails — mmap-locked
+		"/snap/v1.1-000020-000030-headers.seg", // removes cleanly
+	}
+	fakeErr := errors.New("simulated mmap lock — file stays on disk")
+	got := removeOldFilesWith(files, func(path string) error {
+		if path == "/snap/v1.1-000010-000020-headers.seg" {
+			return fakeErr
+		}
+		return nil
+	})
+	require.ElementsMatch(t,
+		[]string{
+			"/snap/v1.1-000000-000010-headers.seg",
+			"/snap/v1.1-000020-000030-headers.seg",
+		}, got,
+		"silent-failure file MUST NOT appear in the deleted list — "+
+			"otherwise NotifyDeletedSnapshotFiles fires for a file still on disk and Inventory drifts")
+}
+
+// TestRemoveOldFilesWith_NotExistTreatedAsSuccess pins the second
+// branch of the success predicate: a primary that's already gone
+// (someone else removed it between the scan and the remove call)
+// counts as removed — the on-disk state matches what the notification
+// would assert. Without this, the inventory clean-up never fires for
+// the already-vanished entry.
+func TestRemoveOldFilesWith_NotExistTreatedAsSuccess(t *testing.T) {
+	t.Parallel()
+	files := []string{"/snap/v1.1-000000-000010-headers.seg"}
+	got := removeOldFilesWith(files, func(path string) error {
+		return &os.PathError{Op: "remove", Path: path, Err: os.ErrNotExist}
+	})
+	require.ElementsMatch(t, files, got,
+		"file already gone is on-disk state matching deletion — must be in returned list")
+}
+
+// TestRemoveOldFilesWith_AllFail_EmptyResult pins the all-failure
+// case: every remove errors, the returned list is empty, and no
+// downstream notification fires.
+func TestRemoveOldFilesWith_AllFail_EmptyResult(t *testing.T) {
+	t.Parallel()
+	files := []string{"/snap/a.seg", "/snap/b.seg", "/snap/c.seg"}
+	got := removeOldFilesWith(files, func(path string) error {
+		return errors.New("locked")
+	})
+	require.Empty(t, got, "all removals failed → returned list is empty")
+}
+
+// TestRemoveOldFilesWith_EmptyInput pins the trivial case.
+func TestRemoveOldFilesWith_EmptyInput(t *testing.T) {
+	t.Parallel()
+	called := false
+	got := removeOldFilesWith(nil, func(string) error { called = true; return nil })
+	require.Empty(t, got)
+	require.False(t, called, "no entries → remove func never called")
+}
+
+// TestRemoveOldFilesWith_SidecarErrorIgnored pins that a .torrent
+// sidecar removal failure does NOT exclude the primary from the
+// returned list. The sidecar is best-effort; a leftover .torrent
+// without a primary is benign (publisher won't seed it).
+func TestRemoveOldFilesWith_SidecarErrorIgnored(t *testing.T) {
+	t.Parallel()
+	files := []string{"/snap/v1.1-000000-000010-headers.seg"}
+	got := removeOldFilesWith(files, func(path string) error {
+		if strings.HasSuffix(path, ".torrent") {
+			return errors.New("sidecar locked")
+		}
+		return nil
+	})
+	require.ElementsMatch(t, files, got,
+		"sidecar removal failure must not gate the primary's inclusion")
 }

@@ -252,8 +252,9 @@ type Provider struct {
 // ops staged by Provider.unwindSnapshotsPastBlock for execution after
 // the mode-B tx commits. See Provider.pendingTrim.
 type pendingTrimState struct {
-	names []string // inventory names (relative to snapDir)
-	paths []string // absolute paths on disk
+	names   []string // inventory names (relative to snapDir)
+	paths   []string // absolute paths on disk
+	toBlock uint64   // unwind target; FinalizeUnwind sweeps orphan files with FromBlock > toBlock
 }
 
 // pendingRebuildState lists the absolute paths of every NEW file
@@ -509,6 +510,7 @@ func (p *Provider) Initialize(deps Deps) error {
 			// Drop deleted files from Inventory. RemoveFile defers the
 			// drop when held views still reference the file, so reads
 			// in flight stay coherent.
+			//
 			if inv != nil {
 				for _, name := range deletedFiles {
 					inv.RemoveFile(name)

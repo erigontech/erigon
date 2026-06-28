@@ -416,9 +416,9 @@ func (t *testExecutionEngine) GetBodiesByHashes(context.Context, []common.Hash) 
 
 func (t *testExecutionEngine) HasBlock(context.Context, common.Hash) (bool, error) { return false, nil }
 
-func (t *testExecutionEngine) FrozenBlocks(context.Context) uint64 { return 0 }
+func (t *testExecutionEngine) FrozenBlocks(context.Context) (uint64, error) { return 0, nil }
 
-func (t *testExecutionEngine) HasGapInSnapshots(context.Context) bool { return false }
+func (t *testExecutionEngine) HasGapInSnapshots(context.Context) (bool, error) { return false, nil }
 
 func (t *testExecutionEngine) GetAssembledBlock(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return nil, nil, nil, nil, nil

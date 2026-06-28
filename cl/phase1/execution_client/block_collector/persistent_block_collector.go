@@ -244,7 +244,11 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		// success, so reaching here means we're in degraded state and
 		// the safer move is to skip more (avoid trying to insert blocks
 		// EL probably can't accept right now).
-		minInsertableBlockNumber = p.engine.FrozenBlocks(ctx)
+		frozen, err := p.engine.FrozenBlocks(ctx)
+		if err != nil {
+			return fmt.Errorf("FrozenBlocks fallback after CurrentHeader failure: %w", err)
+		}
+		minInsertableBlockNumber = frozen
 	}
 	var pending []*types.Block // variants at pendingHeight, awaiting resolution
 	var pendingHeight uint64

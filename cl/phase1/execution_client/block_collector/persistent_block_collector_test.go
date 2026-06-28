@@ -102,7 +102,7 @@ func newFlushTestHarnessWithElHead(t *testing.T, frozen uint64, elHead *types.He
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 
 	h := &flushTestHarness{}
-	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen).AnyTimes()
+	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen, nil).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			h.inserted = append(h.inserted, blocks...)
@@ -446,7 +446,7 @@ func TestPruneSkipsWhenElHeadIsZero(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 
 	var inserted []*types.Block
-	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
+	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0), nil).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			inserted = append(inserted, blocks...)
@@ -491,7 +491,7 @@ func pruneCaseCTestHarness(t *testing.T, elHead uint64) *flushTestHarness {
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 
 	h := &flushTestHarness{}
-	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
+	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0), nil).AnyTimes()
 	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
 			h.inserted = append(h.inserted, blocks...)

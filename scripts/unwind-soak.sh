@@ -32,9 +32,34 @@ DEPTHS_CSV="${DEPTHS:-$DEPTHS_DEFAULT}"
 OUT_DEFAULT="/tmp/unwind-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
 OUT="${OUT:-$OUT_DEFAULT}"
 RECOVERY_WINDOW_BLOCKS=1000
-RECOVERY_TIMEOUT_SEC=1800   # 30 min per iteration recovery window
+RECOVERY_TIMEOUT_SEC=1800   # default 30 min; mode_b scales by depth via recovery_timeout_for_depth
 SETHEAD_BUSY_TIMEOUT_SEC=1800 # 30 min upper bound on retries-while-busy
 SETHEAD_CALL_TIMEOUT_SEC=1800 # 30 min per curl call (synchronous setHead)
+
+# recovery_timeout_for_depth scales the mode_b recovery window with
+# unwind depth. Empirically (2026-06-28 hoodi soaks) the post-setHead
+# recovery splits roughly into:
+#   1. DownloadHistoricalBlocks  — refetches the gapped slots from CL
+#      peers (~50 blk/sec).
+#   2. EL catch-up forward exec  — re-executes the gap with the new
+#      commitment-anchored state (~comparable rate, sometimes slower).
+# Combined throughput maps to ~depth/15 sec end-to-end. The formula
+# `max(600, depth/10)` adds ~50% headroom on top of that and a
+# floor of 10 min so shallow depths still get a reasonable wait.
+# Concrete values:
+#   depth 5_000   → 600s   (10 min) — observed ~3-5 min recovery
+#   depth 10_000  → 1000s  (16 min) — observed ~5-8 min recovery
+#   depth 30_000  → 3000s  (50 min) — observed ~15-20 min recovery
+#   depth 60_000  → 6000s  (100 min) — observed ~60-70 min recovery
+recovery_timeout_for_depth() {
+    local depth=$1
+    local scaled=$(( depth / 10 ))
+    if [[ $scaled -lt 600 ]]; then
+        echo 600
+    else
+        echo "$scaled"
+    fi
+}
 SETHEAD_RETRY_INTERVAL_SEC=2
 POLL_INTERVAL_SEC=30
 INTER_ITER_SLEEP_SEC=60
@@ -340,8 +365,9 @@ for ((i=1; i<=ITER; i++)); do
         scenario_test mode_b "$i" "$DEPTH" \
             "$SETHEAD_CALL_TIMEOUT_SEC" "$STRESS_INTER_ITER_SEC" 0
     else
+        MODEB_RECOVERY_TIMEOUT=$(recovery_timeout_for_depth "$DEPTH")
         scenario_test mode_b "$i" "$DEPTH" \
-            "$SETHEAD_CALL_TIMEOUT_SEC" "$RECOVERY_TIMEOUT_SEC" 1
+            "$SETHEAD_CALL_TIMEOUT_SEC" "$MODEB_RECOVERY_TIMEOUT" 1
     fi
 
     if [[ $OVERALL_RC -ne 0 ]]; then

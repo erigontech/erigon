@@ -343,12 +343,12 @@ func payloadBodiesToRawBodies(bodies []*engine_types.ExecutionPayloadBody) []*ty
 	return ret
 }
 
-func (cc *ExecutionClientEngine) FrozenBlocks(ctx context.Context) uint64 {
+func (cc *ExecutionClientEngine) FrozenBlocks(ctx context.Context) (uint64, error) {
 	if cc.isLocal() {
-		frozenBlocks, _ := cc.chainRW.FrozenBlocks(ctx)
-		return frozenBlocks
+		frozenBlocks, _, err := cc.chainRW.FrozenBlocks(ctx)
+		return frozenBlocks, err
 	}
-	return 0
+	return 0, nil
 }
 
 func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
@@ -542,12 +542,12 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 	return block, nil
 }
 
-func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) bool {
+func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) (bool, error) {
 	if cc.isLocal() {
-		_, hasGap := cc.chainRW.FrozenBlocks(ctx)
-		return hasGap
+		_, hasGap, err := cc.chainRW.FrozenBlocks(ctx)
+		return hasGap, err
 	}
-	return false
+	return false, nil
 }
 
 func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {

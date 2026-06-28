@@ -61,6 +61,14 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		preverified.Item{Name: "v1.0-000000-000500-headers.seg", Hash: "0009"},
 		preverified.Item{Name: "v1.0-000000-000500-bodies.seg", Hash: "000a"},
 		preverified.Item{Name: "v1.0-000000-000500-transactions.seg", Hash: "000b"}, // pre-merge
+		// Post-merge fixtures cover headers + bodies + transactions
+		// at the same height so DeriveManifestTips returns a realistic
+		// BlockTip. Without matching headers+bodies at the high end,
+		// minOfMax(maxHeaders, maxBodies, maxTxs) collapses to the
+		// pre-merge tip and the bug-Z block-prune-horizon path keeps
+		// pre-merge transactions in FullMode.
+		preverified.Item{Name: "v1.0-020000-020500-headers.seg", Hash: "00c1"},
+		preverified.Item{Name: "v1.0-020000-020500-bodies.seg", Hash: "00c2"},
 		preverified.Item{Name: "v1.0-020000-020500-transactions.seg", Hash: "000c"}, // post-merge
 		preverified.Item{Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Hash: "000d"},
 		preverified.Item{Name: "salt-state.txt", Hash: "000e"},
@@ -108,14 +116,19 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		got := FilterPreverifiedByPruneMode(items, cc, prune.MinimalMode)
 		gotNames := namesOf(got)
 
-		// Kept under minimal:
+		// Kept under minimal. Headers stay regardless (small, needed
+		// for ancestor lookups). State primary + config always kept.
+		// The post-merge tx file at 020000-020500 stays because it's
+		// above MinimalPruneDistance from the BlockTip — bug-Z's
+		// horizon only drops bodies + transactions below tip - 100K,
+		// not headers.
 		mustKeep := []string{
 			"domain/v1.0-accounts.0-1024.kv",
 			"domain/v1.0-storage.0-1024.kv",
 			"domain/v1.0-commitment.0-1024.kv",
 			"v1.0-000000-000500-headers.seg",
-			"v1.0-000000-000500-bodies.seg",
-			"v1.0-000000-000500-transactions.seg", // Minimal keeps tx — only Full filters pre-merge tx
+			"v1.0-020000-020500-headers.seg",
+			"v1.0-020000-020500-bodies.seg",
 			"v1.0-020000-020500-transactions.seg",
 			"salt-state.txt",
 			"erigondb.toml",
@@ -142,6 +155,14 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 			// Bug AB: blocksidecars.idx (BlobSidecarSlot accessor
 			// index, K-not-B internal naming) is CL data too.
 			"v1.1-012090-012100-blocksidecars.idx",
+			// Bug Z: bodies + transactions below MinimalPruneDistance
+			// horizon are dropped at bootstrap. With BlockTip ≈ 20.5M
+			// and MinimalPruneDistance = 100K, the horizon ≈ 20.4M;
+			// the 0-500K pre-merge bodies + transactions land well
+			// below it. Headers stay regardless. See
+			// TestFilterPreverifiedByPruneMode_BugZ for the full set.
+			"v1.0-000000-000500-bodies.seg",
+			"v1.0-000000-000500-transactions.seg",
 		}
 		for _, name := range mustDrop {
 			require.NotContains(t, gotNames, name,

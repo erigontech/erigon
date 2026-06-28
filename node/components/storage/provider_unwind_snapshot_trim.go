@@ -142,7 +142,7 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 	// Provider.pendingTrim + FinalizeUnwind / AbortUnwind.
 	sort.Strings(names)
 	p.pendingTrimLock.Lock()
-	p.pendingTrim = &pendingTrimState{names: names, paths: paths}
+	p.pendingTrim = &pendingTrimState{names: names, paths: paths, toBlock: toBlock}
 	if len(rebuildPaths) > 0 {
 		p.pendingRebuild = &pendingRebuildState{paths: rebuildPaths}
 	}

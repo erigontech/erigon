@@ -232,7 +232,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
-			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
+			frozenBlocksInEL, err := cfg.engine.FrozenBlocks(ctx)
+			if err != nil {
+				return false, fmt.Errorf("FrozenBlocks: %w", err)
+			}
 
 			// [New in Gloas:EIP7732] EMPTY blocks carry no EL payload; skip EL insertion.
 			isGloasEmpty := blk.Version() >= clparams.GloasVersion && envelope == nil
@@ -292,7 +295,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
-			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
+			frozenBlocksInEL, err := cfg.engine.FrozenBlocks(ctx)
+			if err != nil {
+				return false, fmt.Errorf("FrozenBlocks: %w", err)
+			}
 			var payloadBlockNumber uint64
 			isGloasEmptyHere := false
 			if blk.Version() >= clparams.GloasVersion {
@@ -318,7 +324,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				canonicalBlockTip >= payloadBlockNumber {
 				isInElSnapshots = true
 			}
-			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
+			hasGap, err := cfg.engine.HasGapInSnapshots(ctx)
+			if err != nil {
+				return false, fmt.Errorf("HasGapInSnapshots: %w", err)
+			}
+			if hasGap && frozenBlocksInEL > 0 {
 				destinationBlockForEL = frozenBlocksInEL - 1
 			}
 		}
@@ -384,7 +394,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				isDownloadingForBeacon := (hasFinishedDownloadingElBlocks.Load() || cfg.caplinConfig.ArchiveBlocks) && clparams.SupportBackfilling(cfg.beaconCfg.DepositNetworkID)
 
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
-					logArgs = append(logArgs, "frozenBlocks", cfg.engine.FrozenBlocks(ctx))
+					if fb, err := cfg.engine.FrozenBlocks(ctx); err == nil {
+						logArgs = append(logArgs, "frozenBlocks", fb)
+					} else {
+						log.Debug("could not read FrozenBlocks for progress log", "err", err)
+					}
 					if !isDownloadingForBeacon {
 						// If we are not backfilling, we are in the EL phase.
 						// [Modified in Gloas:EIP7732] Use initialEth1Progress to avoid nil ExecutionPayload access.
@@ -393,7 +407,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 						h, err := cfg.engine.CurrentHeader(ctx)
 						if err != nil || h == nil {
 							log.Debug("could not log progress", "err", err)
-							lowestBlockToReach = cfg.engine.FrozenBlocks(ctx)
+							if fb, fbErr := cfg.engine.FrozenBlocks(ctx); fbErr == nil {
+								lowestBlockToReach = fb
+							}
 						} else {
 							lowestBlockToReach = h.Number.Uint64()
 						}

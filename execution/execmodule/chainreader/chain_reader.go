@@ -204,12 +204,8 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.
 	return c.executionModule.IsCanonicalHash(ctx, hash)
 }
 
-func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
-	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return frozen, hasGap
+func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool, error) {
+	return c.executionModule.FrozenBlocks(ctx)
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {

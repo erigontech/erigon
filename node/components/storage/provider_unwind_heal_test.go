@@ -120,12 +120,48 @@ func TestHealInventoryOrphansPastBlock_NoOrphansIsNoop(t *testing.T) {
 		"no orphans → no new Inventory entries")
 }
 
+// TestHealInventoryOrphansPastBlock_StraddleHeals pins the straddle
+// inclusion: a file whose range crosses toBlock (FromBlock ≤ toBlock <
+// ToBlock) MUST be healed when present on disk but missing from
+// Inventory. Otherwise the rebuild pass that's supposed to truncate
+// the straddle silently returns rebuilt=0, the file survives unwind,
+// and the no-straddle-after-unwind invariant breaks.
+//
+// Reproduces live iter-4 wedge: 60k-depth setHead with the straddle
+// file on disk but absent from Inventory (the file existed pre-soak
+// but a prior merge/re-download cycle had dropped its Inventory entry).
+func TestHealInventoryOrphansPastBlock_StraddleHeals(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	inv := snapshot.NewInventory()
+
+	// On disk but NOT in Inventory: a straddle file (covers toBlock)
+	// and a strictly-past file. Both must heal.
+	touchSeg(t, snapDir, "v1.1-002800-002900-headers.seg") // straddle — FromBlock ≤ toBlock < ToBlock
+	touchSeg(t, snapDir, "v1.1-002900-002910-headers.seg") // strictly past
+
+	p := &Provider{snapDir: snapDir, Inventory: inv}
+	// toBlock=2,850,000 — sits inside [2,800,000, 2,900,000) → straddle.
+	require.NoError(t, p.healInventoryOrphansPastBlock(2_850_000))
+
+	gotNames := make([]string, 0)
+	for _, e := range inv.BlockFiles() {
+		gotNames = append(gotNames, e.Name)
+	}
+	sort.Strings(gotNames)
+	require.Equal(t, []string{
+		"v1.1-002800-002900-headers.seg",
+		"v1.1-002900-002910-headers.seg",
+	}, gotNames,
+		"both the straddle file and the strictly-past file must heal; "+
+			"the straddle is needed by mode-B's rebuild to truncate the "+
+			"file to a range that doesn't cross toBlock")
+}
+
 // TestHealInventoryOrphansPastBlock_OnlyPastToBlock pins the toBlock
-// scope: only files whose FromBlock > toBlock get healed. Pre-toBlock
-// files on disk but missing from Inventory are out of scope here
-// (handled by other repair paths, or simply preserved for the
-// straddle-rebuild logic). Matches findInventoryOrphansPastBlock's
-// own contract.
+// scope: files entirely below toBlock (ToBlock ≤ toBlock) are out of
+// scope — they don't need healing because mode-B's invariant only
+// constrains content past toBlock.
 func TestHealInventoryOrphansPastBlock_OnlyPastToBlock(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()

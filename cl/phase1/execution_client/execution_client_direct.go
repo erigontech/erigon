@@ -188,9 +188,9 @@ func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes [
 	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
 }
 
-func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
-	frozenBlocks, _ := cc.chainRW.FrozenBlocks(ctx)
-	return frozenBlocks
+func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) (uint64, error) {
+	frozenBlocks, _, err := cc.chainRW.FrozenBlocks(ctx)
+	return frozenBlocks, err
 }
 
 func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
@@ -201,9 +201,9 @@ func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }
 
-func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
-	_, hasGap := cc.chainRW.FrozenBlocks(ctx)
-	return hasGap
+func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) (bool, error) {
+	_, hasGap, err := cc.chainRW.FrozenBlocks(ctx)
+	return hasGap, err
 }
 
 func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {

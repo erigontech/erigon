@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/snapshotsync/fileset"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // FinalizeUnwind executes the FS / inventory / downloader / republish
@@ -74,9 +76,15 @@ func (p *Provider) FinalizeUnwind() error {
 			_ = dir.RemoveFile(path + ".torrent")
 		}
 
+		sweptNames := p.sweepBlockOrphansPastBlock(staged.toBlock)
+
+		deleteNames := staged.names
+		if len(sweptNames) > 0 {
+			deleteNames = append(append([]string{}, staged.names...), sweptNames...)
+		}
 		if p.downloaderClient != nil {
-			if err := p.downloaderClient.Delete(context.Background(), staged.names); err != nil && p.logger != nil {
-				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete failed (continuing)", "err", err, "files", len(staged.names))
+			if err := p.downloaderClient.Delete(context.Background(), deleteNames); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete failed (continuing)", "err", err, "files", len(deleteNames))
 			}
 		}
 
@@ -198,6 +206,74 @@ func (p *Provider) FinalizeUnwind() error {
 		p.logger.Info("[storage] Provider.FinalizeUnwind: deferred snapshot-trim ops executed", "deleted", fileCount, "rebuilt", rebuildCount, "regenerated", regenCount)
 	}
 	return nil
+}
+
+// sweepBlockOrphansPastBlock walks p.snapDir and removes any file
+// whose parsed block range extends past the chunk-aligned tip, plus
+// its .torrent sidecar. Returns the primary names removed so the
+// caller can drop them from the downloader. Inventory entries are
+// removed in lockstep.
+//
+// Delegates the predicate to fileset.StalePastTip — see
+// db/snapshotsync/fileset/rules.go for the rules contract. A file
+// with From ≤ toBlock < To still contains blocks past the new tip
+// (a "straddler") and the rules module catches both that case and
+// entirely-past orphans with one predicate.
+//
+// State-domain files live under domain/ and history/ subdirs; this
+// sweep scopes to the top-level snapDir entries which is where block
+// snapshot files (and their accessors) live.
+func (p *Provider) sweepBlockOrphansPastBlock(toBlock uint64) []string {
+	if p.snapDir == "" {
+		return nil
+	}
+	// toBlock=0 is the sentinel for "no target set" — tests that stage
+	// pendingTrim directly without going through unwindSnapshotsPastBlock
+	// hit this path. Sweeping with toBlock=0 would delete every block
+	// snapshot file.
+	if toBlock == 0 {
+		return nil
+	}
+	newTo := chunkAlignedToBlock(toBlock)
+	entries, err := os.ReadDir(p.snapDir)
+	if err != nil {
+		return nil
+	}
+	type onDisk struct {
+		name    string
+		primary string
+	}
+	var disk []onDisk
+	var ranges []fileset.Tagged
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		primary := strings.TrimSuffix(name, ".torrent")
+		fi, _, ok := snaptype.ParseFileName(p.snapDir, primary)
+		if !ok {
+			continue
+		}
+		disk = append(disk, onDisk{name: name, primary: primary})
+		ranges = append(ranges, fileset.Tagged{Range: fileset.Range{From: fi.From, To: fi.To}})
+	}
+	stale := fileset.StalePastTip(ranges, newTo)
+	var removedPrimaries []string
+	for _, idx := range stale {
+		entry := disk[idx]
+		_ = dir.RemoveFile(filepath.Join(p.snapDir, entry.name))
+		if entry.primary == entry.name {
+			if p.Inventory != nil {
+				p.Inventory.RemoveFile(entry.name)
+			}
+			removedPrimaries = append(removedPrimaries, entry.name)
+		}
+	}
+	if len(removedPrimaries) > 0 && p.logger != nil {
+		p.logger.Info("[storage] Provider.FinalizeUnwind: orphan-past-toBlock sweep", "files", len(removedPrimaries), "toBlock", toBlock, "newTo", newTo)
+	}
+	return removedPrimaries
 }
 
 // renameAccessorsToOld renames every accessor file (.bt / .kvi /

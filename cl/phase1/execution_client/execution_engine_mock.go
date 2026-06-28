@@ -127,11 +127,12 @@ func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Con
 }
 
 // FrozenBlocks mocks base method.
-func (m *MockExecutionEngine) FrozenBlocks(ctx context.Context) uint64 {
+func (m *MockExecutionEngine) FrozenBlocks(ctx context.Context) (uint64, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FrozenBlocks", ctx)
 	ret0, _ := ret[0].(uint64)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // FrozenBlocks indicates an expected call of FrozenBlocks.
@@ -147,19 +148,19 @@ type MockExecutionEngineFrozenBlocksCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockExecutionEngineFrozenBlocksCall) Return(arg0 uint64) *MockExecutionEngineFrozenBlocksCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockExecutionEngineFrozenBlocksCall) Return(arg0 uint64, arg1 error) *MockExecutionEngineFrozenBlocksCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineFrozenBlocksCall) Do(f func(context.Context) uint64) *MockExecutionEngineFrozenBlocksCall {
+func (c *MockExecutionEngineFrozenBlocksCall) Do(f func(context.Context) (uint64, error)) *MockExecutionEngineFrozenBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineFrozenBlocksCall) DoAndReturn(f func(context.Context) uint64) *MockExecutionEngineFrozenBlocksCall {
+func (c *MockExecutionEngineFrozenBlocksCall) DoAndReturn(f func(context.Context) (uint64, error)) *MockExecutionEngineFrozenBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -364,11 +365,12 @@ func (c *MockExecutionEngineHasBlockCall) DoAndReturn(f func(context.Context, co
 }
 
 // HasGapInSnapshots mocks base method.
-func (m *MockExecutionEngine) HasGapInSnapshots(ctx context.Context) bool {
+func (m *MockExecutionEngine) HasGapInSnapshots(ctx context.Context) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "HasGapInSnapshots", ctx)
 	ret0, _ := ret[0].(bool)
-	return ret0
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // HasGapInSnapshots indicates an expected call of HasGapInSnapshots.
@@ -384,19 +386,19 @@ type MockExecutionEngineHasGapInSnapshotsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockExecutionEngineHasGapInSnapshotsCall) Return(arg0 bool) *MockExecutionEngineHasGapInSnapshotsCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockExecutionEngineHasGapInSnapshotsCall) Return(arg0 bool, arg1 error) *MockExecutionEngineHasGapInSnapshotsCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineHasGapInSnapshotsCall) Do(f func(context.Context) bool) *MockExecutionEngineHasGapInSnapshotsCall {
+func (c *MockExecutionEngineHasGapInSnapshotsCall) Do(f func(context.Context) (bool, error)) *MockExecutionEngineHasGapInSnapshotsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineHasGapInSnapshotsCall) DoAndReturn(f func(context.Context) bool) *MockExecutionEngineHasGapInSnapshotsCall {
+func (c *MockExecutionEngineHasGapInSnapshotsCall) DoAndReturn(f func(context.Context) (bool, error)) *MockExecutionEngineHasGapInSnapshotsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

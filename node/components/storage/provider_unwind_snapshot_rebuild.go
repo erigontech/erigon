@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // chunkAlignedToBlock returns the largest 1000-block-aligned value
@@ -192,6 +193,29 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 		rebuildPaths = append(rebuildPaths, newFI.Path)
 		for _, idxName := range newFI.Type.IdxFileNames(newFI.From, newFI.To) {
 			rebuildPaths = append(rebuildPaths, filepath.Join(newFI.Dir(), idxName))
+		}
+		// Inventory write-through: the rebuild wrote a new primary
+		// file on disk; tell Inventory now so reads (LocalBlockTip,
+		// straddleBlockFileForType, etc.) see it immediately. The
+		// LifecycleDriver's periodic Sweep would eventually pick it
+		// up via disk-scan, but the ~60s gap between rebuild and the
+		// next Sweep tick leaves Caplin's stop-bound query (fired
+		// within seconds of UnwindCompleted) reading stale data —
+		// the contiguity walk stops at the highest contiguous
+		// pre-rebuild chunk instead of the new rebuilt tip, yielding
+		// 0 if any of headers/bodies/transactions lacks a contiguous
+		// chain. Live-caught 2026-06-28 iter-4 wedge.
+		if p.Inventory != nil {
+			if err := p.Inventory.AddFile(&snapshot.FileEntry{
+				Name:         filepath.Base(newFI.Path),
+				FromBlock:    newFI.From,
+				ToBlock:      newFI.To,
+				Local:        true,
+				Advertisable: true,
+			}); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] rebuildBlockStraddles: Inventory.AddFile failed; LifecycleDriver.Sweep will pick it up on next tick",
+					"name", filepath.Base(newFI.Path), "err", err)
+			}
 		}
 		toRemoveStraddles = append(toRemoveStraddles, &storageSnapshotFileRef{Name: straddle.Name()})
 		for _, idxName := range straddle.Type.IdxFileNames(straddle.From, straddle.To) {

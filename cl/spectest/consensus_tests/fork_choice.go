@@ -99,9 +99,9 @@ func (forkChoiceSpectestEngine) HasBlock(context.Context, common.Hash) (bool, er
 	return false, nil
 }
 
-func (forkChoiceSpectestEngine) FrozenBlocks(context.Context) uint64 { return 0 }
+func (forkChoiceSpectestEngine) FrozenBlocks(context.Context) (uint64, error) { return 0, nil }
 
-func (forkChoiceSpectestEngine) HasGapInSnapshots(context.Context) bool { return false }
+func (forkChoiceSpectestEngine) HasGapInSnapshots(context.Context) (bool, error) { return false, nil }
 
 func (forkChoiceSpectestEngine) GetAssembledBlock(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return nil, nil, nil, nil, nil

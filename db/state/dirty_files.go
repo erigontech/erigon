@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/fileset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -129,7 +130,18 @@ type FilesItem struct {
 	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
+
+	// producedByRegen marks files written by mode-B's boundary-step
+	// regeneration path. When a regen-tagged set of narrow files
+	// exactly tiles a wider untagged predecessor file, the wider
+	// file is the stale one (the narrower tiling is the canonical
+	// post-mode-B refinement). See db/snapshotsync/fileset/rules.go
+	// for the maximality tiebreaker contract.
+	producedByRegen bool
 }
+
+func (i *FilesItem) ProducedByRegen() bool     { return i.producedByRegen }
+func (i *FilesItem) SetProducedByRegen(v bool) { i.producedByRegen = v }
 
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
@@ -628,6 +640,17 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
 	}
+
+	// First pass: collect every candidate that passes the layered
+	// state-specific checks (tip, accessors, canDelete, custom checker).
+	// Topology rules (tip + maximality) then run via fileset.CullPlan
+	// so block-snapshot and state-domain layers use the same predicate.
+	type candidate struct {
+		item    *FilesItem
+		tagged  fileset.Tagged
+		visible visibleFile
+	}
+	var cands []candidate
 	iter := files.Iter()
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
@@ -644,25 +667,38 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		if checker != nil && !checker(item.startTxNum, item.endTxNum) {
 			continue
 		}
-
-		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-		// see super-set file, just drop sub-set files from list
-		for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isProperSubsetOf(item) {
-			if trace {
-				log.Warn("[dbg] calcVisibleFiles: marked as garbage (is subset)", "item", item.decompressor.FileName(),
-					"of", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
-			}
-			newVisibleFiles[len(newVisibleFiles)-1].src = nil
-			newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
-		}
-
-		// log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
-		newVisibleFiles = append(newVisibleFiles, visibleFile{
-			startTxNum: item.startTxNum,
-			endTxNum:   item.endTxNum,
-			i:          len(newVisibleFiles),
-			src:        item,
+		cands = append(cands, candidate{
+			item: item,
+			tagged: fileset.Tagged{
+				Range:           fileset.Range{From: item.startTxNum, To: item.endTxNum},
+				ProducedByRegen: item.producedByRegen,
+			},
+			visible: visibleFile{
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				src:        item,
+			},
 		})
+	}
+
+	tagged := make([]fileset.Tagged, len(cands))
+	for i, c := range cands {
+		tagged[i] = c.tagged
+	}
+	staleIdx := fileset.CullPlan(tagged, toTxNum)
+	stale := make(map[int]struct{}, len(staleIdx))
+	for _, idx := range staleIdx {
+		stale[idx] = struct{}{}
+	}
+	for i, c := range cands {
+		if _, gone := stale[i]; gone {
+			if trace {
+				log.Warn("[dbg] calcVisibleFiles: marked as garbage (rules)", "item", c.item.decompressor.FileName())
+			}
+			continue
+		}
+		c.visible.i = len(newVisibleFiles)
+		newVisibleFiles = append(newVisibleFiles, c.visible)
 	}
 	if newVisibleFiles == nil {
 		newVisibleFiles = visibleFiles{}

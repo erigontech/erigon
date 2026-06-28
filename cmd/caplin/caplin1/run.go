@@ -75,7 +75,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
@@ -698,30 +697,24 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	defer stageCfg.Close()
 
 	// Wire the canonical block-tip provider so the
-	// DownloadHistoricalBlocks stage stops backward-walking at a
-	// trustworthy bound, not the EL's FrozenBlocks() — which collapses
-	// to state-tip after alignMin-true OpenFolder calls and causes
-	// Caplin to download ~2× the actual gap. See
-	// docs/plans/20260515-three-layer-snapshot-distribution.md.
+	// DownloadHistoricalBlocks stage stops backward-walking at the
+	// runtime Inventory's contiguous tip. The Inventory reflects the
+	// current on-disk state, including post-mode-B sweep + rebuild,
+	// which the compiled-in preverified data does not. Using
+	// preverified at runtime advertises a stale tip and leaves a
+	// recovery gap between elHead and the preverified value (live
+	// 2026-06-28 iter-4 wedge).
 	//
-	// Prefer the local Inventory's contiguous tip (passed via
-	// localBlockTipFn) so the bound reflects what's actually on disk.
-	// Fall back to DeriveManifestTips only when the caller supplied no
-	// inventory — the standalone caplin binary today. The fallback
-	// trusts preverified.toml's advertised entries verbatim and can
-	// overstate the local tip when an advertised file failed to
-	// download.
+	// Standalone caplin binary callers that do not supply
+	// localBlockTipFn pass nil; that path falls back to nothing —
+	// returning 0 makes DownloadHistoricalBlocks walk to its hard
+	// floor rather than risk a stale baked-in tip. Standalone callers
+	// that need a tip must plumb their Inventory equivalent.
 	stageCfg.SetBlockSnapshotTipFn(func() uint64 {
-		if localBlockTipFn != nil {
-			if tip := localBlockTipFn(); tip > 0 {
-				return tip
-			}
-		}
-		cfg, known := snapcfg.KnownCfg(beaconConfig.ConfigName)
-		if !known || cfg == nil {
+		if localBlockTipFn == nil {
 			return 0
 		}
-		return snapshotsync.DeriveManifestTips(cfg.Preverified.Items).BlockTip
+		return localBlockTipFn()
 	})
 
 	sync := stages.ConsensusClStages(ctx, stageCfg)

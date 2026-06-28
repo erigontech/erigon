@@ -625,7 +625,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// inventory-change publish retries). Lives here because
 		// db/snapshotsync imports db/downloader and the reverse
 		// would be a cycle.
-		chainName := config.Genesis.Config.ChainName
 
 		// Phase 7c minority-detection trigger. The producer self-check
 		// runs on every RollingV2Publisher.Publish; when it finds this
@@ -677,20 +676,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.components.Downloader.Downloader.SetManifestSelfCheck(func(m *downloader.ChainTomlV2) error {
 			// Check against the live canonical quorum view when a
 			// genesis is pinned; otherwise fall back to the static
-			// embedded preverified set treated as genesis (legacy
-			// mode — every mismatch is a fatal divergence).
-			genesis := canonicalGenesis
-			var canonicals []snapcfg.PreverifiedItems
-			if canonicalView != nil {
-				canonicals = []snapcfg.PreverifiedItems{canonicalView.Canonical()}
-			} else {
-				cfg, known := snapcfg.KnownCfg(chainName)
-				if !known || cfg == nil {
-					return nil // no canonical loaded → defensive no-op
-				}
-				genesis = cfg.Preverified.Items
-				canonicals = []snapcfg.PreverifiedItems{cfg.Preverified.Items}
+			// canonicalView is the runtime source of truth: post-bootstrap
+			// every published advertisement is validated against the
+			// canonical-view's current set, NOT the compiled-in preverified
+			// data. Falling back to preverified at runtime advertised stale
+			// genesis/tip and caused the 2026-06-28 iter-4 wedge.
+			if canonicalView == nil {
+				return nil // canonical-view not yet initialized → defensive no-op
 			}
+			genesis := canonicalGenesis
+			canonicals := []snapcfg.PreverifiedItems{canonicalView.Canonical()}
 			verdict, err := snapshotsync.CheckOwnAdvertisement(
 				downloader.ChainTomlV2ToItems(m), genesis, canonicals)
 			if err != nil {
@@ -951,23 +946,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 			mx.SetCanonicalValidator(func(issuer []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
 				advItems := downloader.ChainTomlV2ToItems(adv)
-				var canon snapcfg.PreverifiedItems
-				if canonicalView != nil {
-					if len(issuer) > 0 {
-						// Quorum accumulates only on non-transitional entries —
-						// jagged-step files from a fork-from non-aligned cut
-						// (PendingReplacement=true) must not lock the swarm
-						// onto a shape that a subsequent retire will supersede.
-						canonicalView.Observe(issuer, downloader.ChainTomlV2ToCanonicalItems(adv), time.Now())
-					}
-					canon = canonicalView.Canonical()
-				} else {
-					cfg, known := snapcfg.KnownCfg(mxChainName)
-					if !known || cfg == nil {
-						return adv // no canonical loaded → pass through (defensive)
-					}
-					canon = cfg.Preverified.Items
+				if canonicalView == nil {
+					return adv // canonical-view not yet initialized → pass through (defensive)
 				}
+				if len(issuer) > 0 {
+					// Quorum accumulates only on non-transitional entries —
+					// jagged-step files from a fork-from non-aligned cut
+					// (PendingReplacement=true) must not lock the swarm
+					// onto a shape that a subsequent retire will supersede.
+					canonicalView.Observe(issuer, downloader.ChainTomlV2ToCanonicalItems(adv), time.Now())
+				}
+				canon := canonicalView.Canonical()
 				validItems := snapshotsync.ValidateAdvertisement(
 					advItems,
 					[]snapcfg.PreverifiedItems{canon},

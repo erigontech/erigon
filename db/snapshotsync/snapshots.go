@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/fileset"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
@@ -109,41 +110,57 @@ func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
 	return out, missingRanges
 }
 
+// findOverlaps groups items by GetGrouping() and within each group
+// returns the maximal items (res) and the items that are proper
+// subsets of another (overlapped). Delegates the maximality predicate
+// to fileset.StaleNonMaximal — see db/snapshotsync/fileset/rules.go
+// for the shared contract. Zero-length ranges (From == To) are
+// treated as always-overlapped (degenerate marker, not a real range).
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
-	for i := 0; i < len(in); i++ {
-		f := in[i]
-		iFrom, iTo := f.GetRange()
-		if iFrom == iTo {
-			overlapped = append(overlapped, f)
+	if len(in) == 0 {
+		return nil, nil
+	}
+	// Walk in input order, slicing into contiguous groups (same
+	// GetGrouping() value).
+	start := 0
+	for end := 1; end <= len(in); end++ {
+		if end < len(in) && in[end].GetGrouping() == in[start].GetGrouping() {
 			continue
 		}
+		group := in[start:end]
+		groupRes, groupOver := findOverlapsInGroup(group)
+		res = append(res, groupRes...)
+		overlapped = append(overlapped, groupOver...)
+		start = end
+	}
+	return res, overlapped
+}
 
-		for j := i + 1; j < len(in); i, j = i+1, j+1 { // if there is file with larger range - use it instead
-			f2 := in[j]
-			jFrom, jTo := f2.GetRange()
-
-			if f.GetGrouping() != f2.GetGrouping() {
-				break
-			}
-			if jFrom == jTo {
-				overlapped = append(overlapped, f2)
-				continue
-			}
-			if jFrom > iFrom && jTo > iTo {
-				break
-			}
-
-			if iTo >= jTo && iFrom <= jFrom {
-				overlapped = append(overlapped, f2)
-				continue
-			}
-			if i < len(in)-1 && (jTo >= iTo && jFrom <= iFrom) {
-				overlapped = append(overlapped, f)
-			}
-			f = f2
-			iFrom, iTo = f.GetRange()
+func findOverlapsInGroup[T SortedRange](group []T) (res []T, overlapped []T) {
+	tagged := make([]fileset.Tagged, len(group))
+	zeroLen := make(map[int]struct{})
+	for i, item := range group {
+		from, to := item.GetRange()
+		if from == to {
+			zeroLen[i] = struct{}{}
 		}
-		res = append(res, f)
+		tagged[i] = fileset.Tagged{Range: fileset.Range{From: from, To: to}}
+	}
+	staleIdx := fileset.StaleNonMaximal(tagged)
+	stale := make(map[int]struct{}, len(staleIdx))
+	for _, idx := range staleIdx {
+		stale[idx] = struct{}{}
+	}
+	for i, item := range group {
+		if _, isZero := zeroLen[i]; isZero {
+			overlapped = append(overlapped, item)
+			continue
+		}
+		if _, isStale := stale[i]; isStale {
+			overlapped = append(overlapped, item)
+			continue
+		}
+		res = append(res, item)
 	}
 	return res, overlapped
 }
@@ -1418,8 +1435,16 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		toRemove = append(toRemove, info.Path)
 	}
 
+	// Delete files first, then notify with the list of files actually
+	// removed from disk. Calling onDelete before removeOldFiles meant
+	// the notification (and downstream Inventory.RemoveFile) fired for
+	// every file in toRemove regardless of whether the on-disk removal
+	// succeeded — Inventory drifted from disk truth on any silent
+	// dir.RemoveFile failure (mmap, races, transient I/O). Reorder +
+	// use the actually-deleted list closes that gap.
+	actuallyDeleted := removeOldFiles(toRemove)
 	{
-		relativePaths, err := toRelativePaths(s.dir, toRemove)
+		relativePaths, err := toRelativePaths(s.dir, actuallyDeleted)
 		if err != nil {
 			return err
 		}
@@ -1429,8 +1454,6 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 			}
 		}
 	}
-
-	removeOldFiles(toRemove)
 
 	// remove .tmp files
 	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
@@ -1811,11 +1834,42 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 	})
 }
 
-func removeOldFiles(toDel []string) {
+// removeOldFiles deletes each file in toDel and returns the subset whose
+// primary file was actually removed. Callers that fire deletion
+// notifications (NotifyOnFilesDelete → Inventory.RemoveFile) MUST use
+// the returned list so Inventory only loses entries whose files truly
+// went away on disk. Previously the function discarded errors, letting
+// notifications fire for files that survived (mmap locks, transient
+// I/O, races) — Inventory then drifted from disk and mode-B's
+// straddle rebuild couldn't find files the system claimed gone.
+//
+// The .torrent sidecar is best-effort regardless: a leftover sidecar
+// without its primary is benign (publisher won't seed it).
+func removeOldFiles(toDel []string) (deleted []string) {
+	return removeOldFilesWith(toDel, dir.RemoveFile)
+}
+
+// removeOldFilesWith is the testable inner of removeOldFiles. The remove
+// function is parameterised so tests can inject silent-failure scenarios
+// (e.g. "file deletion returns nil error but the file stays on disk"
+// from mmap locks, permission races, etc.) without needing platform-
+// specific filesystem permission tricks.
+//
+// "Removed" means the primary file is gone after the call: either
+// dir.RemoveFile succeeded, or it returned ErrNotExist (someone else
+// already removed it). Both produce a disk-Inventory delta that the
+// caller should propagate. A genuine failure (file still present and
+// remove returned an error) excludes the entry — the Inventory keeps
+// pointing at the surviving file.
+func removeOldFilesWith(toDel []string, remove func(path string) error) (deleted []string) {
+	deleted = make([]string, 0, len(toDel))
 	for _, f := range toDel {
-		_ = dir.RemoveFile(f)
-		_ = dir.RemoveFile(f + ".torrent")
+		if err := remove(f); err == nil || errors.Is(err, os.ErrNotExist) {
+			deleted = append(deleted, f)
+		}
+		_ = remove(f + ".torrent")
 	}
+	return deleted
 }
 
 func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {

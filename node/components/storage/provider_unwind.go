@@ -428,11 +428,18 @@ func (p *Provider) healInventoryOrphansPastBlock(toBlock uint64) error {
 }
 
 // findInventoryOrphansPastBlock scans the snapshots dir for top-level
-// v1.1-*.seg block snapshot files whose range falls strictly past
+// v1.1-*.seg block snapshot files whose range extends at or past
 // toBlock, then cross-checks against Inventory.BlockFiles(). Returns
 // the sorted list of file names that exist on disk but are NOT in
-// Inventory — the orphans Provider.Unwind would silently miss in its
-// strict-FromBlock-past collect pass.
+// Inventory — the orphans Provider.Unwind would silently miss.
+//
+// The predicate is `info.To > toBlock` — covers BOTH the strictly-past
+// files (From > toBlock) AND the straddle file (From ≤ toBlock < To).
+// The straddle file MUST be healable: mode-B's rebuild pass scans
+// Inventory to find the straddle for truncation; without this file in
+// Inventory, the rebuild silently returns rebuilt=0 and the file
+// survives the unwind covering blocks past toBlock — breaking the
+// "no file straddles toBlock after unwind" invariant.
 //
 // Returns nil + nil when SnapDir or Inventory are unset (tools and
 // tests that don't carry the full storage component) — those callers
@@ -468,7 +475,12 @@ func (p *Provider) findInventoryOrphansPastBlock(toBlock uint64) ([]string, erro
 		if !ok {
 			continue
 		}
-		if info.From <= toBlock {
+		// Include files whose range extends past toBlock: strictly-past
+		// (From > toBlock) AND the straddle (From ≤ toBlock < To). The
+		// straddle must be healable so mode-B's rebuild can find it to
+		// truncate; otherwise the file survives the unwind, covering
+		// blocks past toBlock and breaking the no-straddle invariant.
+		if info.To <= toBlock {
 			continue
 		}
 		if _, in := known[name]; in {
