@@ -56,6 +56,7 @@ type commitmentCalculator struct {
 	db        kv.TemporalRoDB
 	logPrefix string
 	logger    log.Logger
+	stepSize  uint64
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -166,6 +167,7 @@ func newCommitmentCalculator(
 		db:                   db,
 		logPrefix:            logPrefix,
 		logger:               logger,
+		stepSize:             doms.StepSize(),
 		updates:              calcUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
@@ -233,6 +235,16 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if len(r.writes) > 0 {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes)
+		}
+
+		// Step-end checkpoint on the calculator's own accumulator. Parallel
+		// exec disables the rs.domains step-boundary commitment, so without
+		// this a block straddling a step edge leaves the step's commitment
+		// .kv lagging its account/storage domain.
+		if cc.stepSize > 0 && (r.txNum+1)%cc.stepSize == 0 && !dbg.DiscardCommitment() {
+			if step := r.txNum / cc.stepSize; step >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain)) {
+				cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
+			}
 		}
 
 	case *blockResult:
@@ -411,6 +423,34 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
+}
+
+// computeStepBoundary saves a commitment checkpoint at a mid-block step edge.
+// Mirrors computeWithoutCheck (no header root to verify against) but must not
+// advance lastComputedBlock — the boundary sits inside the current block, and
+// marking it computed would suppress the real block/batch-end compute.
+func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: step-boundary lazy-load failed: %w", err),
+		})
+		return
+	}
+	cc.state.FlushToUpdates(cc.updates)
+	cc.state.ResetBlockFlags()
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil && cc.logger != nil {
+		cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeStepBoundary failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
+	}
 }
 
 // computeAndCheck computes per-block commitment and validates the root.

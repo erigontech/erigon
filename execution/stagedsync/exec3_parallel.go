@@ -1524,6 +1524,7 @@ type blockResult struct {
 
 type txResult struct {
 	blockNum              uint64
+	blockHash             common.Hash
 	txNum                 uint64
 	blockGasUsed          int64
 	blobGasUsed           uint64
@@ -2663,6 +2664,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			applyResult := txResult{
 				blockNum:              be.blockNum,
+				blockHash:             be.blockHash,
 				traceFroms:            map[accounts.Address]struct{}{},
 				traceTos:              map[accounts.Address]struct{}{},
 				txNum:                 task.Version().TxNum,
@@ -2853,6 +2855,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.blockNum,
+				blockHash:             be.blockHash,
 				txNum:                 txTask.Version().TxNum,
 				rules:                 lastResult.Rules(),
 				writes:                finalizeWrites,
