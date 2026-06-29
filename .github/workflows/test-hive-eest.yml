@@ -113,7 +113,7 @@ jobs:
             exec_mode: parallel
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
-            sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
+            sim-limit: ".*(2780|7708|7778|7843|7928|7954|7976|7981|7997|8024|8037|8038|8246|8282).*"
             shard: glamsterdam-devnet
             pool-size: 24
             fixtures-tarball: eest_devnet

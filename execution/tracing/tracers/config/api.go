@@ -38,6 +38,11 @@ type TraceConfig struct {
 	StateOverrides *ethapi.StateOverrides
 	BlockOverrides *ethapi.BlockOverrides
 
-	BorTraceEnabled *bool
-	TxIndex         *hexutil.Uint
+	BorTraceEnabled    *bool
+	TxIndex            *hexutil.Uint
+	IncludeWithdrawals *bool
+}
+
+func (c *TraceConfig) IncludeWithdrawalsEnabled() bool {
+	return c != nil && c.IncludeWithdrawals != nil && *c.IncludeWithdrawals
 }
