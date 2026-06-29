@@ -277,7 +277,7 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 		return nil, 0, fmt.Errorf("fusefilter sharded %s: unsupported version %d", fName, v)
 	}
 
-	r := &ReaderSharded{}
+	r := &ReaderSharded{fileName: fName}
 	offset := headerSize
 	for i := range 256 {
 		if offset+8 > len(m) {
