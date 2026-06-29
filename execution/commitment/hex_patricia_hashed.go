@@ -63,24 +63,20 @@ type witnessTracer interface {
 }
 
 // witness captures consensus node bytes as they are hashed during a witness
-// fold pass. When tracer is nil the trie is on the normal commitment path and
-// every method is a no-op. The leaf/branch buffers retain their capacity across
-// pooled reuse, so reset() only detaches the tracer.
+// fold pass. With a nil tracer the trie is on the normal commitment path and
+// every method is a no-op. The buffers keep their capacity across pooled reuse,
+// so reset() only detaches the tracer.
 type witness struct {
 	tracer    witnessTracer
 	leafBuf   bytes.Buffer
 	branchBuf bytes.Buffer
 }
 
-// active reports whether a witness fold is in progress.
 func (w *witness) active() bool { return w.tracer != nil }
+func (w *witness) reset()       { w.tracer = nil }
 
-// reset detaches the tracer while keeping the buffers' capacity for reuse.
-func (w *witness) reset() { w.tracer = nil }
-
-// leafWriter returns the writer a leaf node is hashed into. While capturing it
-// tees the keccak stream into leafBuf so the node bytes can be emitted later;
-// otherwise it returns keccak unchanged.
+// leafWriter tees the keccak stream into leafBuf so the leaf node bytes can be
+// emitted once the hash is read; without a tracer it returns keccak unchanged.
 func (w *witness) leafWriter(keccak io.Writer) io.Writer {
 	if w.tracer == nil {
 		return keccak
@@ -89,14 +85,12 @@ func (w *witness) leafWriter(keccak io.Writer) io.Writer {
 	return io.MultiWriter(keccak, &w.leafBuf)
 }
 
-// emitLeaf hands the buffered leaf node bytes and their hash to the tracer.
 func (w *witness) emitLeaf(hash []byte) {
 	if w.tracer != nil {
 		w.tracer.onNode(w.leafBuf.Bytes(), hash)
 	}
 }
 
-// beginBranch resets the branch buffer and seeds it with the RLP list prefix.
 func (w *witness) beginBranch(prefix []byte) {
 	if w.tracer != nil {
 		w.branchBuf.Reset()
@@ -104,11 +98,10 @@ func (w *witness) beginBranch(prefix []byte) {
 	}
 }
 
-// writeBranch appends a hashed branch slot to the buffer. Callers guard the hot
-// loop with active() to avoid the per-slot nil check.
+// writeBranch appends a hashed slot; callers gate the hot loop on active() so
+// this stays a bare Write with no per-slot nil check.
 func (w *witness) writeBranch(b []byte) { w.branchBuf.Write(b) }
 
-// emitBranch hands the buffered branch node bytes and their hash to the tracer.
 func (w *witness) emitBranch(hash []byte) {
 	if w.tracer != nil {
 		w.tracer.onNode(w.branchBuf.Bytes(), hash)

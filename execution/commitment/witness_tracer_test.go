@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -26,6 +27,51 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
+
+type capturedNode struct{ rlp, hash string }
+
+type recordingTracer struct{ nodes []capturedNode }
+
+func (r *recordingTracer) onNode(rlp, hash []byte) {
+	r.nodes = append(r.nodes, capturedNode{rlp: string(rlp), hash: string(hash)})
+}
+
+// Test_witness_capture exercises the witness helper directly: an inactive witness
+// passes the keccak writer through untouched and emits nothing, while an active one
+// tees leaf bytes through leafBuf and accumulates a branch from its prefix and slots.
+func Test_witness_capture(t *testing.T) {
+	var w witness
+	var sink bytes.Buffer
+
+	// inactive: passthrough writer, emits are no-ops, no panic on nil tracer
+	require.False(t, w.active())
+	require.Same(t, &sink, w.leafWriter(&sink))
+	w.emitLeaf([]byte("x"))
+	w.beginBranch([]byte("y"))
+	w.writeBranch([]byte("z"))
+	w.emitBranch([]byte("w"))
+
+	rec := &recordingTracer{}
+	w.tracer = rec
+	require.True(t, w.active())
+
+	lw := w.leafWriter(&sink)
+	_, _ = lw.Write([]byte("leaf-rlp"))
+	w.emitLeaf([]byte("leaf-hash"))
+
+	w.beginBranch([]byte("pre"))
+	w.writeBranch([]byte("-slot1"))
+	w.writeBranch([]byte("-slot2"))
+	w.emitBranch([]byte("branch-hash"))
+
+	require.Equal(t, []capturedNode{
+		{rlp: "leaf-rlp", hash: "leaf-hash"},
+		{rlp: "pre-slot1-slot2", hash: "branch-hash"},
+	}, rec.nodes)
+
+	w.reset()
+	require.False(t, w.active())
+}
 
 // Test_WitnessTracer_CapturedNodesReconstructRoot proves the fold-time tap captures
 // the exact consensus node bytes: decoding the full captured node-set rebuilds the
