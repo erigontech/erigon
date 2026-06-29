@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
@@ -272,6 +273,30 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(456), *engineAttrs.SlotNumber)
 	require.NotNil(t, engineAttrs.TargetGasLimit)
 	require.Equal(t, hexutil.Uint64(36000000), *engineAttrs.TargetGasLimit)
+}
+
+func TestExecutionRequestsFromListDecodesGloasBuilderRequests(t *testing.T) {
+	builderDeposit := &solid.BuilderDepositRequest{Amount: 123}
+	builderDeposit.PubKey[0] = 0x11
+	builderDeposit.WithdrawalCredentials[0] = 0x01
+	builderDeposit.Signature[0] = 0x22
+	builderExit := &solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x1234")}
+	builderExit.PubKey[0] = 0x33
+	encodedDeposit, err := builderDeposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedExit, err := builderExit.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	requests, err := executionRequestsFromList([]hexutil.Bytes{
+		append(hexutil.Bytes{types.BuilderDepositRequestType}, encodedDeposit...),
+		append(hexutil.Bytes{types.BuilderExitRequestType}, encodedExit...),
+	}, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, requests.BuilderDeposits.Len())
+	require.Equal(t, 1, requests.BuilderExits.Len())
+	require.Equal(t, uint64(123), requests.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, builderExit.SourceAddress, requests.BuilderExits.Get(0).SourceAddress)
 }
 
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {

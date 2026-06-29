@@ -456,7 +456,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 				if ok {
 					cachedReqs := cached.ExecutionRequests
 					if cachedReqs == nil {
-						cachedReqs = cltypes.NewExecutionRequests(a.beaconChainCfg)
+						cachedReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 					}
 					envelope := &cltypes.ExecutionPayloadEnvelope{
 						Payload:               cached.Payload,
@@ -854,7 +854,7 @@ func (a *ApiHandler) produceBeaconBody(
 	// Always initialize for GLOAS so EncodeSSZ never sees nil sub-fields.
 	var gloasExecRequests *cltypes.ExecutionRequests
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		gloasExecRequests = cltypes.NewExecutionRequests(a.beaconChainCfg)
+		gloasExecRequests = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 	}
 
 	blockRoot := baseBlockRoot
@@ -1074,7 +1074,7 @@ func (a *ApiHandler) produceBeaconBody(
 		// GLOAS: decode execution requests from the bundle to compute the bid's ExecutionRequestsRoot.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			if requestsBundle != nil && requestsBundle.GetRequests() != nil {
-				execReqs := cltypes.NewExecutionRequests(a.beaconChainCfg)
+				execReqs := cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 				for _, request := range requestsBundle.GetRequests() {
 					rType := request[0]
 					requestData := request[1:]
@@ -1090,6 +1090,14 @@ func (a *ApiHandler) produceBeaconBody(
 					case types.ConsolidationRequestType:
 						if err := execReqs.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 							log.Error("BlockProduction: GLOAS failed to decode consolidation request for root", "err", err)
+						}
+					case types.BuilderDepositRequestType:
+						if err := execReqs.BuilderDeposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+							log.Error("BlockProduction: GLOAS failed to decode builder deposit request for root", "err", err)
+						}
+					case types.BuilderExitRequestType:
+						if err := execReqs.BuilderExits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
+							log.Error("BlockProduction: GLOAS failed to decode builder exit request for root", "err", err)
 						}
 					}
 				}
@@ -1221,7 +1229,7 @@ func (a *ApiHandler) produceBeaconBody(
 		// [New in Gloas:EIP7732]
 		cachedExecReqs := gloasExecRequests
 		if cachedExecReqs == nil {
-			cachedExecReqs = cltypes.NewExecutionRequests(a.beaconChainCfg)
+			cachedExecReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 		}
 		a.selfBuildPayloads.Add(executionPayload.BlockHash, &selfBuildPayload{
 			Payload:           executionPayload,
@@ -1887,7 +1895,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 
 		execReqs := cached.ExecutionRequests
 		if execReqs == nil {
-			execReqs = cltypes.NewExecutionRequests(a.beaconChainCfg)
+			execReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 		}
 		envelope := &cltypes.ExecutionPayloadEnvelope{
 			Payload:               cached.Payload,

@@ -98,7 +98,7 @@ func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
 
 	b := newBuilders.Get(0)
 	require.Equal(t, pubkey, b.Pubkey)
-	require.Equal(t, byte(0x03), b.Version, "builder Version must match creds[0]")
+	require.Equal(t, cfg.PayloadBuilderVersion, b.Version)
 	require.Equal(t, common.BytesToAddress(creds[12:]), b.ExecutionAddress)
 	require.Equal(t, amount, b.Balance)
 }
@@ -153,6 +153,46 @@ func TestApplyDepositForBuilder_InvalidSignature_Ignored(t *testing.T) {
 
 	require.Equal(t, 0, s.GetBuilders().Len(),
 		"invalid signature should prevent builder registration")
+}
+
+func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	s.SetBuilders(solid.NewStaticListSSZ[*cltypes.Builder](64, 73))
+
+	pubkey, creds, amount, sig := makeValidBuilderDeposit(t, &cfg)
+	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey:                pubkey,
+		WithdrawalCredentials: creds,
+		Amount:                amount,
+		Signature:             sig,
+	})
+
+	require.Equal(t, 0, s.GetBuilders().Len())
+}
+
+func TestApplyBuilderDepositRequestTopUpExitedZeroBalanceResetsWithdrawableEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           0,
+		WithdrawableEpoch: 1,
+	})
+	s.SetBuilders(builders)
+
+	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 25,
+	})
+
+	builder := s.GetBuilders().Get(0)
+	require.Equal(t, uint64(25), builder.Balance)
+	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
 }
 
 // ---------------------------------------------------------------------------

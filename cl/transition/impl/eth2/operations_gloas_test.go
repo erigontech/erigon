@@ -78,7 +78,7 @@ func TestProcessBuilderDepositRequestTopsUpExistingBuilder(t *testing.T) {
 	pubkey := common.Bytes48{0x11}
 	builders.Append(&cltypes.Builder{
 		Pubkey:            pubkey,
-		Version:           byte(cfg.BuilderWithdrawalPrefix),
+		Version:           cfg.PayloadBuilderVersion,
 		ExecutionAddress:  common.HexToAddress("0x0000000000000000000000000000000000001234"),
 		Balance:           100,
 		WithdrawableEpoch: cfg.FarFutureEpoch,
@@ -106,7 +106,7 @@ func TestProcessBuilderExitRequestInitiatesActiveBuilderExit(t *testing.T) {
 	sourceAddress := common.HexToAddress("0x0000000000000000000000000000000000001234")
 	builders.Append(&cltypes.Builder{
 		Pubkey:            pubkey,
-		Version:           byte(cfg.BuilderWithdrawalPrefix),
+		Version:           cfg.PayloadBuilderVersion,
 		ExecutionAddress:  sourceAddress,
 		Balance:           100,
 		WithdrawableEpoch: cfg.FarFutureEpoch,
@@ -132,7 +132,7 @@ func TestWithdrawalRequestDoesNotInitiateBuilderExit(t *testing.T) {
 	sourceAddress := common.HexToAddress("0x0000000000000000000000000000000000001234")
 	builders.Append(&cltypes.Builder{
 		Pubkey:            pubkey,
-		Version:           byte(cfg.BuilderWithdrawalPrefix),
+		Version:           cfg.PayloadBuilderVersion,
 		ExecutionAddress:  sourceAddress,
 		Balance:           100,
 		WithdrawableEpoch: cfg.FarFutureEpoch,
@@ -148,6 +148,28 @@ func TestWithdrawalRequestDoesNotInitiateBuilderExit(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, cfg.FarFutureEpoch, s.GetBuilders().Get(0).WithdrawableEpoch)
+}
+
+func TestProcessBuilderRequestsRejectNil(t *testing.T) {
+	machine := &eth2.Impl{}
+	s := state.New(&clparams.MainnetBeaconConfig)
+
+	require.Error(t, machine.ProcessBuilderDepositRequest(s, nil))
+	require.Error(t, machine.ProcessBuilderExitRequest(s, nil))
+}
+
+func TestProcessVoluntaryExitRejectsBuilderIndex(t *testing.T) {
+	machine := &eth2.Impl{}
+	s := state.New(&clparams.MainnetBeaconConfig)
+	s.SetVersion(clparams.GloasVersion)
+
+	err := machine.ProcessVoluntaryExit(s, &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{
+			ValidatorIndex: state.ConvertBuilderIndexToValidatorIndex(0),
+		},
+	})
+
+	require.Error(t, err)
 }
 
 func newTestProposerSlashing(slot, proposerIndex uint64) *cltypes.ProposerSlashing {

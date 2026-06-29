@@ -256,18 +256,8 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
 
-	// [New in Gloas:EIP7732] Builder exit path
 	if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
-		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
-		// Verify the builder is active
-		if !state.IsActiveBuilder(s, builderIndex) {
-			return errors.New("ProcessVoluntaryExit: builder is not active")
-		}
-		// Only exit builder if it has no pending withdrawals in the queue
-		if state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex) != 0 {
-			return errors.New("ProcessVoluntaryExit: builder has pending balance to withdraw")
-		}
-		return nil
+		return errors.New("ProcessVoluntaryExit: builder index voluntary exits are not supported")
 	}
 
 	// Validator exit path
@@ -308,13 +298,6 @@ func (I *impl) ProcessVoluntaryExit(
 	err := IsVoluntaryExitApplicable(s, voluntaryExit)
 	if err != nil {
 		return err
-	}
-
-	// [New in Gloas:EIP7732] Builder exit
-	if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
-		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
-		s.InitiateBuilderExit(builderIndex)
-		return nil
 	}
 
 	// Do the exit (same process in slashing).
@@ -539,6 +522,13 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 		if !state.IsActiveBuilder(s, builderIndex) {
 			return errors.New("processExecutionPayloadBid: builder is not active")
 		}
+		builders := s.GetBuilders()
+		if builders == nil || int(builderIndex) >= builders.Len() || builders.Get(int(builderIndex)) == nil {
+			return errors.New("processExecutionPayloadBid: invalid builder index")
+		}
+		if builders.Get(int(builderIndex)).Version != s.BeaconConfig().PayloadBuilderVersion {
+			return errors.New("processExecutionPayloadBid: builder is not a payload builder")
+		}
 		// Verify that the builder has funds to cover the bid
 		if !state.CanBuilderCoverBid(s, builderIndex, amount) {
 			return errors.New("processExecutionPayloadBid: builder cannot cover bid")
@@ -562,9 +552,11 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 		)
 	}
 
-	// Verify that the bid is for the current slot
-	if bid.Slot != block.GetSlot() {
-		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match block slot %d", bid.Slot, block.GetSlot())
+	if bid.Slot != s.Slot() {
+		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match state slot %d", bid.Slot, s.Slot())
+	}
+	if s.Slot() <= s.BeaconConfig().GenesisSlot {
+		return errors.New("processExecutionPayloadBid: bid at genesis slot")
 	}
 	parentBid := s.GetLatestExecutionPayloadBid()
 	if parentBid == nil {
@@ -574,7 +566,11 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
 		return errors.New("processExecutionPayloadBid: parent block hash mismatch")
 	}
-	if bid.ParentBlockRoot != block.GetParentRoot() {
+	parentBlockRoot, err := s.GetBlockRootAtSlot(s.Slot() - 1)
+	if err != nil {
+		return fmt.Errorf("processExecutionPayloadBid: failed to get parent block root: %w", err)
+	}
+	if bid.ParentBlockRoot != parentBlockRoot {
 		return errors.New("processExecutionPayloadBid: parent block root mismatch")
 	}
 	if bid.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
@@ -1268,6 +1264,7 @@ func (I *impl) processAttestationPostAltair(
 			willSetNewFlag &&
 			isSameSlot &&
 			payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
+			payment = payment.Clone().(*cltypes.BuilderPendingPayment)
 			payment.Weight += val
 		}
 	}
@@ -1767,11 +1764,17 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 }
 
 func (I *impl) ProcessBuilderDepositRequest(s abstract.BeaconState, req *solid.BuilderDepositRequest) error {
-	state.ApplyDepositForBuilder(s, req.PubKey, req.WithdrawalCredentials, req.Amount, req.Signature, s.Slot())
+	if req == nil {
+		return errors.New("ProcessBuilderDepositRequest: nil request")
+	}
+	state.ApplyBuilderDepositRequest(s, req)
 	return nil
 }
 
 func (I *impl) ProcessBuilderExitRequest(s abstract.BeaconState, req *solid.BuilderExitRequest) error {
+	if req == nil {
+		return errors.New("ProcessBuilderExitRequest: nil request")
+	}
 	builders := s.GetBuilders()
 	if builders == nil {
 		return nil
@@ -1780,7 +1783,8 @@ func (I *impl) ProcessBuilderExitRequest(s abstract.BeaconState, req *solid.Buil
 	// Find builder by pubkey
 	builderIndex := -1
 	for i := 0; i < builders.Len(); i++ {
-		if builders.Get(i).Pubkey == req.PubKey {
+		builder := builders.Get(i)
+		if builder != nil && builder.Pubkey == req.PubKey {
 			builderIndex = i
 			break
 		}

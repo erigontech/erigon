@@ -183,7 +183,7 @@ func addSszTests() {
 			}, withTestJson())).
 		With("ExecutionRequests", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.ExecutionRequests {
-				return cltypes.NewExecutionRequests(&clparams.MainnetBeaconConfig)
+				return cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, v)
 			}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
 		With("IndexedAttestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.IndexedAttestation {

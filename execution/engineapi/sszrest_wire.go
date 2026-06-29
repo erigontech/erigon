@@ -262,7 +262,7 @@ func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 }
 
 func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateVersion) (*cltypes.ExecutionRequests, error) {
-	out := cltypes.NewExecutionRequests(mainnetBeaconCfg)
+	out := cltypes.NewExecutionRequestsWithVersion(mainnetBeaconCfg, version)
 	for _, request := range requests {
 		if len(request) == 0 {
 			continue
@@ -279,6 +279,20 @@ func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateV
 			}
 		case types.ConsolidationRequestType:
 			if err := out.Consolidations.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		case types.BuilderDepositRequestType:
+			if version < clparams.GloasVersion {
+				return nil, fmt.Errorf("builder deposit request before gloas")
+			}
+			if err := out.BuilderDeposits.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		case types.BuilderExitRequestType:
+			if version < clparams.GloasVersion {
+				return nil, fmt.Errorf("builder exit request before gloas")
+			}
+			if err := out.BuilderExits.DecodeSSZ(data, int(version)); err != nil {
 				return nil, err
 			}
 		default:

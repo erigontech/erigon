@@ -572,6 +572,7 @@ type BeaconChainConfig struct {
 	DomainBeaconBuilder               common.Bytes4 `json:"-"`                                                                                              // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
 	DomainPtcAttester                 common.Bytes4 `json:"-"`                                                                                              // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
 	DomainProposerPreferences         common.Bytes4 `json:"-"`                                                                                              // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
+	DomainBuilderDeposit              common.Bytes4 `json:"-"`                                                                                              // DomainBuilderDeposit defines the BLS signature domain for builder deposits.
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -691,6 +692,7 @@ type BeaconChainConfig struct {
 	ConsolidationRequestType       ConfigByte `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
 	BuilderDepositRequestType      ConfigByte `yaml:"BUILDER_DEPOSIT_REQUEST_TYPE" spec:"true" json:"BUILDER_DEPOSIT_REQUEST_TYPE"`                    // BuilderDepositRequestType is the type for builder deposit requests.
 	BuilderExitRequestType         ConfigByte `yaml:"BUILDER_EXIT_REQUEST_TYPE" spec:"true" json:"BUILDER_EXIT_REQUEST_TYPE"`                          // BuilderExitRequestType is the type for builder exit requests.
+	PayloadBuilderVersion          uint8      `yaml:"PAYLOAD_BUILDER_VERSION" spec:"true" json:"PAYLOAD_BUILDER_VERSION,string"`                       // PayloadBuilderVersion is the version for execution payload builders.
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
@@ -942,6 +944,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
 	DomainPtcAttester:                 utils.Uint32ToBytes4(0x0C000000),
 	DomainProposerPreferences:         utils.Uint32ToBytes4(0x0D000000),
+	DomainBuilderDeposit:              utils.Uint32ToBytes4(0x0E000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",
@@ -1058,6 +1061,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ConsolidationRequestType:       0x02,
 	BuilderDepositRequestType:      0x03,
 	BuilderExitRequestType:         0x04,
+	PayloadBuilderVersion:          0,
 
 	// Fulu
 	ValidatorCustodyRequirement:      8,

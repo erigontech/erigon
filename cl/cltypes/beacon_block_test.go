@@ -158,7 +158,7 @@ func TestBeaconBodyGetExecutionRequestsListDenebNil(t *testing.T) {
 
 func TestGetExecutionRequestsListGloasBuilderRequests(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	requests := NewExecutionRequests(&cfg)
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
 	builderDeposit := &solid.BuilderDepositRequest{
 		Amount: 123,
 	}
@@ -183,6 +183,19 @@ func TestGetExecutionRequestsListGloasBuilderRequests(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, encodedDeposit...), list[0])
 	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedExit...), list[1])
+}
+
+func TestNewExecutionRequestsDefaultIsPreGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	requests := NewExecutionRequests(&cfg)
+	gloasRequests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	requestsRoot, err := requests.HashSSZ()
+	require.NoError(t, err)
+	gloasRequestsRoot, err := gloasRequests.HashSSZ()
+	require.NoError(t, err)
+
+	require.NotEqual(t, gloasRequestsRoot, requestsRoot)
 }
 
 // TestNewBeaconBody_VersionSpecificFields verifies that NewBeaconBody creates

@@ -563,10 +563,17 @@ func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.Te
 	if err != nil && !expectedError {
 		return err
 	}
-	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
-	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
+	signedBid := &cltypes.SignedExecutionPayloadBid{}
+	if err := spectest.ReadSszOld(root, signedBid, c.Version(), "execution_payload_bid.ssz_snappy"); err != nil {
 		return err
 	}
+	if signedBid.Message == nil {
+		return errors.New("execution payload bid message is nil")
+	}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
+	block.Slot = signedBid.Message.Slot
+	block.ParentRoot = signedBid.Message.ParentBlockRoot
+	block.Body.SignedExecutionPayloadBid = signedBid
 	if err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
 		if expectedError {
 			return nil

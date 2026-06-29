@@ -79,6 +79,31 @@ func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
+func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "missing message")
+}
+
+func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/octet-stream; bad")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
+}
+
 func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0

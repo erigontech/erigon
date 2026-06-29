@@ -731,10 +731,19 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 // POST /eth/v1/beacon/execution_payload_bid
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request) {
-	req := &cltypes.SignedExecutionPayloadBid{Message: new(cltypes.ExecutionPayloadBid)}
-	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || contentType == "" {
+	req := new(cltypes.SignedExecutionPayloadBid)
+	contentTypeHeader := r.Header.Get("Content-Type")
+	contentType := ""
+	if contentTypeHeader == "" {
 		contentType = "application/json"
+	} else {
+		var err error
+		contentType, _, err = mime.ParseMediaType(contentTypeHeader)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
+				fmt.Errorf("unsupported content type: %s", contentTypeHeader)).WriteTo(w)
+			return
+		}
 	}
 	switch contentType {
 	case "application/json":

@@ -118,7 +118,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{
 				Payload:           payload,
-				ExecutionRequests: cltypes.NewExecutionRequests(beaconCfg),
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
 			},
 		}
 		envelope.Message.BeaconBlockRoot = blockRoot
@@ -273,7 +273,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{
 				Payload:           payload,
-				ExecutionRequests: cltypes.NewExecutionRequests(beaconCfg),
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
 			},
 		}
 		envelope.Message.BeaconBlockRoot = blockRoot

@@ -287,7 +287,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 	parentHash := common.HexToHash("0x10")
 	prevRandao := common.HexToHash("0x13")
 	feeRecipient := common.HexToAddress("0x0000000000000000000000000000000000000014")
-	requests := cltypes.NewExecutionRequests(&cfg)
+	requests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
 	requestsRoot, err := requests.HashSSZ()
 	require.NoError(t, err)
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(&cfg, requests))

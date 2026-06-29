@@ -98,7 +98,14 @@ func (b *BuilderPendingWithdrawal) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BuilderPendingWithdrawal) Clone() clonable.Clonable {
-	return &BuilderPendingWithdrawal{}
+	if b == nil {
+		return &BuilderPendingWithdrawal{}
+	}
+	return &BuilderPendingWithdrawal{
+		FeeRecipient: b.FeeRecipient,
+		Amount:       b.Amount,
+		BuilderIndex: b.BuilderIndex,
+	}
 }
 
 func (b *BuilderPendingWithdrawal) HashSSZ() ([32]byte, error) {
@@ -134,7 +141,18 @@ func (b *BuilderPendingPayment) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BuilderPendingPayment) Clone() clonable.Clonable {
+	if b == nil {
+		return &BuilderPendingPayment{Withdrawal: &BuilderPendingWithdrawal{}}
+	}
+	withdrawal := (*BuilderPendingWithdrawal)(nil)
+	if b.Withdrawal != nil {
+		withdrawal = b.Withdrawal.Clone().(*BuilderPendingWithdrawal)
+	} else {
+		withdrawal = &BuilderPendingWithdrawal{}
+	}
 	return &BuilderPendingPayment{
-		Withdrawal: &BuilderPendingWithdrawal{},
+		Weight:        b.Weight,
+		Withdrawal:    withdrawal,
+		ProposerIndex: b.ProposerIndex,
 	}
 }

@@ -37,7 +37,7 @@ type ExecutionRequests struct {
 }
 
 func NewExecutionRequests(cfg *clparams.BeaconChainConfig) *ExecutionRequests {
-	return NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	return NewExecutionRequestsWithVersion(cfg, clparams.ElectraVersion)
 }
 
 func NewExecutionRequestsWithVersion(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *ExecutionRequests {
