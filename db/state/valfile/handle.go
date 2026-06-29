@@ -21,6 +21,11 @@ import (
 	"fmt"
 )
 
+// HandleSize is the fixed encoded width of a Handle: 8-byte offset + 4-byte len.
+// Fixed width keeps an external DupSort record a constant size so it can be
+// rewritten in place rather than delete+insert.
+const HandleSize = 12
+
 // Handle is the offset and length of a value inside a step's value-file, stored
 // in MDBX in place of the value bytes.
 type Handle struct {
@@ -28,23 +33,19 @@ type Handle struct {
 	Len    uint32
 }
 
-// AppendTo appends the varint-encoded handle to b and returns the extended slice.
+// AppendTo appends the fixed-width big-endian handle to b and returns the extended slice.
 func (h Handle) AppendTo(b []byte) []byte {
-	b = binary.AppendUvarint(b, h.Offset)
-	b = binary.AppendUvarint(b, uint64(h.Len))
-	return b
+	var buf [HandleSize]byte
+	binary.BigEndian.PutUint64(buf[0:8], h.Offset)
+	binary.BigEndian.PutUint32(buf[8:12], h.Len)
+	return append(b, buf[:]...)
 }
 
 // DecodeHandle reads a handle from the front of b, returning it and the number of
 // bytes consumed.
 func DecodeHandle(b []byte) (Handle, int, error) {
-	offset, n1 := binary.Uvarint(b)
-	if n1 <= 0 {
-		return Handle{}, 0, fmt.Errorf("valfile: bad handle offset varint")
+	if len(b) < HandleSize {
+		return Handle{}, 0, fmt.Errorf("valfile: short handle: have %d bytes, need %d", len(b), HandleSize)
 	}
-	length, n2 := binary.Uvarint(b[n1:])
-	if n2 <= 0 {
-		return Handle{}, 0, fmt.Errorf("valfile: bad handle len varint")
-	}
-	return Handle{Offset: offset, Len: uint32(length)}, n1 + n2, nil
+	return Handle{Offset: binary.BigEndian.Uint64(b[0:8]), Len: binary.BigEndian.Uint32(b[8:12])}, HandleSize, nil
 }

@@ -39,6 +39,20 @@ func TestHandleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHandleFixedWidth(t *testing.T) {
+	t.Parallel()
+	// Every handle must encode to exactly HandleSize bytes regardless of magnitude,
+	// so an external DupSort record is a constant size (enables in-place rewrite).
+	cases := []Handle{
+		{Offset: 0, Len: 0},
+		{Offset: 4, Len: 12},
+		{Offset: 1<<40 - 1, Len: 1<<32 - 1},
+	}
+	for _, h := range cases {
+		require.Len(t, h.AppendTo(nil), HandleSize)
+	}
+}
+
 func TestHandleAppendPreservesPrefix(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0xde, 0xad}
