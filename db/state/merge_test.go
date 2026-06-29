@@ -115,6 +115,66 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 }
 
+func TestDomainRoTx_forceMergeRangeSingleFile(t *testing.T) {
+	t.Parallel()
+
+	newDomainRoTx := func(aggStep uint64, files []visibleFile) *DomainRoTx {
+		return &DomainRoTx{
+			name:     kv.AccountsDomain,
+			files:    files,
+			stepSize: aggStep,
+			ht:       &HistoryRoTx{iit: &InvertedIndexRoTx{}},
+		}
+	}
+	createFile := func(startTxNum, endTxNum uint64) visibleFile {
+		return visibleFile{
+			startTxNum: startTxNum,
+			endTxNum:   endTxNum,
+			src:        &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum},
+		}
+	}
+
+	// Non-dyadic layout mirroring a real datadir's terminal merge state
+	// (937 = 512+256+128+32+8+1).
+	files := []visibleFile{
+		createFile(0, 512),
+		createFile(512, 768),
+		createFile(768, 896),
+		createFile(896, 928),
+		createFile(928, 936),
+		createFile(936, 937),
+	}
+
+	t.Run("normal merge is already terminal", func(t *testing.T) {
+		dt := newDomainRoTx(1, files)
+		r := dt.findMergeRange(937, config3.UnboundedDomainMerge, config3.UnboundedDomainMerge)
+		assert.False(t, r.values.needMerge)
+	})
+
+	t.Run("force merges all files into one span", func(t *testing.T) {
+		dt := newDomainRoTx(1, files)
+		r := dt.forceMergeRangeSingleFile(937)
+		require.True(t, r.values.needMerge)
+		assert.Equal(t, uint64(0), r.values.from)
+		assert.Equal(t, uint64(937), r.values.to)
+		assert.False(t, r.history.any())
+	})
+
+	t.Run("force respects maxEndTxNum frontier", func(t *testing.T) {
+		dt := newDomainRoTx(1, files)
+		r := dt.forceMergeRangeSingleFile(936)
+		require.True(t, r.values.needMerge)
+		assert.Equal(t, uint64(0), r.values.from)
+		assert.Equal(t, uint64(936), r.values.to)
+	})
+
+	t.Run("force on single file is a no-op", func(t *testing.T) {
+		dt := newDomainRoTx(1, []visibleFile{createFile(0, 512)})
+		r := dt.forceMergeRangeSingleFile(512)
+		assert.False(t, r.values.needMerge)
+	})
+}
+
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
 	t.Helper()
 	salt := uint32(1)

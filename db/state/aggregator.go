@@ -75,6 +75,11 @@ type Aggregator struct {
 	// an existing datadir, the existing domain files containing more steps will be unaffected.
 	erigondbDomainStepsInFrozenFile uint64
 
+	// forceDomainSingleFileMerge, when set, makes findMergeRange collapse every domain's value
+	// (.kv) files into one full-span file regardless of power-of-two alignment. One-shot tools
+	// only (`erigon seg retire --force-single-file`); leaves history/inverted-index merges untouched.
+	forceDomainSingleFileMerge bool
+
 	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
@@ -258,6 +263,13 @@ func (a *Aggregator) Logger() log.Logger        { return a.logger }
 // merge work begins.
 func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 	a.erigondbDomainStepsInFrozenFile = steps
+}
+
+// SetForceDomainSingleFileMerge enables collapsing each domain's value files into a single
+// full-span .kv file on the next MergeLoop, bypassing power-of-two alignment. Must be called
+// before merge work begins. Intended for `erigon seg retire --force-single-file`.
+func (a *Aggregator) SetForceDomainSingleFileMerge(v bool) {
+	a.forceDomainSingleFileMerge = v
 }
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
@@ -1751,6 +1763,17 @@ func (v *aggregatorVisible) stateMinimaxTxNum() uint64 {
 }
 
 func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFile uint64) *Ranges {
+	if at.a.forceDomainSingleFileMerge {
+		r := &Ranges{}
+		for id, d := range at.d {
+			if d.d.Disable {
+				continue
+			}
+			r.domain[id] = d.forceMergeRangeSingleFile(maxEndTxNum)
+		}
+		return r
+	}
+
 	maxSpan := stepSize * stepsInFrozenFile
 
 	// --erigondb.domain.steps-in-frozen-file adjusts the domain cap only; history/II keep maxSpan.

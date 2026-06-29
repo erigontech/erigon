@@ -190,6 +190,32 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64)
 	return r
 }
 
+// forceMergeRangeSingleFile returns a single values MergeRange spanning every
+// visible value file up to maxEndTxNum, ignoring the power-of-two alignment that
+// findMergeRange enforces. History and inverted-index ranges are left empty: this
+// collapses domain values (.kv) only. needMerge is false when fewer than two files
+// are eligible, so the merge loop terminates once a single file remains.
+func (dt *DomainRoTx) forceMergeRangeSingleFile(maxEndTxNum uint64) DomainRanges {
+	r := DomainRanges{name: dt.name, aggStep: dt.stepSize}
+	var from, to uint64
+	count := 0
+	for _, item := range dt.files {
+		if item.endTxNum > maxEndTxNum {
+			continue
+		}
+		if count == 0 {
+			from = item.startTxNum
+		}
+		to = item.endTxNum
+		count++
+	}
+	if count < 2 {
+		return r
+	}
+	r.values = MergeRange{needMerge: true, from: from, to: to}
+	return r
+}
+
 func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	var r HistoryRanges
 	if dbg.NoMergeHistory() {

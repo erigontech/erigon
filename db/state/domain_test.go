@@ -776,6 +776,87 @@ func TestDomain_MergeFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
+// TestDomain_ForceMergeSingleFile collates each step into its own value file (no
+// dyadic merge), then collapses the whole non-dyadic set into one file via
+// forceMergeRangeSingleFile and verifies the result: exactly one value file
+// spanning the full range, with GetAsOf at the file boundary unchanged for every
+// key (i.e. the forced merge is value-preserving and the merged file is readable).
+func TestDomain_ForceMergeSingleFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomain(t, logger)
+	ctx := t.Context()
+
+	txs := fillDomain(t, d, db, logger)
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	// Collate every completed step into a single-step value file and prune it from
+	// the DB, so reads at the file boundary must come from the files, not the DB.
+	collated := kv.Step(txs/d.stepSize) - 1
+	for step := kv.Step(0); step < collated; step++ {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, rwTx, background.NewProgressSet()))
+		drt := d.beginForTests()
+		_, err := drt.Prune(ctx, rwTx, step, step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize), math.MaxUint64, logEvery)
+		drt.Close()
+		require.NoError(t, err)
+	}
+	boundaryTxNum := uint64(collated) * d.stepSize
+
+	// Snapshot GetAsOf at the file boundary before the force-merge.
+	pre := d.beginForTests()
+	require.Greater(t, len(pre.files), 2, "expected many single-step files before force-merge")
+	before := make(map[uint64][]byte, 31)
+	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		v, _, err := pre.GetAsOf(k[:], boundaryTxNum, rwTx)
+		require.NoError(t, err)
+		before[keyNum] = append([]byte(nil), v...)
+	}
+	pre.Close()
+
+	// Force-merge all value files into one non-dyadic span.
+	for {
+		drt := d.beginForTests()
+		r := drt.forceMergeRangeSingleFile(drt.files.EndTxNum())
+		if !r.values.needMerge {
+			drt.Close()
+			break
+		}
+		valuesOuts, indexOuts, historyOuts := drt.staticFilesInRange(r)
+		valuesIn, indexIn, historyIn, err := drt.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		require.NoError(t, err)
+		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+		drt.Close()
+	}
+
+	// Exactly one value file remains, covering the full [0, boundary) span.
+	post := d.beginForTests()
+	defer post.Close()
+	require.Equal(t, 1, len(post.files), "force-merge must leave a single value file")
+	require.Equal(t, uint64(0), post.files[0].startTxNum)
+	require.Equal(t, boundaryTxNum, post.files[0].endTxNum)
+	require.Positive(t, post.files[0].src.decompressor.Count(), "merged file must contain keys")
+
+	// GetAsOf at the boundary is unchanged: the merge preserved every key's value.
+	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		v, _, err := post.GetAsOf(k[:], boundaryTxNum, rwTx)
+		require.NoError(t, err)
+		require.Equal(t, before[keyNum], v, "key %d value changed after force-merge", keyNum)
+	}
+}
+
 func TestDomain_ScanFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

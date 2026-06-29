@@ -190,6 +190,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ErigondbDomainStepsInFrozenFileFlag,
+				&utils.SegRetireForceSingleFileFlag,
 			}),
 		},
 		{
@@ -3494,6 +3495,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
+
+	if cliCtx.Bool(utils.SegRetireForceSingleFileFlag.Name) {
+		logger.Info("force-single-file: collapsing each domain's .kv files into one full-span file (ignores power-of-two alignment; history/inverted-index untouched)")
+		agg.SetForceDomainSingleFileMerge(true)
+	}
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err

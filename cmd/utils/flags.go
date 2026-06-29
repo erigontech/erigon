@@ -1150,6 +1150,10 @@ var (
 		Name:  "erigondb.domain.steps-in-frozen-file",
 		Usage: `Override erigondb.toml "steps_in_frozen_file" for the domain merge cap only (history/inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or "Inf" to leave the domain merge unbounded. Default: unset, meaning the domain uses the same cap as determined by erigondb.toml.`,
 	}
+	SegRetireForceSingleFileFlag = cli.BoolFlag{
+		Name:  "force-single-file",
+		Usage: `Collapse every domain's value (.kv) files into one full-span file, ignoring the power-of-two step alignment that normally splits them (e.g. 0-512/512-768/... become 0-937). History and inverted-index files are left untouched. The merged file is non-standard (not torrent-shareable) and intended for local use; the original files are removed only after the merged file is built and indexed.`,
+	}
 	ExecBatchedIOFlag = cli.BoolFlag{
 		Name:  "exec.batched-io",
 		Usage: "Enable BAL-driven I/O and write-dependency optimisations: (1) read-ahead pre-warms the DB page cache with account/code/storage reads before block execution (READ_AHEAD=true), and (2) the parallel executor pre-populates the version map from BAL hints (IGNORE_BAL=false). Disable for cold-read or non-BAL scheduling performance measurements.",
