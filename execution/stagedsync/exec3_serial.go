@@ -434,7 +434,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-					if err := se.cfg.engine.ValidateBlockPostExecution(se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Txs, se.logger); err != nil {
+					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Txs, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}

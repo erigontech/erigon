@@ -378,12 +378,5 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 
 // Deprecated: use Engine.ValidateBlockPostExecution instead.
 func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	err := rules.DefaultBlockPostValidation(chainConfig, h, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
-	if err != nil && dbg.LogHashMismatchReason() {
-		ethutils.LogReceipts(log.LvlWarn, "post-execution validation failed", receipts, txns, chainConfig, h, logger)
-	}
-	if err == nil && dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		ethutils.LogReceipts(log.LvlInfo, "trace logs", receipts, txns, chainConfig, h, logger)
-	}
-	return err
+	return rules.DefaultBlockPostValidation(chainConfig, h, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
