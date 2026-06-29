@@ -375,8 +375,6 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	ctx := context.Background()
 	withdrawalAddr := config.GetWithdrawalRequestContract()
 	consolidationAddr := config.GetConsolidationRequestContract()
-	builderDepositAddr := config.GetBuilderDepositContract()
-	builderExitAddr := config.GetBuilderExitContract()
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
@@ -403,7 +401,32 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	})
 	stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
 
-	// EIP-8282 builder contracts
+	return domains.Commit(ctx, tx)
+}
+
+// InitAmsterdamPreDeploys deploys the EIP-8282 builder deposit and exit
+// system contracts into the state database for test chains with Amsterdam active.
+func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
+	ctx := context.Background()
+	builderDepositAddr := config.GetBuilderDepositContract()
+	builderExitAddr := config.GetBuilderExitContract()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
+
 	stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: builderDepositRequestCodeHash,
 	})

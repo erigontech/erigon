@@ -262,9 +262,6 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 				rs = append(rs, *builderExitReq)
 			}
 		}
-	}
-
-	if config.IsPrague(header.Time) && !skipReceiptsEval {
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
