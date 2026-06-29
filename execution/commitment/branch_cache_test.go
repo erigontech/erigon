@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -106,6 +107,25 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.False(t, ok)
 	_, _, ok = c.Get([]byte{0x12})
 	require.False(t, ok)
+}
+
+// TestBranchCache_StateKeyNeverCached pins the invariant that the commitment
+// state checkpoint key bypasses every tier: Put is a no-op, Get always misses,
+// and Invalidate neither panics nor disturbs real entries.
+func TestBranchCache_StateKeyNeverCached(t *testing.T) {
+	c := NewBranchCache(100)
+
+	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok := c.Get(KeyCommitmentState)
+	require.False(t, ok, "state key must never be served from the cache")
+	require.Equal(t, 0, c.tail.Len(), "state key must not occupy a tail slot")
+
+	deepKey := []byte{0x12, 0x34}
+	c.Put(deepKey, []byte("d"), 0, 0)
+	c.Invalidate(KeyCommitmentState)
+	got, _, ok := c.Get(deepKey)
+	require.True(t, ok, "invalidating the state key must not evict real entries")
+	require.Equal(t, []byte("d"), got)
 }
 
 // TestBranchCache_Stats verifies the format of the stats string is
@@ -219,4 +239,57 @@ func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
 	require.True(t, ok, "entry at txN==watermark must survive")
 	_, _, ok = c.Get(aboveKey)
 	require.False(t, ok, "entry at txN>watermark must be evicted")
+}
+
+// TestBranchCache_ShardedTailUnwindAcrossShards drives UnwindTo over many tail
+// entries spread across the sharded tail, pinning that eviction by txN
+// watermark works at scale: every stale entry is evicted and every fresh one
+// survives, regardless of which shard it landed in.
+func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
+	c := NewBranchCache(DefaultBranchCacheTailCapacity)
+
+	const n = 2000
+	const watermark = 1000
+	for i := 0; i < n; i++ {
+		prefix := []byte{0x01, byte(i), byte(i >> 8)}
+		c.Put(prefix, []byte{byte(i)}, 0, uint64(i))
+	}
+
+	evicted := c.UnwindTo(watermark)
+	require.Equal(t, n-watermark-1, evicted, "every tail entry with txN > watermark must be evicted")
+
+	for i := 0; i < n; i++ {
+		prefix := []byte{0x01, byte(i), byte(i >> 8)}
+		_, _, ok := c.Get(prefix)
+		if uint64(i) > watermark {
+			require.False(t, ok, "entry txN=%d must be evicted by watermark=%d", i, watermark)
+		} else {
+			require.True(t, ok, "entry txN=%d must survive watermark=%d", i, watermark)
+		}
+	}
+}
+
+// TestBranchCache_BaselineFootprint pins that a freshly constructed cache is
+// cheap. One is allocated per aggregator and may linger after Close, so an
+// empty cache must not carry a multi-megabyte fixed backing for its LRU tail.
+func TestBranchCache_BaselineFootprint(t *testing.T) {
+	const (
+		n                = 128
+		maxBytesPerCache = 256 * 1024
+	)
+	caches := make([]*BranchCache, n)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := range caches {
+		caches[i] = NewBranchCache(DefaultBranchCacheTailCapacity)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(caches)
+
+	perCache := (after.HeapAlloc - before.HeapAlloc) / n
+	require.Less(t, perCache, uint64(maxBytesPerCache),
+		"fresh BranchCache baseline is %d KiB/cache, want < %d KiB", perCache/1024, maxBytesPerCache/1024)
 }
