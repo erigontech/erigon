@@ -141,11 +141,11 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
-// TestHandleMessage_NoStepCheckpointInPerBlockMode pins that in per-block compute
-// mode the calculator does not inject a mid-block step-boundary checkpoint — the
-// block-boundary compute owns commitment, and a mid-block checkpoint would corrupt
-// that block's root.
-func TestHandleMessage_NoStepCheckpointInPerBlockMode(t *testing.T) {
+// TestHandleMessage_StepCheckpointInPerBlockMode pins that the step-boundary
+// checkpoint still fires in per-block compute mode (forcePerBlockCompute), which
+// is how the archive snapshot producer runs — it needs step-aligned commitment
+// just like batch mode.
+func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 	const stepSize = uint64(16)
@@ -171,7 +171,7 @@ func TestHandleMessage_NoStepCheckpointInPerBlockMode(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	// forcePerBlockCompute => every block computes per-block.
+	// forcePerBlockCompute=true => snapshot-producer mode (per-block at every block).
 	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, true, in, out)
 	require.NoError(t, err)
 
@@ -211,12 +211,12 @@ func TestHandleMessage_NoStepCheckpointInPerBlockMode(t *testing.T) {
 
 	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(stateBlob), 16, "block 1's per-block compute should have saved a commitment state")
+	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
 	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
-	require.Equal(t, block1End, gotTxNum,
-		"per-block mode must not checkpoint at the mid-block step edge — latest state must stay at block 1's boundary")
-	require.Equal(t, uint64(1), gotBlockNum,
-		"per-block mode must not advance commitment into the straddling block before its boundary")
+	require.Equal(t, stepEdgeTxNum, gotTxNum,
+		"per-block mode must still checkpoint at the mid-block step edge (snapshot producer needs step-aligned commitment)")
+	require.Equal(t, uint64(2), gotBlockNum,
+		"the step checkpoint sits inside the straddling block")
 }
 
 // requireBranchesConsistentWithAccounts flushes the calculator's commitment
