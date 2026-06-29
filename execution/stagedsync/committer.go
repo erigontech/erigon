@@ -198,6 +198,26 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	}
 }
 
+// perBlockCompute reports whether commitment is computed at each block boundary
+// (vs accumulating into a batch).
+func (cc *commitmentCalculator) perBlockCompute() bool {
+	return !dbg.BatchCommitments || cc.forcePerBlockCompute
+}
+
+// shouldCheckpointStepBoundary reports whether this tx sits on a not-yet-frozen
+// step edge that the calculator must checkpoint itself. Only in batch mode:
+// per-block compute owns the boundary, and a mid-block checkpoint there corrupts
+// the straddling block's root.
+func (cc *commitmentCalculator) shouldCheckpointStepBoundary(r *txResult) bool {
+	if cc.perBlockCompute() || cc.stepSize == 0 || dbg.DiscardCommitment() {
+		return false
+	}
+	if (r.txNum+1)%cc.stepSize != 0 {
+		return false
+	}
+	return r.txNum/cc.stepSize >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain))
+}
+
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
@@ -225,14 +245,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.state.ApplyWrites(r.writes)
 		}
 
-		// Step-end checkpoint on the calculator's own accumulator. Parallel
-		// exec disables the rs.domains step-boundary commitment, so without
-		// this a block straddling a step edge leaves the step's commitment
-		// .kv lagging its account/storage domain.
-		if cc.stepSize > 0 && (r.txNum+1)%cc.stepSize == 0 && !dbg.DiscardCommitment() {
-			if step := r.txNum / cc.stepSize; step >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain)) {
-				cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
-			}
+		if cc.shouldCheckpointStepBoundary(r) {
+			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}
 
 	case *blockResult:
@@ -263,7 +277,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// || shouldGenerateChangesets || ...` check) — per-block compute is
 		// required when changesets must record per-block branch deltas
 		// (reorg support, KeepExecutionProofs).
-		if !dbg.BatchCommitments || cc.forcePerBlockCompute {
+		if cc.perBlockCompute() {
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block is partial (resumed mid-block).
 				// Compute it (like serial does) to save trie state, then
