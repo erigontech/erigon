@@ -105,7 +105,10 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		return 0, err
 	}
 	defer srcC.Close()
-	total, _ := srcTx.Count(table)
+	total, err := srcTx.Count(table)
+	if err != nil {
+		return 0, err
+	}
 	size, err := srcTx.BucketSize(table)
 	if err != nil {
 		return 0, err
