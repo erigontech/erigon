@@ -97,14 +97,15 @@ var (
 	EarliestBlock       = EarliestBlockNumber.AsBlockReference()
 )
 
-// UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
-// - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
-// - the block number
-// Returned errors:
-// - an invalid block number error when the given argument isn't a known strings
-// - an out of range error when the given block number is either too little or too large
+// UnmarshalJSON parses a JSON block number: named tags or 0x-prefixed hex when quoted,
+// bare decimal integer when unquoted. Quoted decimal strings are rejected.
 func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	input := strings.TrimSpace(string(data))
+	if input == "null" || input == `"null"` {
+		*bn = LatestBlockNumber
+		return nil
+	}
+	var blckNum uint64
 	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
 		input = input[1 : len(input)-1]
 		switch input {
@@ -126,24 +127,15 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		case "latestExecuted":
 			*bn = LatestExecutedBlockNumber
 			return nil
-		case "null":
-			*bn = LatestBlockNumber
-			return nil
 		}
-		blckNum, err := hexutil.DecodeUint64(input)
+		var err error
+		blckNum, err = hexutil.DecodeUint64(input)
 		if err != nil {
 			return err
 		}
-		if blckNum > math.MaxInt64 {
-			return errors.New("block number larger than int64")
-		}
-		*bn = BlockNumber(blckNum)
-		return nil
-	}
-	// Bare JSON integer: accept decimal or hex.
-	blckNum, err := strconv.ParseUint(input, 10, 64)
-	if err != nil {
-		blckNum, err = hexutil.DecodeUint64(input)
+	} else {
+		var err error
+		blckNum, err = strconv.ParseUint(input, 10, 64)
 		if err != nil {
 			return err
 		}
