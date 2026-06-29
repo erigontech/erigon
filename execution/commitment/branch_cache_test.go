@@ -108,6 +108,25 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestBranchCache_StateKeyNeverCached pins the invariant that the commitment
+// state checkpoint key bypasses every tier: Put is a no-op, Get always misses,
+// and Invalidate neither panics nor disturbs real entries.
+func TestBranchCache_StateKeyNeverCached(t *testing.T) {
+	c := NewBranchCache(100)
+
+	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok := c.Get(KeyCommitmentState)
+	require.False(t, ok, "state key must never be served from the cache")
+	require.Equal(t, 0, c.tail.Len(), "state key must not occupy a tail slot")
+
+	deepKey := []byte{0x12, 0x34}
+	c.Put(deepKey, []byte("d"), 0, 0)
+	c.Invalidate(KeyCommitmentState)
+	got, _, ok := c.Get(deepKey)
+	require.True(t, ok, "invalidating the state key must not evict real entries")
+	require.Equal(t, []byte("d"), got)
+}
+
 // TestBranchCache_Stats verifies the format of the stats string is
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {

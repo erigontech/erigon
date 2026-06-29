@@ -107,6 +107,15 @@ func isRootPrefix(prefix []byte) bool {
 	return len(prefix) == 1 && prefix[0] == 0x00
 }
 
+// tailHash maps prefix to its LRU-tail key, returning ok=false for a prefix that
+// must never be cached (the commitment state checkpoint key).
+func tailHash(prefix []byte) (uint64, bool) {
+	if isCommitmentStateKey(prefix) {
+		return 0, false
+	}
+	return maphash.Hash(prefix), true
+}
+
 func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	if isRootPrefix(prefix) {
 		entry := c.root.Load()
@@ -117,7 +126,11 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		c.rootHits.Add(1)
 		return entry, true
 	}
-	entry, ok := c.tail.Get(maphash.Hash(prefix))
+	h, ok := tailHash(prefix)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := c.tail.Get(h)
 	if !ok {
 		c.tailMisses.Add(1)
 		return nil, false
@@ -131,7 +144,11 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
-	c.tail.Add(maphash.Hash(prefix), entry)
+	h, ok := tailHash(prefix)
+	if !ok {
+		return
+	}
+	c.tail.Add(h, entry)
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
@@ -142,9 +159,6 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 // be mutated. Callers needing to modify the bytes must copy first (the
 // trie-context Branch() boundary already does, via common.Copy).
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
-		return nil, 0, false
-	}
 	entry, ok := c.lookup(prefix)
 	if !ok {
 		return nil, 0, false
@@ -157,9 +171,6 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 // Always copies the input data so the cache owns it independently of
 // caller buffer lifetime. See entry.txN for the txN tagging semantics.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
-		return
-	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 	c.store(prefix, &branchCacheEntry{
@@ -173,14 +184,15 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 // it. Use when the caller knows the canonical store has changed and the cached
 // entry should not be served at all.
 func (c *BranchCache) Invalidate(prefix []byte) {
-	if isCommitmentStateKey(prefix) {
-		return
-	}
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return
 	}
-	c.tail.Remove(maphash.Hash(prefix))
+	h, ok := tailHash(prefix)
+	if !ok {
+		return
+	}
+	c.tail.Remove(h)
 }
 
 // UnwindTo evicts every cache entry whose txN > maxValidTxN across
@@ -195,7 +207,7 @@ func (c *BranchCache) UnwindTo(maxValidTxN uint64) (evicted int) {
 	}
 	for _, hash := range c.tail.Keys() {
 		entry, ok := c.tail.Peek(hash)
-		if ok && entry != nil && entry.txN > maxValidTxN {
+		if ok && entry.txN > maxValidTxN {
 			if c.tail.Remove(hash) {
 				evicted++
 			}

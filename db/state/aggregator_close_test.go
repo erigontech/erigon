@@ -47,8 +47,8 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 	}
 }
 
-// Close must release the commitment BranchCache so a closed-but-still-referenced
-// Aggregator doesn't keep the cache (and its entries) reachable.
+// Close releases the cached data held by the commitment BranchCache while
+// keeping the cache object itself usable for a later reopen.
 func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 	prev := dbg.UseStateCache
 	dbg.SetUseStateCache(true)
@@ -65,7 +65,14 @@ func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 	require.NotNil(t, cd)
 	require.NotNil(t, cd.branchCache, "precondition: BranchCache is set when USE_STATE_CACHE is on")
 
+	prefix := []byte{0x01, 0x02}
+	cd.branchCache.Put(prefix, []byte{0xaa, 0xbb}, 1, 1)
+	_, _, ok := cd.branchCache.Get(prefix)
+	require.True(t, ok, "precondition: entry is cached before Close")
+
 	agg.Close()
 
-	require.Nil(t, cd.branchCache, "Close must drop the BranchCache reference")
+	require.NotNil(t, cd.branchCache, "Close keeps the cache object reusable")
+	_, _, ok = cd.branchCache.Get(prefix)
+	require.False(t, ok, "Close must clear the cached branch data")
 }
