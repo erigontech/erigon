@@ -169,6 +169,8 @@ func (s *JsoniterStream) Size() int {
 }
 
 // ClosePending does nothing because JsoniterStream wrapper does not support closing pending elements
-func (s *JsoniterStream) ClosePending( /*skipLast*/ uint) error {
+func (s *JsoniterStream) ClosePending( /*targetDepth*/ uint) error {
 	return nil
 }
+
+func (s *JsoniterStream) Depth() int { return 0 }

@@ -126,7 +126,6 @@ func TraceTx(
 ) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockNumber, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
-		stream.WriteNil()
 		return 0, err
 	}
 
@@ -259,13 +258,11 @@ func ExecuteTraceTx(
 	} else {
 		r, err := tracer.GetResult()
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 
 		_, err = stream.Write(r)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 	}
