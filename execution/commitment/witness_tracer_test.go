@@ -59,7 +59,7 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	defer toProcess.Close()
 
 	c := newWitnessNodeSet()
-	hph.witnessTracer = c
+	hph.witness.tracer = c
 	root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEmpty(t, c.byHash, "tracer must capture nodes")
