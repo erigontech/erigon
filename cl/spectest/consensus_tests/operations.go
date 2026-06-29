@@ -46,6 +46,8 @@ const (
 	voluntaryExitFileName    = "voluntary_exit.ssz_snappy"
 	executionPayloadFileName = "execution_payload.ssz_snappy"
 	addressChangeFileName    = "address_change.ssz_snappy"
+	builderDepositFileName   = "builder_deposit_request.ssz_snappy"
+	builderExitFileName      = "builder_exit_request.ssz_snappy"
 )
 
 func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
@@ -484,6 +486,66 @@ func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestC
 	haveRoot, err := preState.HashSSZ()
 	require.NoError(t, err)
 
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationBuilderDepositRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	request := &solid.BuilderDepositRequest{}
+	if err := spectest.ReadSszOld(root, request, c.Version(), builderDepositFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessBuilderDepositRequest(preState, request); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationBuilderExitRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	request := &solid.BuilderExitRequest{}
+	if err := spectest.ReadSszOld(root, request, c.Version(), builderExitFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessBuilderExitRequest(preState, request); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 

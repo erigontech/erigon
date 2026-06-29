@@ -92,7 +92,9 @@ func init() {
 		WithFn("execution_payload", operationExecutionPayloadHandler).
 		WithFn("execution_payload_bid", operationExecutionPayloadBidHandler).
 		WithFn("payload_attestation", operationPayloadAttestationHandler).
-		WithFn("parent_execution_payload", operationParentExecutionPayloadHandler)
+		WithFn("parent_execution_payload", operationParentExecutionPayloadHandler).
+		WithFn("builder_deposit_request", operationBuilderDepositRequestHandler).
+		WithFn("builder_exit_request", operationBuilderExitRequestHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").

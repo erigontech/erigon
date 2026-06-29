@@ -172,7 +172,7 @@ func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T
 	require.Equal(t, 0, s.GetBuilders().Len())
 }
 
-func TestApplyBuilderDepositRequestTopUpExitedZeroBalanceResetsWithdrawableEpoch(t *testing.T) {
+func TestApplyBuilderDepositRequestTopUpExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
 	s.SetSlot(cfg.SlotsPerEpoch * 10)
@@ -181,7 +181,7 @@ func TestApplyBuilderDepositRequestTopUpExitedZeroBalanceResetsWithdrawableEpoch
 	builders.Append(&cltypes.Builder{
 		Pubkey:            pubkey,
 		Version:           cfg.PayloadBuilderVersion,
-		Balance:           0,
+		Balance:           10,
 		WithdrawableEpoch: 1,
 	})
 	s.SetBuilders(builders)
@@ -192,7 +192,7 @@ func TestApplyBuilderDepositRequestTopUpExitedZeroBalanceResetsWithdrawableEpoch
 	})
 
 	builder := s.GetBuilders().Get(0)
-	require.Equal(t, uint64(25), builder.Balance)
+	require.Equal(t, uint64(35), builder.Balance)
 	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
 }
 
