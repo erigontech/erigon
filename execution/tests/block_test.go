@@ -63,8 +63,9 @@ func TestLegacyCancunBlockchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
-
+	// No t.Parallel(): the fixtures already run as parallel subtests, and the
+	// global log-handler swap below would otherwise interfere with concurrent
+	// top-level tests.
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
