@@ -57,25 +57,11 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // CallContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type CallContext struct {
-	gas      uint64
-	stateGas uint64
-	// EIP-8037 per-frame net state-gas tracker (signed). Increments on every
-	// state-gas charge (including reservoir→regular spill), decrements on
-	// inline refund (SSTORE clear, CREATE collision/revert) regardless of
-	// prior frame usage — the refund credits the local reservoir
-	// (`stateGas`) immediately and the matching charge it cancels may live
-	// in an ancestor sharing storage (CALLCODE/DELEGATECALL) or in the
-	// tx-level intrinsic, so `frameStateUsed` can go negative. Returned via
-	// gasUsed.State at frame exit.
-	frameStateUsed int64
-	// EIP-8037 per-frame spilled-state-gas tracker: the portion of state
-	// gas charged against the regular pool (gas) because the reservoir was
-	// empty. Source-based refunds credit gas first (up to this), then the
-	// reservoir; revert/halt refills gas by this before burning. Returned
-	// via gasUsed.Spilled so a successful parent can reabsorb it.
-	stateGasSpilled uint64
-	input           []byte
-	Memory          Memory
+	gas           uint64
+	stateGas      uint64
+	stateGasSpill uint64
+	input         []byte
+	Memory        Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
 	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
@@ -134,8 +120,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 
 	ctx.gas = gas.Regular
 	ctx.stateGas = gas.State
-	ctx.frameStateUsed = 0
-	ctx.stateGasSpilled = 0
+	ctx.stateGasSpill = 0
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -145,8 +130,7 @@ func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
 	c.cacheGen = 0
-	c.frameStateUsed = 0
-	c.stateGasSpilled = 0
+	c.stateGasSpill = 0
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	c.cachedKeyGen = ^uint64(0)
@@ -175,28 +159,26 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 		c.gas = remaining.Regular
 		c.stateGas = remaining.State
 		if t == mdgas.StateGas {
-			c.frameStateUsed += int64(gas)
 			// The regular pool only drops when the reservoir was
 			// exhausted, so its decrease is exactly the spilled portion.
-			c.stateGasSpilled += prevRegular - remaining.Regular
+			c.stateGasSpill += prevRegular - remaining.Regular
 		}
 	}
 	return ok
 }
 
-// creditStateGasRefund applies an inline state-gas refund per EIP-8037,
+// refillStateGas applies an inline state-gas refill per EIP-8037,
 // in last-in-first-out order: state-gas charges draw from the reservoir
 // first and spill to the regular pool last, so refills credit the regular
 // pool first (up to the spilled amount) and the reservoir with the
-// remainder. This restores the exact pools the charge drew from. The
-// frame's net state-gas usage drops by the full amount (going negative
-// when the matching charge sits in an ancestor or the tx-level intrinsic).
-func (c *CallContext) creditStateGasRefund(amount uint64) {
-	fromGasLeft := min(amount, c.stateGasSpilled)
+// remainder. This restores the exact pools the charge drew from, so the
+// derived net state-gas usage drops by the full amount (going negative when
+// the matching charge sits in an ancestor or the tx-level intrinsic).
+func (c *CallContext) refillStateGas(amount uint64) {
+	fromGasLeft := min(amount, c.stateGasSpill)
 	c.gas += fromGasLeft
-	c.stateGasSpilled -= fromGasLeft
+	c.stateGasSpill -= fromGasLeft
 	c.stateGas += amount - fromGasLeft
-	c.frameStateUsed -= int64(amount)
 }
 
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
@@ -213,8 +195,8 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 
 // useMdGas charges gas in the requested dimension. State charges that
 // exceed the reservoir spill the deficit into the regular dimension. No
-// EVM-level tracker is touched here — frame-level accounting lives on
-// CallContext.frameStateUsed (for in-loop charges via CallContext.useMdGas)
+// EVM-level tracker is touched here — spill accounting lives on
+// CallContext.stateGasSpill (for in-loop charges via CallContext.useMdGas)
 // or on the caller's local gasUsed accumulator (for code-deposit charges
 // in evm.create after Run returns).
 func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, bool) {
@@ -436,13 +418,15 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}
-		// EIP-8037: snapshot the frame's net state-gas usage (charges minus
-		// inline refunds, signed) and spilled portion before callContext.put()
-		// clears them. gasUsed.Regular is derived uniformly by
-		// evm.call/evm.create's defer from the final gasRemaining (covers
-		// precompile/no-code paths and handleFrameRevert gas burn).
-		gasUsed.State = callContext.frameStateUsed
-		gasUsed.Spilled = callContext.stateGasSpilled
+		// EIP-8037: snapshot the spilled portion and derive the frame's net
+		// state-gas usage from the reservoir delta before callContext.put()
+		// clears them. A state charge lowers stateGas (or raises stateGasSpill
+		// on spill) and a refill reverses it, so the net used (signed) is
+		// (initialReservoir - stateGas) + stateGasSpill. gasUsed.Regular is
+		// derived uniformly by evm.call/evm.create's defer from the final
+		// gasRemaining (covers precompile/no-code paths and the revert burn).
+		gasUsed.StateSpill = callContext.stateGasSpill
+		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
 		if restoreReadonly {
