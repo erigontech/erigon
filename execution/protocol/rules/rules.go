@@ -227,9 +227,14 @@ func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 			blobGasUsed, *header.BlobGasUsed, header.Number.Uint64(), header.Hash())
 	}
 
+	var bloom types.Bloom
+	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if bloomFromReceipts {
+				bloom.Or(&r.Bloom)
+			}
 		}
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != header.ReceiptHash {
@@ -239,7 +244,9 @@ func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 	}
 
 	if checkBloom && !alwaysSkipReceiptCheck {
-		bloom := types.CreateBloom(receipts)
+		if !bloomFromReceipts {
+			bloom = types.CreateBloom(receipts)
+		}
 		if bloom != header.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, bloom)
 		}
