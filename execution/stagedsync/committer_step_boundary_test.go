@@ -141,10 +141,86 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
-// requireBranchesConsistentWithAccounts flushes the calculator's commitment
-// branches and verifies every one hashes consistently with the account values
-// written through the step edge — the integrity oracle proving the step-0
-// commitment .kv matches the step-0 account domain .kv.
+// TestHandleMessage_NoStepCheckpointInPerBlockMode pins that in per-block compute
+// mode the calculator does not inject a mid-block step-boundary checkpoint — the
+// block-boundary compute owns commitment, and a mid-block checkpoint would corrupt
+// that block's root.
+func TestHandleMessage_NoStepCheckpointInPerBlockMode(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
+
+	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx, rawDb)
+	require.NoError(t, err)
+	defer agg.Close()
+
+	db, err := temporal.New(rawDb, agg)
+	require.NoError(t, err)
+
+	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// perBlockFrom 0 => every block computes per-block.
+	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 0, in, out)
+	require.NoError(t, err)
+
+	const block1End = uint64(10)
+	const stepEdgeTxNum = stepSize - 1 // 15
+
+	rnd := rand.New(rand.NewSource(42))
+	writeAccount := func(txNum, blockNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			blockNum: blockNum,
+			txNum:    txNum,
+			writes: state.VersionedWrites{
+				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
+				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
+			},
+		})
+	}
+
+	for txNum := uint64(1); txNum <= block1End; txNum++ {
+		writeAccount(txNum, 1)
+	}
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+
+	// Block 2 runs only up to the step edge — no block-2 boundary is sent.
+	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
+		writeAccount(txNum, 2)
+	}
+
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16, "block 1's per-block compute should have saved a commitment state")
+	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, block1End, gotTxNum,
+		"per-block mode must not checkpoint at the mid-block step edge — latest state must stay at block 1's boundary")
+	require.Equal(t, uint64(1), gotBlockNum,
+		"per-block mode must not advance commitment into the straddling block before its boundary")
+}
+
+// requireBranchesConsistentWithAccounts verifies each flushed commitment branch
+// hashes consistently with the account values written through the step edge.
 func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, accountValues map[string][]byte) {
 	t.Helper()
 	require.NoError(t, doms.Flush(t.Context(), tx))
