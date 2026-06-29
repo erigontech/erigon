@@ -25,10 +25,10 @@ import (
 func TestHandleRoundTrip(t *testing.T) {
 	t.Parallel()
 	cases := []Handle{
-		{Offset: 4, Len: 12},
-		{Offset: 0, Len: 0},
-		{Offset: 1 << 20, Len: 4096},
-		{Offset: 1<<40 - 1, Len: 1<<32 - 1},
+		{Offset: 4},
+		{Offset: 0},
+		{Offset: 1 << 20},
+		{Offset: 1<<40 - 1},
 	}
 	for _, h := range cases {
 		enc := h.AppendTo(nil)
@@ -44,9 +44,9 @@ func TestHandleFixedWidth(t *testing.T) {
 	// Every handle must encode to exactly HandleSize bytes regardless of magnitude,
 	// so an external DupSort record is a constant size (enables in-place rewrite).
 	cases := []Handle{
-		{Offset: 0, Len: 0},
-		{Offset: 4, Len: 12},
-		{Offset: 1<<40 - 1, Len: 1<<32 - 1},
+		{Offset: 0},
+		{Offset: 4},
+		{Offset: 1<<40 - 1},
 	}
 	for _, h := range cases {
 		require.Len(t, h.AppendTo(nil), HandleSize)
@@ -56,7 +56,7 @@ func TestHandleFixedWidth(t *testing.T) {
 func TestHandleAppendPreservesPrefix(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0xde, 0xad}
-	h := Handle{Offset: 99, Len: 3}
+	h := Handle{Offset: 99}
 	enc := h.AppendTo(prefix)
 	require.Equal(t, prefix, enc[:2])
 	got, n, err := DecodeHandle(enc[2:])
@@ -67,8 +67,8 @@ func TestHandleAppendPreservesPrefix(t *testing.T) {
 
 func TestDecodeHandleTruncated(t *testing.T) {
 	t.Parallel()
-	enc := Handle{Offset: 1 << 30, Len: 300}.AppendTo(nil)
-	_, _, err := DecodeHandle(enc[:1]) // not enough bytes for both varints
+	enc := Handle{Offset: 1 << 30}.AppendTo(nil)
+	_, _, err := DecodeHandle(enc[:1]) // fewer than HandleSize bytes
 	require.Error(t, err)
 	_, _, err = DecodeHandle(nil)
 	require.Error(t, err)

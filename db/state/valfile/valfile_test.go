@@ -109,7 +109,7 @@ func TestGarbageTailIsHarmless(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Sync()) // A is durable and (conceptually) committed in MDBX
 	// uncommitted tail: appended+flushed but its handle never lands in MDBX
-	_, err = w.Append(bytes.Repeat([]byte{0xff}, 500))
+	hGarbage, err := w.Append(bytes.Repeat([]byte{0xff}, 500))
 	require.NoError(t, err)
 	require.NoError(t, w.Close()) // flushes the garbage to disk
 
@@ -131,7 +131,7 @@ func TestGarbageTailIsHarmless(t *testing.T) {
 	gotC, err := r.Get(hC, nil)
 	require.NoError(t, err)
 	require.Equal(t, []byte("recomputed-C"), gotC)
-	require.Greater(t, hC.Offset, hA.Offset+uint64(hA.Len)) // C lands past the garbage
+	require.Greater(t, hC.Offset, hGarbage.Offset) // C lands past the garbage record
 }
 
 func TestOpenRejectsBadMagic(t *testing.T) {
@@ -161,6 +161,6 @@ func TestGetOutOfBoundsErrorsNotPanics(t *testing.T) {
 
 	_, err = r.Get(h, nil) // valid
 	require.NoError(t, err)
-	_, err = r.Get(Handle{Offset: h.Offset, Len: h.Len + 1000}, nil) // overruns EOF
+	_, err = r.Get(Handle{Offset: h.Offset + 1_000_000}, nil) // offset past EOF
 	require.Error(t, err)
 }

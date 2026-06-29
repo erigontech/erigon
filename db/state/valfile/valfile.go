@@ -21,6 +21,7 @@ package valfile
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -98,14 +99,20 @@ func OpenWriter(path string) (*Writer, error) {
 // MDBX's no-fsync mode, where durability is intentionally relaxed.
 func (w *Writer) DisableFsync() { w.noFsync = true }
 
-// Append writes v at the current EOF and returns the Handle the caller persists
-// in MDBX. The bytes are durable only after a successful Sync.
+// Append writes `uvarint(len(v)) || v` at the current EOF and returns the Handle
+// (the record offset) the caller persists in MDBX. The length lives in the record
+// so MDBX stores only the offset. Bytes are durable only after a successful Sync.
 func (w *Writer) Append(v []byte) (Handle, error) {
-	h := Handle{Offset: w.pos, Len: uint32(len(v))}
+	h := Handle{Offset: w.pos}
+	var lenBuf [binary.MaxVarintLen64]byte
+	n := binary.PutUvarint(lenBuf[:], uint64(len(v)))
+	if _, err := w.w.Write(lenBuf[:n]); err != nil {
+		return Handle{}, err
+	}
 	if _, err := w.w.Write(v); err != nil {
 		return Handle{}, err
 	}
-	w.pos += uint64(len(v))
+	w.pos += uint64(n) + uint64(len(v))
 	w.count++
 	return h, nil
 }
@@ -169,20 +176,29 @@ func OpenReader(path string) (*Reader, error) {
 	return &Reader{f: f, path: path}, nil
 }
 
-// Get returns the value referenced by h. The result is written into dst when it
-// has capacity, otherwise a new slice is allocated. Reading past EOF errors
-// rather than panics.
+// Get returns the value referenced by h. It reads the record's length-prefix from
+// the file, then the value. The result is written into dst when it has capacity,
+// otherwise a new slice is allocated. Reading past EOF errors rather than panics.
 func (r *Reader) Get(h Handle, dst []byte) ([]byte, error) {
 	if h.Offset < headerLen {
 		return nil, fmt.Errorf("valfile %s: handle offset %d inside header", r.path, h.Offset)
 	}
-	if cap(dst) >= int(h.Len) {
-		dst = dst[:h.Len]
-	} else {
-		dst = make([]byte, h.Len)
+	var lenBuf [binary.MaxVarintLen64]byte
+	n, err := r.f.ReadAt(lenBuf[:], int64(h.Offset))
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("valfile %s: read length at %d: %w", r.path, h.Offset, err)
 	}
-	if _, err := r.f.ReadAt(dst, int64(h.Offset)); err != nil {
-		return nil, fmt.Errorf("valfile %s: read at %d len %d: %w", r.path, h.Offset, h.Len, err)
+	vlen, vn := binary.Uvarint(lenBuf[:n])
+	if vn <= 0 {
+		return nil, fmt.Errorf("valfile %s: bad length varint at %d", r.path, h.Offset)
+	}
+	if cap(dst) >= int(vlen) {
+		dst = dst[:vlen]
+	} else {
+		dst = make([]byte, vlen)
+	}
+	if _, err := r.f.ReadAt(dst, int64(h.Offset)+int64(vn)); err != nil {
+		return nil, fmt.Errorf("valfile %s: read at %d len %d: %w", r.path, h.Offset, vlen, err)
 	}
 	return dst, nil
 }
