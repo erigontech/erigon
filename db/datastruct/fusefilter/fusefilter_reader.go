@@ -13,6 +13,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	mm "github.com/erigontech/erigon/common/mmap"
 )
 
@@ -162,6 +163,7 @@ func (r *Reader) ForceInMem() datasize.ByteSize {
 	if r.m == nil || r.inner == nil {
 		return 0
 	}
+	log.Warn("[dbg] force in mem", "name", r.fileName, "sz", datasize.ByteSize(len(r.inner.Fingerprints)).HumanReadable())
 	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
 	copy(cpy, r.inner.Fingerprints)
 	r.inner.Fingerprints = cpy
