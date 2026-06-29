@@ -217,11 +217,10 @@ func (cc *commitmentCalculator) perBlockCompute(blockNum uint64) bool {
 }
 
 // shouldCheckpointStepBoundary reports whether this tx sits on a not-yet-frozen
-// step edge that the calculator must checkpoint itself. Only in batch mode:
-// per-block compute owns the boundary, and a mid-block checkpoint there corrupts
-// the straddling block's root.
+// step edge that the calculator must checkpoint itself, in every commitment mode
+// (the snapshot producer runs per-block and still needs step-aligned commitment).
 func (cc *commitmentCalculator) shouldCheckpointStepBoundary(r *txResult) bool {
-	if cc.perBlockCompute(r.blockNum) || cc.stepSize == 0 || dbg.DiscardCommitment() {
+	if cc.stepSize == 0 || dbg.DiscardCommitment() {
 		return false
 	}
 	if (r.txNum+1)%cc.stepSize != 0 {
@@ -439,10 +438,10 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.hasComputed = true
 }
 
-// computeStepBoundary saves a commitment checkpoint at a mid-block step edge.
-// Mirrors computeWithoutCheck (no header root to verify against) but must not
-// advance lastComputedBlock — the boundary sits inside the current block, and
-// marking it computed would suppress the real block/batch-end compute.
+// computeStepBoundary checkpoints commitment at a mid-block step edge. It must
+// not advance lastComputedBlock (or the block/batch-end compute gets suppressed)
+// and must not ResetBlockFlags (or the block-end compute loses the pre-edge
+// dirty keys and folds a wrong block root).
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blockResult) {
 	if err := cc.state.LazyLoadErr(); err != nil {
 		cc.publish(ctx, commitmentResult{
@@ -453,7 +452,6 @@ func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blo
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
 
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.updates)
