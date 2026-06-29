@@ -22,6 +22,10 @@ type Cache interface {
 	// Get retrieves data for the given key.
 	Get(key []byte) ([]byte, bool)
 
+	// GetWithTxNum is Get plus the txNum the cached value reflects, so the
+	// read path can apply a step bound against an in-flight unwind's maxStep.
+	GetWithTxNum(key []byte) ([]byte, uint64, bool)
+
 	// Put stores data for the given key, stamped with the txNum the value
 	// reflects (used for txNum/epoch unwind invalidation).
 	Put(key []byte, value []byte, txNum uint64)

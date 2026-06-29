@@ -32,10 +32,9 @@ import (
 const (
 	// DefaultAccountCacheBytes is the byte limit for the account cache.
 	DefaultAccountCacheBytes = 1 * datasize.GB
-	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB: the
-	// measured mainnet-tip storage working set is ~106 MB for 95% of reads
-	// (top 1% of keys = 48%, ~10 MB for 80%); 150 MB leaves headroom over the
-	// 95% set so eviction pressure doesn't push the hot set out.
+	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB
+	// holds the hot storage working set with headroom so eviction pressure
+	// doesn't push the hot set out.
 	DefaultStorageCacheBytes = 150 * datasize.MB
 
 	// Per-domain avg entry size used to translate the byte budget into the
@@ -120,6 +119,16 @@ func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return cache.Get(key)
+}
+
+// GetWithTxNum is Get plus the txNum the cached value reflects, so the read
+// path can bound a hit by step against an in-flight unwind's maxStep.
+func (c *StateCache) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
+	cache := c.caches[domain]
+	if cache == nil {
+		return nil, 0, false
+	}
+	return cache.GetWithTxNum(key)
 }
 
 // GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),

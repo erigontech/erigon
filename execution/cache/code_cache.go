@@ -226,16 +226,23 @@ func NewDefaultCodeCache() *CodeCache {
 
 // Get retrieves contract code for the given address, implementing the Cache interface.
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
+	v, _, ok := c.GetWithTxNum(addr)
+	return v, ok
+}
+
+// GetWithTxNum is Get plus the txNum of the addr→code binding, so the read
+// path can apply the same step bound the DomainCache/BranchCache reads do.
+func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	k := addrKey(addr)
 	vID, ok := c.addrToHash.Get(k)
 	if !ok {
 		c.addrMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	if c.isStale(vID.txNum, vID.epoch) {
 		c.addrToHash.Remove(k)
 		c.addrMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	c.addrHits.Add(1)
 
@@ -243,7 +250,7 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	ce, ok := c.hashToCode.Get(hashKey)
 	if !ok || len(ce.code) == 0 {
 		c.codeMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	if c.isStale(ce.txNum, ce.epoch) {
 		// Only the goroutine that actually removes the entry adjusts the byte
@@ -252,17 +259,18 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 			c.codeSize.Add(-int64(8 + len(old.code)))
 		}
 		c.codeMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	// Reject a 64-bit maphash collision: the stored code belongs to a different
 	// contract than addr's. Verifiable only when the addr entry carries a
 	// codeHash (always for PutWithCodeHash-populated code; the EVM read path).
 	if vID.codeHash != ([32]byte{}) && ce.keyHash != vID.codeHash {
 		c.codeMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	c.codeHits.Add(1)
-	return ce.code, true
+	// The addr→code binding is what an unwind re-binds; vID.txNum bounds it.
+	return ce.code, vID.txNum, true
 }
 
 // Put stores contract code for the given address, implementing the Cache interface.
@@ -496,8 +504,8 @@ func (c *CodeCache) Clear() {
 
 // Unwind invalidates entries reflecting dead-fork state. Code deployed on the
 // rolled-back fork must stop being discoverable — even by codeHash — because
-// although a hash → bytes value is invariant, the code's EXISTENCE is not
-// . O(1) and scan-free: bump the epoch and lower the floor to
+// although a hash → bytes value is invariant, the code's EXISTENCE is not.
+// O(1) and scan-free: bump the epoch and lower the floor to
 // unwindToTxNum; every layer's entries at/above the floor from a superseded
 // epoch drop lazily on their next Get (re-fetching code shared with a
 // still-live deployment, an accepted multiplicity cost).

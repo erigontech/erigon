@@ -1540,7 +1540,17 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	// Pure read: prefer the content-addressed fast path (addr → codeHash →
+	// cached bytes, no per-address CodeDomain read) when the getter offers it.
+	// This is a getter, never a setter — it must not feed a DomainPut prevVal,
+	// so it does not use the addr-keyed GetLatest the write path relies on.
+	var enc []byte
+	var err error
+	if cg, ok := r.getter.(codeGetter); ok {
+		enc, _, err = cg.GetCode(addressValue[:])
+	} else {
+		enc, _, err = r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1549,6 +1559,14 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d, stack: %s\n", r.tracePrefix, address, lenc, cs, r.txNum, dbg.Stack())
 	}
 	return enc, nil
+}
+
+// codeGetter is the type-asserted fast-path interface for full-code reads
+// (EXTCODECOPY / CALL / ReadAccountCode). Implemented by execctx.temporalGetter;
+// callers fall back to GetLatest otherwise. Read-only: never used to resolve a
+// DomainPut prevVal (setters resolve prevVal via the addr-keyed GetLatest).
+type codeGetter interface {
+	GetCode(addr []byte) ([]byte, bool, error)
 }
 
 // codeSizeGetter is the type-asserted fast-path interface for callers

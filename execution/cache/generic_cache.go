@@ -159,12 +159,20 @@ func (c *DomainCache) Delete(key []byte) {
 
 // Get retrieves data for the given key.
 func (c *GenericCache[T]) Get(key []byte) (T, bool) {
+	v, _, ok := c.GetWithTxNum(key)
+	return v, ok
+}
+
+// GetWithTxNum is Get plus the txNum the cached value reflects, so callers can
+// apply a step bound (cStep = txNum/stepSize) against an in-flight unwind's
+// maxStep — the same coherence the BranchCache read applies for commitment.
+func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
 	e, ok := c.data.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
 		c.misses.Add(1)
 		var zero T
-		return zero, false
+		return zero, 0, false
 	}
 	// Lazy unwind invalidation: an entry from a superseded epoch whose txNum is
 	// at or above the unwind floor reflects dead-fork state — drop it and miss so
@@ -179,10 +187,10 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
 		var zero T
-		return zero, false
+		return zero, 0, false
 	}
 	c.hits.Add(1)
-	return e.val, true
+	return e.val, e.txNum, true
 }
 
 // Put stores data for the given key. In ModeEvictLRU the underlying

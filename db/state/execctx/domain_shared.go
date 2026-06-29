@@ -443,6 +443,15 @@ func (gt *temporalGetter) GetCodeSize(addr []byte) (int, bool, error) {
 	return gt.sd.GetCodeSize(gt.tx, addr)
 }
 
+// GetCode returns contract code via the content-addressed fast path (see
+// SD.GetCode): many addresses sharing one bytecode resolve to a single cached
+// copy with no per-address CodeDomain read. Read-only — callers
+// (ReaderV3.ReadAccountCode) type-assert this method; setters must not use it
+// (they resolve prevVal through GetLatest, which is addr-keyed).
+func (gt *temporalGetter) GetCode(addr []byte) ([]byte, bool, error) {
+	return gt.sd.GetCode(gt.tx, addr)
+}
+
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
 }
@@ -1092,7 +1101,19 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
 	if sd.stateCache != nil {
-		v, ok := sd.stateCache.Get(domain, k)
+		v, cTxNum, ok := sd.stateCache.GetWithTxNum(domain, k)
+		cStep := kv.Step(cTxNum / sd.StepSize())
+		// Respect maxStep, mirroring the BranchCache gate below. sd.mem /
+		// sd.parent.mem lowered maxStep above when an in-flight unwind re-bound
+		// this key to an earlier step (the per-key unwindChangeset signal). A
+		// cached entry from a higher step would diverge from the (maxStep-bounded)
+		// DB read the cache-disabled path takes, so treat it as a miss and fall
+		// through; the Put below refreshes it. For direct domains the (txNum,epoch)
+		// floor in Get usually already drops such entries — this keeps the two
+		// read paths identical regardless.
+		if ok && cStep > maxStep {
+			ok = false
+		}
 		if dbg.KVReadLevelledMetrics {
 			if ok {
 				wm.UpdateStateCacheHit(domain)
@@ -1116,7 +1137,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 						domain, k, v, vDB, sd.txNum))
 				}
 			}
-			return v, 0, nil
+			return v, cStep, nil
 		}
 	}
 
@@ -1127,7 +1148,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// evicted by txN watermark on unwind, so a cache hit never coexists
 	// with a newer MDBX state.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
-		if cv, cTxNum, ok := sd.branchCache.Get(k); ok {
+		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Respect maxStep. sd.mem / sd.parent.mem lowered maxStep above when an
 			// unwound key reports its restored step via unwindChangeset (the per-key
 			// in-mem unwind signal). The cache's global epoch/floor is coarser than
@@ -1135,25 +1156,16 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			// to a step the unwind re-bound away. Serving it then diverges from the
 			// (maxStep-bounded) DB read the cache-disabled path takes. Fall through to
 			// the bounded read in that case; the Put below refreshes the entry.
-			cStep := kv.Step(cTxNum / sd.StepSize())
+			// Get returns the on-disk step index directly — do NOT divide by
+			// StepSize (that double-division collapsed cStep to ~0, defeating the
+			// gate).
+			cStep := kv.Step(cStepU64)
 			if cStep <= maxStep {
 				return cv, cStep, nil
 			}
 		}
 	}
 
-	// No codeHash-keyed bypass for CodeDomain here. Answering GetLatest(CodeDomain,
-	// addr) from the account's codeHash is unsound: the account record (resolved
-	// from sd.mem or the addr→codeHash LRU) can be ahead of the authoritative
-	// per-address CodeDomain value — e.g. the account commits with codeHash H while
-	// the code write for this addr has not landed in the queried layer. The bypass
-	// then returned H's bytes as this addr's value, diverging from the file read
-	// (observed: 618-byte bypass vs 0-byte CodeDomain). That phantom value, taken as
-	// the prevVal of the deploy's code write, equals the identical bytecode being
-	// written, so the DomainPut diff elides the write and the code is never
-	// persisted (surfacing later as ErrNoCode). Code dedup by hash already happens
-	// soundly in the addr-keyed cache above (addrToHash→hashToCode); the
-	// authoritative addr-keyed file read below is the only correct fallthrough.
 	var readTxN uint64
 	var txNKnown bool
 	switch aggTx := tx.AggTx().(type) {
@@ -1182,10 +1194,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				// on a read. Key the content-addressed entry by the code's OWN hash,
 				// keccak(v) — NEVER a separately-read account codeHash, which under
 				// parallel exec can be a skewed/cross-account value and would poison
-				// the shared codeHash->code map for every account sharing that hash
-				// (surfacing as a wrong-forwarder gas divergence). keccak(v) makes
-				// every cached entry self-consistent, so a skewed account read can
-				// never produce a bad entry.
+				// the shared codeHash->code map for every account sharing that hash.
+				// keccak(v) makes every cached entry self-consistent, so a skewed
+				// account read can never produce a bad entry.
 				sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v), readTxNum)
 			}
 		} else {
@@ -1207,6 +1218,11 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 // full bytes path. For workloads dominated by EXTCODESIZE / EXTCODEHASH
 // this avoids the file-accessor + decompression cost of the full bytes on
 // the second-and-later access to any codeHash seen anywhere in the process.
+//
+// READ-ONLY contract (same as GetCode): the codeHash fast path resolves from
+// the account record, so it must not feed a DomainPut prevVal — setters use
+// the addr-keyed GetLatest. Only pure getters (EXTCODESIZE / EXTCODEHASH) use
+// this shortcut.
 //
 // Correctness invariant: the fast path is purely additive. When it cannot
 // answer, the function delegates to GetLatest(CodeDomain, addr) — the
@@ -1250,6 +1266,46 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, 
 		return 0, false, nil
 	}
 	return len(v), true, nil
+}
+
+// GetCode returns the contract code at addr. The fast path resolves the
+// account's codeHash and returns the content-addressed bytes from the code
+// cache without touching the per-address CodeDomain — so many addresses
+// sharing one bytecode (proxies, clones) resolve to a single cached copy with
+// no disk read. The cold path is the authoritative addr-keyed GetLatest, which
+// also populates the caches.
+//
+// READ-ONLY contract: this is for pure getters (EVM EXTCODECOPY / CALL,
+// ReaderV3.ReadAccountCode). It MUST NOT resolve a DomainPut prevVal. The fast
+// path answers from the account record, which during a deploy is updated with
+// the new codeHash before the code write lands; a write's prevVal read through
+// it would see the about-to-be-written bytes and the DomainPut diff would elide
+// the write. Setters therefore resolve prevVal through GetLatest, which is
+// addr-keyed (domain-faithful); only getters use this codeHash shortcut.
+func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte) ([]byte, bool, error) {
+	if tx == nil {
+		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
+	}
+
+	// Fast path: addr → account codeHash → content-addressed bytes, no
+	// per-address CodeDomain read.
+	if sd.stateCache != nil {
+		if codeHash := sd.codeHashForAddr(tx, addr); len(codeHash) > 0 {
+			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
+				return cv, true, nil
+			}
+		}
+	}
+
+	// Cold path: authoritative addr-keyed read (also populates the caches).
+	v, _, err := sd.GetLatest(kv.CodeDomain, tx, addr)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(v) == 0 {
+		return nil, false, nil
+	}
+	return v, true, nil
 }
 
 // codeHashForAddr returns the Ethereum codeHash for an account, or nil if the
@@ -1329,8 +1385,7 @@ func decodeAccountCodeHash(enc []byte) []byte {
 	// AccountsDomain values are SerialiseV3-encoded, so they must be decoded
 	// with DeserialiseV3. DecodeForStorage is the legacy MDBX bitmask format
 	// with an incompatible binary layout; applied to V3 bytes it silently
-	// misparses and leaves CodeHash empty, so codeHashForAddr returned nil for
-	// every contract and the CodeDomain codeHash bypass never fired.
+	// misparses and leaves CodeHash empty.
 	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
 		return nil
 	}

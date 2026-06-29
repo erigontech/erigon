@@ -725,12 +725,10 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
-		// Geth pattern (core/state/state_object.go ~Code()): pay full code
-		// fetch once on first touch, populate stateObject.code so subsequent
+		// Geth pattern (core/state/state_object.go ~Code()): pay the full code
+		// fetch once on first touch and populate stateObject.code, so repeat
 		// EXTCODESIZE / EXTCODEHASH / CALL on the same addr in this tx are
-		// in-struct slice-len calls (~50 ns), not full reader round-trips.
-		// On a 30M-gas EXTCODESIZE loop with N unique addrs, this collapses
-		// the per-addr cost from ~150k reader calls to 1 reader call.
+		// in-struct slice-len calls, not reader round-trips.
 		code, err := sdb.stateReader.ReadAccountCode(addr)
 		if err != nil {
 			return 0, err
