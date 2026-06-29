@@ -670,13 +670,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(ctx); waitErr != nil {
-		if execErr == nil {
-			execErr = waitErr
-		} else {
-			execErr = errors.Join(execErr, waitErr)
-		}
-	}
+	execErr = reconcileExecAndWaitErr(execErr, pe.wait(ctx))
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
@@ -1222,6 +1216,20 @@ func wrapAsExecAbort(origErr error, depTxIndex int) error {
 		return origErr
 	}
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
+}
+
+// reconcileExecAndWaitErr combines the apply-loop result with a non-nil error
+// from pe.wait. A real (non-canceled) wait error has no resumable work, so it
+// supersedes ErrLoopExhausted — joining would keep errors.Is(_, ErrLoopExhausted)
+// true and let a fatal exec error be retried silently forever.
+func reconcileExecAndWaitErr(execErr, waitErr error) error {
+	if waitErr == nil {
+		return execErr
+	}
+	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) {
+		return waitErr
+	}
+	return errors.Join(execErr, waitErr)
 }
 
 // execLoopExitDecision is the result of evaluating the exec-loop's

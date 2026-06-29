@@ -1050,6 +1050,55 @@ func TestProcessCommitErr(t *testing.T) {
 	})
 }
 
+// Pins reconcileExecAndWaitErr: a real (non-canceled) error from pe.wait must
+// supersede the apply loop's ErrLoopExhausted. Merely joining keeps
+// errors.Is(_, &ErrLoopExhausted{}) true, so execImpl skips the failure Warn
+// and advances the stage to the unchanged commit height — turning a fatal
+// executeBlocks error into a silent zero-progress retry loop.
+func TestReconcileExecAndWaitErr(t *testing.T) {
+	exhausted := &ErrLoopExhausted{From: 100, To: 0, Reason: "block batch is full"}
+	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
+
+	// surfacesLoudly mirrors execImpl's gate: an error that is neither
+	// context.Canceled nor ErrLoopExhausted reaches the failure Warn and is
+	// returned to the stage loop as a hard error rather than "more work".
+	surfacesLoudly := func(err error) bool {
+		return err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{}))
+	}
+
+	t.Run("both nil", func(t *testing.T) {
+		require.NoError(t, reconcileExecAndWaitErr(nil, nil))
+	})
+
+	t.Run("clean partial batch keeps ErrLoopExhausted", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(exhausted, nil)
+		require.ErrorIs(t, got, &ErrLoopExhausted{})
+		require.False(t, surfacesLoudly(got), "a clean partial batch must resume, not fail")
+	})
+
+	t.Run("wait error with no apply error surfaces", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(nil, waitFail)
+		require.Same(t, waitFail, got)
+		require.True(t, surfacesLoudly(got))
+	})
+
+	t.Run("wait error supersedes ErrLoopExhausted", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(exhausted, waitFail)
+		require.ErrorIs(t, got, waitFail)
+		require.False(t, errors.Is(got, &ErrLoopExhausted{}),
+			"ErrLoopExhausted must not survive, or execImpl retries a fatal error forever")
+		require.True(t, surfacesLoudly(got))
+	})
+
+	t.Run("specific apply error is kept alongside the wait error", func(t *testing.T) {
+		invalid := fmt.Errorf("%w: bad receipts", rules.ErrInvalidBlock)
+		got := reconcileExecAndWaitErr(invalid, waitFail)
+		require.ErrorIs(t, got, rules.ErrInvalidBlock)
+		require.ErrorIs(t, got, waitFail)
+		require.True(t, surfacesLoudly(got))
+	})
+}
+
 // Pins the close-branch precedence: deferredRootErr must surface ahead of
 // the missing-blocks completeness error, otherwise a deliberate cancel masks
 // ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
