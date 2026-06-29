@@ -19,7 +19,7 @@ type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
-	*freelru.LRU[uint64, domainGetFromFileCacheItem]
+	*freelru.ShardedLRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
 	limit          uint32
 }
@@ -37,11 +37,11 @@ var (
 )
 
 func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
+	c, err := freelru.NewSharded[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
+	return &DomainGetFromFileCache{ShardedLRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
@@ -70,22 +70,24 @@ func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
 	}
-	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
+	// One cache per visibleFiles snapshot, shared (concurrent-safe) by every
+	// DomainRoTx opened against it. The snapshot is immutable, so its mmap-pointer
+	// entries never go stale: a file change builds a new domainVisible with a fresh
+	// cache and drops this one — no invalidation.
+	if domainGetFromFileCacheEnabled {
+		d.cache = NewDomainGetFromFileCache(limit)
+	}
 	return d
 }
 
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-	if !domainGetFromFileCacheEnabled {
-		return nil
-	}
-	return v.caches.Get().(*DomainGetFromFileCache)
+	return v.cache
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	if c == nil {
 		return
 	}
-	c.LogStats(v.name)
-	v.caches.Put(c)
+	c.LogStats(v.name) // shared cache: stats are cumulative for this snapshot
 }
 
 var (

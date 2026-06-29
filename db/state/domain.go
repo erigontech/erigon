@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -99,9 +98,9 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files  visibleFiles
-	name   kv.Domain
-	caches *sync.Pool
+	files visibleFiles
+	name  kv.Domain
+	cache *DomainGetFromFileCache // shared (concurrent) across all DomainRoTx of this snapshot
 
 	// valFiles holds per-step external value-files (.cvl), keyed by step (resolved
 	// from an MDBX handle, not by key).
