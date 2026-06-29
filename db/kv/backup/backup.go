@@ -289,7 +289,7 @@ func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err er
 		return nil, err
 	}
 	if took := time.Since(started); took > 5*time.Second {
-		log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took")
+		log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took", took)
 	}
 	return bounds, nil
 }

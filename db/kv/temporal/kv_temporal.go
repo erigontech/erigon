@@ -395,7 +395,27 @@ func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
 		return dr.DeleteRange(table, from, to)
 	}
-	return 0, fmt.Errorf("DeleteRange unsupported by %T", tx.RwTx)
+	// Backend has no native range-delete: emulate it so callers can rely on
+	// temporal.RwTx always satisfying kv.HasDeleteRange.
+	it, err := tx.RwTx.Range(table, from, to, order.Asc, kv.Unlim)
+	if err != nil {
+		return 0, err
+	}
+	defer it.Close()
+	var keys [][]byte
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return 0, err
+		}
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		if err := tx.RwTx.Delete(table, k); err != nil {
+			return uint64(len(keys)), err
+		}
+	}
+	return uint64(len(keys)), nil
 }
 
 func (tx *RwTx) LockDBInRam() error {
