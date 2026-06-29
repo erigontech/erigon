@@ -19,6 +19,7 @@ package executiontests
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -149,7 +150,11 @@ func TestImportReorgUnwindToGenesisParallel(t *testing.T) {
 	// intentionally-invalid post-Paris-uncle block. The canonical head is the
 	// signal we check, exactly as the Hive consensus simulator does.
 	importArgs := append([]string{"import", "--datadir", datadir, "--networkid", "1337"}, rlpFiles...)
-	importOut, _ := exec.Command(bin, importArgs...).CombinedOutput() //nolint:gosec
+	importOut, importErr := exec.Command(bin, importArgs...).CombinedOutput() //nolint:gosec
+	var exitErr *exec.ExitError
+	if importErr != nil && !errors.As(importErr, &exitErr) {
+		t.Fatalf("erigon import failed to run: %v\n%s", importErr, importOut)
+	}
 
 	head, number := lastImportedHead(string(importOut))
 	require.Equalf(t, uint64(4), number,
