@@ -72,7 +72,9 @@ func TestLegacyCancunBlockchain(t *testing.T) {
 	}
 
 	bt := new(testutil.TestMatcher)
+	dir := filepath.Join(legacyDir, "LegacyTests", "Cancun", "BlockchainTests")
 	bt.SkipLoad(`.*\.meta/.*`)
+
 	// GeneralStateTests run natively via TestLegacyCancunState; re-running all of
 	// them through the per-test block executor here is prohibitively slow.
 	bt.SkipLoad(`GeneralStateTests`)
@@ -86,7 +88,6 @@ func TestLegacyCancunBlockchain(t *testing.T) {
 	bt.SkipLoad(`TransitionTests`)
 	bt.SkipLoad(`bcStateTests/refundReset\.json/refundReset_Constantinople`)
 
-	dir := filepath.Join(legacyDir, "LegacyTests", "Cancun", "BlockchainTests")
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
