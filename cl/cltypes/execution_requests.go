@@ -146,6 +146,34 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+func (e *ExecutionRequests) MarshalJSON() ([]byte, error) {
+	e.ensureLists()
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return json.Marshal(struct {
+			Deposits       *solid.ListSSZ[*solid.DepositRequest]       `json:"deposits"`
+			Withdrawals    *solid.ListSSZ[*solid.WithdrawalRequest]    `json:"withdrawals"`
+			Consolidations *solid.ListSSZ[*solid.ConsolidationRequest] `json:"consolidations"`
+		}{
+			Deposits:       e.Deposits,
+			Withdrawals:    e.Withdrawals,
+			Consolidations: e.Consolidations,
+		})
+	}
+	return json.Marshal(struct {
+		Deposits        *solid.ListSSZ[*solid.DepositRequest]        `json:"deposits"`
+		Withdrawals     *solid.ListSSZ[*solid.WithdrawalRequest]     `json:"withdrawals"`
+		Consolidations  *solid.ListSSZ[*solid.ConsolidationRequest]  `json:"consolidations"`
+		BuilderDeposits *solid.ListSSZ[*solid.BuilderDepositRequest] `json:"builder_deposits"`
+		BuilderExits    *solid.ListSSZ[*solid.BuilderExitRequest]    `json:"builder_exits"`
+	}{
+		Deposits:        e.Deposits,
+		Withdrawals:     e.Withdrawals,
+		Consolidations:  e.Consolidations,
+		BuilderDeposits: e.BuilderDeposits,
+		BuilderExits:    e.BuilderExits,
+	})
+}
+
 func DecodeExecutionRequestsList(cfg *clparams.BeaconChainConfig, requests []hexutil.Bytes, version clparams.StateVersion) (*ExecutionRequests, error) {
 	out := NewExecutionRequestsWithVersion(cfg, version)
 	lastType := -1

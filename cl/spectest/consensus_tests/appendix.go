@@ -241,6 +241,8 @@ func addSszTests() {
 			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
 		}, runAfterVersion(clparams.GloasVersion))).
 		With("BuilderPendingWithdrawal", sszStaticTestByEmptyObject(&cltypes.BuilderPendingWithdrawal{}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderDepositRequest", sszStaticTestByEmptyObject(&solid.BuilderDepositRequest{}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderExitRequest", sszStaticTestByEmptyObject(&solid.BuilderExitRequest{}, runAfterVersion(clparams.GloasVersion))).
 		With("ExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.ExecutionPayloadBid{
 			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		}, runAfterVersion(clparams.GloasVersion))).

@@ -721,6 +721,66 @@ func TestExecutionPayloadBidServiceFeeRecipientMismatch(t *testing.T) {
 	require.Contains(t, err.Error(), "does not match")
 }
 
+func TestExecutionPayloadBidServiceRejectsTooManyBlobCommitments(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	maxBlobs := int(service.beaconCfg.GetBlobParameters(100 / service.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock)
+	for i := 0; i <= maxBlobs; i++ {
+		msg.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	}
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too many blob_kzg_commitments")
+}
+
+func TestExecutionPayloadBidServiceRejectsPrevRandaoMismatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	parentState := newBidParentState(service.beaconCfg, testDependentRoot)
+	parentState.SetRandaoMixAt(int(state2.Epoch(parentState)%service.beaconCfg.EpochsPerHistoricalVector), common.Hash{0x42})
+	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = parentState
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "prev_randao")
+}
+
+func TestExecutionPayloadBidServiceRejectsBidAtParentSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	addPreferencesToPool(epbsPool, 100)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not greater than parent block slot")
+}
+
 func TestExecutionPayloadBidServiceFailedValidationNotStored(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

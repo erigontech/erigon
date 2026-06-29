@@ -202,6 +202,28 @@ func TestExecutionRequestsJSONRejectsPreGloasBuilderRequests(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestExecutionRequestsMarshalJSONOmitsBuilderRequestsBeforeGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+
+	body, err := json.Marshal(requests)
+	require.NoError(t, err)
+
+	require.NotContains(t, string(body), "builder_deposits")
+	require.NotContains(t, string(body), "builder_exits")
+}
+
+func TestExecutionRequestsMarshalJSONIncludesBuilderRequestsAtGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+
+	body, err := json.Marshal(requests)
+	require.NoError(t, err)
+
+	require.Contains(t, string(body), "builder_deposits")
+	require.Contains(t, string(body), "builder_exits")
+}
+
 func TestNewExecutionRequestsDefaultIsPreGloas(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 

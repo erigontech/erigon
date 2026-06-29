@@ -158,6 +158,14 @@ func TestProcessBuilderRequestsRejectNil(t *testing.T) {
 	require.Error(t, machine.ProcessBuilderExitRequest(s, nil))
 }
 
+func TestProcessPayloadAttestationRejectsNil(t *testing.T) {
+	machine := &eth2.Impl{}
+	s := state.New(&clparams.MainnetBeaconConfig)
+
+	require.Error(t, machine.ProcessPayloadAttestation(s, nil))
+	require.Error(t, machine.ProcessPayloadAttestation(s, &cltypes.PayloadAttestation{}))
+}
+
 func TestProcessVoluntaryExitRejectsBuilderIndex(t *testing.T) {
 	machine := &eth2.Impl{}
 	s := state.New(&clparams.MainnetBeaconConfig)

@@ -37,12 +37,20 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	execparams "github.com/erigontech/erigon/execution/protocol/params"
 )
 
 const maxProposerPreferencesRequestItems = 2048
+const maxEpbsJSONSize = 1 << 20
+const maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
 	return int64(4 + 224 + cltypes.MaxBlobsCommittmentsPerBlock*48 + 96)
+}
+
+func maxPayloadAttestationMessagesSSZSize(cfg *clparams.BeaconChainConfig) int64 {
+	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
+	return int64(cfg.MaxPayloadAttestations) * int64(msgSize)
 }
 
 // ---- PTC Duties ----
@@ -382,7 +390,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 
 	switch r.Header.Get("Content-Type") {
 	case "application/octet-stream":
-		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSignedExecutionPayloadBidSSZSize()))
+		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPayloadAttestationMessagesSSZSize(a.beaconChainCfg)))
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
@@ -410,7 +418,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		}
 	default:
 		// application/json or any other content type: use JSON decoding
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&req); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
@@ -677,12 +685,12 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
-		if err := json.NewDecoder(r.Body).Decode(signedEnvelope); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize)).Decode(signedEnvelope); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
 	case "application/octet-stream":
-		octect, err := io.ReadAll(r.Body)
+		octect, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize))
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
@@ -751,12 +759,12 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 	}
 	switch contentType {
 	case "application/json":
-		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(req); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
 	case "application/octet-stream":
-		octets, err := io.ReadAll(r.Body)
+		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSignedExecutionPayloadBidSSZSize()))
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return

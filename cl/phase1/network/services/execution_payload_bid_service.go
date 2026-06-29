@@ -151,7 +151,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return fmt.Errorf("%w: bid slot %d is not current (%d) or next slot", ErrIgnore, slot, currentSlot)
 	}
 
-	preferences, ok, err := s.matchingProposerPreferences(msg)
+	preferences, parentState, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
 			s.queuePendingBid(msg)
@@ -169,26 +169,26 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return nil
 	}
 
-	return s.validateAndStoreBid(msg, preferences)
+	return s.validateAndStoreBid(msg, preferences, parentState)
 }
 
-func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, bool, error) {
+func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, *state.CachingBeaconState, bool, error) {
 	bid := msg.Message
 	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
 	if err != nil || parentState == nil {
-		return nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
+		return nil, nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	dependentRootState, err := s.proposerDependentRootState(parentState, proposalEpoch)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: failed to prepare parent state: %v", ErrIgnore, err)
+		return nil, nil, false, fmt.Errorf("%w: failed to prepare parent state: %v", ErrIgnore, err)
 	}
 	dependentRoot, err := state.GetProposerDependentRoot(dependentRootState, proposalEpoch)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: failed to compute proposer dependent root: %v", ErrIgnore, err)
+		return nil, nil, false, fmt.Errorf("%w: failed to compute proposer dependent root: %v", ErrIgnore, err)
 	}
 	preferences, ok := s.epbsPool.GetPreference(bid.Slot, dependentRoot)
-	return preferences, ok, nil
+	return preferences, parentState, ok, nil
 }
 
 func (s *executionPayloadBidService) proposerDependentRootState(parentState *state.CachingBeaconState, proposalEpoch uint64) (*state.CachingBeaconState, error) {
@@ -214,6 +214,7 @@ func (s *executionPayloadBidService) proposerDependentRootState(parentState *sta
 func (s *executionPayloadBidService) validateAndStoreBid(
 	msg *cltypes.SignedExecutionPayloadBid,
 	preferences *cltypes.SignedProposerPreferences,
+	parentState *state.CachingBeaconState,
 ) error {
 	bid := msg.Message
 	slot := bid.Slot
@@ -229,6 +230,20 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	if bid.FeeRecipient != prefs.FeeRecipient {
 		return fmt.Errorf("bid fee_recipient %v does not match proposer preferences %v",
 			bid.FeeRecipient, prefs.FeeRecipient)
+	}
+
+	epoch := state.GetEpochAtSlot(s.beaconCfg, slot)
+	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
+	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {
+		return fmt.Errorf("bid has too many blob_kzg_commitments: %d > %d",
+			bid.BlobKzgCommitments.Len(), maxBlobsPerBlock)
+	}
+
+	if parentState == nil {
+		return fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
+	}
+	if bid.PrevRandao != parentState.GetRandaoMixes(state.Epoch(parentState)) {
+		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
 	}
 
 	// [IGNORE] First valid bid from this builder for this slot
@@ -305,9 +320,13 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	}
 
 	// [IGNORE] parent_block_root is known in fork choice
-	if _, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot); !ok {
+	parentHeader, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot)
+	if !ok {
 		return fmt.Errorf("%w: parent_block_root %v not known in fork choice",
 			ErrIgnore, bid.ParentBlockRoot)
+	}
+	if slot <= parentHeader.Slot {
+		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", slot, parentHeader.Slot)
 	}
 
 	// [IGNORE] Highest bid check: only accept if this is the highest value bid for (slot, parentBlockHash, parentBlockRoot)
@@ -423,7 +442,7 @@ func (s *executionPayloadBidService) processPendingBids() {
 			return true
 		}
 
-		preferences, ok, err := s.matchingProposerPreferences(job.msg)
+		preferences, parentState, ok, err := s.matchingProposerPreferences(job.msg)
 		if err != nil {
 			if errors.Is(err, errBidDependencyUnavailable) {
 				return true
@@ -444,7 +463,7 @@ func (s *executionPayloadBidService) processPendingBids() {
 		s.pendingBids.Delete(pendingKey)
 		s.pendingCount.Add(-1)
 
-		if err := s.validateAndStoreBid(job.msg, preferences); err != nil {
+		if err := s.validateAndStoreBid(job.msg, preferences, parentState); err != nil {
 			log.Trace("Failed to process pending execution payload bid",
 				"slot", pendingKey.slot,
 				"builderIndex", pendingKey.builderIndex,

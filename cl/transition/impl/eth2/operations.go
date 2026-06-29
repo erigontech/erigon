@@ -1980,6 +1980,9 @@ func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidati
 // ProcessPayloadAttestation validates a single payload attestation.
 // [New in Gloas:EIP7732]
 func (I *impl) ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error {
+	if payloadAttestation == nil || payloadAttestation.Data == nil {
+		return errors.New("ProcessPayloadAttestation: nil payload attestation")
+	}
 	data := payloadAttestation.Data
 	// Check that the attestation is for the parent beacon block
 	header := s.LatestBlockHeader()

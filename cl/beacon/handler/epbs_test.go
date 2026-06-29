@@ -48,6 +48,20 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "missing payload attestation message data")
 }
 
+func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
+	maxSize := int(handler.beaconChainCfg.MaxPayloadAttestations) * msgSize
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(strings.Repeat("\x00", maxSize+1)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
 func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
