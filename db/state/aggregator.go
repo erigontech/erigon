@@ -557,6 +557,11 @@ func (a *Aggregator) Close() {
 	a.ctxCancel = nil
 	a.wg.Wait()
 
+	// A closed Aggregator may linger referenced; release the cached branch data eagerly.
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		cd.branchCache.Clear()
+	}
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
@@ -2427,8 +2432,8 @@ func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx,
 }
 
 // MeteredGetLatestWithTxN returns the high-water txN alongside (value,
-// step) for tagging BranchCache entries so UnwindTo can evict by
-// watermark. Non-CommitmentDomain reads return txN=0.
+// step) for tagging BranchCache entries so a lazy unwind can drop them by
+// (txN, epoch). Non-CommitmentDomain reads return txN=0.
 func (at *AggregatorRoTx) MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
 	return at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
 }

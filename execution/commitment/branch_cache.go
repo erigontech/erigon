@@ -57,9 +57,9 @@ type BranchCache struct {
 	// read path.
 	root atomic.Pointer[branchCacheEntry]
 
-	// LRU tail — bounded entries, evicts oldest when full. maphash.LRU
-	// wraps hashicorp/golang-lru/v2 which is thread-safe internally.
-	tail *maphash.LRU[*branchCacheEntry]
+	// LRU tail — bounded entries with per-shard LRU eviction (no global recency
+	// order across shards). See branchCacheTailShards for why it's sharded.
+	tail *maphash.ShardedLRU[*branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().
 	rootHits, rootMisses atomic.Uint64
@@ -107,15 +107,15 @@ type branchCacheEntry struct {
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
 
+// branchCacheTailShards splits the tail into this many independently-locked
+// shards so concurrent warmup workers don't serialize on a single LRU mutex.
+// Fixed value sized for the default warmup pool (dbg.TipTrieWarmupers ≈ NumCPU*8).
+const branchCacheTailShards = 256
+
 // BranchCacheProvider exposes the long-lived BranchCache attached to the
-// commitment domain. Implemented by *db/state.AggregatorRoTx (via duck
-// typing) so callers in the SharedDomains construction path can fetch the
-// cache without forcing db/state/execctx to import db/state — that import
-// would create a cycle since db/state imports execctx (squeeze.go,
-// trie_reader_integration_test.go, …).
-//
-// Returning nil is permitted; callers MUST treat nil as "no shared cache,
-// behave as if disabled" rather than panic.
+// commitment domain. Implemented by *db/state.AggregatorRoTx via duck typing to
+// avoid an execctx→db/state import cycle. Nil means caching is disabled — callers
+// MUST treat nil as "behave as if disabled" rather than panic.
 type BranchCacheProvider interface {
 	BranchCache() *BranchCache
 }
@@ -126,9 +126,9 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
-	tail, err := maphash.NewLRU[*branchCacheEntry](tailCapacity)
+	tail, err := maphash.NewShardedLRU[*branchCacheEntry](tailCapacity, branchCacheTailShards)
 	if err != nil {
-		panic(fmt.Sprintf("BranchCache: NewLRU: %s", err))
+		panic(fmt.Sprintf("BranchCache: NewShardedLRU: %s", err))
 	}
 	bc := &BranchCache{
 		tail: tail,
@@ -147,6 +147,15 @@ func isRootPrefix(prefix []byte) bool {
 	return len(prefix) == 1 && prefix[0] == 0x00
 }
 
+// tailHash maps prefix to its LRU-tail key, returning ok=false for a prefix that
+// must never be cached (the commitment state checkpoint key).
+func tailHash(prefix []byte) (uint64, bool) {
+	if isCommitmentStateKey(prefix) {
+		return 0, false
+	}
+	return maphash.Hash(prefix), true
+}
+
 func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	if isRootPrefix(prefix) {
 		entry := c.root.Load()
@@ -157,7 +166,11 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		c.rootHits.Add(1)
 		return entry, true
 	}
-	entry, ok := c.tail.Get(prefix)
+	h, ok := tailHash(prefix)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := c.tail.GetByHash(h)
 	if !ok {
 		c.tailMisses.Add(1)
 		return nil, false
@@ -171,7 +184,11 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
-	c.tail.Set(prefix, entry)
+	h, ok := tailHash(prefix)
+	if !ok {
+		return
+	}
+	c.tail.SetByHash(h, entry)
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
@@ -182,9 +199,6 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 // be mutated. Callers needing to modify the bytes must copy first (the
 // trie-context Branch() boundary already does, via common.Copy).
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
-		return nil, 0, false
-	}
 	entry, ok := c.lookup(prefix)
 	if !ok {
 		return nil, 0, false
@@ -228,7 +242,11 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 		c.root.Store(nil)
 		return
 	}
-	c.tail.Delete(prefix)
+	h, ok := tailHash(prefix)
+	if !ok {
+		return
+	}
+	c.tail.DeleteByHash(h)
 }
 
 // Unwind invalidates entries that reflect dead-fork state. unwindToTxN is the
