@@ -1547,7 +1547,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var enc []byte
 	var err error
 	if cg, ok := r.getter.(codeGetter); ok {
-		enc, _, err = cg.GetCode(addressValue[:])
+		enc, _, err = cg.GetCode(addressValue[:], r.txNum)
 	} else {
 		enc, _, err = r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	}
@@ -1566,14 +1566,14 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 // callers fall back to GetLatest otherwise. Read-only: never used to resolve a
 // DomainPut prevVal (setters resolve prevVal via the addr-keyed GetLatest).
 type codeGetter interface {
-	GetCode(addr []byte) ([]byte, bool, error)
+	GetCode(addr []byte, txNum uint64) ([]byte, bool, error)
 }
 
 // codeSizeGetter is the type-asserted fast-path interface for callers
 // that only need the length of the code (EXTCODESIZE / EXTCODEHASH).
 // Implemented by execctx.temporalGetter; fallback to GetLatest otherwise.
 type codeSizeGetter interface {
-	GetCodeSize(addr []byte) (int, bool, error)
+	GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
@@ -1582,7 +1582,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 		addressValue = address.Value()
 	}
 	if sg, ok := r.getter.(codeSizeGetter); ok {
-		size, _, err := sg.GetCodeSize(addressValue[:])
+		size, _, err := sg.GetCodeSize(addressValue[:], r.txNum)
 		if err != nil {
 			return 0, err
 		}

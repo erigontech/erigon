@@ -54,7 +54,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 		acc := accounts.Account{Nonce: 7, CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&acc), 0, nil))
 
-		got := sd.CodeHashForAddr(rwTx, addr[:])
+		got := sd.CodeHashForAddr(rwTx, addr[:], 0)
 		require.Nil(t, got, "in-batch empty-code account must override the stale non-empty LRU entry")
 	})
 
@@ -66,7 +66,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 		acc := accounts.Account{Nonce: 8, CodeHash: accounts.InternCodeHash(freshHash)}
 		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
 
-		got := sd.CodeHashForAddr(rwTx, addr[:])
+		got := sd.CodeHashForAddr(rwTx, addr[:], 0)
 		require.Equal(t, freshHash[:], got, "in-batch account's codeHash must override the stale LRU entry")
 		require.NotEqual(t, stale[:], got)
 	})

@@ -438,18 +438,20 @@ func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, 
 // has no code. Errors propagate normally.
 //
 // Callers (ReaderV3.ReadAccountCodeSize, etc.) type-assert on this method
-// so the existing kv.TemporalGetter interface is unchanged.
-func (gt *temporalGetter) GetCodeSize(addr []byte) (int, bool, error) {
-	return gt.sd.GetCodeSize(gt.tx, addr)
+// so the existing kv.TemporalGetter interface is unchanged. txNum is the
+// caller's read txNum, used to stamp any cache entry it populates.
+func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
+	return gt.sd.GetCodeSize(gt.tx, addr, txNum)
 }
 
 // GetCode returns contract code via the content-addressed fast path (see
 // SD.GetCode): many addresses sharing one bytecode resolve to a single cached
 // copy with no per-address CodeDomain read. Read-only — callers
 // (ReaderV3.ReadAccountCode) type-assert this method; setters must not use it
-// (they resolve prevVal through GetLatest, which is addr-keyed).
-func (gt *temporalGetter) GetCode(addr []byte) ([]byte, bool, error) {
-	return gt.sd.GetCode(gt.tx, addr)
+// (they resolve prevVal through GetLatest, which is addr-keyed). txNum is the
+// caller's read txNum, used to stamp any cache entry it populates.
+func (gt *temporalGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
+	return gt.sd.GetCode(gt.tx, addr, txNum)
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
@@ -1234,7 +1236,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 //
 // Returns (size, true, nil) on success and (0, false, nil) only when
 // CodeDomain itself confirms no code.
-func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, error) {
+func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64) (int, bool, error) {
 	if tx == nil {
 		return 0, false, errors.New("sd.GetCodeSize: unexpected nil tx")
 	}
@@ -1242,14 +1244,14 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, 
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
 	if sd.stateCache != nil {
-		if codeHash := sd.codeHashForAddr(tx, addr); len(codeHash) > 0 {
+		if codeHash := sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
 			if size, ok := sd.stateCache.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
 			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
-				// sd.txNum is a conservative upper bound: >= the live code's write
+				// txNum is a conservative upper bound: >= the live code's write
 				// txNum, so the size drops on any unwind that drops the code.
-				sd.stateCache.PutCodeSizeByHash(codeHash, len(cv), sd.txNum)
+				sd.stateCache.PutCodeSizeByHash(codeHash, len(cv), txNum)
 				return len(cv), true, nil
 			}
 		}
@@ -1282,7 +1284,7 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, 
 // it would see the about-to-be-written bytes and the DomainPut diff would elide
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
-func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte) ([]byte, bool, error) {
+func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1290,7 +1292,7 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte) ([]byte, bool, e
 	// Fast path: addr → account codeHash → content-addressed bytes, no
 	// per-address CodeDomain read.
 	if sd.stateCache != nil {
-		if codeHash := sd.codeHashForAddr(tx, addr); len(codeHash) > 0 {
+		if codeHash := sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
 			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
 				return cv, true, nil
 			}
@@ -1315,7 +1317,12 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte) ([]byte, bool, e
 //
 // Returns nil quietly on any error or missing account — the caller falls
 // through to the addr-keyed file read so correctness is unaffected.
-func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
+//
+// txNum stamps the addr→codeHash cache entry (a conservative upper bound for
+// unwind invalidation). It is passed in by the caller — never read from the
+// shared sd.txNum, which a parallel exec worker on this read path must not
+// touch (the exec loop advances it concurrently).
+func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum uint64) []byte {
 	if len(addr) == 0 {
 		return nil
 	}
@@ -1366,10 +1373,10 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
 			copy(fixed[:], h)
 		}
 		// Always populate, including the zero-hash sentinel for misses —
-		// repeat lookups skip the whole resolve() chain. sd.txNum is a
+		// repeat lookups skip the whole resolve() chain. txNum is a
 		// conservative upper bound (>= the resolved account's write txNum), so
 		// the mapping drops on any unwind that reverts that account.
-		sd.stateCache.PutAddrCodeHash(addr, fixed, sd.txNum)
+		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)
 	}
 	return h
 }
