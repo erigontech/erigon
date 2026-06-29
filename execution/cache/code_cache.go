@@ -24,6 +24,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
@@ -117,7 +118,7 @@ type CodeCache struct {
 	// addrToHash maps a 20-byte Ethereum address to the maphash-derived
 	// codeID for the code at that address. An LRU so fresh-address workloads
 	// evict oldest entries and warm up the working set.
-	addrToHash *lru.Cache[[20]byte, versionedAddressID]
+	addrToHash *lru.Cache[common.Address, versionedAddressID]
 	hashToCode *maphash.Map[codeEntry] // maphash(code) → code, concurrent
 	codeSize   atomic.Int64            // current size in bytes (code only, hash is fixed 8 bytes)
 
@@ -126,7 +127,7 @@ type CodeCache struct {
 	// for bytes-lookup chaining). Used by SharedDomains.codeHashForAddr to
 	// skip a cold account-domain read when the EVM-known codeHash is
 	// already in cache. An addr → codeHash LRU.
-	addrToCodeHash *lru.Cache[[20]byte, addrCodeHashEntry]
+	addrToCodeHash *lru.Cache[common.Address, addrCodeHashEntry]
 
 	// codeHashToCode: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
 	// alongside L2 when the caller provides codeHash on Put. Independent
@@ -181,11 +182,11 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	if addrEntries < 1024 {
 		addrEntries = 1024
 	}
-	addrLRU, err := lru.New[[20]byte, versionedAddressID](addrEntries)
+	addrLRU, err := lru.New[common.Address, versionedAddressID](addrEntries)
 	if err != nil {
 		panic(err)
 	}
-	addrCodeHashLRU, err := lru.New[[20]byte, addrCodeHashEntry](addrEntries)
+	addrCodeHashLRU, err := lru.New[common.Address, addrCodeHashEntry](addrEntries)
 	if err != nil {
 		panic(err)
 	}
@@ -205,20 +206,6 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	return cc
 }
 
-// addrKey casts a 20-byte slice to a fixed-size key without allocation.
-// Caller MUST pass a 20-byte slice (all Ethereum addresses are 20 bytes).
-// Returns the zero [20]byte if addr is shorter; only longer slices are
-// truncated silently — defensive but should not happen on the hot path.
-func addrKey(addr []byte) [20]byte {
-	var k [20]byte
-	if len(addr) >= 20 {
-		copy(k[:], addr[:20])
-	} else {
-		copy(k[:], addr)
-	}
-	return k
-}
-
 // NewDefaultCodeCache creates a new CodeCache with the default sizes.
 func NewDefaultCodeCache() *CodeCache {
 	return NewCodeCache(DefaultCodeCacheBytes, DefaultAddrCacheBytes)
@@ -233,7 +220,7 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 // GetWithTxNum is Get plus the txNum of the addr→code binding, so the read
 // path can apply the same step bound the DomainCache/BranchCache reads do.
 func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
-	k := addrKey(addr)
+	k := common.BytesToAddress(addr)
 	vID, ok := c.addrToHash.Get(k)
 	if !ok {
 		c.addrMisses.Add(1)
@@ -295,7 +282,7 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	ep := c.epoch.Load()
 	codeID := maphash.Hash(code)
 
-	c.addrToHash.Add(addrKey(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
+	c.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 
 	hashKey := uint64AsBytes(&codeID)
 	if existing, exists := c.hashToCode.Get(hashKey); exists {
@@ -326,7 +313,7 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 // EVM-known codeHash is already known. Eviction is LRU; freshly seen addrs
 // replace coldest entries.
 func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
-	k := addrKey(addr)
+	k := common.BytesToAddress(addr)
 	e, ok := c.addrToCodeHash.Get(k)
 	if !ok {
 		return [32]byte{}, false
@@ -343,14 +330,14 @@ func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 // readAhead's BAL prefetch when it learns the codeHash from the decoded
 // account record. txNum stamps the mapping for unwind invalidation.
 func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
-	c.addrToCodeHash.Add(addrKey(addr), addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.epoch.Load()})
+	c.addrToCodeHash.Add(common.BytesToAddress(addr), addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.epoch.Load()})
 }
 
 // DeleteAddrCodeHash drops the addr → codeHash mapping. Called on
 // SELFDESTRUCT / CREATE2-replace / unwind where the account's codeHash
 // has been mutated.
 func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
-	c.addrToCodeHash.Remove(addrKey(addr))
+	c.addrToCodeHash.Remove(common.BytesToAddress(addr))
 }
 
 // GetByCodeHash retrieves contract code by its Ethereum codeHash (keccak256).
@@ -484,7 +471,7 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
-	c.addrToHash.Remove(addrKey(addr))
+	c.addrToHash.Remove(common.BytesToAddress(addr))
 }
 
 // Clear hard-resets every layer and the epoch/floor. Use on Reset /

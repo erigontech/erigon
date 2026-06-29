@@ -203,13 +203,14 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	newSize := len(key) + valBytes + 24
 	ep := c.epoch.Load()
 
+	existing, hasExisting := c.data.Get(h)
+
 	// Existing key — update in place. Reuse the stored key buffer to
 	// avoid an extra allocation; the freshly-decoded value replaces the
 	// old one.
-	if existing, ok := c.data.Get(h); ok && bytes.Equal(existing.key, key) {
-		oldSize := existing.size
+	if hasExisting && bytes.Equal(existing.key, key) {
 		c.data.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
-		c.currentSize.Add(int64(newSize - oldSize))
+		c.currentSize.Add(int64(newSize - existing.size))
 		return
 	}
 
@@ -226,6 +227,13 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	// from currentSize. Eviction is per-shard, not globally-LRU — same
 	// trade-off code_cache.go / balcache.go / db/state/cache.go accept.
 
+	// hasExisting here means a 64-bit maphash collision (different key, same
+	// hash): freelru.Add replaces the colliding entry in place WITHOUT firing
+	// OnEvict, so subtract the displaced size now — otherwise currentSize drifts
+	// up by it permanently.
+	if hasExisting {
+		c.currentSize.Add(-int64(existing.size))
+	}
 	keyCopy := common.Copy(key)
 	c.data.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
 	c.currentSize.Add(int64(newSize))
@@ -240,10 +248,16 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	}
 }
 
-// Clear removes all entries from the cache.
+// Clear removes all entries from the cache. It also resets the (epoch,
+// unwindFloor) coherence pair: with no entries left, no stale (txNum, epoch)
+// can survive, so a fresh floor keeps subsequent Puts at the live epoch
+// serviceable. Mirrors CodeCache.Clear (which already did this — the two had
+// drifted).
 func (c *GenericCache[T]) Clear() {
 	c.data.Purge()
 	c.currentSize.Store(0)
+	c.epoch.Store(0)
+	c.unwindFloor.Store(math.MaxUint64)
 }
 
 // Unwind invalidates entries that reflect dead-fork state. unwindToTxNum is the
