@@ -142,7 +142,9 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 			return nil
 		}
 		c := common.Copy(rlp)
-		seen[string(c)] = struct{}{}
+		// c is appended to out and never mutated, so alias it as the set key
+		// instead of allocating a second copy of the same bytes.
+		seen[common.ToStringZeroCopy(c)] = struct{}{}
 		out = append(out, c)
 		return nil
 	}
