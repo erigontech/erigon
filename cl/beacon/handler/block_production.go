@@ -849,6 +849,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
+	var executionErr error
 	var executionRequestsRoot common.Hash
 	// [New in Gloas:EIP7732] saved for envelope construction.
 	// Always initialize for GLOAS so EncodeSSZ never sees nil sub-fields.
@@ -1031,78 +1032,30 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 
-		// Add the requests bundle (pre-GLOAS only; in GLOAS, ExecutionRequests live in the envelope)
-		if stateVersion.Before(clparams.GloasVersion) && requestsBundle != nil && requestsBundle.GetRequests() != nil {
-			if len(requestsBundle.GetRequests()) > 0 {
-				log.Info("BlockProduction: Received requests bundle", "len", len(requestsBundle.GetRequests()))
+		if requestsBundle != nil && requestsBundle.GetRequests() != nil {
+			requests := requestsBundle.GetRequests()
+			if len(requests) > 0 {
+				log.Info("BlockProduction: Received requests bundle", "len", len(requests))
 			}
 
-			for _, request := range requestsBundle.GetRequests() {
-				rType := request[0]
-				requestData := request[1:]
-				switch rType {
-				case types.DepositRequestType:
-					if beaconBody.ExecutionRequests.Deposits.Len() > 0 {
-						log.Error("BlockProduction: Deposit request already exists")
-					} else if err := beaconBody.ExecutionRequests.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-						log.Error("BlockProduction: Failed to decode deposit request", "err", err)
-					} else {
-						log.Info("BlockProduction: Decoded deposit request", "len", beaconBody.ExecutionRequests.Deposits.Len())
-					}
-				case types.WithdrawalRequestType:
-
-					if beaconBody.ExecutionRequests.Withdrawals.Len() > 0 {
-						log.Error("BlockProduction: Withdrawal request already exists")
-					} else if err := beaconBody.ExecutionRequests.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-						log.Error("BlockProduction: Failed to decode withdrawal request", "err", err)
-					} else {
-						log.Info("BlockProduction: Decoded withdrawal request", "len", beaconBody.ExecutionRequests.Withdrawals.Len())
-					}
-
-				case types.ConsolidationRequestType:
-					if beaconBody.ExecutionRequests.Consolidations.Len() > 0 {
-						log.Error("BlockProduction: Consolidation request already exists")
-					} else if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-						log.Error("BlockProduction: Failed to decode consolidation request", "err", err)
-					} else {
-						log.Info("BlockProduction: Decoded consolidation request", "len", beaconBody.ExecutionRequests.Consolidations.Len())
-					}
-				}
+			requestList := make([]hexutil.Bytes, len(requests))
+			for i := range requests {
+				requestList[i] = requests[i]
+			}
+			execReqs, err := cltypes.DecodeExecutionRequestsList(a.beaconChainCfg, requestList, stateVersion)
+			if err != nil {
+				executionErr = fmt.Errorf("produceBeaconBody: invalid execution requests bundle: %w", err)
+				return
+			}
+			if stateVersion.Before(clparams.GloasVersion) {
+				beaconBody.ExecutionRequests = execReqs
+			} else {
+				gloasExecRequests = execReqs
 			}
 		}
 
-		// GLOAS: decode execution requests from the bundle to compute the bid's ExecutionRequestsRoot.
+		// GLOAS: compute the bid's ExecutionRequestsRoot from the envelope request container.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-			if requestsBundle != nil && requestsBundle.GetRequests() != nil {
-				execReqs := cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
-				for _, request := range requestsBundle.GetRequests() {
-					rType := request[0]
-					requestData := request[1:]
-					switch rType {
-					case types.DepositRequestType:
-						if err := execReqs.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode deposit request for root", "err", err)
-						}
-					case types.WithdrawalRequestType:
-						if err := execReqs.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode withdrawal request for root", "err", err)
-						}
-					case types.ConsolidationRequestType:
-						if err := execReqs.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode consolidation request for root", "err", err)
-						}
-					case types.BuilderDepositRequestType:
-						if err := execReqs.BuilderDeposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode builder deposit request for root", "err", err)
-						}
-					case types.BuilderExitRequestType:
-						if err := execReqs.BuilderExits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode builder exit request for root", "err", err)
-						}
-					}
-				}
-				gloasExecRequests = execReqs
-			}
 			// Always compute the root from the (possibly empty) gloasExecRequests
 			// so the bid's ExecutionRequestsRoot matches the envelope's actual root.
 			root, err := gloasExecRequests.HashSSZ()
@@ -1201,6 +1154,9 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 	}
 	wg.Wait()
+	if executionErr != nil {
+		return nil, 0, executionErr
+	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
 	}

@@ -257,12 +257,15 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 		if builders == nil {
 			return fmt.Errorf("builders list not available")
 		}
-		if int(builderIndex) >= builders.Len() {
+		if builderIndex >= uint64(builders.Len()) {
 			return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
 		}
 		builder := builders.Get(int(builderIndex))
 		if builder == nil {
 			return fmt.Errorf("builder %d not found", builderIndex)
+		}
+		if builder.Version != s.beaconCfg.PayloadBuilderVersion {
+			return fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
 		}
 		pk := builder.Pubkey
 

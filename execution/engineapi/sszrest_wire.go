@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -262,44 +261,7 @@ func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 }
 
 func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateVersion) (*cltypes.ExecutionRequests, error) {
-	out := cltypes.NewExecutionRequestsWithVersion(mainnetBeaconCfg, version)
-	for _, request := range requests {
-		if len(request) == 0 {
-			continue
-		}
-		data := request[1:]
-		switch request[0] {
-		case types.DepositRequestType:
-			if err := out.Deposits.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		case types.WithdrawalRequestType:
-			if err := out.Withdrawals.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		case types.ConsolidationRequestType:
-			if err := out.Consolidations.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		case types.BuilderDepositRequestType:
-			if version < clparams.GloasVersion {
-				return nil, fmt.Errorf("builder deposit request before gloas")
-			}
-			if err := out.BuilderDeposits.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		case types.BuilderExitRequestType:
-			if version < clparams.GloasVersion {
-				return nil, fmt.Errorf("builder exit request before gloas")
-			}
-			if err := out.BuilderExits.DecodeSSZ(data, int(version)); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unknown execution request type %d", request[0])
-		}
-	}
-	return out, nil
+	return cltypes.DecodeExecutionRequestsList(mainnetBeaconCfg, requests, version)
 }
 
 func encodeGetBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {

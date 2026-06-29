@@ -785,11 +785,13 @@ func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *Executio
 	if r.Consolidations != nil && !appendRequests(byte(beaconCfg.ConsolidationRequestType), r.Consolidations) {
 		return nil
 	}
-	if r.BuilderDeposits != nil && !appendRequests(byte(beaconCfg.BuilderDepositRequestType), r.BuilderDeposits) {
-		return nil
-	}
-	if r.BuilderExits != nil && !appendRequests(byte(beaconCfg.BuilderExitRequestType), r.BuilderExits) {
-		return nil
+	if r.effectiveVersion() >= clparams.GloasVersion {
+		if r.BuilderDeposits != nil && !appendRequests(byte(beaconCfg.BuilderDepositRequestType), r.BuilderDeposits) {
+			return nil
+		}
+		if r.BuilderExits != nil && !appendRequests(byte(beaconCfg.BuilderExitRequestType), r.BuilderExits) {
+			return nil
+		}
 	}
 	return ret
 }

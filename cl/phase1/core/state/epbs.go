@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -43,7 +44,7 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 		log.Debug("builders is nil")
 		return false
 	}
-	if int(builderIndex) >= builders.Len() {
+	if builderIndex >= uint64(builders.Len()) {
 		return false
 	}
 	builder := builders.Get(int(builderIndex))
@@ -120,7 +121,7 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 		log.Debug("builders is nil")
 		return false
 	}
-	if int(builderIndex) >= builders.Len() {
+	if builderIndex >= uint64(builders.Len()) {
 		return false
 	}
 	builder := builders.Get(int(builderIndex))
@@ -131,6 +132,9 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 
 	builderBalance := builder.Balance
 	pendingWithdrawalsAmount := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	if pendingWithdrawalsAmount > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
+		return false
+	}
 	minBalance := s.BeaconConfig().MinDepositAmount + pendingWithdrawalsAmount
 	if builderBalance < minBalance {
 		return false
@@ -163,6 +167,10 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	if pendingWithdrawals != nil {
 		pendingWithdrawals.Range(func(_ int, withdrawal *cltypes.BuilderPendingWithdrawal, _ int) bool {
 			if withdrawal != nil && withdrawal.BuilderIndex == builderIndex {
+				if withdrawal.Amount > math.MaxUint64-total {
+					total = math.MaxUint64
+					return false
+				}
 				total += withdrawal.Amount
 			}
 			return true
@@ -176,6 +184,10 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	if pendingPayments != nil {
 		pendingPayments.Range(func(_ int, payment *cltypes.BuilderPendingPayment, _ int) bool {
 			if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.BuilderIndex == builderIndex {
+				if payment.Withdrawal.Amount > math.MaxUint64-total {
+					total = math.MaxUint64
+					return false
+				}
 				total += payment.Withdrawal.Amount
 			}
 			return true
@@ -365,6 +377,9 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 	} else {
 		builder := builders.Get(builderIndex)
 		newBuilder := *builder
+		if amount > math.MaxUint64-newBuilder.Balance {
+			return
+		}
 		newBuilder.Balance += amount
 		builders.Set(builderIndex, &newBuilder)
 		s.SetBuilders(builders)
@@ -407,6 +422,9 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 	newBuilder := *builder
 	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch && newBuilder.Balance == 0 {
 		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
+	}
+	if request.Amount > math.MaxUint64-newBuilder.Balance {
+		return
 	}
 	newBuilder.Balance += request.Amount
 	builders.Set(builderIndex, &newBuilder)

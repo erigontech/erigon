@@ -41,6 +41,10 @@ import (
 
 const maxProposerPreferencesRequestItems = 2048
 
+func maxSignedExecutionPayloadBidSSZSize() int64 {
+	return int64(4 + 224 + cltypes.MaxBlobsCommittmentsPerBlock*48 + 96)
+}
+
 // ---- PTC Duties ----
 
 // ptcDutyResponse represents a single PTC duty assignment.
@@ -378,7 +382,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 
 	switch r.Header.Get("Content-Type") {
 	case "application/octet-stream":
-		octets, err := io.ReadAll(r.Body)
+		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSignedExecutionPayloadBidSSZSize()))
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return

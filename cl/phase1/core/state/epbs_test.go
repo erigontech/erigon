@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -193,6 +194,58 @@ func TestApplyBuilderDepositRequestTopUpExitedZeroBalanceResetsWithdrawableEpoch
 	builder := s.GetBuilders().Get(0)
 	require.Equal(t, uint64(25), builder.Balance)
 	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
+}
+
+func TestBuilderHelpersRejectHugeIndex(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(&cltypes.Builder{
+		Balance:           cfg.MinDepositAmount,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	require.False(t, state2.IsActiveBuilder(s, math.MaxUint64))
+	require.False(t, state2.CanBuilderCoverBid(s, math.MaxUint64, 1))
+}
+
+func TestApplyBuilderDepositRequestDoesNotOverflowBalance(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           math.MaxUint64,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 1,
+	})
+
+	require.Equal(t, uint64(math.MaxUint64), s.GetBuilders().Get(0).Balance)
+}
+
+func TestCanBuilderCoverBidRejectsPendingBalanceOverflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(&cltypes.Builder{
+		Balance:           math.MaxUint64,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+	withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](64, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: math.MaxUint64})
+	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 1})
+	s.SetBuilderPendingWithdrawals(withdrawals)
+
+	require.False(t, state2.CanBuilderCoverBid(s, 0, 1))
 }
 
 // ---------------------------------------------------------------------------

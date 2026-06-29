@@ -172,6 +172,39 @@ func TestExecutionPayloadBidServiceCurrentSlot(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestExecutionPayloadBidServiceRejectsNonPayloadBuilderVersion(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	addPreferencesToPool(epbsPool, 100)
+
+	headState := state2.New(service.beaconCfg)
+	headState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 2})
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(&cltypes.Builder{Version: service.beaconCfg.PayloadBuilderVersion})
+	builders.Append(&cltypes.Builder{
+		Version:           service.beaconCfg.PayloadBuilderVersion + 1,
+		Balance:           service.beaconCfg.MinDepositAmount + msg.Message.Value,
+		DepositEpoch:      1,
+		WithdrawableEpoch: service.beaconCfg.FarFutureEpoch,
+	})
+	headState.SetBuilders(builders)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return fn(headState)
+	})
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported version")
+}
+
 func TestExecutionPayloadBidServiceNextSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

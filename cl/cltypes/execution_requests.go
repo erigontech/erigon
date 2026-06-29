@@ -3,6 +3,7 @@ package cltypes
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -139,7 +140,57 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	e.Consolidations = c.Consolidations
 	e.BuilderDeposits = c.BuilderDeposits
 	e.BuilderExits = c.BuilderExits
+	if e.effectiveVersion() < clparams.GloasVersion && (e.BuilderDeposits.Len() > 0 || e.BuilderExits.Len() > 0) {
+		return fmt.Errorf("builder execution requests before gloas")
+	}
 	return nil
+}
+
+func DecodeExecutionRequestsList(cfg *clparams.BeaconChainConfig, requests []hexutil.Bytes, version clparams.StateVersion) (*ExecutionRequests, error) {
+	out := NewExecutionRequestsWithVersion(cfg, version)
+	lastType := -1
+	for i, request := range requests {
+		if len(request) <= 1 {
+			return nil, fmt.Errorf("execution request %d has no request data", i)
+		}
+		requestType := int(request[0])
+		if requestType <= lastType {
+			return nil, fmt.Errorf("execution request type %d is not strictly ascending", request[0])
+		}
+		lastType = requestType
+		data := request[1:]
+		switch request[0] {
+		case byte(cfg.DepositRequestType):
+			if err := out.Deposits.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		case byte(cfg.WithdrawalRequestType):
+			if err := out.Withdrawals.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		case byte(cfg.ConsolidationRequestType):
+			if err := out.Consolidations.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		case byte(cfg.BuilderDepositRequestType):
+			if version < clparams.GloasVersion {
+				return nil, fmt.Errorf("builder deposit request before gloas")
+			}
+			if err := out.BuilderDeposits.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		case byte(cfg.BuilderExitRequestType):
+			if version < clparams.GloasVersion {
+				return nil, fmt.Errorf("builder exit request before gloas")
+			}
+			if err := out.BuilderExits.DecodeSSZ(data, int(version)); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("unknown execution request type %d", request[0])
+		}
+	}
+	return out, nil
 }
 
 func ComputeExecutionRequestHash(executionRequests []hexutil.Bytes) common.Hash {

@@ -299,6 +299,46 @@ func TestExecutionRequestsFromListDecodesGloasBuilderRequests(t *testing.T) {
 	require.Equal(t, builderExit.SourceAddress, requests.BuilderExits.Get(0).SourceAddress)
 }
 
+func TestExecutionRequestsFromListRejectsInvalidOrdering(t *testing.T) {
+	emptyDeposits, err := solid.NewStaticListSSZ[*solid.DepositRequest](1, solid.SizeDepositRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+	emptyWithdrawals, err := solid.NewStaticListSSZ[*solid.WithdrawalRequest](1, solid.SizeWithdrawalRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		requests []hexutil.Bytes
+	}{
+		{
+			name:     "empty",
+			requests: []hexutil.Bytes{{}},
+		},
+		{
+			name: "duplicate",
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
+				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
+			},
+		},
+		{
+			name: "out of order",
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{types.WithdrawalRequestType}, emptyWithdrawals...),
+				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
+			},
+		},
+		{
+			name:     "unknown",
+			requests: []hexutil.Bytes{{0xff}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := executionRequestsFromList(tc.requests, clparams.GloasVersion)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})

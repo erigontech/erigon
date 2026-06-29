@@ -185,6 +185,23 @@ func TestGetExecutionRequestsListGloasBuilderRequests(t *testing.T) {
 	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedExit...), list[1])
 }
 
+func TestGetExecutionRequestsListPreGloasOmitsBuilderRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+	requests.BuilderDeposits.Append(&solid.BuilderDepositRequest{Amount: 1})
+	requests.BuilderExits.Append(&solid.BuilderExitRequest{})
+
+	require.Empty(t, GetExecutionRequestsList(&cfg, requests))
+}
+
+func TestExecutionRequestsJSONRejectsPreGloasBuilderRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+
+	err := requests.UnmarshalJSON([]byte(`{"deposits":[],"withdrawals":[],"consolidations":[],"builder_deposits":[{"pubkey":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","withdrawal_credentials":"0x0000000000000000000000000000000000000000000000000000000000000000","amount":"1","signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}],"builder_exits":[]}`))
+	require.Error(t, err)
+}
+
 func TestNewExecutionRequestsDefaultIsPreGloas(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 
