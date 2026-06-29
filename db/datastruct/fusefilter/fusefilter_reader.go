@@ -120,7 +120,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 
 	filter.Fingerprints = data[:fingerprintsLen]
 	total := headerSize + fingerprintsLen
-	return &Reader{inner: filter, version: v, features: features, m: m[:total]}, total, nil
+	return &Reader{inner: filter, version: v, features: features, m: m[:total], fileName: fName}, total, nil
 }
 
 // validateFilterGeometry rejects on-disk header values that would let
