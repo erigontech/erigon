@@ -788,7 +788,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		sdCtx.TouchHashedKey(siblingPath)
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
+	// Serialize the lean (reth-aligned) node set debug_executionWitness emits, not the full
+	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
+	// fed redundant memoizationOff nodes.
+	witnessTrie, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
@@ -796,9 +799,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	// nil retain decider expands every materialized node and hashes only the already-blinded
-	// children, so the op-stream carries the full fold superset — including the collapse /
-	// exclusion-divergence branches a retain list keyed by accessed keys would re-blind.
 	witness, err := witnessTrie.ExtractWitness(true, nil)
 	if err != nil {
 		return nil, err

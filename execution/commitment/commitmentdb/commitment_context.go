@@ -326,6 +326,33 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	return proofTrie, rootHash, nil
 }
 
+// WitnessLean builds the proof trie from the lean (pruned) witness node set — the
+// strict-verifier form debug_executionWitness emits — and re-attaches codeReads. Use
+// it when a single witness is serialized whole (eth_getWitness op-stream); the full
+// superset Witness() returns is for consumers that do their own per-key selection.
+func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	nodes, rootHash, err := sdc.WitnessNodes(ctx, produceExclusionProofs, logPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	proofTrie, err = trie.RLPDecode(nodes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
+	}
+	for addrHash, codeWithHash := range codeReads {
+		if len(codeWithHash.Code) == 0 {
+			continue
+		}
+		if _, present := proofTrie.GetAccount(addrHash[:]); !present {
+			continue
+		}
+		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
+			return nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
+		}
+	}
+	return proofTrie, rootHash, nil
+}
+
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
 // during commitment calculation. This is used by witness generation to capture paths
 // to HashNodes that need resolution when a FullNode is reduced to a single child.
