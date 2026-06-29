@@ -171,7 +171,6 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 // Always copies the input data so the cache owns it independently of
 // caller buffer lifetime. See entry.txN for the txN tagging semantics.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	// Never cached: skip the copy here, since store would drop it anyway.
 	if isCommitmentStateKey(prefix) {
 		return
 	}
