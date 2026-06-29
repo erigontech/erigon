@@ -48,6 +48,26 @@ func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
+func TestBranchDataIsComplete_EmptyAndShort(t *testing.T) {
+	// Empty branch data (tombstone) must not panic — returns false.
+	require.False(t, BranchData(nil).IsComplete())
+	require.False(t, BranchData([]byte{}).IsComplete())
+	require.False(t, BranchData([]byte{0x00}).IsComplete())
+	require.False(t, BranchData([]byte{0x00, 0x01}).IsComplete())
+	require.False(t, BranchData([]byte{0x00, 0x01, 0x02}).IsComplete())
+
+	// 4-byte branch where touchMap == afterMap → complete.
+	var buf [4]byte
+	binary.BigEndian.PutUint16(buf[0:], 0xFFFF)
+	binary.BigEndian.PutUint16(buf[2:], 0xFFFF)
+	require.True(t, BranchData(buf[:]).IsComplete())
+
+	// 4-byte branch where afterMap has bits not in touchMap → incomplete.
+	binary.BigEndian.PutUint16(buf[0:], 0x0001)
+	binary.BigEndian.PutUint16(buf[2:], 0x0003)
+	require.False(t, BranchData(buf[:]).IsComplete())
+}
+
 // gatedPatriciaContext is a mock PatriciaContext with a controllable in-flight window:
 // sleep+descend keep a worker re-reading its arena-backed key across batch boundaries,
 // while entered/release gate a worker inside Branch for deterministic ordering.
