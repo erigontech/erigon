@@ -817,6 +817,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
+			HasValue:           !mt.TxnSlot.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
@@ -824,6 +825,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
+			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicRegularGas := intrinsicGasResult.RegularGas
@@ -1013,6 +1015,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
 		IsContractCreation: txn.IsCreation(),
+		HasValue:           !txn.GetValue().IsZero(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
@@ -1020,6 +1023,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP8037:          isAmsterdam,
+		IsEIP2780:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
 	gas := mdgas.MdGas{
