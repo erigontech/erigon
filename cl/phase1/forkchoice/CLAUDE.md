@@ -27,7 +27,7 @@ verified against the Go code in this repository.
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
 | `get_head.go`: `getHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
 | `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree` | Phase0 `get_filtered_block_tree`, `filter_block_tree`, `get_voting_source`; Gloas inherits filtered-tree viability |
-| `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, `should_apply_proposer_boost`, delta-maintained `LatestMessage` weights |
+| `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, delta-maintained `LatestMessage` weights; delegates Gloas proposer-boost checks to `timing.go` |
 | `payload_vote.go`: `notifyPtcMessages`, `applyPayloadAttestationVote` | Gloas `notify_ptc_messages`, `on_payload_attestation_message` vote application |
 | `payload_vote.go`: `payloadTimeliness`, `payloadDataAvailability` | Gloas `payload_timeliness`, `payload_data_availability`; requires local envelope availability plus independent PTC majorities |
 | `payload_vote.go`: `getParentPayloadStatus`, `isParentNodeFull`, `getSupportedNode`, `isAncestor` | Gloas `get_parent_payload_status`, `is_parent_node_full`, `get_supported_node`, `is_ancestor` |

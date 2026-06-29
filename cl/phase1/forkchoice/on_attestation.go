@@ -177,7 +177,11 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
 		if index >= cap(f.equivocatingIndicies) {
-			tmp := make([]byte, index+1, index*2)
+			capacity := index * 2
+			if capacity < index+1 {
+				capacity = index + 1
+			}
+			tmp := make([]byte, index+1, capacity)
 			copy(tmp, f.equivocatingIndicies)
 			f.equivocatingIndicies = tmp
 		}
@@ -185,7 +189,7 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
-	if f.gloasWeightTree != nil {
+	if f.gloasWeightTree != nil && f.gloasWeightTree.ready {
 		f.gloasWeightTree.markDirty(validatorIndex)
 	}
 }

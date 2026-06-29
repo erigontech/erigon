@@ -17,7 +17,6 @@
 package forkchoice
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
@@ -150,15 +149,16 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 				t.nodes[child] = childNode
 				requiresDirectRebuild = true
 			}
-			block, _ := t.f.forkGraph.GetBlock(child)
+			block, ok := t.f.forkGraph.GetBlock(child)
+			if !ok || block == nil {
+				continue
+			}
 			parentPayloadStatus := t.f.getParentPayloadStatus(block.Block)
 			if childNode.parent != current {
 				childNode.parent = current
 				requiresDirectRebuild = true
 			}
-			if childNode.parentPayloadStatus != parentPayloadStatus {
-				childNode.parentPayloadStatus = parentPayloadStatus
-			}
+			childNode.parentPayloadStatus = parentPayloadStatus
 			t.stack = append(t.stack, child)
 		}
 	}
@@ -395,89 +395,13 @@ func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
 		t.boost = false
 		return false
 	}
-	t.boost = t.shouldApplyProposerBoostGloas(proposerBoostRoot)
+	t.boost = t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
+		return t.f.isHeadWeakWith(root, t.state, func(root common.Hash) uint64 {
+			return t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+		})
+	})
 	t.boostKnown = true
 	return t.boost
-}
-
-func (t *gloasWeightTree) shouldApplyProposerBoostGloas(proposerBoostRoot common.Hash) bool {
-	boostBlock, ok := t.f.forkGraph.GetBlock(proposerBoostRoot)
-	if !ok || boostBlock == nil {
-		return false
-	}
-	parentRoot := boostBlock.Block.ParentRoot
-	slot := boostBlock.Block.Slot
-
-	parentBlock, ok := t.f.forkGraph.GetBlock(parentRoot)
-	if !ok || parentBlock == nil {
-		return false
-	}
-	if parentBlock.Block.Slot+1 < slot {
-		return true
-	}
-	if !t.isHeadWeak(parentRoot) {
-		return true
-	}
-
-	parentProposerIndex := parentBlock.Block.ProposerIndex
-	hasEquivocation := false
-	t.f.blockTimeliness.Range(func(key, value any) bool {
-		root := key.(common.Hash)
-		if root == parentRoot {
-			return true
-		}
-		timeliness := value.([clparams.NumBlockTimelinessDeadlines]bool)
-		if !timeliness[clparams.PtcTimelinessIndex] {
-			return true
-		}
-		blk, blkOk := t.f.forkGraph.GetBlock(root)
-		if !blkOk || blk == nil {
-			return true
-		}
-		if blk.Block.ProposerIndex == parentProposerIndex && blk.Block.Slot+1 == slot {
-			hasEquivocation = true
-			return false
-		}
-		return true
-	})
-	return !hasEquivocation
-}
-
-func (t *gloasWeightTree) isHeadWeak(root common.Hash) bool {
-	cs := t.state
-	if cs == nil {
-		return false
-	}
-	committeeWeight := cs.activeBalance / t.f.beaconCfg.SlotsPerEpoch
-	reorgThreshold := committeeWeight * clparams.ReorgHeadWeightThreshold / 100
-	headWeight := t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
-
-	headBlock, ok := t.f.forkGraph.GetBlock(root)
-	if !ok || headBlock == nil {
-		return false
-	}
-	headSlot := headBlock.Block.Slot
-	epoch := t.f.computeEpochAtSlot(headSlot)
-	lenIndicies := uint64(len(cs.shuffledSet))
-	if lenIndicies > 0 {
-		committeesPerSlot := cs.committeeCount(epoch, lenIndicies)
-		count := committeesPerSlot * t.f.beaconCfg.SlotsPerEpoch
-		for ci := uint64(0); ci < committeesPerSlot; ci++ {
-			index := (headSlot%t.f.beaconCfg.SlotsPerEpoch)*committeesPerSlot + ci
-			start := (lenIndicies * index) / count
-			end := (lenIndicies * (index + 1)) / count
-			for _, validatorIndex := range cs.shuffledSet[start:end] {
-				if !t.f.isUnequivocating(validatorIndex) {
-					continue
-				}
-				vi := int(validatorIndex)
-				if vi < cs.validatorSetSize && readFromBitset(cs.actives, vi) && !readFromBitset(cs.slasheds, vi) {
-					headWeight += cs.balances[vi]
-				}
-			}
-		}
-	}
-	return headWeight < reorgThreshold
 }
 
 func (t *gloasWeightTree) pruneFinalized(finalizedSlot uint64) {

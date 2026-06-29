@@ -56,6 +56,15 @@ func TestPreGloasDoesNotDirtyGloasWeightTree(t *testing.T) {
 	require.Empty(t, f.gloasWeightTree.dirty)
 }
 
+func TestPreGloasEquivocationDoesNotDirtyGloasWeightTree(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+
+	f.setUnequivocating(4)
+
+	require.True(t, f.isUnequivocating(4))
+	require.Empty(t, f.gloasWeightTree.dirty)
+}
+
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 
@@ -155,6 +164,37 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 
 	f.setUnequivocating(validatorIndex)
 	tree = f.gloasWeightTree.prepare(justified, cs)
+
+	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+}
+
+func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
+	var validatorIndex uint64
+	found := false
+	for i := 0; i < f.latestMessages.latestMessagesCount(); i++ {
+		message, has := f.latestMessages.get(i)
+		if has && message != (LatestMessage{}) && f.isAncestor(f.getSupportedNode(message), node) {
+			validatorIndex = uint64(i)
+			found = true
+			break
+		}
+	}
+	require.True(t, found)
+
+	f.setUnequivocating(validatorIndex)
+	require.Empty(t, f.gloasWeightTree.dirty)
+
+	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
 }
