@@ -1680,9 +1680,6 @@ func (result *execResult) calcFees(
 		coinbaseNonce = coinbaseAcc.Nonce
 	}
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
-	// The coinbase contract SELFDESTRUCTed in this tx (and was not resurrected):
-	// serial credits the tip then FinalizeTx deletes the account, burning the
-	// tip, so the tip must not resurrect it here.
 	coinbaseSelfdestructed := false
 	for _, w := range result.TxOut {
 		if w.Address != result.Coinbase && (!hasBurnt || w.Address != burntAddr) {
