@@ -796,31 +796,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	// retain list is needed for the serialization of the trie.Trie into a witness
-	retainListBuilder := trie.NewRetainListBuilder()
-	for addr := range accessed.Addresses {
-		retainListBuilder.AddTouch(crypto.Keccak256(addr[:]))
-	}
-	for addr, keys := range accessed.Storage {
-		addrHash := crypto.Keccak256(addr[:])
-		for key := range keys {
-			storageTouch := append(common.Copy(addrHash), crypto.Keccak256(key[:])...)
-			retainListBuilder.AddStorageTouch(storageTouch)
-		}
-	}
-	for _, codeWithHash := range accessed.CodeReads {
-		retainListBuilder.ReadCode(codeWithHash.CodeHash, codeWithHash.Code)
-	}
-	retainList := retainListBuilder.Build(false)
-	// Sibling/collapse paths are folded into the witness trie (touched above) and must
-	// also be retained, or ExtractWitness blinds them and the stateless re-exec can't
-	// descend the collapse branch. siblingPaths are already hashed hex-nibble keys.
-	for _, siblingPath := range siblingPaths {
-		retainList.AddHex(siblingPath)
-		retainList.AddMarker(false)
-	}
-
-	witness, err := witnessTrie.ExtractWitness(true, retainList)
+	// nil retain decider expands every materialized node and hashes only the already-blinded
+	// children, so the op-stream carries the full fold superset — including the collapse /
+	// exclusion-divergence branches a retain list keyed by accessed keys would re-blind.
+	witness, err := witnessTrie.ExtractWitness(true, nil)
 	if err != nil {
 		return nil, err
 	}
