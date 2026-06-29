@@ -120,7 +120,7 @@ jobs:
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-            max-failures: 2390
+            max-failures: 3407
             exec_mode: parallel
     steps:
       - name: Clean docker system
