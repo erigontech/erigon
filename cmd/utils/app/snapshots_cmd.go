@@ -78,6 +78,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -364,6 +365,15 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "key", Required: true},
 				&cli.StringFlag{Name: "domain", Required: true},
+			}),
+		},
+		{
+			Name:   "dump-key",
+			Action: doDumpKey,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "key", Required: true, Usage: "hex key; for accounts/code domain this is the 20-byte address"},
+				&cli.StringFlag{Name: "domain", Value: "accounts", Usage: "accounts|storage|code|commitment|receipt|rcache"},
 			}),
 		},
 		{
@@ -1202,6 +1212,109 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
+	return nil
+}
+
+func doDumpKey(cliCtx *cli.Context) error {
+	logger := log.Root()
+	key := common.FromHex(cliCtx.String("key"))
+	ds := cliCtx.String("domain")
+	var domain kv.Domain
+	switch ds {
+	case "accounts":
+		domain = kv.AccountsDomain
+	case "storage":
+		domain = kv.StorageDomain
+	case "code":
+		domain = kv.CodeDomain
+	case "commitment":
+		domain = kv.CommitmentDomain
+	case "receipt":
+		domain = kv.ReceiptDomain
+	case "rcache":
+		domain = kv.RCacheDomain
+	default:
+		return fmt.Errorf("unknown domain %q", ds)
+	}
+
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	agg := res.Aggregator
+
+	roTx, err := chainDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	stepSize := at.StepSize()
+
+	decode := func(v []byte) string {
+		if v == nil {
+			return "<absent>"
+		}
+		if len(v) == 0 {
+			return "<empty>"
+		}
+		if domain == kv.AccountsDomain {
+			var a accounts.Account
+			if err := accounts.DeserialiseV3(&a, v); err != nil {
+				return fmt.Sprintf("decode-err(%x): %v", v, err)
+			}
+			return fmt.Sprintf("nonce=%d balance=%s codeHash=%x inc=%d", a.Nonce, a.Balance.String(), a.CodeHash, a.Incarnation)
+		}
+		return fmt.Sprintf("%x", v)
+	}
+	step := func(txNum uint64) float64 { return float64(txNum) / float64(stepSize) }
+
+	fmt.Printf("key=%x domain=%s stepSize=%d\n", key, ds, stepSize)
+
+	histFiles, histDB, err := at.DebugDumpKeyHistory(domain, key, roTx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\n=== HISTORY (files) ===\n")
+	for _, f := range histFiles {
+		fmt.Printf("%s  steps %.1f-%.1f  (%d entries)\n", f.FileName, step(f.StartTxNum), step(f.EndTxNum), len(f.Entries))
+		for _, e := range f.Entries {
+			fmt.Printf("  txNum=%-12d step=%-8.1f %s\n", e.TxNum, step(e.TxNum), decode(e.Val))
+		}
+	}
+	fmt.Printf("\n=== HISTORY (db) ===  (%d entries)\n", len(histDB))
+	for _, e := range histDB {
+		fmt.Printf("  txNum=%-12d step=%-8.1f %s\n", e.TxNum, step(e.TxNum), decode(e.Val))
+	}
+
+	domFiles, domDB, err := at.DebugDumpKeyDomain(domain, key, roTx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\n=== DOMAIN (files) ===\n")
+	for _, f := range domFiles {
+		if !f.Found {
+			fmt.Printf("%s  steps %.1f-%.1f  <not in file>\n", f.FileName, step(f.StartTxNum), step(f.EndTxNum))
+			continue
+		}
+		fmt.Printf("%s  steps %.1f-%.1f  %s\n", f.FileName, step(f.StartTxNum), step(f.EndTxNum), decode(f.Val))
+	}
+	fmt.Printf("\n=== DOMAIN (db) ===  (%d entries)\n", len(domDB))
+	for _, e := range domDB {
+		fmt.Printf("  step=%-8d %s\n", e.Step, decode(e.Val))
+	}
+
 	return nil
 }
 
