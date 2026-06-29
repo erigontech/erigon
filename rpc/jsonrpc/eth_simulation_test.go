@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -417,6 +418,25 @@ func TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap(t *testing.T)
 
 func TestTxValidationErrorNil(t *testing.T) {
 	assert.Nil(t, txValidationError(nil))
+}
+
+// TestTxValidationErrorBaseFeeTooLow verifies that txValidationError maps
+// ErrFeeCapTooLow to ErrCodeBaseFeeTooLow (-38012) as required by the Ethereum
+// execution API specification for eth_simulateV1.
+//
+// Regression guard: this mapping was previously incorrect (returned the generic
+// -32602 "Invalid params" code) and was corrected to -38012. This test prevents
+// silent regression if the mapping is accidentally reverted in a future refactor.
+func TestTxValidationErrorBaseFeeTooLow(t *testing.T) {
+	err := fmt.Errorf("%w: address 0x1, feeCap: 0 baseFee: 7", protocol.ErrFeeCapTooLow)
+
+	result := txValidationError(err)
+
+	var customErr *rpc.CustomError
+	require.ErrorAs(t, result, &customErr)
+	assert.Equal(t, rpc.ErrCodeBaseFeeTooLow, customErr.Code,
+		"ErrFeeCapTooLow must map to ErrCodeBaseFeeTooLow (-38012), not ErrCodeInvalidParams (-32602)")
+	assert.Equal(t, err.Error(), customErr.Message)
 }
 
 // ─── error helper tests ──────────────────────────────────────────────────────

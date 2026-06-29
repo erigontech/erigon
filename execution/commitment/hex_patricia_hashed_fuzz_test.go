@@ -40,10 +40,10 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	f.Add(uint64(2), ha, uint64(1235105), hb)
 
 	f.Fuzz(func(t *testing.T, balanceA uint64, accountA []byte, balanceB uint64, accountB []byte) {
-		if len(accountA) == 0 || len(accountA) > length.Addr || len(accountB) == 0 || len(accountB) > length.Addr {
+		// the trie is built with accountKeyLen == length.Addr, so only exact-length keys are valid
+		if len(accountA) != length.Addr || len(accountB) != length.Addr {
 			t.Skip()
 		}
-		t.Logf("fuzzing %d keys\n", 2)
 
 		builder := NewUpdateBuilder().
 			Balance(hex.EncodeToString(accountA), balanceA).
@@ -51,11 +51,8 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
-		hphAnother := NewHexPatriciaHashed(length.Addr, ms2)
-
-		hph.SetTrace(false)
-		hphAnother.SetTrace(false)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
 		plainKeys, updates := builder.Build()
 		err := ms.applyPlainUpdates(plainKeys, updates)
@@ -63,24 +60,24 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		rootHashDirect, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
-		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
+		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys, updates)
 		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
 		require.Equal(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
+		anotherUpds.Close()
 	})
 }
 
 // go test -trimpath -v -fuzz=Fuzz_ProcessUpdates_ArbitraryUpdateCount2 -fuzztime=300s ./commitment
 
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
-	//ha, _ := hex.DecodeString("0008852883b2850c7a48f4b0eea3ccc4c04e6cb6025e9e8f7db2589c7dae81517c514790cfd6f668903161349e")
 	ctx := context.Background()
 	f.Add(uint16(100), uint32(1), uint32(2))
 
@@ -136,8 +133,8 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
-		hphAnother := NewHexPatriciaHashed(length.Addr, ms2)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
 		trace := false
 		hph.SetTrace(trace)
@@ -249,7 +246,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		t.Logf("keys count: %d", kc)
 
 		ms := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 
 		plainKeys, updates := builder.Build()
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {

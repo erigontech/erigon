@@ -303,7 +303,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 	}
 
 	var acc accounts.Account
-	emptyRemoval := rules.IsSpuriousDragon
 	for addr, increase := range balanceIncreases {
 		addrValue := addr.Value()
 		// Read current account — from blockCache if available, otherwise domain.
@@ -333,7 +332,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+		if EIP161EmptyRemoval(rules.IsSpuriousDragon, rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if blockCache != nil {
 				blockCache.DeleteAccount(addr, txNum)
 				if !domains.InlineTouchKeyDisabled() {
@@ -743,7 +742,11 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	if accountCopy.Nonce != original.Nonce {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
 	}
-	if accountCopy.Incarnation != original.Incarnation {
+	// Emit only on up-revs. A value-transfer to a same-block SD'd address
+	// leaves newObj.Incarnation at 0 while original carries the prior
+	// block's value; emitting the down-rev would clobber the SD-side
+	// IncarnationPath cell and break a same-block CREATE2's prevInc.
+	if accountCopy.Incarnation > original.Incarnation {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
 	}
 	if accountCopy.CodeHash != original.CodeHash {
@@ -1202,6 +1205,12 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	// Mark deleted in the current view so subsequent in-block reads / puts
 	// see the destruction immediately. nil (not absent) so GetCurrentAccount
 	// reports "present but empty" rather than falling back to committed state.
+	if v, present := c.currentAccounts[addr]; present && v == nil {
+		// Already deleted by an earlier tx in this block — match serial's
+		// IBS short-circuit so Flush emits a single DomainDel per address.
+		c.mu.Unlock()
+		return
+	}
 	c.currentAccounts[addr] = nil
 	delete(c.currentCode, addr)
 	delete(c.currentStorage, addr)

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -170,6 +171,26 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 	assert.False(t, ibs.AddressInAccessList(testAddr), "Address should be cold after Reset")
 }
 
+// TestAddressAccessResetInIBSReset verifies that IBS.Reset() clears BAL
+// address-access recording. An aborted incarnation never harvests
+// AccessedAddresses, and only regular txs call Prepare (which re-inits
+// recording) — a worker next assigned a system block-start/block-end
+// transaction never calls Prepare, so it would harvest the leftovers into
+// its own block's access list as phantom entries.
+func TestAddressAccessResetInIBSReset(t *testing.T) {
+	ibs := New(nil)
+	sender := accounts.InternAddress([20]byte{0x01})
+	coinbase := accounts.InternAddress([20]byte{0x02})
+	leaked := accounts.InternAddress([20]byte{0x42})
+	// Prepare enables access recording at tx start.
+	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.MarkAddressAccess(leaked, false)
+	// Tx aborts: AccessedAddresses is never harvested. The worker resets
+	// the shared IBS before the next task.
+	ibs.Reset()
+	assert.Empty(t, ibs.AccessedAddresses(), "no recorded accesses should survive Reset")
+}
+
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears
 // transient storage (EIP-1153).
 func TestTransientStorageResetInIBSReset(t *testing.T) {
@@ -237,6 +258,24 @@ func TestTouchUpdates_Account(t *testing.T) {
 	writes.TouchUpdates(updates)
 
 	// All 4 fields merge into 1 key (same address)
+	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
+}
+
+// TestTouchUpdates_AccountModeParallel: ModeParallel must merge per-field
+// touches of one address additively, like ModeUpdate.
+func TestTouchUpdates_AccountModeParallel(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x42})
+
+	writes := VersionedWrites{
+		{Address: addr, Path: BalancePath, Val: *uint256.NewInt(1000)},
+		{Address: addr, Path: NoncePath, Val: uint64(5)},
+		{Address: addr, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
+	}
+
+	updates := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), func(k []byte) []byte { return k })
+	defer updates.Close()
+	writes.TouchUpdates(updates)
+
 	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
 }
 
@@ -356,6 +395,55 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok)
 	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
+}
+
+// Pins that a second DeleteAccount in the same block is a writeLog no-op —
+// Flush must emit exactly one DomainDel per address (matching serial's IBS
+// short-circuit). Without this dedup the redundant nil-history entry feeds
+// into commitment-cache step keys and produces a non-deterministic state
+// root between parallel-exec nodes validating each other's blocks.
+func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x77})
+
+	cache.DeleteAccount(addr, 1)
+	cache.DeleteAccount(addr, 2)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
+
+	enc, present := cache.GetCurrentAccount(addr)
+	assert.True(t, present, "current view must still report addr as present-and-empty")
+	assert.Nil(t, enc, "current view value must remain nil")
+}
+
+// Pins the recreate-then-redelete pattern: an intervening WriteAccount
+// resets the dedup so the next DeleteAccount IS recorded — only the
+// "no write in between" duplicate is collapsed.
+func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x88})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	enc := accounts.SerialiseV3(&acc)
+
+	cache.DeleteAccount(addr, 1)
+	cache.WriteAccount(addr, enc, 2)
+	cache.DeleteAccount(addr, 3)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 2, deletes, "delete after recreate must be recorded; only no-op duplicates are collapsed")
 }
 
 // TestSelfDestructKeepsDirtyStorageReadableSameTx verifies that after an

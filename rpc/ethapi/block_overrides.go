@@ -80,6 +80,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	}
 	if overrides.GasLimit != nil {
 		context.GasLimit = uint64(*overrides.GasLimit)
+		context.MaxGasLimit = false
 	}
 	if overrides.FeeRecipient != nil {
 		context.Coinbase = accounts.InternAddress(*overrides.FeeRecipient)

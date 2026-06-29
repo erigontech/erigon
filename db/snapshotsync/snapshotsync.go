@@ -409,7 +409,7 @@ func SyncSnapshots(
 			}
 			// re-open headers and bodies with alignMin=false after deletes,
 			// otherwise no headers/bodies will be visible since transactions are not downloaded yet
-			err = blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false)
+			err = blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, false)
 			if err != nil {
 				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}

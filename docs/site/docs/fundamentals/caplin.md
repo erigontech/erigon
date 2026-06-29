@@ -1,7 +1,7 @@
 ---
 title: "Caplin"
 description: "Erigon's built-in consensus layer — run a full node without an external CL client."
-sidebar_position: 7
+sidebar_position: 6
 ---
 
 # Caplin

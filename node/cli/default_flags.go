@@ -128,6 +128,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapStateStopFlag,
 	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.SnapP2PManifestFlag,
+	&utils.SnapChainTomlURLFlag,
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
@@ -260,7 +261,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.GDBMeFlag,
 
-	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalStreamingCommitmentFlag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,

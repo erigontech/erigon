@@ -382,8 +382,8 @@ func TestCapabilities(t *testing.T) {
 		raw, err := json.Marshal(result)
 		require.NoError(t, err)
 		s := string(raw)
-		require.Contains(t, s, fmt.Sprintf(`"retentionBlocks":%d`, testPruneDistance), "retentionBlocks must be decimal, not hex")
-		require.NotContains(t, s, `"retentionBlocks":"0x`, "retentionBlocks must not be hex-encoded")
+		require.Contains(t, s, fmt.Sprintf(`"retentionBlocks":"0x%x"`, testPruneDistance), "retentionBlocks must be hex-encoded per execution-apis uint schema")
+		require.NotContains(t, s, fmt.Sprintf(`"retentionBlocks":%d`, testPruneDistance), "retentionBlocks must not be a plain decimal integer")
 		require.Contains(t, s, `"oldestBlock":"0x`, "oldestBlock must be hex-encoded")
 		require.Contains(t, s, `"disabled":false`, "disabled:false must be present, not omitted")
 		require.Contains(t, s, `"stateproofs":{"disabled":true}`, "disabled category must serialize as {disabled:true} only")
@@ -587,6 +587,67 @@ func TestEthConfig(t *testing.T) {
 			require.Equal(t, want, have)
 		})
 	}
+}
+
+func TestBaseFee(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	t.Run("pre-London returns nil", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BaseFee(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, result)
+	})
+
+	t.Run("post-London returns fee", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainOsakaConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BaseFee(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Positive(t, result.ToInt().Sign())
+	})
+}
+
+func TestBlobBaseFee(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	t.Run("pre-Cancun returns nil", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BlobBaseFee(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, result)
+	})
+
+	t.Run("post-Cancun returns fee", func(t *testing.T) {
+		t.Parallel()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainOsakaConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}), execmoduletester.WithKey(key))
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.BlobBaseFee(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	})
 }
 
 func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecModuleTester {

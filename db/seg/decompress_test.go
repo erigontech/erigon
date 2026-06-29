@@ -526,12 +526,50 @@ func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
 
-func TestDecompressTorrent(t *testing.T) {
-	t.Skip()
+func TestDecompressDeepPositionSubtable(t *testing.T) {
+	// 600 words where a common pattern appears at 600 distinct byte positions
+	// force posMaxDepth=10>9, creating subtables and exercising nextPosSubtable.
+	const nWords = 600
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "deep_pos")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
 
+	words := make([][]byte, nWords)
+	pat := []byte("SUBTABLEPATTERN")
+	for i := range words {
+		words[i] = append(bytes.Repeat([]byte{byte(i % 251)}, i), pat...)
+		require.NoError(t, c.AddWord(words[i]))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	require.NotNil(t, d.posArena)
+	require.Greater(t, len(d.posArena.tables), 1, "expected posMaxDepth>9 to create subtables")
+
+	g := d.MakeGetter()
+	for i, want := range words {
+		require.True(t, g.HasNext(), "word %d", i)
+		got, _ := g.Next(nil)
+		require.Equal(t, want, got, "word %d mismatch", i)
+	}
+	require.False(t, g.HasNext())
+}
+
+func TestDecompressTorrent(t *testing.T) {
 	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("requires local snapshot file %s", fpath)
+	}
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
 	d, err := NewDecompressor(fpath)

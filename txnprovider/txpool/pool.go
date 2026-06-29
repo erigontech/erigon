@@ -165,10 +165,7 @@ type TxPool struct {
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
-	blobHashToTxn           map[common.Hash]struct {
-		index   int
-		txnHash common.Hash
-	}
+	blobs                   *blobStore
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
 	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
@@ -258,11 +255,8 @@ func New(
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
 		auths:                   make(map[AuthAndNonce]*metaTxn),
-		blobHashToTxn: make(map[common.Hash]struct {
-			index   int
-			txnHash common.Hash
-		}),
-		senderLastActivity: make(map[uint64]uint64),
+		blobs:                   newBlobStore(),
+		senderLastActivity:      make(map[uint64]uint64),
 	}
 	// Seed the EWMA block time with 12 s (Ethereum mainnet slot time). The tracker adjusts
 	// automatically after a few blocks, so the seed only affects the very first sweep interval.
@@ -823,6 +817,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
+			HasValue:           !mt.TxnSlot.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
@@ -830,6 +825,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
+			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicRegularGas := intrinsicGasResult.RegularGas
@@ -1019,6 +1015,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
 		IsContractCreation: txn.IsCreation(),
+		HasValue:           !txn.GetValue().IsZero(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
@@ -1026,6 +1023,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP8037:          isAmsterdam,
+		IsEIP2780:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
 	gas := mdgas.MdGas{
@@ -1804,10 +1802,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + uint64(len(blobHashes)))
 		for i, b := range blobHashes {
-			p.blobHashToTxn[b] = struct {
-				index   int
-				txnHash common.Hash
-			}{i, mt.TxnSlot.IDHash}
+			p.blobs.put(b, mt.TxnSlot.IDHash, mt.TxnSlot.BlobBundles[i])
 		}
 	}
 
@@ -1825,8 +1820,10 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
 	if mt.TxnSlot.TxType() == BlobTxnType {
+		blobHashes := mt.TxnSlot.GetBlobHashes()
 		t := p.totalBlobsInPool.Load()
-		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.GetBlobHashes())))
+		p.totalBlobsInPool.Store(t - uint64(len(blobHashes)))
+		p.blobs.remove(mt.TxnSlot.IDHash, blobHashes)
 	}
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
@@ -1998,28 +1995,8 @@ func (p *TxPool) nextDormancySweepInterval(backoff *float64, lastEvicted, queued
 	return interval
 }
 
-func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []PoolBlobBundle {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	blobBundles := make([]PoolBlobBundle, len(blobHashes))
-	for i, h := range blobHashes {
-		th, ok := p.blobHashToTxn[h]
-		if !ok {
-			continue
-		}
-		mt, ok := p.byHash[string(th.txnHash[:])]
-		if !ok || mt == nil {
-			continue
-		}
-		if th.index < len(mt.TxnSlot.BlobBundles) {
-			blobBundles[i] = mt.TxnSlot.BlobBundles[th.index]
-		}
-	}
-	return blobBundles
-}
-
 func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
-	return p.getBlobsAndProofByBlobHashLocked(blobHashes)
+	return p.blobs.get(blobHashes)
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones

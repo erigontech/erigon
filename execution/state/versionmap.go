@@ -49,7 +49,7 @@ func (p AccountPath) String() string {
 
 // AccountPath enum values. The numeric order matters: AsBlockAccessList
 // sorts writes by Path to ensure deterministic processing. SelfDestructPath
-// MUST precede BalancePath because updateWrite skips non-zero balance writes
+// MUST precede BalancePath because updateWrite zeroes non-zero balance writes
 // in the same tx as a selfdestruct — the selfDestructed flag must be set
 // before balance writes are evaluated. Do not reorder without reviewing
 // updateWrite in versionedio.go.
@@ -281,6 +281,35 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 		return 0, false
 	}
 	return highest, true
+}
+
+// AnyDoneBoolWriteEquals reports whether any Done write at TxIdx ≤
+// txIdxLimit has data == target. Detects a prior in-block
+// SelfDestructPath=true write that a later revival flipped back to false
+// — a case Read alone (latest-only) misses.
+func (vm *VersionMap) AnyDoneBoolWriteEquals(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int, target bool) bool {
+	if vm == nil {
+		return false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+
+	cells := vm.getKeyCells(addr, path, key, nil)
+	if cells == nil {
+		return false
+	}
+	found := false
+	cells.Descend(txIdxLimit, func(_ int, v *WriteCell) bool {
+		if v.flag != FlagDone {
+			return true
+		}
+		if b, ok := v.data.(bool); ok && b == target {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // FlushVersionedWrites atomically flushes all writes to the version map

@@ -85,7 +85,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 
 	// Load snapshot hashes
 	if p.cfg != nil && p.cfg.ChainName != "" {
-		if err := downloadercfg.LoadSnapshotsHashes(ctx, p.cfg.Dirs, p.cfg.ChainName); err != nil {
+		if err := downloadercfg.LoadSnapshotsHashes(ctx, p.cfg.Dirs, p.cfg.ChainName, p.snapshotCfg.ChainTomlURL); err != nil {
 			return fmt.Errorf("load snapshot hashes: %w", err)
 		}
 	}
@@ -125,9 +125,11 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	}
 	p.Downloader = d
 
-	if p.debugMux != nil {
-		d.HandleTorrentClientStatus(p.debugMux)
-	}
+	// Always call: HandleTorrentClientStatus registers the status handler on
+	// http.DefaultServeMux (reachable via GOPPROF=http) regardless of whether
+	// debugMux is nil. Guarding on p.debugMux != nil drops the default-mux
+	// registration when --metrics/--pprof are disabled.
+	d.HandleTorrentClientStatus(p.debugMux)
 
 	bittorrentServer, err := dl.NewGrpcServer(d)
 	if err != nil {
