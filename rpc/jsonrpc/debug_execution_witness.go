@@ -1257,7 +1257,7 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 // pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
 // from the parent back to the oldest block reached via the BLOCKHASH opcode, so
 // each header can be validated against the next one's parentHash.
-func (api *DebugAPIImpl) collectAccessedHeaders(
+func (api *BaseAPI) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	parentNum uint64,
