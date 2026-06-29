@@ -2,7 +2,9 @@ package state
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/elastic/go-freelru"
 
@@ -22,6 +24,25 @@ type DomainGetFromFileCache struct {
 	*freelru.ShardedLRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
 	limit          uint32
+
+	// debug: file-reads (cache misses) served per file level and per key length,
+	// to explain which level/key shape drives reads. Counted only when trace is on.
+	reads      [6]atomic.Uint64
+	readsByLen [48]atomic.Uint64
+}
+
+// AddRead records a file-read served from file index `level` for a key of keyLen.
+func (c *DomainGetFromFileCache) AddRead(level, keyLen int) {
+	if c == nil || !c.trace {
+		return
+	}
+	if level > 5 {
+		level = 5
+	}
+	c.reads[level].Add(1)
+	if keyLen >= 0 && keyLen < len(c.readsByLen) {
+		c.readsByLen[keyLen].Add(1)
+	}
 }
 
 // nolint
@@ -54,8 +75,33 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	}
 	m := c.Metrics()
 	if m.Hits > 0 {
-		log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+		log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit,
+			"readsPerLevel", c.readsPerLevelString(), "readsByLen", c.readsByLenString())
 	}
+}
+
+func (c *DomainGetFromFileCache) readsPerLevelString() string {
+	var b []string
+	for lvl := range c.reads {
+		if n := c.reads[lvl].Load(); n > 0 {
+			label := fmt.Sprintf("L%d", lvl)
+			if lvl == 5 {
+				label = "recent+"
+			}
+			b = append(b, fmt.Sprintf("%s:%d", label, n))
+		}
+	}
+	return "[" + strings.Join(b, " ") + "]"
+}
+
+func (c *DomainGetFromFileCache) readsByLenString() string {
+	var b []string
+	for keyLen := range c.readsByLen {
+		if n := c.readsByLen[keyLen].Load(); n > 0 {
+			b = append(b, fmt.Sprintf("%d:%d", keyLen, n))
+		}
+	}
+	return "[" + strings.Join(b, " ") + "]"
 }
 
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
