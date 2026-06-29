@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -266,4 +267,29 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 			require.True(t, ok, "entry txN=%d must survive watermark=%d", i, watermark)
 		}
 	}
+}
+
+// TestBranchCache_BaselineFootprint pins that a freshly constructed cache is
+// cheap. One is allocated per aggregator and may linger after Close, so an
+// empty cache must not carry a multi-megabyte fixed backing for its LRU tail.
+func TestBranchCache_BaselineFootprint(t *testing.T) {
+	const (
+		n                = 128
+		maxBytesPerCache = 256 * 1024
+	)
+	caches := make([]*BranchCache, n)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	for i := range caches {
+		caches[i] = NewBranchCache(DefaultBranchCacheTailCapacity)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(caches)
+
+	perCache := (after.HeapAlloc - before.HeapAlloc) / n
+	require.Less(t, perCache, uint64(maxBytesPerCache),
+		"fresh BranchCache baseline is %d KiB/cache, want < %d KiB", perCache/1024, maxBytesPerCache/1024)
 }
