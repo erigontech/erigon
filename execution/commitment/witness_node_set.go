@@ -38,11 +38,12 @@ func (s *witnessNodeSet) onNode(rlp, hash []byte) {
 // RLPDecode contract that treats the first node as the trie root.
 func (s *witnessNodeSet) nodes(root []byte) [][]byte {
 	out := make([][]byte, 0, len(s.byHash))
-	if r, ok := s.byHash[string(root)]; ok {
+	rootKey := string(root)
+	if r, ok := s.byHash[rootKey]; ok {
 		out = append(out, r)
 	}
 	for k, v := range s.byHash {
-		if k != string(root) {
+		if k != rootKey {
 			out = append(out, v)
 		}
 	}
