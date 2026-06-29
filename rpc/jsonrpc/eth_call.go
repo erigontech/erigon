@@ -31,9 +31,10 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -643,36 +644,35 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 }
 
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
-	roTx, err := db.BeginRo(ctx)
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
+	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
 
 	// Witness for genesis block is empty
 	if blockNr == 0 {
-		w := trie.NewWitness(make([]trie.WitnessOperator, 0))
-
-		var buf bytes.Buffer
-		_, err = w.WriteInto(&buf)
-		if err != nil {
-			return nil, err
-		}
-
-		return buf.Bytes(), nil
+		return emptyWitnessBytes()
 	}
 
-	err = api.checkPruneHistory(ctx, roTx, blockNr)
-	if err != nil {
+	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, roTx, hash, blockNr)
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+	if !commitmentHistoryEnabled {
+		return nil, fmt.Errorf("eth_getWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
+	}
+
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNr)
 	if err != nil {
 		return nil, err
 	}
@@ -684,137 +684,181 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNr)
 	if err != nil {
 		return nil, err
 	}
-
-	if latestBlock < blockNr {
-		// shouldn't happen, but check anyway
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
-	}
-
-	// Compute the witness if it's for a tx or it's not present in db
-	prevHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr-1)
+	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNr)
 	if err != nil {
 		return nil, err
 	}
+	endTxNum := lastTxNumInBlock + 1
+	parentNum := blockNr - 1
 
-	regenerateHash := false
-	if latestBlock-blockNr > uint64(maxGetProofRewindBlockCount) {
-		regenerateHash = true
+	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if firstTxNumInBlock < commitmentStartingTxNum {
+		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	engine, ok := api.engine().(rules.Engine)
+	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
+	if err != nil {
+		return nil, err
+	}
+	if parentHeader == nil {
+		return nil, fmt.Errorf("parent header %d not found", parentNum)
+	}
+	expectedParentRoot := parentHeader.Root
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
+	engine := api.engine()
+	fullEngine, ok := engine.(rules.Engine)
 	if !ok {
 		return nil, errors.New("engine is not rules.Engine")
 	}
 
-	roTx2, err := db.BeginTemporalRo(ctx)
+	accessed, _, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, witnessModeLegacy)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx2.Rollback()
-	txBatch2, err := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
-	if err != nil {
-		return nil, err
+	if accessed.isEmpty() {
+		return emptyWitnessBytes()
 	}
-	defer txBatch2.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	// The stateless verifier navigates the system address (system-call msg.sender, then its
+	// EIP-161 empty-account cleanup via DeleteSubtree), so its path must be in the witness.
+	// collectAccessedState drops it per EIP-7928 — a witness-content rule for the
+	// debug_executionWitness format that does not apply to this op-stream witness.
+	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
+
+	// A self-destruct / empty-account delete never traverses the account's storage
+	// trie, so the recording reader saw none of its slots. The stateless verifier's
+	// DeleteSubtree clears that subtree structurally and needs it in the witness, so
+	// range the deleted account's parent-state storage and add its slots to the access
+	// set (the fold then materializes the subtree, the retain list keeps it).
+	for delAddr := range accessed.Deleted {
+		to, ok := kv.NextSubtree(delAddr[:])
+		if !ok {
+			to = nil
+		}
+		it, err := tx.RangeAsOf(kv.StorageDomain, delAddr[:], to, firstTxNumInBlock, order.Asc, kv.Unlim)
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				it.Close()
+				return nil, err
+			}
+			if len(v) == 0 {
+				continue
+			}
+			if accessed.Storage[delAddr] == nil {
+				accessed.Storage[delAddr] = make(map[common.Hash]struct{})
+			}
+			accessed.Storage[delAddr][common.BytesToHash(k[len(delAddr):])] = struct{}{}
+		}
+		it.Close()
+	}
+
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
-
-	// Prepare witness config
-	chainConfig, err := api.chainConfig(ctx, roTx2)
-	if err != nil {
-		return nil, fmt.Errorf("error loading chain config: %v", err)
-	}
-
-	// Unwind to blockNr
-	cfg := stagedsync.StageWitnessCfg(chainConfig, engine, api._blockReader, api.dirs)
-	err = stagedsync.RewindStagesForWitness(domains, txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	store, err := stagedsync.PrepareForWitness(txBatch2, block, prevHeader.Root, &cfg, ctx, logger)
-	if err != nil {
-		return nil, err
-	}
-
 	sdCtx := domains.GetCommitmentContext()
-	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
-	_, err = protocol.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
+
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+		firstTxNumInBlock, endTxNum, blockNr, parentNum,
+		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {
 		return nil, err
 	}
 
-	// gather touched keys from ephemeral block execution
-	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
-	codeReads := store.Tds.BuildCodeTouches()
-
-	// marking keys we want to get witness for
-	for _, key := range touchedPlainKeys {
-		sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
+		return nil, fmt.Errorf("failed to reset commitment for witness: %w", err)
 	}
 
-	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := sdCtx.Witness(ctx, codeReads, "computeWitness", false)
+	accessed.touchAll(sdCtx)
+	for _, siblingPath := range siblingPaths {
+		sdCtx.TouchHashedKey(siblingPath)
+	}
+
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
-
-	if !bytes.Equal(witnessRootHash, prevHeader.Root[:]) {
-		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRootHash, prevHeader.Root[:])
+	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
+		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRoot, expectedParentRoot[:])
 	}
 
-	// retain list is need for the serialization of the trie.Trie into a witness
+	// retain list is needed for the serialization of the trie.Trie into a witness
 	retainListBuilder := trie.NewRetainListBuilder()
-	for _, key := range touchedHashedKeys {
-		if len(key) == 32 {
-			retainListBuilder.AddTouch(key)
-		} else {
-			addr, _, hash := dbutils.ParseCompositeStorageKey(key)
-			storageTouch := dbutils.GenerateCompositeTrieKey(addr, hash)
+	for addr := range accessed.Addresses {
+		retainListBuilder.AddTouch(crypto.Keccak256(addr[:]))
+	}
+	for addr, keys := range accessed.Storage {
+		addrHash := crypto.Keccak256(addr[:])
+		for key := range keys {
+			storageTouch := append(common.Copy(addrHash), crypto.Keccak256(key[:])...)
 			retainListBuilder.AddStorageTouch(storageTouch)
 		}
 	}
-
-	for _, codeWithHash := range codeReads {
+	for _, codeWithHash := range accessed.CodeReads {
 		retainListBuilder.ReadCode(codeWithHash.CodeHash, codeWithHash.Code)
 	}
-
 	retainList := retainListBuilder.Build(false)
+	// Sibling/collapse paths are folded into the witness trie (touched above) and must
+	// also be retained, or ExtractWitness blinds them and the stateless re-exec can't
+	// descend the collapse branch. siblingPaths are already hashed hex-nibble keys.
+	for _, siblingPath := range siblingPaths {
+		retainList.AddHex(siblingPath)
+		retainList.AddMarker(false)
+	}
 
-	// serialize witness trie
 	witness, err := witnessTrie.ExtractWitness(true, retainList)
 	if err != nil {
 		return nil, err
 	}
 
 	var witnessBuffer bytes.Buffer
-	_, err = witness.WriteInto(&witnessBuffer)
-	if err != nil {
+	if _, err = witness.WriteInto(&witnessBuffer); err != nil {
 		return nil, err
 	}
 
-	// this is a verification step: we execute block #blockNr statelessly using the witness, and we expect to get the same state root as in the header
-	// otherwise something went wrong
-	store.Tds.SetTrie(witnessTrie)
-	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, store.ChainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
+	// Self-verify: re-execute the block statelessly from the witness and confirm the
+	// resulting state root matches the header.
+	cfg := stagedsync.StageWitnessCfg(chainConfig, fullEngine, api._blockReader, api.dirs)
+	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return api._blockReader.Header(ctx, tx, hash, number)
+	}
+	getHashFn := protocol.GetHashFn(block.Header(), getHeader)
+	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, parentHeader, chainReader, nil, &cfg, &witnessBuffer, getHashFn, logger)
 	if err != nil {
 		return nil, err
 	}
 	blockRoot := block.Root()
 	if !bytes.Equal(newStateRoot[:], blockRoot[:]) {
-		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot[:], blockRoot[:])
+		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", blockRoot)
 	}
-	witnessBufBytes := witnessBuffer.Bytes()
-	witnessBufBytesCopy := common.Copy(witnessBufBytes)
-	return witnessBufBytesCopy, nil
+
+	return common.Copy(witnessBuffer.Bytes()), nil
+}
+
+// emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
+// empty-touch blocks.
+func emptyWitnessBytes() (hexutil.Bytes, error) {
+	w := trie.NewWitness(make([]trie.WitnessOperator, 0))
+	var buf bytes.Buffer
+	if _, err := w.WriteInto(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // accessListResult returns an optional accesslist
