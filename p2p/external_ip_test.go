@@ -39,6 +39,7 @@ func TestUsableExternalIP(t *testing.T) {
 		{net.ParseIP("172.16.4.4"), false},
 		{net.ParseIP("169.254.1.1"), false},
 		{net.ParseIP("224.0.0.1"), false},
+		{net.IPv4bcast, false},
 		{net.ParseIP("203.0.113.7"), true},
 		{net.ParseIP("8.8.8.8"), true},
 	}

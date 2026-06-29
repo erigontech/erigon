@@ -32,15 +32,7 @@ const externalIPRefreshInterval = 10 * time.Minute
 // address. It rejects the non-routable values a misbehaving resolver might hand
 // back so they never reach the local node record.
 func usableExternalIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	return !ip.IsUnspecified() &&
-		!ip.IsLoopback() &&
-		!ip.IsPrivate() &&
-		!ip.IsLinkLocalUnicast() &&
-		!ip.IsLinkLocalMulticast() &&
-		!ip.IsMulticast()
+	return ip.IsGlobalUnicast() && !ip.IsPrivate()
 }
 
 // externalIPTracker re-resolves the external IP through a NAT mechanism and
