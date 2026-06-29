@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -142,21 +141,14 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
-	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
-	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
-	VariantStreamingHexPatricia  TrieVariant = "hex-streaming-patricia-hashed"
+	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
+	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
+	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
 )
 
 // InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
-	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
-		trie := NewConcurrentPatriciaHashed(root, nil)
-		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
-		// tree.SetConcurrentCommitment(true) // first run always sequential
-		return trie, tree
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -1243,8 +1235,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "hex-parallel":
-		trieVariant = VariantConcurrentHexPatricia
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1376,7 +1366,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
+				case VariantHexPatriciaTrie:
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -1449,9 +1439,6 @@ type Updates struct {
 	mode    Mode
 	tmpdir  string
 
-	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
-	nibbles       [16]*etl.Collector
-
 	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
 	parallel *parallelUpdate
 
@@ -1503,15 +1490,9 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-// Should be called right after updates initialisation. Otherwise could lost some data
-func (t *Updates) SetConcurrentCommitment(b bool) {
-	t.sortPerNibble = b
-	t.initCollector()
-}
-
-// IsConcurrentCommitment reports whether the configuration allows concurrent commitment processing.
+// IsConcurrentCommitment reports whether commitment runs in the parallel mode.
 func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel || t.sortPerNibble
+	return t.mode == ModeParallel
 }
 
 type keyHasher func(key []byte) []byte
@@ -1572,23 +1553,6 @@ func (t *Updates) SetMode(m Mode) {
 }
 
 func (t *Updates) initCollector() {
-	if t.sortPerNibble {
-		for i := 0; i < len(t.nibbles); i++ {
-			if t.nibbles[i] != nil {
-				t.nibbles[i].Close()
-				t.nibbles[i] = nil
-			}
-
-			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
-			t.nibbles[i].SortAndFlushInBackground(true)
-		}
-		if t.etl != nil {
-			t.etl.Close()
-			t.etl = nil
-		}
-		return
-	}
-
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
@@ -1654,12 +1618,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
+			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1731,12 +1690,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
+			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1771,12 +1725,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, []byte{})
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
-			}
+			err := t.etl.Collect(hashedKey, []byte{})
 			if err != nil {
 				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
 			}
@@ -1864,13 +1813,6 @@ func (t *Updates) Close() {
 	}
 	if t.etl != nil {
 		t.etl.Close()
-	}
-	if t.sortPerNibble {
-		for i := 0; i < len(t.nibbles); i++ {
-			if t.nibbles[i] != nil {
-				t.nibbles[i].Close()
-			}
-		}
 	}
 	if t.parallel != nil {
 		t.parallel.Close()
