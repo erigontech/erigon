@@ -86,6 +86,18 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+	// callNewAccountCharged records whether the in-progress CALL charged the
+	// EIP-8037 NEW_ACCOUNT state gas (value transfer to a non-existent
+	// account), so opCall can refill it source-based when the call fails and
+	// no account ends up created. Set during the CALL gas phase, read in
+	// the immediately following opCall.
+	callNewAccountCharged bool
+	// createTargetAlive records whether the just-finished CREATE targeted an
+	// address that was already alive (existed, non-empty). On a successful
+	// create the unconditional NEW_ACCOUNT charge is refilled in that case
+	// (no new account leaf was created). Set as the create frame returns,
+	// read in the immediately following execCreate.
+	createTargetAlive bool
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
 
@@ -156,65 +168,45 @@ func (evm *EVM) Cancel() { evm.abort.Store(true) }
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 // handleFrameRevert handles the full error path for a call or create frame:
-// state revert, regular gas burning on exceptional halt, and EIP-8037
-// state-gas reservoir restoration for child frames.
+// state revert, EIP-8037 source-based state-gas refill, and regular gas
+// burning on exceptional halt.
 //
 // At depth 0 there is no parent reservoir to restore to: the evm.call /
 // evm.create depth==0 defers fold the error semantics into gasUsed.State
 // (reset to 0 for CALL, -StateGasNewAccount for CREATE) so TxnExecutor
 // can read gasUsed.State directly without checking the error.
-func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth int, snapshot int, stateGasUsed int64) {
+func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth int, snapshot int, stateGasUsed int64, stateGasSpilled uint64) {
 
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
 
-	// 2. On exceptional halt (not REVERT), burn remaining regular gas.
+	// 2. EIP-8037 refill_frame_state_gas: the frame's state changes are
+	// undone, so its state gas is credited back last-in-first-out — the
+	// regular pool first (the spilled portion), then the reservoir with the
+	// remainder, which restores the reservoir to the value the frame began
+	// with. This must precede the halt burn below so the refilled spill is
+	// burned together with the rest of the regular gas.
+	if evm.chainRules.IsAmsterdam {
+		gasRemaining.Regular += stateGasSpilled
+		// state_gas_left + state_gas_used - state_gas_spilled equals the
+		// reservoir the frame was given (>= 0 by construction). A negative
+		// value means a code path mutated the state-gas trackers without the
+		// paired update; surface it loudly and clamp.
+		newState := int64(gasRemaining.State) + stateGasUsed - int64(stateGasSpilled)
+		if newState < 0 {
+			log.Error("EIP-8037 invariant violated; clamping reservoir to 0",
+				"gasRemainingState", gasRemaining.State, "stateGasUsed", stateGasUsed, "stateGasSpilled", stateGasSpilled, "depth", depth)
+			newState = 0
+		}
+		gasRemaining.State = uint64(newState)
+	}
+
+	// 3. On exceptional halt (not REVERT), burn remaining regular gas.
 	if err != ErrExecutionReverted {
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.config.Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}
 		gasRemaining.Regular = 0
-	}
-
-	// 3. EIP-8037: at depth>0 restore the original child reservoir to the
-	// parent. Per the spec's incorporate_child_on_error invariant:
-	//   parent.state_gas_left += child.state_gas_used + child.state_gas_left
-	// (the sum equals what the parent originally passed in, after any
-	// inline refunds the child credited are dropped along with reverted
-	// state). Regular gas: REVERT preserves it (step 2 didn't apply);
-	// exceptional halt burnt it in step 2. At depth==0 the user-side
-	// refund flows through gasUsed.State (see func doc).
-	//
-	if evm.chainRules.IsAmsterdam && depth > 0 {
-		// Invariant: gasRemaining.State + stateGasUsed >= 0. useMdGas
-		// (charge: stateGas -= a, frameStateUsed += a) and
-		// creditStateGasRefund (refund: stateGas += a, frameStateUsed -= a)
-		// are the only mutators and update both sides in lock-step, so
-		// the sum can only grow (via spillover charges) from the parent's
-		// reservoir R ≥ 0. A negative sum here means some new code path
-		// mutated stateGas or frameStateUsed without the paired update,
-		// or the EIP-8037 accounting was reimplemented incorrectly. We
-		// surface this loudly via a log + clamp; the corrupted accounting
-		// will manifest downstream as wrong execution / gas accounting /
-		// state root.
-		//
-		// The comparison stays in uint64 (`uint64(-stateGasUsed) >
-		// gasRemaining.State`) rather than promoting both sides to int64.
-		// gasRemaining.State is a reservoir balance — unsigned by design
-		// and free to use the full uint64 range — so an int64 cast would
-		// flip any value above 2^63 to negative and break the comparison.
-		// Comparing the magnitudes directly in uint64 keeps the check
-		// correct at any gas size.
-		if stateGasUsed < 0 && uint64(-stateGasUsed) > gasRemaining.State {
-			log.Error("EIP-8037 invariant violated; clamping parent reservoir to 0",
-				"gasRemainingState", gasRemaining.State, "stateGasUsed", stateGasUsed, "depth", depth)
-			gasRemaining.State = 0
-			return
-		}
-		// uint64(negative int64) = 2^64 − |stateGasUsed|; the += then
-		// overflows and wraps into the correct subtraction for negative
-		// stateGasUsed.
-		gasRemaining.State += uint64(stateGasUsed)
 	}
 }
 
@@ -273,10 +265,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// already restored the child's reservoir to the parent.)
 	inputTotal := gas.Total()
 	defer func() {
-		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+		// At depth 0 on error, handleFrameRevert already refilled the frame's
+		// state gas into gasRemaining, so the frame's net state usage is 0.
+		// Reset before the regular-gas derivation so it sees the refilled value.
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
 			gasUsed.State = 0
 		}
+		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 	}()
 
 	version := evm.intraBlockState.Version()
@@ -333,6 +328,20 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
+	// EIP-8037 top-level frame charges (reference process_message, depth 0):
+	// a value transfer that creates the recipient is charged NEW_ACCOUNT state
+	// gas here rather than in intrinsic. Capture emptiness before the transfer
+	// below makes the recipient non-empty. Nested CALLs charge this via the
+	// CALL gas function; the top-level frame has no such gas phase.
+	topLevelNewAccount := false
+	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && !value.IsZero() {
+		empty, err := evm.intraBlockState.Empty(addr)
+		if err != nil {
+			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		topLevelNewAccount = empty
+	}
+
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
 		if err != nil {
@@ -381,8 +390,49 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 	}
 
+	// EIP-8037 top-level frame charges (reference process_message, depth 0),
+	// applied before code execution: NEW_ACCOUNT state gas for an account-
+	// creating value transfer, and the cold cost of resolving a delegated
+	// recipient (the delegation target is also warmed). On insufficient gas
+	// the frame halts and the dispatch below is skipped.
+	var topStateUsed int64
+	var topStateSpilled uint64
+	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && err == nil {
+		if topLevelNewAccount {
+			beforeRegular := gasRemaining.Regular
+			var ok bool
+			gasRemaining, ok = useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
+				err = ErrOutOfGas
+			} else {
+				topStateUsed = int64(params.StateGasNewAccount)
+				topStateSpilled = beforeRegular - gasRemaining.Regular
+			}
+		}
+		if err == nil && !isPrecompile {
+			var dd accounts.Address
+			var isDelegated bool
+			dd, isDelegated, err = evm.intraBlockState.GetDelegatedDesignation(addr)
+			if err != nil {
+				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
+			if isDelegated {
+				cold := coldAccountAccessCost(evm.chainRules)
+				if gasRemaining.Regular < cold {
+					err = ErrOutOfGas
+				} else {
+					gasRemaining.Regular -= cold
+					evm.intraBlockState.AddAddressToAccessList(dd)
+				}
+			}
+		}
+	}
+
 	// It is allowed to call precompiles, even via delegatecall
-	if isPrecompile {
+	if err != nil {
+		// A top-level frame charge above ran out of gas; skip execution and
+		// fall through to the revert handling below.
+	} else if isPrecompile {
 		ret, gasRemaining.Regular, err = RunPrecompiledContract(p, input, gasRemaining.Regular, evm.Config().Tracer)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
@@ -426,13 +476,20 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, gasRemaining, gasUsed, err = evm.Run(contract, gas, input, readOnly)
+		// Pass gasRemaining (not the original gas) so any top-level frame
+		// charges applied above reduce the gas available to the executed code.
+		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, readOnly)
 	}
+	// Fold the top-level frame's state-gas charge into this frame's usage so it
+	// is reported to TxnExecutor and refilled by handleFrameRevert on failure.
+	gasUsed.State += topStateUsed
+	gasUsed.Spilled += topStateSpilled
+
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State)
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State, gasUsed.Spilled)
 	}
 
 	return ret, gasRemaining, gasUsed, err
@@ -528,11 +585,25 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	// intrinsic_state == StateGasNewAccount). The Call counterpart does NOT
 	// refund intrinsic AUTH state-gas — EIP-7702 auth side effects persist
 	// even on call failure.
+	var targetAlive bool
 	inputTotal := gas.Total()
 	defer func() {
-		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+		evm.createTargetAlive = targetAlive
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
+			// handleFrameRevert already refilled the initcode frame's own state
+			// gas into gasRemaining, so derive regular gas against a zero net
+			// frame-state usage; the reported -NEW_ACCOUNT is the separate
+			// intrinsic create charge being returned to the sender.
+			gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), 0)
 			gasUsed.State = -int64(params.StateGasNewAccount)
+		} else {
+			// Derive regular against the frame's true state usage, then on a
+			// top-level create whose target pre-existed alive report the
+			// intrinsic NEW_ACCOUNT as refunded (no new account leaf created).
+			gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+			if depth == 0 && evm.chainRules.IsAmsterdam && targetAlive {
+				gasUsed.State -= int64(params.StateGasNewAccount)
+			}
 		}
 	}()
 
@@ -603,6 +674,16 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		// Preserve State so the parent's reservoir is restored by restoreChildGas.
 		return nil, accounts.NilAddress, mdgas.MdGas{State: gasRemaining.State}, mdgas.MdGasUsage{}, err
 	}
+	// EIP-8037: a deployable target that already exists and is non-empty
+	// (e.g. a balance-only leaf) is "alive"; the unconditional NEW_ACCOUNT
+	// charge is refilled on success since no new account leaf is created.
+	if evm.chainRules.IsAmsterdam {
+		empty, err := evm.intraBlockState.Empty(address)
+		if err != nil {
+			return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		targetAlive = !empty
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
@@ -650,10 +731,13 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 
 		// Charge state gas (Amsterdam only).
 		stateGasOk := true
-		var stateGas uint64
+		var stateGas, depositStateSpill uint64
 		if evm.chainRules.IsAmsterdam {
 			stateGas = uint64(len(ret)) * params.CostPerStateByte
 			gasRemaining, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			// The regular pool only drops when the reservoir was exhausted,
+			// so its decrease is the spilled portion of the deposit charge.
+			depositStateSpill = preDepositGas.Regular - gasRemaining.Regular
 		}
 
 		// Charge regular gas.
@@ -673,8 +757,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		if stateGasOk && regularGasOk {
 			evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation)
 			// EIP-8037: post-Run code-deposit state charge counts toward this
-			// frame's state-gas usage.
+			// frame's state-gas usage; its spilled portion propagates so an
+			// ancestor revert refills it from the right pool.
 			gasUsed.State += int64(stateGas)
+			gasUsed.Spilled += depositStateSpill
 		} else {
 			if evm.chainRules.IsAmsterdam {
 				// Code deposit failed: per EIP-8037 the failure cost is
@@ -694,7 +780,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State)
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State, gasUsed.Spilled)
 	}
 
 	return ret, address, gasRemaining, gasUsed, err

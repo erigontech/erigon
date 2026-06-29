@@ -57,9 +57,13 @@ type FullMdGas struct {
 // exceed its own charges — i.e. an SSTORE/CREATE clear refund inside
 // a callee that matches a charge an ancestor made (sharing storage via
 // CALLCODE/DELEGATECALL, or against a tx-level intrinsic state charge).
+// Spilled is the portion of State that was charged against the regular
+// gas pool because the state reservoir was empty (EIP-8037 source-based
+// refunds credit gas_left first, up to Spilled, then the reservoir).
 type MdGasUsage struct {
 	Regular uint64
 	State   int64
+	Spilled uint64
 }
 
 // PlusIntrinsic folds an intrinsic-gas MdGas into the frame-usage report,
@@ -69,6 +73,7 @@ func (u MdGasUsage) PlusIntrinsic(igas MdGas) MdGasUsage {
 	return MdGasUsage{
 		Regular: u.Regular + igas.Regular,
 		State:   u.State + int64(igas.State),
+		Spilled: u.Spilled,
 	}
 }
 

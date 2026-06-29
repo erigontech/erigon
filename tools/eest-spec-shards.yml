@@ -24,7 +24,7 @@
 - shard: statetests-devnet
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 980
+  max-allowed-failures: 63
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
