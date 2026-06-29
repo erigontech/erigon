@@ -259,7 +259,7 @@ func (c *CodeCache) PrintStatsAndReset() {
 	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
 	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
 
-	log.Debug("CodeCache stats",
+	log.Warn("[dbg] CodeCache stats",
 		"addr_hits", addrHits,
 		"addr_misses", addrMisses,
 		"addr_hit_rate", addrHitRate,
