@@ -231,18 +231,22 @@ func TableScanningPrune(
 	}
 
 	if prevStat.KeyProgress != Done {
+		i := 0
 		txnb := common.Copy(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
-			select {
-			case <-ctx.Done():
-				stat.LastPrunedKey = common.Copy(txnb)
-				stat.KeyProgress = InProgress
-				return stat, nil
-			default:
+			i++
+			if i%128 == 0 {
+				select {
+				case <-ctx.Done():
+					stat.LastPrunedKey = common.Copy(txnb)
+					stat.KeyProgress = InProgress
+					return stat, nil
+				default:
+				}
 			}
 			txNum := binary.BigEndian.Uint64(txnb)
 			if txNum >= txTo {
@@ -326,6 +330,7 @@ func tableScanningPrune(
 	if err != nil {
 		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
+	i := 0
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -433,15 +438,18 @@ func tableScanningPrune(
 		}
 	nextKey:
 
-		select {
-		case <-logEvery.C:
-			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
-			if keysCursor != nil {
-				args = append(args, "pruned tx", stat.PruneCountTx)
+		i++
+		if i%128 == 0 {
+			select {
+			case <-logEvery.C:
+				args := []any{"name", filenameBase, "pruned values", stat.PruneCountValues}
+				if keysCursor != nil {
+					args = append(args, "pruned tx", stat.PruneCountTx)
+				}
+				args = append(args, "val status", stat.ValueProgress.String())
+				logger.Info("[snapshots] prune index", args...)
+			default:
 			}
-			args = append(args, "val status", stat.ValueProgress.String())
-			logger.Info("[snapshots] prune index", args...)
-		default:
 		}
 	}
 
