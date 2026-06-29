@@ -65,8 +65,6 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 	}
 	defer srcTx.Rollback()
 
-	commitEvery := time.NewTicker(5 * time.Minute)
-	defer commitEvery.Stop()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 

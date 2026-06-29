@@ -889,6 +889,8 @@ func rawCursor(c kv.Cursor) *mdbx.Cursor {
 	return c.(*MdbxCursor).c
 }
 
+const maxDistributeCursors = 4096
+
 // DistributeCursors partitions bucket into n approximately equal-count key
 // ranges using mdbx's b-tree distribution. Fast on db >> RAM: it touches only
 // the b-tree branch nodes. Returned keys are valid until tx end.
@@ -896,6 +898,7 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	if n <= 1 {
 		return [][]byte{from, nil}, nil
 	}
+	n = min(n, maxDistributeCursors) // n is derived from table size; cap it so a multi-TB table doesn't open tens of thousands of cursors
 
 	firstC, err := tx.Cursor(table)
 	if err != nil {
