@@ -242,13 +242,9 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		// prior Flush-then-commit shape did.
 		if err := doms.Commit(ctx, tx, func(tx kv.RwTx) error {
 			if produce.ReceiptDomain {
-				if err := AssertReceipts(ctx, cfg, db, fromBlock, toBlock); err != nil {
-					return err
-				}
+				return AssertReceipts(ctx, cfg, db, fromBlock, toBlock)
 			}
-			var err error
-			lastTxNum, _, err = doms.SeekCommitment(ctx, tx.(kv.TemporalTx))
-			return err
+			return nil
 		}); err != nil {
 			return err
 		}
@@ -259,6 +255,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	var fromStep, toStep kv.Step
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
+		// toStep must reflect what this batch actually re-derived, not the commitment
+		// frontier: when rebuilding a subset of domains, commitment can be ahead, which
+		// would build empty files past the domain's data and desync pruning.
+		var err error
+		lastTxNum, err = cfg.BlockReader.TxnumReader().Max(ctx, tx, toBlock-1)
+		if err != nil {
+			return err
+		}
 		if lastTxNum/agg.StepSize() > 0 {
 			toStep = kv.Step(lastTxNum / agg.StepSize())
 		}
