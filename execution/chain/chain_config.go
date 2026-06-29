@@ -348,11 +348,9 @@ func (c *Config) IsMuirGlacier(num uint64) bool {
 	return isForked(c.MuirGlacierBlock, num)
 }
 
-// IsPetersburg returns whether num is either
-// - equal to or greater than the PetersburgBlock fork block,
-// - OR is nil, and Constantinople is active
+// IsPetersburg returns whether num is either equal to the Petersburg fork block or greater.
 func (c *Config) IsPetersburg(num uint64) bool {
-	return isForked(c.PetersburgBlock, num) || c.PetersburgBlock == nil && isForked(c.ConstantinopleBlock, num)
+	return isForked(c.PetersburgBlock, num)
 }
 
 // IsIstanbul returns whether num is either equal to the Istanbul fork block or greater.
