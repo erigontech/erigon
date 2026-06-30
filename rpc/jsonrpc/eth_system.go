@@ -271,14 +271,14 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	oracle := api.newGasOracle(overlayTx)
+	oracle := api.newGasOracle(tx)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
 	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
