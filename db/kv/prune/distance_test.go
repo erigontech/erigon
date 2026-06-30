@@ -1,0 +1,109 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package prune
+
+import (
+	"math"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestParseBlocksDistance(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    uint64
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "0", want: 0},
+		{in: "262144", want: 262_144},
+		{in: "  100  ", want: 100},
+		{in: "keep-post-merge", want: uint64(KeepPostMergeBlocksPruneMode)},
+		{in: "KEEP-POST-MERGE", want: uint64(KeepPostMergeBlocksPruneMode)},
+		{in: "keep-all", want: uint64(KeepAllBlocksPruneMode)},
+		{in: "Keep-All", want: uint64(KeepAllBlocksPruneMode)},
+		// Raw sentinel numbers must keep working for backward compatibility.
+		{in: "18446744073709551615", want: uint64(KeepPostMergeBlocksPruneMode)},
+		{in: "18446744073709551614", want: uint64(KeepAllBlocksPruneMode)},
+		// Only keep-post-merge and keep-all are recognized.
+		{in: "post-merge", wantErr: true},
+		{in: "history-expiry", wantErr: true},
+		{in: "all", wantErr: true},
+		{in: "garbage", wantErr: true},
+		{in: "-1", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParseBlocksDistance(tc.in)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParseHistoryDistance(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    uint64
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "100000", want: 100_000},
+		{in: "keep-all", want: uint64(math.MaxUint64)},
+		{in: "Keep-All", want: uint64(math.MaxUint64)},
+		{in: "18446744073709551615", want: uint64(math.MaxUint64)},
+		// keep-post-merge is block-only; everything else is invalid.
+		{in: "all", wantErr: true},
+		{in: "keep-post-merge", wantErr: true},
+		{in: "garbage", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParseHistoryDistance(tc.in)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestBlocksDistanceCLIValue(t *testing.T) {
+	assert.Equal(t, "keep-post-merge", blocksDistanceCLIValue(uint64(KeepPostMergeBlocksPruneMode)))
+	assert.Equal(t, "keep-all", blocksDistanceCLIValue(uint64(KeepAllBlocksPruneMode)))
+	assert.Equal(t, "262144", blocksDistanceCLIValue(262_144))
+}
+
+// A keep-post-merge Blocks sentinel must render with its readable alias rather
+// than the raw MaxUint64 magic number.
+func TestModeString_BlocksSentinelAlias(t *testing.T) {
+	blockDist, err := ParseBlocksDistance("keep-post-merge")
+	require.NoError(t, err)
+
+	mode, err := FromCli(archiveModeStr, 0, blockDist)
+	require.NoError(t, err)
+	assert.Equal(t, KeepPostMergeBlocksPruneMode, mode.Blocks)
+	assert.Equal(t, "archive --prune.distance.blocks=keep-post-merge", mode.String())
+}

@@ -16,6 +16,12 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 - If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
 
+### Added
+
+#### CLI & Operations
+
+- `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22055) — by @yperbasis
+
 ---
 
 # Erigon v3.5.0 — Tidal Tails — 2026-06-26
