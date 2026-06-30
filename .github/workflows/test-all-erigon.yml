@@ -63,6 +63,15 @@ jobs:
           # exec mode keeps its own cache lineage.
           build-cache-extra-key: ${{ matrix.exec_mode }}
 
+      # Build erigon up front so binary-driven execution tests consume a
+      # prebuilt binary (via ERIGON_BIN) instead of building it inside the
+      # timed `make test-all` step. Skipped where execution tests don't run.
+      - name: Build erigon binary
+        if: matrix.skip_execution_tests != 'true'
+        run: |
+          make erigon
+          echo "ERIGON_BIN=$GITHUB_WORKSPACE/build/bin/erigon" >> "$GITHUB_ENV"
+
       - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
           SKIP_FLAKY_TESTS: 'true'
