@@ -254,8 +254,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
 	// into later foreground commitment reads (which break when the caller runs
 	// with in-mem history reads disabled, e.g. offline re-exec).
-	prevStateReader := pe.rs.Domains().GetCommitmentContext().StateReader()
-	defer pe.rs.Domains().GetCommitmentContext().SetStateReader(prevStateReader)
+	sdCtx := pe.rs.Domains().GetCommitmentContext()
+	prevStateReader := sdCtx.StateReader()
+	defer sdCtx.SetStateReader(prevStateReader)
 
 	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
