@@ -240,14 +240,12 @@ func (evm *EVM) chargeTopLevelFrameGas(gasRemaining mdgas.MdGas, addr accounts.A
 	var topLvlFrameStateGas int64
 	var topLvlFrameStateGasSpill uint64
 	if topLevelNewAccount {
-		beforeRegular := gasRemaining.Regular
 		var ok bool
-		gasRemaining, ok = useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+		gasRemaining, topLvlFrameStateGasSpill, ok = useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 		if !ok {
-			return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, ErrOutOfGas
+			return gasRemaining, topLvlFrameStateGas, 0, ErrOutOfGas
 		}
 		topLvlFrameStateGas = int64(params.StateGasNewAccount)
-		topLvlFrameStateGasSpill = beforeRegular - gasRemaining.Regular
 	}
 	if !isPrecompile {
 		dd, isDelegated, err := evm.intraBlockState.GetDelegatedDesignation(addr)
@@ -679,10 +677,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		var stateGas, depositStateSpill uint64
 		if evm.chainRules.IsAmsterdam {
 			stateGas = uint64(len(ret)) * params.CostPerStateByte
-			gasRemaining, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
-			// The regular pool only drops when the reservoir was exhausted,
-			// so its decrease is the spilled portion of the deposit charge.
-			depositStateSpill = preDepositGas.Regular - gasRemaining.Regular
+			gasRemaining, depositStateSpill, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
 
 		// Charge regular gas.
@@ -696,7 +691,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 			} else {
 				regularGas = uint64(len(ret)) * params.CreateDataGas
 			}
-			gasRemaining, regularGasOk = useMdGas(gasRemaining, regularGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			gasRemaining, _, regularGasOk = useMdGas(gasRemaining, regularGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
 
 		if stateGasOk && regularGasOk {

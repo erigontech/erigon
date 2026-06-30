@@ -153,16 +153,11 @@ func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 }
 
 func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	prevRegular := c.gas
-	remaining, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
+	remaining, stateSpill, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
 	if ok {
 		c.gas = remaining.Regular
 		c.stateGas = remaining.State
-		if t == mdgas.StateGas {
-			// The regular pool only drops when the reservoir was
-			// exhausted, so its decrease is exactly the spilled portion.
-			c.stateGasSpill += prevRegular - remaining.Regular
-		}
+		c.stateGasSpill += stateSpill
 	}
 	return ok
 }
@@ -199,22 +194,22 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 // CallContext.stateGasSpill (for in-loop charges via CallContext.useMdGas)
 // or on the caller's local gasUsed accumulator (for code-deposit charges
 // in evm.create after Run returns).
-func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, bool) {
+func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, uint64, bool) {
 	var ok bool
 	switch t {
 	case mdgas.StateGas:
 		initial.State, ok = useGas(initial.State, gas, tracer, reason)
 		if ok {
-			return initial, true
+			return initial, 0, true
 		}
-		// otherwise use up all remaining state gas and try to use some from the regular gas
-		gas = gas - initial.State
+		// otherwise use up all remaining state gas and spill the remainder into regular gas
+		spill := gas - initial.State
 		initial.State = 0
-		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		return initial, ok
+		initial.Regular, ok = useGas(initial.Regular, spill, tracer, reason)
+		return initial, spill, ok
 	case mdgas.RegularGas:
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		return initial, ok
+		return initial, 0, ok
 	default:
 		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
 	}
