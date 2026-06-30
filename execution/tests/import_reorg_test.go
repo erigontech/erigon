@@ -31,13 +31,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-)
 
-// cancunGenesisConfig is the chain config that reproduces the
-// UncleFromSideChain_Cancun fixture's genesis hash (0xfc96de62…). It mirrors
-// what the Hive ethereum/consensus simulator builds for the Cancun network;
-// the test asserts the resulting hash so config drift fails loudly.
-const cancunGenesisConfig = `{"ethash":{},"chainId":1,"homesteadBlock":0,"daoForkSupport":true,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":0,"blobSchedule":{"cancun":{"target":3,"max":6,"baseFeeUpdateFraction":3338477},"prague":{"target":6,"max":9,"baseFeeUpdateFraction":5007716}},"depositContractAddress":"0x00000000219ab540356cBB839Cbe05303d7705Fa"}`
+	"github.com/erigontech/erigon/execution/tests/testforks"
+)
 
 type importFixtureCase struct {
 	LastBlockHash string `json:"lastblockhash"`
@@ -64,26 +60,23 @@ type importFixtureCase struct {
 
 var headUpdatedRe = regexp.MustCompile(`head updated\s+hash=(0x[0-9a-fA-F]{64})\s+number=(\d+)`)
 
-// lastImportedHead returns the highest-numbered head the import advanced to.
+// lastImportedHead returns the final canonical head the import settled on (the
+// last head-update logged), or ("", 0) if none was logged.
 func lastImportedHead(out string) (hash string, number uint64) {
-	for _, m := range headUpdatedRe.FindAllStringSubmatch(out, -1) {
-		n, _ := strconv.ParseUint(m[2], 10, 64)
-		if hash == "" || n >= number {
-			hash, number = m[1], n
-		}
+	matches := headUpdatedRe.FindAllStringSubmatch(out, -1)
+	if len(matches) == 0 {
+		return "", 0
 	}
-	return hash, number
+	last := matches[len(matches)-1]
+	number, _ = strconv.ParseUint(last[2], 10, 64)
+	return last[1], number
 }
 
-// TestImportReorgUnwindToGenesis guards a parallel-executor defect:
-// importing a chain that reorgs back to genesis crashes the commitment
-// calculator ("empty branch data read during unfold"), leaving the canonical
-// head stuck on the lighter chain instead of the heavier side chain.
-//
-// It must drive the real `erigon init` + `erigon import` binary flow: the
-// in-process block-test harness backs chaindata with in-memory MDBX and commits
-// genesis in the same execution flow, both of which mask this on-disk defect
-// (TestLegacyBlockchain runs the same fixture and passes).
+// TestImportReorgUnwindToGenesis drives the real erigon init + import binary
+// flow for a chain that reorgs back to genesis, asserting the canonical head
+// advances to the heavier side chain. It must use the binary rather than the
+// in-process block-test harness: that harness commits genesis through a
+// separate path that doesn't hit this parallel-executor regression.
 func TestImportReorgUnwindToGenesis(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -108,8 +101,13 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	for addr, acc := range tc.Pre {
 		alloc[strings.TrimPrefix(addr, "0x")] = acc
 	}
+	// Reuse the same chain config the in-process fixture tests resolve, so the
+	// CLI genesis can't silently drift from it; the genesis-hash check below
+	// still guards header/alloc drift.
+	configJSON, err := json.Marshal(testforks.Forks["Cancun"])
+	require.NoError(t, err)
 	genesis := map[string]any{
-		"config":        json.RawMessage(cancunGenesisConfig),
+		"config":        json.RawMessage(configJSON),
 		"nonce":         tc.GenesisHeader.Nonce,
 		"timestamp":     tc.GenesisHeader.Timestamp,
 		"extraData":     tc.GenesisHeader.ExtraData,
@@ -146,9 +144,9 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	require.Containsf(t, string(initOut), tc.GenesisHeader.Hash,
 		"genesis hash mismatch — chain config drift?\n%s", initOut)
 
-	// Import exits non-zero by design here: the fixture includes one
-	// intentionally-invalid post-Paris-uncle block. The canonical head is the
-	// signal we check, exactly as the Hive consensus simulator does.
+	// Import exits non-zero by design: the fixture includes an intentionally
+	// invalid block (a post-merge uncle). We assert on the canonical head the
+	// import reached, not the exit code.
 	importArgs := append([]string{"import", "--datadir", datadir, "--networkid", "1337"}, rlpFiles...)
 	importOut, importErr := exec.Command(bin, importArgs...).CombinedOutput() //nolint:gosec
 	var exitErr *exec.ExitError
@@ -179,9 +177,9 @@ func repoRootDir(t *testing.T) string {
 	}
 }
 
-// erigonBinaryForTest returns a usable erigon binary: $ERIGON_BIN, else the
-// make-built build/bin/erigon, else a freshly built one (slow, hence the
-// testing.Short guard above).
+// erigonBinaryForTest resolves the erigon binary to drive: $ERIGON_BIN (set by
+// CI), else a prebuilt build/bin/erigon, else a slow local from-scratch build
+// (which is why the test is skipped under -short).
 func erigonBinaryForTest(t *testing.T, root string) string {
 	t.Helper()
 	if b := os.Getenv("ERIGON_BIN"); b != "" {
@@ -191,9 +189,9 @@ func erigonBinaryForTest(t *testing.T, root string) string {
 	if _, err := os.Stat(binPath); err == nil {
 		return binPath
 	}
-	// Build on the real disk, not t.TempDir(): under CI the latter is a small
-	// RAM disk that the linker output and go build's work dir (GOTMPDIR) would
-	// overflow.
+	// Point go build's work dir (GOTMPDIR) at real disk under build/ rather
+	// than the default temp: the from-scratch erigon link is large and can
+	// overflow a small or tmpfs /tmp.
 	buildRoot := filepath.Join(root, "build")
 	require.NoError(t, os.MkdirAll(filepath.Join(buildRoot, "bin"), 0o755))
 	build := exec.Command("go", "build", "-o", binPath, "./cmd/erigon") //nolint:gosec
