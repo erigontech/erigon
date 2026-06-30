@@ -61,6 +61,12 @@ func (t *externalIPTracker) runWithNotifier(stop <-chan struct{}, notifier netCh
 			t.refresh()
 			tick.Reset(interval)
 		case <-notifier.Events():
+			if !settle.Stop() {
+				select {
+				case <-settle.C:
+				default:
+				}
+			}
 			settle.Reset(debounce)
 		case <-settle.C:
 			t.refresh()

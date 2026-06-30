@@ -52,8 +52,13 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		logger.Debug("p2p: netlink bind failed, using periodic external IP refresh only", "err", err)
 		return noopNotifier{}
 	}
-	// A receive timeout lets the read wake periodically to observe Close.
-	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1})
+	// A receive timeout lets the read wake periodically to observe Close;
+	// without it Close could block forever on a blocked read.
+	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); err != nil {
+		_ = unix.Close(fd)
+		logger.Debug("p2p: netlink receive timeout setup failed, using periodic external IP refresh only", "err", err)
+		return noopNotifier{}
+	}
 
 	n := &netlinkNotifier{
 		fd:      fd,

@@ -44,8 +44,13 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		return noopNotifier{}
 	}
 	unix.CloseOnExec(fd)
-	// A receive timeout lets the read wake periodically to observe Close.
-	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1})
+	// A receive timeout lets the read wake periodically to observe Close;
+	// without it Close could block forever on a blocked read.
+	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); err != nil {
+		_ = unix.Close(fd)
+		logger.Debug("p2p: route receive timeout setup failed, using periodic external IP refresh only", "err", err)
+		return noopNotifier{}
+	}
 
 	n := &routeNotifier{
 		fd:      fd,
