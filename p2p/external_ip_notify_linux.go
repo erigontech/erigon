@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// netlinkNotifier signals on address, link and route changes via an
+// netlinkNotifier signals on interface address and link changes via an
 // RTNETLINK multicast socket.
 type netlinkNotifier struct {
 	fd        int

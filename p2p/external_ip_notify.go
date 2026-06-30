@@ -50,7 +50,7 @@ func (t *externalIPTracker) runWithNotifier(stop <-chan struct{}, notifier netCh
 	defer tick.Stop()
 
 	settle := time.NewTimer(debounce)
-	settle.Stop()
+	stopAndDrain(settle)
 	defer settle.Stop()
 
 	for {
@@ -61,15 +61,20 @@ func (t *externalIPTracker) runWithNotifier(stop <-chan struct{}, notifier netCh
 			t.refresh()
 			tick.Reset(interval)
 		case <-notifier.Events():
-			if !settle.Stop() {
-				select {
-				case <-settle.C:
-				default:
-				}
-			}
+			stopAndDrain(settle)
 			settle.Reset(debounce)
 		case <-settle.C:
 			t.refresh()
+		}
+	}
+}
+
+// stopAndDrain stops t and discards any pending tick, leaving it safe to Reset.
+func stopAndDrain(t *time.Timer) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
 		}
 	}
 }

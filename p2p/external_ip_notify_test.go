@@ -118,17 +118,33 @@ func TestNetworkChangeEventsCoalesce(t *testing.T) {
 
 	expectApplied(t, applied, ip1) // initial resolve -> 1 call
 
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 8; i++ { // burst, buffered, no inter-event sleeps
 		fn.ch <- struct{}{}
-		time.Sleep(2 * time.Millisecond)
 	}
-	time.Sleep(120 * time.Millisecond) // let the debounce settle and fire once
+	waitForCount(t, nat, 2) // the burst coalesces into a single extra resolve
+
+	// No further events arrive, so the count must stay at 2 (coalesced, not per-event).
+	time.Sleep(80 * time.Millisecond)
+	if got := nat.callCount(); got != 2 {
+		t.Fatalf("expected a burst to coalesce into 1 extra resolve (2 calls total), got %d", got)
+	}
 
 	close(stop)
 	expectClosed(t, done)
+}
 
-	if got := nat.callCount(); got != 2 {
-		t.Fatalf("expected a burst to coalesce into 1 extra resolve (2 calls total), got %d", got)
+func waitForCount(t *testing.T, nat *countingNAT, want int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		if nat.callCount() >= want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d resolves, got %d", want, nat.callCount())
+		case <-time.After(time.Millisecond):
+		}
 	}
 }
 
