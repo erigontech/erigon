@@ -1063,3 +1063,19 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)
 }
+
+func TestIsComplete_ShortBranchData(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data BranchData
+	}{
+		{"nil", nil},
+		{"empty", BranchData{}},
+		{"one_byte", BranchData{0x01}},
+		{"three_bytes", BranchData{0x01, 0x02, 0x03}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.False(t, tc.data.IsComplete())
+		})
+	}
+}
