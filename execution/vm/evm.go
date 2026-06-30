@@ -180,15 +180,10 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
 
-	// 2. EIP-8037 refill_frame_state_gas: the frame's state changes are
-	// undone, so its state gas is credited back last-in-first-out — the
-	// regular pool first (the spilled portion), then the reservoir with the
-	// remainder, which restores the reservoir to the value the frame began
-	// with. This must precede the halt burn below so the refilled spill is
-	// burned together with the rest of the regular gas.
+	// 2. EIP-8037 refill frame state gas
 	if evm.chainRules.IsAmsterdam {
 		gasRemaining.Regular += stateGasSpill
-		// state_gas_left + state_gas_used - state_gas_spill equals the
+		// gasRemaining.State + stateGasUsed - stateGasSpill equals the
 		// reservoir the frame was given (>= 0 by construction). A negative
 		// value means a code path mutated the state-gas trackers without the
 		// paired update; surface it loudly and clamp.
@@ -265,9 +260,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// already restored the child's reservoir to the parent.)
 	inputTotal := gas.Total()
 	defer func() {
-		// At depth 0 on error, handleFrameRevert already refilled the frame's
-		// state gas into gasRemaining, so the frame's net state usage is 0.
-		// Reset before the regular-gas derivation so it sees the refilled value.
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
 			gasUsed.State = 0
 		}
