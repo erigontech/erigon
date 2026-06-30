@@ -55,7 +55,6 @@ type commitmentCalculator struct {
 	doms      *execctx.SharedDomains
 	db        kv.TemporalRoDB
 	logPrefix string
-	logger    log.Logger
 	stepSize  uint64
 
 	// updates is the calculator's OWN buffer — never shared with the
@@ -166,7 +165,6 @@ func newCommitmentCalculator(
 		doms:                 doms,
 		db:                   db,
 		logPrefix:            logPrefix,
-		logger:               logger,
 		stepSize:             doms.StepSize(),
 		updates:              calcUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
@@ -426,12 +424,12 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	// when pastChangesAccumulator holds multiple changesets per block number
 	// (canonical + fork during reorg-bounce tests).
 	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
-		// Partial-block compute is intentionally not verified (no header root
-		// to compare against), but a real ComputeCommitment failure leaves
-		// later trie state suspect — log so the failure isn't silent.
-		if cc.logger != nil {
-			cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeWithoutCheck failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
-		}
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: partial-block compute failed: %w", err),
+		})
+		return
 	}
 
 	cc.lastComputedBlock = br.BlockNum
@@ -460,8 +458,12 @@ func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blo
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil && cc.logger != nil {
-		cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeStepBoundary failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
+	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: step-boundary compute failed: %w", err),
+		})
 	}
 }
 
