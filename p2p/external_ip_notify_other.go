@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
+//go:build !linux && !windows && !darwin && !freebsd && !netbsd && !openbsd && !dragonfly
 
 package p2p
 
