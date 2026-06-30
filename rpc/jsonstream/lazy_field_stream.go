@@ -47,13 +47,11 @@ func (s *LazyFieldStream) CloseIfOpen() {
 func (s *LazyFieldStream) ensure() {
 	if !s.Written {
 		s.Written = true
+		s.openDepth = uint(s.Stream.Depth())
 		if s.prependSeparator {
 			s.Stream.WriteMore()
 		}
 		s.Stream.WriteObjectField(s.field)
-		if d := s.Stream.Depth(); d > 0 {
-			s.openDepth = uint(d - 1)
-		}
 	}
 }
 

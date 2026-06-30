@@ -282,6 +282,9 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 	if stackLen == 0 {
 		return s.stream.Error
 	}
+	if targetDepth > uint(stackLen) {
+		targetDepth = uint(stackLen)
+	}
 
 	for i := stackLen - 1; i >= int(targetDepth); i-- {
 		switch s.stack[i] {
@@ -302,7 +305,7 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 		}
 	}
 
-	s.stack = s.stack[:min(int(targetDepth), stackLen)]
+	s.stack = s.stack[:targetDepth]
 	return s.stream.Error
 }
 
