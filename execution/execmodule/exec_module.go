@@ -379,6 +379,23 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 	return canonical, nil
 }
 
+// drainReadAhead blocks until any in-flight block-assembly warmup finishes.
+// warmBody is fire-and-forget and populates the shared state/branch caches; if
+// it is still running when an unwind bumps the cache epoch, it can Put a
+// pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
+// returns false and the stale value is served as canonical (wrong root). Call
+// before every UnwindTo that invalidates the cache.
+func (e *ExecModule) drainReadAhead() {
+	if e.readAheader == nil {
+		return
+	}
+	ctx := e.bacgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	e.readAheader.WaitForWarmup(ctx)
+}
+
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
@@ -407,6 +424,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
+	e.drainReadAhead()
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}

@@ -1128,10 +1128,17 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
 				// backing tx is the single source of truth for this key at this point.
 				var vDB []byte
+				var dbErr error
 				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
+					vDB, _, _, dbErr = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
 				} else {
-					vDB, _, _ = tx.GetLatest(domain, k)
+					vDB, _, dbErr = tx.GetLatest(domain, k)
+				}
+				// A transient read error leaves vDB nil; comparing against it would
+				// panic "divergence" on an I/O fault even when the cache was correct.
+				// Surface the real error instead.
+				if dbErr != nil {
+					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", dbErr)
 				}
 				if !bytes.Equal(v, vDB) {
 					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",

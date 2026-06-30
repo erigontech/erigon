@@ -410,6 +410,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}, false)
 			}
 
+			// Drain in-flight warmup before the unwind bumps the cache epoch
+			// (cross-fork contamination — see drainReadAhead).
+			e.drainReadAhead()
 			if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}

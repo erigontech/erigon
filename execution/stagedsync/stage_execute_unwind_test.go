@@ -40,9 +40,10 @@ import (
 )
 
 // Pins that the unwind early-return (u.UnwindPoint >= s.BlockNumber) prunes
-// uncommitted overlay writes above the unwind point — which the overlay-reusing
-// retry loop would otherwise read as stale — while a write at/below the unwind
-// point survives (no over-pruning).
+// uncommitted overlay writes above committed progress (s.BlockNumber) — the
+// whole (s.BlockNumber, u.UnwindPoint] range re-executes since u.Done is skipped,
+// so those writes must go too, not just ones above u.UnwindPoint — while a write
+// at/below committed progress survives (no over-pruning).
 func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	t.Parallel()
 
@@ -88,9 +89,11 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 		unwindPoint    = uint64(7) // = failedBlock-1; >= committedBlock => disk no-op
 		failedBlock    = uint64(8) // block whose post-exec gas check failed mid-batch
 	)
-	boundaryTxNum, err := br.TxnumReader().Min(ctx, tx, unwindPoint+1)
+	// The early-return prunes from Min(s.BlockNumber+1) = Min(committedBlock+1),
+	// the first re-executed txNum — verify that boundary (not unwindPoint+1).
+	pruneFloorTxNum, err := br.TxnumReader().Min(ctx, tx, committedBlock+1)
 	require.NoError(t, err)
-	require.Equal(t, failedBlock*perBlock, boundaryTxNum, "sanity: Min(failedBlock) == first txNum of failedBlock")
+	require.Equal(t, (committedBlock+1)*perBlock, pruneFloorTxNum, "sanity: prune floor == first txNum of committedBlock+1")
 
 	// staleKey mirrors ca5daf64 slot0: first-written by failedBlock's tx19 at a
 	// txNum strictly above the unwind boundary — must be pruned on unwind.

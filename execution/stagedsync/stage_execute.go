@@ -457,7 +457,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
+	// Restore doms' internal commitment state to the unwound tip; a failure here
+	// leaves doms inconsistent for the next re-execution, so surface it.
+	if _, _, err = doms.SeekCommitment(ctx, rwTx); err != nil {
+		return fmt.Errorf("unwind: SeekCommitment after disk unwind: %w", err)
+	}
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }

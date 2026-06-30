@@ -110,6 +110,11 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
 
+	// Drain in-flight warmup before the unwind bumps the cache epoch, so a
+	// fire-and-forget warmup can't Put a dead-fork value stamped with the new
+	// epoch (cross-fork contamination).
+	e.drainReadAhead()
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)

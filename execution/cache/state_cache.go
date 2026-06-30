@@ -68,9 +68,9 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	return sc
 }
 
-// stateCacheModeFromEnv reads STATE_CACHE_MODE once. Unset or unrecognised
-// returns ModeEvictLRU. Recognised values: "evict", "noop". Logged at
-// startup so operators can see the mode pick.
+// stateCacheModeFromEnv reads STATE_CACHE_MODE (once per NewStateCache). Unset
+// or unrecognised returns ModeEvictLRU. Recognised values: "evict", "noop". The
+// noop and unrecognised cases log; the default evict path is silent.
 func stateCacheModeFromEnv() Mode {
 	v := strings.ToLower(strings.TrimSpace(dbg.EnvString("STATE_CACHE_MODE", "")))
 	switch v {
