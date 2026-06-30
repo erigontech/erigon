@@ -181,50 +181,6 @@ func TestApplyLoopMissingBlocks(t *testing.T) {
 	}
 }
 
-// TestExecLoopExitCheck covers the exec-loop exit invariant:
-// pe.blockExecutors must be empty at every clean exit, otherwise an
-// orphaned (queued-but-never-scheduled) block silently sits there
-// forever and the apply loop never sees its blockResult.
-func TestExecLoopExitCheck(t *testing.T) {
-	t.Run("empty map returns nil", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{}
-		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
-			t.Fatalf("execLoopExitCheck on empty map should return nil, got: %v", err)
-		}
-	})
-
-	t.Run("non-empty map returns ErrInvalidBlock with block nums", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{
-			3: {},
-			7: {},
-		}
-		err := pe.execLoopExitCheck(context.Background(), "test-reason")
-		if err == nil {
-			t.Fatalf("execLoopExitCheck on non-empty map should return error, got nil")
-		}
-		if !errors.Is(err, rules.ErrInvalidBlock) {
-			t.Fatalf("expected wrapped ErrInvalidBlock, got: %v", err)
-		}
-		// Both block nums must appear in the error so the operator can
-		// see exactly which blocks were left orphaned.
-		for _, want := range []string{"3", "7", "test-reason"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error message missing %q: %s", want, err.Error())
-			}
-		}
-	})
-
-	t.Run("nil map returns nil (defensive)", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		// pe.blockExecutors is nil
-		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
-			t.Fatalf("execLoopExitCheck on nil map should return nil, got: %v", err)
-		}
-	})
-}
-
 // TestBlockValidatorWaitNil verifies the per-block validator is
 // safe to Wait on when nil (the case where the apply loop's if-condition
 // declined to construct one). Defends against NPE regression if someone
@@ -399,10 +355,10 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
-// TestExecLoopExitCheckConcurrentReads verifies execLoopExitCheck is
+// TestCheckBlocksDrainedConcurrentReads verifies checkBlocksDrained is
 // safe to call concurrently with map mutations under the lock — guards
 // against future regression if someone removes the RLock.
-func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
+func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 	pe := &parallelExecutor{}
 	pe.blockExecutors = map[uint64]*blockExecutor{}
 
@@ -423,12 +379,12 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 		}
 	}()
 
-	// Reader: continually call execLoopExitCheck.
+	// Reader: continually call checkBlocksDrained.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for !stop.Load() {
-			_ = pe.execLoopExitCheck(context.Background(), "concurrent")
+			_ = pe.checkBlocksDrained(context.Background(), nil)
 		}
 	}()
 
@@ -1147,34 +1103,59 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// TestExecLoopExitCheckDeliberateStop verifies that a canceled ctx (deliberate
-// stop or graceful shutdown) suppresses the pending-block ErrInvalidBlock, while
-// a non-canceled exit with pending blocks still flags the silent miss.
-func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
-	t.Run("pending blocks but deliberate-stop cause returns nil", func(t *testing.T) {
+// Pins checkBlocksDrained: a clean apply-loop exit (execErr == nil) on a live
+// context that left scheduled blocks undrained is a genuine silent miss and must
+// surface as ErrInvalidBlock. Leftover blocks are expected — and must pass
+// through untouched — when the batch is resumable (ErrLoopExhausted), already
+// failing, or being canceled/shut down.
+func TestCheckBlocksDrained(t *testing.T) {
+	withPending := func() *parallelExecutor {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		return pe
+	}
+
+	t.Run("clean exit with undrained block is a silent miss", func(t *testing.T) {
+		err := withPending().checkBlocksDrained(context.Background(), nil)
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+	})
+
+	t.Run("undrained block numbers appear in the error", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
-		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(errDeliberateStop)
-		if err := pe.execLoopExitCheck(ctx, "post-cancel-drain"); err != nil {
-			t.Fatalf("deliberate-stop cause must suppress pending-block error, got: %v", err)
-		}
+		err := pe.checkBlocksDrained(context.Background(), nil)
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.Contains(t, err.Error(), "3")
+		require.Contains(t, err.Error(), "7")
 	})
 
-	t.Run("pending blocks without cancellation still errors", func(t *testing.T) {
+	t.Run("clean exit with everything drained is fine", func(t *testing.T) {
 		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
-		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not canceled")
+		pe.blockExecutors = map[uint64]*blockExecutor{}
+		require.NoError(t, pe.checkBlocksDrained(context.Background(), nil))
 	})
 
-	t.Run("pending blocks on a graceful shutdown cancel returns nil", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
-		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(errors.New("shutdown")) // any cancellation, not only the deliberate-stop cause
-		require.NoError(t, pe.execLoopExitCheck(ctx, "graceful-shutdown"),
-			"a canceled context aborts the batch (nothing is committed), so undrained blocks are expected, not a silent miss")
+	t.Run("nil map is fine", func(t *testing.T) {
+		require.NoError(t, (&parallelExecutor{}).checkBlocksDrained(context.Background(), nil))
+	})
+
+	t.Run("canceled batch leaves undrained blocks alone", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		require.NoError(t, withPending().checkBlocksDrained(ctx, nil))
+	})
+
+	t.Run("resumable batch keeps ErrLoopExhausted, not ErrInvalidBlock", func(t *testing.T) {
+		exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
+		got := withPending().checkBlocksDrained(context.Background(), exhausted)
+		require.Same(t, exhausted, got)
+		require.NotErrorIs(t, got, rules.ErrInvalidBlock)
+	})
+
+	t.Run("existing error is not masked", func(t *testing.T) {
+		boom := errors.New("snapshot step misalignment")
+		got := withPending().checkBlocksDrained(context.Background(), boom)
+		require.Same(t, boom, got)
 	})
 }
 

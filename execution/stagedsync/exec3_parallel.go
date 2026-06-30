@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -126,10 +127,6 @@ type parallelExecutor struct {
 	// blockResult to trigger the install at the rotation site below).
 	currentChangeSetBlock uint64
 }
-
-// errDeliberateStop is the cancel cause set when the apply loop stops the
-// executor on a deferred ErrWrongTrieRoot.
-var errDeliberateStop = errors.New("parallel executor: deliberate stop on wrong trie root")
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
 // block-specific StateChangeSet before any of blockNum's sd.mem writes are
@@ -391,9 +388,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 		// processCommit defers ErrWrongTrieRoot via processCommitErr so a
 		// same-block ErrInvalidBlock can supersede it; the first occurrence
-		// cancels the executor with errDeliberateStop, so later blocks'
-		// verdicts may not be produced.
-		deliberateCancel := func() { executorCancel(errDeliberateStop) }
+		// cancels the executor, so later blocks' verdicts may not be produced.
+		deliberateCancel := func() { executorCancel(nil) }
 		processCommit := func(cr commitmentResult) error {
 			return processCommitErr(handleCommitResult(cr), deliberateCancel, &deferredRootErr)
 		}
@@ -465,7 +461,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					}
 					// Clean exit even without the reachedMaxBlock flag: the exec loop
 					// can exit through `rws.ResultCh closed` / `rws.Drain returned closed`
-					// (execLoopExitCheck) for a single-block fork-validation batch where
+					// for a single-block fork-validation batch where
 					// the result heap empties before the main loop reaches the
 					// execLoopShouldExit precedence check. In that path nobody flips
 					// reachedMaxBlock, even though every block in [startBlockNum, maxBlockNum]
@@ -670,6 +666,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 	// Wait for all goroutines to complete before reading shared state.
 	execErr = reconcileExecAndWaitErr(execErr, pe.wait(ctx))
+	execErr = pe.checkBlocksDrained(ctx, execErr)
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
@@ -883,13 +880,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				select {
 				case nextResult, ok := <-pe.rws.ResultCh():
 					if !ok {
-						return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.ResultCh closed")
+						return nil
 					}
 					if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
 						if err != nil {
 							return err
 						}
-						return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.Drain returned closed")
+						return nil
 					}
 					blockResult, err := pe.processResults(ctx, applyTx)
 					if err != nil {
@@ -919,19 +916,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 					}
 				default:
-					return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
+					return nil
 				}
 			}
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
+				return nil
 			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
 				return err
 			}
 			if closed {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.Drain returned closed")
+				return nil
 			}
 		}
 
@@ -1231,6 +1228,24 @@ func reconcileExecAndWaitErr(execErr, waitErr error) error {
 	return errors.Join(execErr, waitErr)
 }
 
+// checkBlocksDrained turns a clean apply-loop exit (execErr == nil) that left
+// scheduled blocks undrained in pe.blockExecutors into an ErrInvalidBlock;
+// leftover blocks on a resumable (ErrLoopExhausted) or canceled batch are
+// expected and pass through.
+func (pe *parallelExecutor) checkBlocksDrained(ctx context.Context, execErr error) error {
+	if execErr != nil || ctx.Err() != nil {
+		return execErr
+	}
+	pe.RLock()
+	pending := slices.Sorted(maps.Keys(pe.blockExecutors))
+	pe.RUnlock()
+	if len(pending) > 0 {
+		return fmt.Errorf("%w: parallel exec committed cleanly but %d scheduled block(s) never drained: %v",
+			rules.ErrInvalidBlock, len(pending), pending)
+	}
+	return nil
+}
+
 // execLoopExitDecision is the result of evaluating the exec-loop's
 // per-blockResult exit conditions. Values are ordered by precedence:
 // later conditions only matter if no earlier one fired.
@@ -1327,41 +1342,6 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 		pe.applyResultsCh = nil
 	}
 	return
-}
-
-// execLoopExitCheck enforces the completeness invariant for the exec
-// loop's clean exit paths: all blocks the loop was asked to process must
-// be drained from pe.blockExecutors. A non-empty map at exit means a
-// block was scheduled (or queued) but never produced a blockResult,
-// which previously caused "block accepted when it should have been
-// rejected" failures (the apply loop never received the block, post-
-// validation never fired). Converts that silent-success path into a
-// loud InvalidBlock error so the failure surfaces through InsertChain.
-//
-// The reason argument tags the call site (which silent-return path
-// triggered the check) so a failure log identifies the exit path
-// involved without needing a stack trace.
-func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	// A canceled context means the batch was aborted, not committed, so
-	// undrained blocks are expected — not the silent miss this guards against.
-	if ctx.Err() != nil {
-		return nil
-	}
-	pe.RLock()
-	pendingBlocks := len(pe.blockExecutors)
-	var pendingNums []uint64
-	if pendingBlocks > 0 {
-		pendingNums = make([]uint64, 0, pendingBlocks)
-		for n := range pe.blockExecutors {
-			pendingNums = append(pendingNums, n)
-		}
-	}
-	pe.RUnlock()
-	if pendingBlocks > 0 {
-		return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s)",
-			rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason)
-	}
-	return nil
 }
 
 // scheduleNextPending picks the lowest-numbered block still queued in
