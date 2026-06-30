@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package protocol
+package rules
 
 import (
 	"strings"
@@ -63,7 +63,7 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 	const checkReceipts = false // pre-Byzantium gate
 	const checkBloom = true
 
-	err := BlockPostValidation(21912, 0, checkReceipts, checkBloom, receipts, header, nil, cfg, log.New())
+	err := DefaultBlockPostValidation(cfg, header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New())
 	if err == nil {
 		t.Fatal("expected bloom-mismatch error on pre-Byzantium block, got nil")
 	}
@@ -73,14 +73,14 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 
 	// Set the correct bloom — validation must pass.
 	header.Bloom = correctBloom
-	if err := BlockPostValidation(21912, 0, checkReceipts, checkBloom, receipts, header, nil, cfg, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(cfg, header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
 		t.Fatalf("expected success when bloom matches, got: %v", err)
 	}
 
 	// With checkBloom disabled the mismatch must not trigger an error
 	// (sanity check that the new flag does gate the new path).
 	header.Bloom = types.Bloom{}
-	if err := BlockPostValidation(21912, 0, checkReceipts, false, receipts, header, nil, cfg, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(cfg, header, 21912, 0, checkReceipts, false, receipts, nil, log.New()); err != nil {
 		t.Fatalf("checkBloom=false should skip bloom validation, got: %v", err)
 	}
 }
@@ -137,12 +137,12 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	const checkReceipts = true
 	const checkBloom = true
 
-	if err := BlockPostValidation(42_000, 0, checkReceipts, checkBloom, receipts, header, nil, cfg, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(cfg, header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
 		t.Fatalf("expected receipt+bloom validation to accept OR-merged bloom: %v", err)
 	}
 
 	header.Bloom = types.Bloom{}
-	err := BlockPostValidation(42_000, 0, checkReceipts, checkBloom, receipts, header, nil, cfg, log.New())
+	err := DefaultBlockPostValidation(cfg, header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New())
 	if err == nil {
 		t.Fatal("expected bloom-mismatch error, got nil")
 	}
