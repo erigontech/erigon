@@ -145,19 +145,10 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 		"BUG #21138: after reset + integration-path re-exec, genesis-allocated balance dropped (mainnet block 46147)")
 }
 
-// reExecViaIntegrationPath drives execution the way cmd/integration/commands/
-// stages.go does: SpawnExecuteBlocksStage one batch per rwtx, committing each
-// with doms.Commit + ClearRam and reusing the SharedDomains. This bypasses the
-// engine API. doms.Commit (not Flush) is load-bearing: it refreshes the
-// aggregator BranchCache to match committed state — Flush leaves it stale and
-// corrupts the next batch's trie root.
-func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModuleTester, toBlock uint64, batchSize datasize.ByteSize, badBlockHalt bool, logger log.Logger) error {
-	t.Helper()
-
-	// The exec stage cfg execmoduletester built sits inside emt.Sync; we
-	// rebuild it with the same arguments so we can invoke
-	// SpawnExecuteBlocksStage directly without coupling to internal stage
-	// indices.
+// newOfflineExecCfg rebuilds the exec-stage cfg directly (execmoduletester's own
+// copy is buried in emt.Sync) and locks the offline-execution writers like the
+// integration tool does, so periodic snapshot retiring doesn't fight the re-exec.
+func newOfflineExecCfg(emt *ExecModuleTester, batchSize datasize.ByteSize, badBlockHalt bool) stagedsync.ExecuteBlockCfg {
 	cfg := stagedsync.StageExecuteBlocksCfg(
 		emt.DB,
 		emt.cfg.Prune,
@@ -175,14 +166,24 @@ func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModule
 		false, /*experimentalBAL*/
 		exec.NewBlockReadAheader(),
 	)
-
-	// Lock the offline-execution writers like the integration tool does so
-	// the periodic snapshot retiring doesn't fight us.
 	if agg, ok := emt.DB.(dbstate.HasAgg); ok {
 		if aggT, okT := agg.Agg().(*dbstate.Aggregator); okT {
 			aggT.PresetOfflineExecution()
 		}
 	}
+	return cfg
+}
+
+// reExecViaIntegrationPath drives execution the way cmd/integration/commands/
+// stages.go does: SpawnExecuteBlocksStage one batch per rwtx, committing each
+// with doms.Commit + ClearRam and reusing the SharedDomains. This bypasses the
+// engine API. doms.Commit (not Flush) is load-bearing: it refreshes the
+// aggregator BranchCache to match committed state — Flush leaves it stale and
+// corrupts the next batch's trie root.
+func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModuleTester, toBlock uint64, batchSize datasize.ByteSize, badBlockHalt bool, logger log.Logger) error {
+	t.Helper()
+
+	cfg := newOfflineExecCfg(emt, batchSize, badBlockHalt)
 
 	doms, err := newReusedDomains(ctx, emt, logger)
 	if err != nil {
@@ -356,15 +357,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	logger := log.New()
 	require.NoError(t, rawdbreset.ResetExec(ctx, emt.DB))
 
-	cfg := stagedsync.StageExecuteBlocksCfg(
-		emt.DB, emt.cfg.Prune, emt.cfg.BatchSize, emt.ChainConfig, emt.Engine,
-		&vm.Config{}, emt.Notifications, emt.cfg.StateStream, false /*badBlockHalt*/, emt.Dirs,
-		emt.BlockReader, emt.cfg.Genesis, emt.cfg.Sync, false /*experimentalBAL*/, exec.NewBlockReadAheader())
-	if agg, ok := emt.DB.(dbstate.HasAgg); ok {
-		if aggT, okT := agg.Agg().(*dbstate.Aggregator); okT {
-			aggT.PresetOfflineExecution()
-		}
-	}
+	cfg := newOfflineExecCfg(emt, emt.cfg.BatchSize, false /*badBlockHalt*/)
 
 	doms, err := newReusedDomains(ctx, emt, logger)
 	require.NoError(t, err)
