@@ -53,6 +53,11 @@ func (b *wsb) codeHash(addr accounts.Address, ver state.Version, val accounts.Co
 	return b
 }
 
+func (b *wsb) code(addr accounts.Address, ver state.Version, val accounts.Code) *wsb {
+	b.ws.SetCode(addr, &state.VersionedWrite[accounts.Code]{WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath, Version: ver}, Val: val})
+	return b
+}
+
 func (b *wsb) selfDestruct(addr accounts.Address, ver state.Version, val bool) *wsb {
 	b.ws.SetSelfDestruct(addr, &state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: ver}, Val: val})
 	return b

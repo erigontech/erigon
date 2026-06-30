@@ -1533,7 +1533,17 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	// Pure read: prefer the content-addressed fast path (addr → codeHash →
+	// cached bytes, no per-address CodeDomain read) when the getter offers it.
+	// This is a getter, never a setter — it must not feed a DomainPut prevVal,
+	// so it does not use the addr-keyed GetLatest the write path relies on.
+	var enc []byte
+	var err error
+	if cg, ok := r.getter.(codeGetter); ok {
+		enc, _, err = cg.GetCode(addressValue[:], r.txNum)
+	} else {
+		enc, _, err = r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1544,10 +1554,35 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	return enc, nil
 }
 
+// codeGetter is the type-asserted fast-path interface for full-code reads
+// (EXTCODECOPY / CALL / ReadAccountCode). Implemented by execctx.temporalGetter;
+// callers fall back to GetLatest otherwise. Read-only: never used to resolve a
+// DomainPut prevVal (setters resolve prevVal via the addr-keyed GetLatest).
+type codeGetter interface {
+	GetCode(addr []byte, txNum uint64) ([]byte, bool, error)
+}
+
+// codeSizeGetter is the type-asserted fast-path interface for callers
+// that only need the length of the code (EXTCODESIZE / EXTCODEHASH).
+// Implemented by execctx.temporalGetter; fallback to GetLatest otherwise.
+type codeSizeGetter interface {
+	GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
+}
+
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var addressValue common.Address
 	if !address.IsNil() {
 		addressValue = address.Value()
+	}
+	if sg, ok := r.getter.(codeSizeGetter); ok {
+		size, _, err := sg.GetCodeSize(addressValue[:], r.txNum)
+		if err != nil {
+			return 0, err
+		}
+		if r.trace {
+			fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
+		}
+		return size, nil
 	}
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {

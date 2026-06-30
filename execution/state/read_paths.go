@@ -41,18 +41,16 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 	if dbg.KVReadLevelledMetrics {
 		readStart = time.Now()
 	}
-	code, codeErr := sdb.stateReader.ReadAccountCode(addr)
+	// Size-only read for Stateless-witness correctness (see GetCodeSize): a
+	// witness node has the size but not the bytes, so ReadAccountCode returns
+	// nil there and reports EXTCODESIZE 0.
+	size, _ := sdb.stateReader.ReadAccountCodeSize(addr)
 	if dbg.KVReadLevelledMetrics {
 		sdb.codeReadDuration += time.Since(readStart)
 		sdb.codeReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
-	l := len(code)
-	if codeErr == nil && code != nil {
-		so.code = accounts.Code{Hash: so.data.CodeHash, Bytes: code}
-		sdb.callCodeAccessHook(addr, code)
-	}
-	return l
+	return size
 }
 
 // versionedReadCore runs the type-independent part of a versionMap-aware read —

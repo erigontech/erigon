@@ -732,21 +732,16 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
-		// Geth pattern (core/state/state_object.go ~Code()): pay full code
-		// fetch once on first touch, populate stateObject.code so subsequent
-		// EXTCODESIZE / EXTCODEHASH / CALL on the same addr in this tx are
-		// in-struct slice-len calls (~50 ns), not full reader round-trips.
-		// On a 30M-gas EXTCODESIZE loop with N unique addrs, this collapses
-		// the per-addr cost from ~150k reader calls to 1 reader call.
-		code, err := sdb.stateReader.ReadAccountCode(addr)
+		// Size-only read: ReadAccountCodeSize, not ReadAccountCode. It routes
+		// through the size-only cache layer, and is correct on the Stateless
+		// reader — a size-only witness node has the size but no bytes, so
+		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
+		// consensus.
+		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
 		if err != nil {
 			return 0, err
 		}
-		if code != nil {
-			stateObject.code = accounts.Code{Hash: stateObject.data.CodeHash, Bytes: code}
-			sdb.callCodeAccessHook(addr, code)
-		}
-		return len(code), nil
+		return size, nil
 	}
 
 	size, source, _, err := readCodeSize(sdb, addr)
