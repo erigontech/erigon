@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -1046,7 +1046,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
 
-		if assert.Enable {
+		if dbg.AssertEnabled {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])

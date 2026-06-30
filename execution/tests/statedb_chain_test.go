@@ -53,6 +53,7 @@ func TestSelfDestructReceive(t *testing.T) {
 				HomesteadBlock:        new(uint64),
 				ByzantiumBlock:        new(uint64),
 				ConstantinopleBlock:   new(uint64),
+				PetersburgBlock:       new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   new(uint64),
 			},
