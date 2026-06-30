@@ -634,14 +634,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	return api.getWitness(ctx, api.db, blockNrOrHash, 0, true, api.MaxGetProofRewindBlockCount, api.logger)
+	return api.getWitness(ctx, api.db, blockNrOrHash, 0, true, api.logger)
 }
 
 func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash, txIndex hexutil.Uint) (hexutil.Bytes, error) {
-	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
+	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.logger)
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, logger log.Logger) (hexutil.Bytes, error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -735,7 +735,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// trie, so the recording reader saw none of its slots. The stateless verifier's
 	// DeleteSubtree clears that subtree structurally and needs it in the witness, so
 	// range the deleted account's parent-state storage and add its slots to the access
-	// set (the fold then materializes the subtree, the retain list keeps it).
+	// set — they become proved keys, so the fold materializes the subtree and the lean
+	// prune keeps it.
 	for delAddr := range accessed.Deleted {
 		to, ok := kv.NextSubtree(delAddr[:])
 		if !ok {

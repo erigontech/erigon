@@ -2449,7 +2449,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 			}
 		}
 
-		if hph.currentKeyLen < int16(len(hashedKey)) {
+		if hph.activeRows > 0 && hph.currentKeyLen < int16(len(hashedKey)) {
 			lastNibble := int(hashedKey[hph.currentKeyLen])
 			lastCell := &hph.grid[hph.activeRows-1][lastNibble]
 			if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
