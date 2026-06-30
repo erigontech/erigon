@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
@@ -901,7 +900,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	if assert.Enable { // verify code hash from account encoding matches stored code
+	if dbg.AssertEnabled { // verify code hash from account encoding matches stored code
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err

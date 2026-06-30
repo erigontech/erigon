@@ -34,7 +34,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -1107,7 +1106,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 		}
 	}()
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		if coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
 			panic("assert: collation is not initialized " + ii.FilenameBase)
 		}
