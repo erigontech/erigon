@@ -731,7 +731,14 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetStateCache sets the state cache for faster lookups.
+// SetStateCache attaches the process-global state cache to this SD.
+//
+// Invariant: attach it on any SD that may UNWIND committed state the cache
+// already holds. The cache is shared across SDs and invalidated only via
+// sd.Unwind → stateCache.Unwind, so an SD that rolls back tip-region txNums
+// without it attached strands the entries another SD populated for those txNums,
+// and the next read serves dead-fork state. The attach is convention-enforced
+// (engine-API / FCU / set_head paths all call this) rather than structural.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return

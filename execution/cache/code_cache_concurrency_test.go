@@ -89,3 +89,32 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	_, ok = cc.GetByCodeHash(foreign)
 	require.False(t, ok, "byte-check must reject an entry whose keyHash differs from the requested codeHash")
 }
+
+// TestCodeCache_ConcurrentDistinctPuts_RespectCap exercises the back-out branch
+// of the shared insert path: many workers Put distinct codes whose combined size
+// far exceeds the byte cap. Each insert that races past the cap must subtract its
+// own cost and drop its entry, so after the dust settles the byte counters never
+// exceed the cap and stay non-negative — the bound holds under concurrency, not
+// just serial inserts.
+func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
+	const codeCap = 4 * datasize.KB
+	cc := NewCodeCache(codeCap, 16*datasize.MB)
+
+	const workers = 128
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(n int) {
+			defer wg.Done()
+			code := make([]byte, 256)
+			code[0], code[1] = byte(n), byte(n>>8) // distinct code per worker
+			cc.PutWithCodeHash(nil, code, crypto.Keccak256(code), 1)
+		}(i)
+	}
+	wg.Wait()
+
+	require.LessOrEqual(t, cc.codeHashCodeSize.Load(), int64(codeCap),
+		"codeHashToCode must never exceed the byte cap after concurrent distinct Puts")
+	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
+		"codeHashToCode size must stay non-negative (no double back-out)")
+}

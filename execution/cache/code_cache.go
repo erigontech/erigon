@@ -171,6 +171,51 @@ func (c *CodeCache) isStale(txNum uint64, epoch uint32) bool {
 	return c.coh.IsStale(txNum, epoch)
 }
 
+// putAccounted is the shared insert path for the content-addressed code layers
+// (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a maphash.Map of
+// per-key-immutable entries carrying a (txNum, epoch) stamp, and the bookkeeping
+// is identical across all three: skip a live entry (its bytes/size are invariant
+// for a given key), drop a stale one through the accounted LoadAndDelete (the
+// same primitive stale-Get eviction uses, so a racing eviction can't
+// double-subtract), refuse the insert once the layer is full, and back it out if
+// it raced past the cap so concurrent distinct inserts can't overshoot. An entry
+// costs keyCost + valCost(e); capacity bounds counter. stamp/valCost are
+// non-capturing so passing them allocates nothing on the put path.
+func putAccounted[T any](
+	m *maphash.Map[T],
+	key []byte,
+	newEntry T,
+	stamp func(T) (uint64, uint32),
+	valCost func(T) int64,
+	coh *coherence.Gen,
+	counter *atomic.Int64,
+	keyCost, capacity int64,
+) {
+	cost := keyCost + valCost(newEntry)
+	if existing, exists := m.Get(key); exists {
+		if txNum, epoch := stamp(existing); !coh.IsStale(txNum, epoch) {
+			return
+		}
+		if old, removed := m.LoadAndDelete(key); removed {
+			counter.Add(-(keyCost + valCost(old)))
+		}
+	}
+	if counter.Load()+cost > capacity {
+		return
+	}
+	if _, loaded := m.LoadOrStore(key, newEntry); !loaded {
+		if counter.Add(cost) > capacity {
+			counter.Add(-cost)
+			m.Delete(key)
+		}
+	}
+}
+
+func codeEntryStamp(e codeEntry) (uint64, uint32)         { return e.txNum, e.epoch }
+func codeEntryCodeLen(e codeEntry) int64                  { return int64(len(e.code)) }
+func codeSizeEntryStamp(e codeSizeEntry) (uint64, uint32) { return e.txNum, e.epoch }
+func zeroCost[T any](T) int64                             { return 0 }
+
 // NewCodeCache creates a new CodeCache with the specified byte capacities.
 func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeCache {
 	// The addr budget is shared by both addr-keyed LRUs, so each "slot" costs
@@ -283,32 +328,10 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	c.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 
 	hashKey := uint64AsBytes(&codeID)
-	if existing, exists := c.hashToCode.Get(hashKey); exists {
-		if !c.isStale(existing.txNum, existing.epoch) {
-			return // live entry; bytes are immutable for a given hash, nothing to update
-		}
-		// Stale (stranded by a prior unwind, now re-deployed on the live fork):
-		// drop it through the accounted path so the fresh insert below re-adds it
-		// cleanly. LoadAndDelete is the same primitive the stale-Get eviction uses,
-		// so codeSize stays balanced under concurrency — a bare Set here would
-		// re-insert without re-adding the size a racing eviction subtracted.
-		if old, deleted := c.hashToCode.LoadAndDelete(hashKey); deleted {
-			c.codeSize.Add(-int64(8 + len(old.code)))
-		}
-	}
-	codeEntrySize := int64(8 + len(code))
-	if c.codeSize.Load()+codeEntrySize > int64(c.codeCapacityB) {
-		return
-	}
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
-	if _, loaded := c.hashToCode.LoadOrStore(hashKey, entry); !loaded {
-		// Account only the real insert, then back it out if it raced past the cap
-		// so concurrent inserts of distinct codes can't overshoot the budget.
-		if c.codeSize.Add(codeEntrySize) > int64(c.codeCapacityB) {
-			c.codeSize.Add(-codeEntrySize)
-			c.hashToCode.Delete(hashKey)
-		}
-	}
+	// 8-byte maphash key + code bytes.
+	putAccounted(c.hashToCode, hashKey, entry, codeEntryStamp, codeEntryCodeLen,
+		&c.coh, &c.codeSize, 8, int64(c.codeCapacityB))
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
@@ -396,28 +419,10 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	// we touch the bytes we can answer a future EXTCODESIZE for free.
 	c.PutCodeSizeByCodeHash(codeHash, len(code), txNum)
 
-	if existing, exists := c.codeHashToCode.Get(codeHash); exists {
-		if !c.isStale(existing.txNum, existing.epoch) {
-			return // live entry; immutable bytes for a given hash
-		}
-		// Stale: drop through the accounted LoadAndDelete (same primitive the
-		// stale-Get eviction uses) so codeHashCodeSize stays balanced against a
-		// racing eviction, then the fresh insert below re-adds it.
-		if old, removed := c.codeHashToCode.LoadAndDelete(codeHash); removed {
-			c.codeHashCodeSize.Add(-int64(len(codeHash) + len(old.code)))
-		}
-	}
-	entrySize := int64(len(codeHash) + len(code))
-	if c.codeHashCodeSize.Load()+entrySize > int64(c.codeCapacityB) {
-		return
-	}
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
-	if _, loaded := c.codeHashToCode.LoadOrStore(codeHash, entry); !loaded {
-		if c.codeHashCodeSize.Add(entrySize) > int64(c.codeCapacityB) {
-			c.codeHashCodeSize.Add(-entrySize)
-			c.codeHashToCode.Delete(codeHash)
-		}
-	}
+	// 32-byte codeHash key + code bytes.
+	putAccounted(c.codeHashToCode, codeHash, entry, codeEntryStamp, codeEntryCodeLen,
+		&c.coh, &c.codeHashCodeSize, int64(len(codeHash)), int64(c.codeCapacityB))
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -457,27 +462,10 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 	}
 	ep := c.coh.Epoch()
 	kh := hash32(codeHash)
-	if existing, exists := c.codeSizeByCodeHash.Get(codeHash); exists {
-		if !c.isStale(existing.txNum, existing.epoch) {
-			return // live entry; size for a given codeHash is immutable
-		}
-		// Stale: drop through the accounted LoadAndDelete (same primitive the
-		// stale-Get eviction uses) so codeSizeEntries stays balanced against a
-		// racing eviction, then the fresh insert below re-adds it.
-		if _, removed := c.codeSizeByCodeHash.LoadAndDelete(codeHash); removed {
-			c.codeSizeEntries.Add(-1)
-		}
-	}
-	if c.codeSizeEntries.Load() >= c.codeSizeCapEntries {
-		return
-	}
 	entry := codeSizeEntry{size: size, keyHash: kh, txNum: txNum, epoch: ep}
-	if _, loaded := c.codeSizeByCodeHash.LoadOrStore(codeHash, entry); !loaded {
-		if c.codeSizeEntries.Add(1) > c.codeSizeCapEntries {
-			c.codeSizeEntries.Add(-1)
-			c.codeSizeByCodeHash.Delete(codeHash)
-		}
-	}
+	// Entry-counted layer: each entry costs 1 against the entry cap.
+	putAccounted(c.codeSizeByCodeHash, codeHash, entry, codeSizeEntryStamp, zeroCost,
+		&c.coh, &c.codeSizeEntries, 1, c.codeSizeCapEntries)
 }
 
 // Delete removes the address → code mapping for addr.

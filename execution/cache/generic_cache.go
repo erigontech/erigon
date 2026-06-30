@@ -216,10 +216,17 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 			return
 		}
 	}
-	// In ModeEvictLRU the per-shard LRU evicts the oldest entry inside
-	// freelru.Add when its slot cap is reached; OnEvict drops the size
-	// from currentSize. Eviction is per-shard, not globally-LRU — same
-	// trade-off code_cache.go / balcache.go / db/state/cache.go accept.
+	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
+	// not a separate currentSize check: capacityEntries is derived from
+	// capacityB (capacityB/avgBytesPerEntry, see NewGenericCache /
+	// newDomainCacheBytes), so once the slot cap is reached the per-shard LRU
+	// evicts the oldest entry inside freelru.Add and currentSize settles at
+	// ≈ capacityEntries × avg ≈ capacityB. For the near-fixed-size domains this
+	// caches (account ~96 B, storage ~88 B) the variance against avg is small, so
+	// currentSize tracks capacityB closely rather than running away — freelru
+	// exposes no evict-until-bytes-fit primitive to enforce it more tightly.
+	// Eviction is per-shard, not globally-LRU — same trade-off code_cache.go /
+	// balcache.go / db/state/cache.go accept.
 
 	// hasExisting here means a 64-bit maphash collision (different key, same
 	// hash): freelru.Add replaces the colliding entry in place WITHOUT firing
