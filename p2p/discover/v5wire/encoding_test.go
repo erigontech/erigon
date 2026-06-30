@@ -51,6 +51,7 @@ var (
 	testKeyB, _   = crypto.HexToECDSA("66fb62bfbd66b9177a138c1e5cddbe4f7c30c343e94e68df8769459cb1cde628")
 	testEphKey, _ = crypto.HexToECDSA("0288ef00023598499cb6c940146d050d2b1fb914198c327f76aad590bead68b6")
 	testIDnonce   = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	testLoopback  = netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), 0)
 )
 
 // This test checks that the minPacketSize and randomPacketMsgSize constants are well-defined.
@@ -355,7 +356,7 @@ func TestTestVectorsV5(t *testing.T) {
 	var (
 		idA     = enode.PubkeyToIDV4(&testKeyA.PublicKey)
 		idB     = enode.PubkeyToIDV4(&testKeyB.PublicKey)
-		addr    = netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), 0)
+		addr    = testLoopback
 		session = &session{
 			writeKey: hexutil.MustDecode("0x00000000000000000000000000000000"),
 			readKey:  hexutil.MustDecode("0x01010101010101010101010101010101"),
@@ -626,7 +627,7 @@ func (n *handshakeTestNode) expectDecodeErr(t *testing.T, wantErr error, p []byt
 }
 
 func (n *handshakeTestNode) decode(input []byte) (Packet, error) {
-	_, _, p, err := n.c.Decode(input, netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), 0))
+	_, _, p, err := n.c.Decode(input, testLoopback)
 	return p, err
 }
 
@@ -635,7 +636,7 @@ func (n *handshakeTestNode) n() *enode.Node {
 }
 
 func (n *handshakeTestNode) addr() netip.AddrPort {
-	return netip.AddrPortFrom(n.ln.Node().IPAddr(), uint16(n.ln.Node().UDP()))
+	return netip.AddrPortFrom(n.ln.Node().IPAddr(), 0)
 }
 
 func (n *handshakeTestNode) id() enode.ID {
