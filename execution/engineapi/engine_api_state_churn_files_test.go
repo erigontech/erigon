@@ -37,6 +37,7 @@ import (
 // snapshot boundary is stable before the test unwinds across it.
 func waitForDomainFilesSettled(ctx context.Context, t *testing.T, agg *state.Aggregator) {
 	t.Helper()
+	require.NotNil(t, agg, "StateAgg is nil: ChainDB did not expose a *state.Aggregator")
 	// First wait for a file to appear; FilesAmount()>0 is the signal that the
 	// background builder has run at least once.
 	require.Eventually(t, func() bool {

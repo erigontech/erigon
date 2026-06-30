@@ -182,11 +182,10 @@ func TestEngineApiReorgToSideChainSwitchesStateChurn(t *testing.T) {
 }
 
 // buildChurnChain deploys StateChurn at block 2 on the given tester and then
-// applies one poke per block, using seed(k) for the k-th poke. The returned
-// payloads are indexed by offset from block 2: payloads[0] is the deploy block
-// (height 2) and payloads[i] is the i-th poke block (height 2+i). sums[i] is the
-// on-chain trackedSum observed at payloads[i] and is the ground truth a later
-// unwind/reorg must reproduce.
+// applies one poke per block, using seed(k) for the k-th poke. payloads[0] is
+// the deploy block (height 2) and payloads[k+1] is the block applying poke k
+// (height 3+k). sums[i] is the on-chain trackedSum observed at payloads[i] and
+// is the ground truth a later unwind/reorg must reproduce.
 func buildChurnChain(
 	ctx context.Context,
 	t *testing.T,
