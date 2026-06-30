@@ -545,27 +545,31 @@ func TestHaltFrameTerminalState(t *testing.T) {
 
 // =================== SSTORE reentrancy sentry ===========================
 
-// EIP-8037: the SSTORE reentrancy sentry (2300 gas) checks gas_left only;
-// the state-gas reservoir is excluded. Even with a massive reservoir, if
-// regular gas is at the sentry threshold, the SSTORE must fail.
+// TestSStoreStipendExcludesReservoir verifies that the SSTORE reentrancy sentry
+// (2300 gas check) only evaluates remaining regular gas, completely ignoring
+// the state-gas reservoir.
 //
-// Protocol invariant: the sentry prevents re-entrancy griefing and must
-// operate solely on gas_left regardless of the multi-dimensional budget.
-// Bug prevented: if the sentry summed regular + reservoir, a contract with
-// low regular gas but a huge reservoir could pass the sentry and execute an
-// SSTORE, violating the protection guarantee.
+// The test performs a no-op write (1->1->1). The two initial PUSH1 instructions
+// consume 6 gas. With an initial regular budget of 2306, exactly 2300 gas is left
+// for the SSTORE, which hits and fails the sentry threshold.
+// Under EIP-8038, if the sentry check is cleared, the cold storage slot access cost
+// is COLD_STORAGE_ACCESS (3000).
 func TestSStoreStipendExcludesReservoir(t *testing.T) {
 	t.Parallel()
-	// Noop write (slot already == 1, writing 1 again) so only the sentry gate matters.
-	// PUSH1(1) costs 3 gas + PUSH1(0) costs 3 gas = 6 gas consumed before SSTORE.
-	// Sentry threshold: regular gas <= 2300 → fail.
-	// With 2306 regular gas: 2306 - 6 = 2300, fails the sentry (<=).
-	_, _, err := run8037(t, sstore(0, 1), mdgas.MdGas{Regular: 2306, State: math.MaxUint64 / 2}, uint256.Int{}, setSlot(0, 1))
-	require.Error(t, err, "expected sentry failure with regular gas at the limit")
-
-	// With 2307 regular gas: 2307 - 6 = 2301, passes the sentry (> 2300).
-	_, _, err = run8037(t, sstore(0, 1), mdgas.MdGas{Regular: 2307, State: math.MaxUint64 / 2}, uint256.Int{}, setSlot(0, 1))
-	require.NoError(t, err, "one more regular gas above the sentry must succeed")
+	// A budget at the exact sentry threshold must fail even with an infinite state-gas reservoir.
+	if _, _, err := run8037(t, sstore(0, 1), mdgas.MdGas{Regular: 2306, State: math.MaxUint64 / 2}, uint256.Int{}, setSlot(0, 1)); err == nil {
+		t.Fatal("expected sentry failure with regular gas at the limit")
+	}
+	// Providing sufficient regular gas to clear the sentry threshold and cover the
+	// cold storage access cost (6 gas for PUSH1s + COLD_STORAGE_ACCESS) succeeds.
+	regular := 6 + params.ColdStorageAccessCostEIP8038
+	if _, _, err := run8037(t, sstore(0, 1), mdgas.MdGas{Regular: regular, State: math.MaxUint64 / 2}, uint256.Int{}, setSlot(0, 1)); err != nil {
+		t.Fatalf("unexpected failure above sentry: %v", err)
+	}
+	// If regular gas is one unit below the cold access cost, it clears the sentry but fails due to Out-Of-Gas (OOG).
+	if _, _, err := run8037(t, sstore(0, 1), mdgas.MdGas{Regular: regular - 1, State: math.MaxUint64 / 2}, uint256.Int{}, setSlot(0, 1)); err == nil {
+		t.Fatal("expected OOG when regular gas cannot cover cold-slot access")
+	}
 }
 
 // =================== GAS opcode excludes reservoir ========================
