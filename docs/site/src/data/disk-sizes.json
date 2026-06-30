@@ -9,9 +9,9 @@
         "source": "manual"
       },
       "full": {
-        "bytes": 2062893906264,
-        "display": "2.06 TB",
-        "measured_at": "2026-06-27",
+        "bytes": 2086269499497,
+        "display": "2.09 TB",
+        "measured_at": "2026-06-30",
         "source": "ci"
       },
       "minimal": {
@@ -29,9 +29,9 @@
         "source": "manual"
       },
       "full": {
-        "bytes": 673107777254,
-        "display": "673.11 GB",
-        "measured_at": "2026-06-27",
+        "bytes": 682953919972,
+        "display": "682.95 GB",
+        "measured_at": "2026-06-30",
         "source": "ci"
       },
       "minimal": {
