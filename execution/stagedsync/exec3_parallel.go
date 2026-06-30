@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -573,7 +574,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
-						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+						if !execStage.CurrentSyncCycle.IsInitialCycle {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}
@@ -2494,9 +2495,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.finalizedResults[tx] = txResult
 
 				var prevReceipt *types.Receipt
-				if txVersion.TxIndex > 0 && tx > 0 {
-					if prev := be.finalizedResults[tx-1]; prev != nil {
-						prevReceipt = prev.Receipt
+				if txVersion.TxIndex > 0 {
+					if tx > 0 {
+						if prev := be.finalizedResults[tx-1]; prev != nil {
+							prevReceipt = prev.Receipt
+						}
+					}
+					if prevReceipt == nil {
+						cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
+						if err != nil {
+							return nil, err
+						}
+						prevReceipt = &types.Receipt{
+							CumulativeGasUsed:        cumGasUsed,
+							FirstLogIndexWithinBlock: logIndexAfterTx,
+						}
 					}
 				}
 
