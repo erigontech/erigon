@@ -1028,8 +1028,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	res, addr, returnGas, childGasUsage, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
-	createTargetAlive := evm.createTargetAlive
+	res, addr, returnGas, childGasUsage, wasBalanceOnly, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
 	scope.Contract.selfBalanceCached = false
 
 	// Push item on the stack based on the returned error. If the ruleset is
@@ -1062,7 +1061,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 			// above; fold in only its spilled portion so an ancestor revert
 			// refills from the right pool.
 			scope.stateGasSpill += childGasUsage.StateSpill
-			if createTargetAlive {
+			if wasBalanceOnly {
 				// Target already existed and was non-empty: no new account
 				// leaf created, so refill the unconditional NEW_ACCOUNT charge.
 				scope.refillStateGas(params.StateGasNewAccount)
@@ -1115,11 +1114,8 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas.Regular += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
-	// Captured before the call: nested CALL gas phases overwrite the flag.
-	newAccountCharged := evm.callNewAccountCharged
-
+	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
+	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 
 	if err != nil {
