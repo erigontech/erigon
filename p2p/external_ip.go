@@ -38,10 +38,11 @@ func usableExternalIP(ip net.IP) bool {
 // externalIPTracker re-resolves the external IP through a NAT mechanism and
 // applies it via set only when it changes to a usable value.
 type externalIPTracker struct {
-	nat    nat.Interface
-	set    func(net.IP)
-	logger log.Logger
-	last   net.IP
+	nat     nat.Interface
+	set     func(net.IP)
+	logger  log.Logger
+	last    net.IP
+	failing bool
 }
 
 // refresh resolves the external IP once and applies it on change. It reports
@@ -49,13 +50,14 @@ type externalIPTracker struct {
 func (t *externalIPTracker) refresh() bool {
 	ip, err := t.nat.ExternalIP()
 	if err != nil {
-		t.logger.Warn("NAT ExternalIP resolution has failed, try to pass a different --nat option", "err", err)
+		t.logFailure("NAT ExternalIP resolution has failed, try to pass a different --nat option", "err", err)
 		return false
 	}
 	if !usableExternalIP(ip) {
-		t.logger.Warn("NAT returned an unusable external IP, ignoring", "ip", ip)
+		t.logFailure("NAT returned an unusable external IP, ignoring", "ip", ip)
 		return false
 	}
+	t.failing = false
 	if ip.Equal(t.last) {
 		return false
 	}
@@ -65,18 +67,21 @@ func (t *externalIPTracker) refresh() bool {
 	return true
 }
 
-// run resolves immediately, then re-resolves every interval until stop closes.
-func (t *externalIPTracker) run(stop <-chan struct{}, interval time.Duration) {
-	t.refresh()
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-timer.C:
-			t.refresh()
-			timer.Reset(interval)
-		}
+// logFailure reports a resolution failure loudly the first time, then quietly
+// while it persists, so a flapping link or a down STUN server cannot spam logs.
+func (t *externalIPTracker) logFailure(msg string, ctx ...interface{}) {
+	if t.failing {
+		t.logger.Debug(msg, ctx...)
+		return
 	}
+	t.failing = true
+	t.logger.Warn(msg, ctx...)
+}
+
+// run resolves immediately, then re-resolves on every interval and on every OS
+// network-change event until stop closes.
+func (t *externalIPTracker) run(stop <-chan struct{}, interval time.Duration) {
+	notifier := newNetChangeNotifier(t.logger)
+	defer notifier.Close()
+	t.runWithNotifier(stop, notifier, interval, defaultEventDebounce)
 }
