@@ -1117,7 +1117,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
 	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
-
 	if err != nil {
 		temp.Clear()
 	} else {

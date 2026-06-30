@@ -237,21 +237,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	depth := evm.depth
 	gasRemaining = gas
-
-	// Derive gasUsed.Regular from the final gasRemaining at function exit,
-	// uniformly across Run / precompile / no-code paths and after any
-	// handleFrameRevert gas burn. gasUsed.State is derived by Run's defer
-	// (signed net state used) and is 0 for precompile/no-code frames.
-	// Regular = (input − leftover) − state,
-	// computed in signed int64 so a negative net state correctly grows
-	// the regular component (refill credit lands in the reservoir,
-	// which leftover absorbs back).
-	//
-	// At depth==0 on error, the spec resets the top-frame's state_gas_used
-	// to 0 (the refill-on-failure invariant). Mirror that on the returned
-	// gasUsed.State so TxnExecutor's tx_state_gas computation is uniform
-	// across success and error paths. (At depth>0, handleFrameRevert
-	// already restored the child's reservoir to the parent.)
 	inputTotal := gas.Total()
 	defer func() {
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
@@ -554,38 +539,17 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	}
 
 	depth := evm.depth
-
-	// Derive gasUsed.Regular from the final gasRemaining at function exit,
-	// uniformly across all Create exit paths (Run, depth/balance/collision
-	// errors, post-handleFrameRevert gas burn). gasUsed.State is set by Run's
-	// defer for the initcode frame (signed net) and stays 0 on early-exit
-	// paths. Regular = (input − leftover) − state in signed int64 so a
-	// negative net state correctly grows the regular component.
-	//
-	// At depth==0 on error, the spec resets the top-frame's state_gas_used
-	// to 0 AND refills STATE_BYTES_PER_NEW_ACCOUNT * COST_PER_STATE_BYTE
-	// (the contract was never created, so the intrinsic NEW_ACCOUNT state-gas
-	// is returned). Mirror both by setting gasUsed.State = −StateGasNewAccount
-	// so TxnExecutor's tx_state_gas = intrinsic_state + gasUsed.State naturally
-	// yields the "intrinsic refilled" outcome (= 0 for a CREATE tx, since its
-	// intrinsic_state == StateGasNewAccount). The Call counterpart does NOT
-	// refill intrinsic AUTH state-gas — EIP-7702 auth side effects persist
-	// even on call failure.
 	inputTotal := gas.Total()
 	defer func() {
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
-			// handleFrameRevert already refilled the initcode frame's own state
-			// gas into gasRemaining, so derive regular gas against a zero net
-			// frame-state usage; the reported -NEW_ACCOUNT is the separate
-			// intrinsic create charge being returned to the sender.
-			gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), 0)
-			gasUsed.State = -int64(params.StateGasNewAccount)
-		} else {
-			// Derive regular against the frame's true state usage, then on a
-			// top-level create whose target pre-existed alive report the
-			// intrinsic NEW_ACCOUNT as refilled (no new account leaf created).
-			gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
-			if depth == 0 && evm.chainRules.IsAmsterdam && wasBalanceOnly {
+			gasUsed.State = 0
+		}
+		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+		// depth-0 create refills the intrinsic NEW_ACCOUNT (nothing created on error, no new leaf when account existed with balance only populated)
+		if depth == 0 && evm.chainRules.IsAmsterdam {
+			if err != nil {
+				gasUsed.State = -int64(params.StateGasNewAccount)
+			} else if wasBalanceOnly {
 				gasUsed.State -= int64(params.StateGasNewAccount)
 			}
 		}
