@@ -425,9 +425,10 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 }
 
 // computeStepBoundary checkpoints commitment at a mid-block step edge. It must
-// not advance lastComputedBlock (or the block/batch-end compute gets suppressed)
-// and must not ResetBlockFlags (or the block-end compute loses the pre-edge
-// dirty keys and folds a wrong block root).
+// not advance lastComputedBlock (else the block/batch-end compute is suppressed)
+// and must not ResetBlockFlags: the block-end FlushToUpdates emits only keys
+// still flagged dirty, so resetting here would drop every pre-edge key from the
+// block-end fold and yield a wrong block root.
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blockResult) {
 	if err := cc.state.LazyLoadErr(); err != nil {
 		cc.publish(ctx, commitmentResult{
