@@ -731,14 +731,16 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetStateCache attaches the process-global state cache to this SD.
+// SetStateCache hands this SD the process-global state cache to manage.
 //
-// Invariant: attach it on any SD that may UNWIND committed state the cache
-// already holds. The cache is shared across SDs and invalidated only via
-// sd.Unwind → stateCache.Unwind, so an SD that rolls back tip-region txNums
-// without it attached strands the entries another SD populated for those txNums,
-// and the next read serves dead-fork state. The attach is convention-enforced
-// (engine-API / FCU / set_head paths all call this) rather than structural.
+// Coherence is structural, enforced by the architecture rather than by
+// remembering to call this: app components reach state only through the SD, and
+// the SD owns cache population (on flush) and invalidation (sd.Unwind →
+// stateCache.Unwind). It is not *additionally* type-enforced only because the
+// cache crosses the app/storage boundary — the storage layer can't depend on an
+// app-level cache type. The single desync vector is a component that
+// deliberately bypasses the SD (raw domain reads + direct cache writes, e.g.
+// read-ahead warmup), which then owns its cache coherence explicitly.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
