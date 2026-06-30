@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -141,13 +140,11 @@ func PickTrieVariant() commitment.TrieVariant {
 	switch {
 	// Selecting more than one experimental-commitment flag is a misconfiguration;
 	// they are alternative paths. Streaming overlaps folding with execution, so it
-	// wins over parallel, which in turn parallelizes deeper than concurrent.
+	// wins over parallel.
 	case statecfg.ExperimentalStreamingCommitment:
 		return commitment.VariantStreamingHexPatricia
 	case statecfg.ExperimentalParallelCommitment:
 		return commitment.VariantParallelHexPatricia
-	case statecfg.ExperimentalConcurrentCommitment:
-		return commitment.VariantConcurrentHexPatricia
 	}
 	return commitment.VariantHexPatriciaTrie
 }
@@ -1099,7 +1096,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		}
 	}
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		forgotten := 0
 		if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte) (bool, error) {
 			forgotten++

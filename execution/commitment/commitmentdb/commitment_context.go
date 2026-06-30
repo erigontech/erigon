@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
@@ -367,8 +366,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.HexPatriciaHashed:
 			trieState, err = trie.EncodeCurrentState(nil)
-		case *commitment.ConcurrentPatriciaHashed:
-			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
 		case *commitment.ParallelPatriciaHashed:
 			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
 		}
@@ -416,12 +413,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
 		switch trie := sdc.patriciaTrie.(type) {
-		case *commitment.ConcurrentPatriciaHashed:
-			if sdc.updates.IsConcurrentCommitment() {
-				warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
-			} else {
-				warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
-			}
 		case *commitment.ParallelPatriciaHashed:
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
@@ -621,7 +612,7 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantConcurrentHexPatricia && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -643,18 +634,6 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	return blockNum, txNum, state, nil
 }
 
-// enable concurrent commitment if we are using concurrent patricia trie and this trie diverges on very top (first branch is straight at nibble 0)
-func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible() error {
-	if pt, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
-		nextConcurrent, err := pt.CanDoConcurrentNext()
-		if err != nil {
-			return err
-		}
-		sdc.updates.SetConcurrentCommitment(nextConcurrent)
-	}
-	return nil
-}
-
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
@@ -667,9 +646,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	if state != nil {
 		blockNum, txNum, err = sdc.restorePatriciaState(state)
 		if err != nil {
-			return 0, 0, err
-		}
-		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
 			return 0, 0, err
 		}
 		return txNum, blockNum, nil
@@ -695,9 +671,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		if err != nil {
 			return 0, 0, err
 		}
-	}
-	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
-		return 0, 0, err
 	}
 	return txNum, blockNum, nil
 }
@@ -740,11 +713,6 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 		if err != nil {
 			return nil, err
 		}
-	case *commitment.ConcurrentPatriciaHashed:
-		state, err = trie.RootTrie().EncodeCurrentState(nil)
-		if err != nil {
-			return nil, err
-		}
 	case *commitment.ParallelPatriciaHashed:
 		state, err = trie.RootTrie().EncodeCurrentState(nil)
 		if err != nil {
@@ -782,13 +750,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		if !ok {
 			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
-	}
-	if tv == commitment.VariantConcurrentHexPatricia {
-		phext, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed)
-		if !ok {
-			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
-		}
-		hext = phext.RootTrie()
 	}
 	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
 		var ok bool
@@ -896,7 +857,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	if assert.Enable { // verify code hash from account encoding matches stored code
+	if dbg.AssertEnabled { // verify code hash from account encoding matches stored code
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err

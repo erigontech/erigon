@@ -1328,11 +1328,11 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
 
 	tests := []struct {
-		name           string
-		spuriousDragon bool
-		isAura         bool
-		addr           accounts.Address
-		want           bool
+		name          string
+		eip161Enabled bool
+		isAura        bool
+		addr          accounts.Address
+		want          bool
 	}{
 		{"pre-spurious-dragon user", false, false, userAddr, false},
 		{"pre-spurious-dragon aura system address", false, true, params.SystemAddress, false},
@@ -1343,7 +1343,7 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.spuriousDragon, tc.isAura, tc.addr))
+			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.eip161Enabled, tc.isAura, tc.addr))
 		})
 	}
 }

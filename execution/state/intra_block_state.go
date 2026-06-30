@@ -1968,12 +1968,12 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 // EIP161EmptyRemoval reports whether an empty account at addr is removed under
 // EIP-161 (SpuriousDragon). AuRa retains its SystemAddress even when empty, to
 // match the reference implementation.
-func EIP161EmptyRemoval(spuriousDragon, isAura bool, addr accounts.Address) bool {
-	return spuriousDragon && (!isAura || addr != params.SystemAddress)
+func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool {
+	return eip161Enabled && (!isAura || addr != params.SystemAddress)
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
-	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
+func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
+	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
@@ -2023,8 +2023,8 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	return nil
 }
 
-func printAccount(EIP161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
+func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
+	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		fmt.Printf("delete: %x\n", addr)
 	}
@@ -2060,7 +2060,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
 			return err
 		}
 
@@ -2197,7 +2197,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
 		// Per EIP-6780 + EIP-7928: a SELFDESTRUCT against a SAME-TX created
@@ -2242,7 +2242,7 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		_, isDirty2 := sdb.journal.dirties[addr]
 
-		printAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
+		printAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
 	}
 }
 

@@ -345,7 +345,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		if EIP161EmptyRemoval(rules.IsSpuriousDragon, rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if blockCache != nil {
 				blockCache.DeleteAccount(addr, txNum)
 				if !domains.InlineTouchKeyDisabled() {
