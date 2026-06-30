@@ -55,6 +55,7 @@ type commitmentCalculator struct {
 	db        kv.TemporalRoDB
 	logPrefix string
 	logger    log.Logger
+	stepSize  uint64
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -164,6 +165,7 @@ func newCommitmentCalculator(
 		db:                   db,
 		logPrefix:            logPrefix,
 		logger:               logger,
+		stepSize:             doms.StepSize(),
 		updates:              calcUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
@@ -206,6 +208,19 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	}
 }
 
+// shouldCheckpointStepBoundary reports whether this tx sits on a not-yet-frozen
+// step edge that the calculator must checkpoint itself, in every commitment mode
+// (the snapshot producer runs per-block and still needs step-aligned commitment).
+func (cc *commitmentCalculator) shouldCheckpointStepBoundary(r *txResult) bool {
+	if cc.stepSize == 0 || dbg.DiscardCommitment() {
+		return false
+	}
+	if (r.txNum+1)%cc.stepSize != 0 {
+		return false
+	}
+	return r.txNum/cc.stepSize >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain))
+}
+
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
@@ -231,6 +246,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if len(r.writes) > 0 {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes)
+		}
+
+		if cc.shouldCheckpointStepBoundary(r) {
+			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}
 
 	case *blockResult:
@@ -409,6 +428,37 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
+}
+
+// computeStepBoundary checkpoints commitment at a mid-block step edge. It must
+// not advance lastComputedBlock (or the block/batch-end compute gets suppressed)
+// and must not ResetBlockFlags (or the block-end compute loses the pre-edge
+// dirty keys and folds a wrong block root).
+func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: step-boundary lazy-load failed: %w", err),
+		})
+		return
+	}
+	cc.state.FlushToUpdates(cc.updates)
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: step-boundary compute failed: %w", err),
+		})
+	}
 }
 
 // computeAndCheck computes per-block commitment and validates the root.
