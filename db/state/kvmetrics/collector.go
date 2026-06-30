@@ -89,15 +89,15 @@ func NewCollector() *Collector {
 
 // Start launches the collector goroutine, registered on the Aggregator's
 // WaitGroup so Close joins it.
-func (c *Collector) Start(wg *sync.WaitGroup) {
+// Start launches the collector goroutine. It is NOT registered on any external
+// WaitGroup: Stop() joins it via <-c.done. (It must not share the Aggregator's
+// wg — callers wait on that wg for background merges independently of Close, and
+// the collector only exits on Stop, which would deadlock such a wait.)
+func (c *Collector) Start() {
 	if c == nil {
 		return
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.run()
-	}()
+	go c.run()
 }
 
 func (c *Collector) run() {

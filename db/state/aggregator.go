@@ -153,7 +153,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 	a.oldestVisible = empty
 
 	a.metricsCollector = kvmetrics.NewCollector()
-	a.metricsCollector.Start(&a.wg)
+	a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
 	return a, nil
 }
 

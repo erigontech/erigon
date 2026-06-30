@@ -14,8 +14,7 @@ import (
 func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 	t.Parallel()
 	c := NewCollector()
-	var wg sync.WaitGroup
-	c.Start(&wg)
+	c.Start()
 
 	const producers = 8
 	const perProducer = 500
@@ -45,8 +44,7 @@ func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 
 	pwg.Wait()
 	swg.Wait()
-	c.Stop() // drains the buffer
-	wg.Wait()
+	c.Stop() // drains and joins the collector goroutine
 
 	snap := c.Snapshot() // after Stop, returns nil
 	if snap != nil {
@@ -88,8 +86,7 @@ func TestCollectorTrySendNeverBlocks(t *testing.T) {
 func TestCollectorFoldsBySource(t *testing.T) {
 	t.Parallel()
 	c := NewCollector()
-	var wg sync.WaitGroup
-	c.Start(&wg)
+	c.Start()
 
 	const n = 1000
 	want := int64(n)
@@ -102,7 +99,6 @@ func TestCollectorFoldsBySource(t *testing.T) {
 	// (channel-ordered), so the count is exact.
 	snap := c.Snapshot()
 	c.Stop()
-	wg.Wait()
 
 	g := snap[SourceExec]
 	if g == nil {
