@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/rpc"
@@ -100,26 +101,10 @@ func TestParseBlockNumberOrHash(t *testing.T) {
 		name    string
 		input   string
 		wantErr bool
-		isHash  bool
 	}{
-		{
-			name:    "block hash",
-			input:   "0x1234567890123456789012345678901234567890123456789012345678901234",
-			wantErr: false,
-			isHash:  true,
-		},
-		{
-			name:    "block number",
-			input:   "latest",
-			wantErr: false,
-			isHash:  false,
-		},
-		{
-			name:    "hex number",
-			input:   "0x10",
-			wantErr: false,
-			isHash:  false,
-		},
+		{name: "block hash", input: "0x1234567890123456789012345678901234567890123456789012345678901234"},
+		{name: "block number", input: "latest"},
+		{name: "hex number", input: "0x10"},
 	}
 
 	for _, tt := range tests {
@@ -130,11 +115,23 @@ func TestParseBlockNumberOrHash(t *testing.T) {
 				return
 			}
 			if !tt.wantErr {
-				// Just verify it doesn't panic
 				_ = result
 				t.Logf("parseBlockNumberOrHash(%q) succeeded", tt.input)
 			}
 		})
+	}
+
+	// Special characters must not produce a JSON syntax error — only a semantic block-format error.
+	for _, input := range []string{`foo"bar`, `foo\bar`, "foo\nbar"} {
+		_, err := parseBlockNumberOrHash(input)
+		if err == nil {
+			t.Errorf("parseBlockNumberOrHash(%q) succeeded, want error", input)
+			continue
+		}
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			t.Errorf("parseBlockNumberOrHash(%q) returned JSON syntax error, want semantic error: %v", input, err)
+		}
 	}
 }
 

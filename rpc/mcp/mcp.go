@@ -68,11 +68,13 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 	return e
 }
 
-// parseBlockNumberOrHash parses block number or hash from string
 func parseBlockNumberOrHash(s string) (rpc.BlockNumberOrHash, error) {
 	var result rpc.BlockNumberOrHash
-	err := result.UnmarshalJSON([]byte(`"` + s + `"`))
-	return result, err
+	b, err := json.Marshal(s)
+	if err != nil {
+		return result, err
+	}
+	return result, result.UnmarshalJSON(b)
 }
 
 // registerTools registers all MCP tools
