@@ -172,6 +172,25 @@ func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T
 	require.Equal(t, 0, s.GetBuilders().Len())
 }
 
+func TestAddBuilderToRegistryDoesNotExceedLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.BuilderRegistryLimit = 1
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey:            common.Bytes48{0x11},
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           1,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	state2.AddBuilderToRegistry(s, common.Bytes48{0x22}, cfg.PayloadBuilderVersion, common.Address{0x33}, 1, s.Slot())
+
+	require.Equal(t, 1, s.GetBuilders().Len())
+	require.Equal(t, common.Bytes48{0x11}, s.GetBuilders().Get(0).Pubkey)
+}
+
 func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)

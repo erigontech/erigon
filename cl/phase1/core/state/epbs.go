@@ -321,7 +321,14 @@ func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
 // AddBuilderToRegistry adds a new builder to the registry.
 func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version uint8, executionAddress common.Address, amount uint64, slot uint64) {
 	cfg := s.BeaconConfig()
+	builders := s.GetBuilders()
+	if builders == nil {
+		return
+	}
 	index := GetIndexForNewBuilder(s)
+	if index >= cfg.BuilderRegistryLimit {
+		return
+	}
 
 	builder := &cltypes.Builder{
 		Pubkey:            pubkey,
@@ -332,7 +339,6 @@ func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version
 		WithdrawableEpoch: cfg.FarFutureEpoch,
 	}
 
-	builders := s.GetBuilders()
 	if int(index) < builders.Len() {
 		builders.Set(int(index), builder)
 	} else {
