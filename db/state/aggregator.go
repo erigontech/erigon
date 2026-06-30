@@ -152,8 +152,15 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 	a.visible.Store(empty)
 	a.oldestVisible = empty
 
-	a.metricsCollector = kvmetrics.NewCollector()
-	a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
+	// Only when KV-read metrics are enabled, matching every producer (which
+	// no-ops on dbg.KVReadLevelledMetrics). Otherwise the collector's goroutine
+	// and buffered channel are dead weight, and harnesses that build one
+	// Aggregator per fixture (eest blocktests: thousands × workers) accumulate
+	// them until the runner OOMs. All collector access is nil-safe.
+	if dbg.KVReadLevelledMetrics {
+		a.metricsCollector = kvmetrics.NewCollector()
+		a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
+	}
 	return a, nil
 }
 
