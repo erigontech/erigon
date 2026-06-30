@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
 
@@ -73,34 +74,37 @@ func RegenerateBoundaryStepFile(
 	ctx context.Context,
 	domain kv.Domain,
 	oldKVPath string,
+	newKVPath string,
 	lookup AsOfLookup,
 	lastTxNum uint64,
 	compression seg.FileCompression,
 	commitmentAnchor []byte,
 	tmpDir string,
 	logger log.Logger,
-) (newPath string, err error) {
+) error {
 	if domain == kv.CommitmentDomain && commitmentAnchor == nil {
-		return "", fmt.Errorf("RegenerateBoundaryStepFile(commitment): commitmentAnchor required")
+		return fmt.Errorf("RegenerateBoundaryStepFile(commitment): commitmentAnchor required")
 	}
 	if domain != kv.CommitmentDomain && commitmentAnchor != nil {
-		return "", fmt.Errorf("RegenerateBoundaryStepFile(%s): commitmentAnchor must be nil for non-commitment domains", domain)
+		return fmt.Errorf("RegenerateBoundaryStepFile(%s): commitmentAnchor must be nil for non-commitment domains", domain)
 	}
 	if lookup == nil {
-		return "", fmt.Errorf("RegenerateBoundaryStepFile: lookup is required")
+		return fmt.Errorf("RegenerateBoundaryStepFile: lookup is required")
+	}
+	if newKVPath == "" {
+		return fmt.Errorf("RegenerateBoundaryStepFile: newKVPath is required")
 	}
 
 	oldDecomp, err := seg.NewDecompressor(oldKVPath)
 	if err != nil {
-		return "", fmt.Errorf("open old %s: %w", oldKVPath, err)
+		return fmt.Errorf("open old %s: %w", oldKVPath, err)
 	}
 	defer oldDecomp.Close()
 
-	newPath = oldKVPath + ".regen"
 	compressCfg := seg.DefaultCfg
-	comp, err := seg.NewCompressor(ctx, "mode-B boundary-step regen", newPath, tmpDir, compressCfg, log.LvlInfo, logger)
+	comp, err := seg.NewCompressor(ctx, "mode-B boundary-step regen", newKVPath, tmpDir, compressCfg, log.LvlInfo, logger)
 	if err != nil {
-		return "", fmt.Errorf("create new %s: %w", newPath, err)
+		return fmt.Errorf("create new %s: %w", newKVPath, err)
 	}
 	defer comp.Close()
 
@@ -115,7 +119,7 @@ func RegenerateBoundaryStepFile(
 	for reader.HasNext() {
 		keyBuf, _ = reader.Next(keyBuf[:0])
 		if !reader.HasNext() {
-			return "", fmt.Errorf("malformed %s: trailing key with no value", oldKVPath)
+			return fmt.Errorf("malformed %s: trailing key with no value", oldKVPath)
 		}
 		valBuf, _ = reader.Next(valBuf[:0])
 
@@ -126,10 +130,10 @@ func RegenerateBoundaryStepFile(
 		// target.
 		if domain == kv.CommitmentDomain && bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) {
 			if _, err := writer.Write(keyBuf); err != nil {
-				return "", fmt.Errorf("write KeyCommitmentState key: %w", err)
+				return fmt.Errorf("write KeyCommitmentState key: %w", err)
 			}
 			if _, err := writer.Write(commitmentAnchor); err != nil {
-				return "", fmt.Errorf("write KeyCommitmentState anchor: %w", err)
+				return fmt.Errorf("write KeyCommitmentState anchor: %w", err)
 			}
 			anchorPlanted = true
 			kept++
@@ -140,7 +144,7 @@ func RegenerateBoundaryStepFile(
 		// didn't exist at the anchor point — drop from output.
 		newVal, found, err := lookup(domain, keyBuf, lastTxNum)
 		if err != nil {
-			return "", fmt.Errorf("AsOfLookup(%s, key, %d): %w", domain, lastTxNum, err)
+			return fmt.Errorf("AsOfLookup(%s, key, %d): %w", domain, lastTxNum, err)
 		}
 		if !found {
 			dropped++
@@ -148,10 +152,10 @@ func RegenerateBoundaryStepFile(
 		}
 
 		if _, err := writer.Write(keyBuf); err != nil {
-			return "", fmt.Errorf("write key: %w", err)
+			return fmt.Errorf("write key: %w", err)
 		}
 		if _, err := writer.Write(newVal); err != nil {
-			return "", fmt.Errorf("write value: %w", err)
+			return fmt.Errorf("write value: %w", err)
 		}
 		kept++
 	}
@@ -161,18 +165,36 @@ func RegenerateBoundaryStepFile(
 	// but is defensible to detect) we'd silently emit a file the
 	// chain can't seek a commitment from. Make that loud.
 	if domain == kv.CommitmentDomain && !anchorPlanted {
-		return "", fmt.Errorf("RegenerateBoundaryStepFile(commitment): old file %s had no KeyCommitmentState entry; regen would produce a commitment file with no anchor", oldKVPath)
+		return fmt.Errorf("RegenerateBoundaryStepFile(commitment): old file %s had no KeyCommitmentState entry; regen would produce a commitment file with no anchor", oldKVPath)
 	}
 
 	if err := comp.Compress(); err != nil {
-		return "", fmt.Errorf("compress %s: %w", newPath, err)
+		return fmt.Errorf("compress %s: %w", newKVPath, err)
 	}
 
 	if logger != nil {
 		logger.Info("[storage] mode-B boundary-step regen",
-			"domain", domain, "old", oldKVPath, "new", newPath,
+			"domain", domain, "old", oldKVPath, "new", newKVPath,
 			"kept", kept, "dropped", dropped, "anchor_planted", anchorPlanted)
 	}
 
-	return newPath, nil
+	return nil
+}
+
+// renameStepRange returns a copy of basename with the embedded
+// "<from>-<oldTo>" step segment replaced by "<from>-<newTo>". The step
+// segment is the first "<digits>-<digits>" occurrence in the name
+// matching the provided values, so callers passing FromStep/ToStep
+// from a parsed FileEntry get a deterministic, single-shot rewrite.
+//
+// Returns the input unchanged if the expected segment is not present
+// (defensive; the caller should only invoke this with a matching
+// boundary file).
+func renameStepRange(basename string, fromStep, oldToStep, newToStep uint64) string {
+	oldSeg := fmt.Sprintf("%d-%d", fromStep, oldToStep)
+	newSeg := fmt.Sprintf("%d-%d", fromStep, newToStep)
+	if !strings.Contains(basename, oldSeg) {
+		return basename
+	}
+	return strings.Replace(basename, oldSeg, newSeg, 1)
 }

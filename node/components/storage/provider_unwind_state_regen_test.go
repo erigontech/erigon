@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -108,13 +109,13 @@ func TestRegenerateBoundaryStepFile_NonCommitment(t *testing.T) {
 		return nil, false, nil
 	}
 
-	newPath, err := RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, lookup,
+	newPath := oldPath + ".regen"
+	err := RegenerateBoundaryStepFile(
+		ctx, kv.AccountsDomain, oldPath, newPath, lookup,
 		103_848_485, seg.CompressNone, nil,
 		dir, log.New(),
 	)
 	require.NoError(t, err)
-	require.Equal(t, oldPath+".regen", newPath)
 
 	got := readKV(t, newPath)
 	require.Equal(t, [][2][]byte{
@@ -145,8 +146,9 @@ func TestRegenerateBoundaryStepFile_Commitment(t *testing.T) {
 	}
 
 	anchor := []byte("encoded-anchor-blockNum-2910208-txNum-103848485-trieState")
-	newPath, err := RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, oldPath, lookup,
+	newPath := oldPath + ".regen"
+	err := RegenerateBoundaryStepFile(
+		ctx, kv.CommitmentDomain, oldPath, newPath, lookup,
 		103_848_485, seg.CompressNone, anchor,
 		dir, log.New(),
 	)
@@ -166,8 +168,8 @@ func TestRegenerateBoundaryStepFile_CommitmentRequiresAnchor(t *testing.T) {
 
 	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", nil)
 
-	_, err := RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, oldPath,
+	err := RegenerateBoundaryStepFile(
+		ctx, kv.CommitmentDomain, oldPath, oldPath+".regen",
 		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil },
 		0, seg.CompressNone, nil /* anchor */, dir, log.New(),
 	)
@@ -182,8 +184,8 @@ func TestRegenerateBoundaryStepFile_NonCommitmentRejectsAnchor(t *testing.T) {
 
 	oldPath := writeKV(t, ctx, dir, "v1.0-accounts.264-266.kv", nil)
 
-	_, err := RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath,
+	err := RegenerateBoundaryStepFile(
+		ctx, kv.AccountsDomain, oldPath, oldPath+".regen",
 		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil },
 		0, seg.CompressNone, []byte("anchor"), dir, log.New(),
 	)
@@ -202,8 +204,8 @@ func TestRegenerateBoundaryStepFile_CommitmentWithoutKeyCommitmentStateErrors(t 
 		{[]byte("branch-only-no-anchor"), []byte("value")},
 	})
 
-	_, err := RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, oldPath,
+	err := RegenerateBoundaryStepFile(
+		ctx, kv.CommitmentDomain, oldPath, oldPath+".regen",
 		func(kv.Domain, []byte, uint64) ([]byte, bool, error) {
 			return []byte("v"), true, nil
 		},
@@ -211,4 +213,72 @@ func TestRegenerateBoundaryStepFile_CommitmentWithoutKeyCommitmentStateErrors(t 
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no KeyCommitmentState")
+}
+
+// TestRenameStepRange covers the helper that builds the truncated
+// filename for the mode-B regen output when the boundary file's
+// ToStep extends past the unwind-target step. Each row is a
+// (basename, oldTo, newTo) → expected mapping; the test pins the
+// rule that:
+//   - "<from>-<oldTo>" segments are rewritten to "<from>-<newTo>"
+//   - only the first matching segment is touched (defensive — the
+//     boundary file basename has at most one step range)
+//   - missing segments return the input unchanged (no-op fallback)
+func TestRenameStepRange(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name                       string
+		basename                   string
+		fromStep, oldToStep, newTo uint64
+		want                       string
+	}{
+		{"accounts truncate 280→278", "v1.1-accounts.272-280.kv", 272, 280, 278, "v1.1-accounts.272-278.kv"},
+		{"accounts truncate to 1-step", "v1.1-accounts.272-280.kv", 272, 280, 273, "v1.1-accounts.272-273.kv"},
+		{"commitment v2.1 truncate", "v2.1-commitment.272-280.kv", 272, 280, 278, "v2.1-commitment.272-278.kv"},
+		{"aligned no-op (oldTo==newTo)", "v1.1-accounts.272-280.kv", 272, 280, 280, "v1.1-accounts.272-280.kv"},
+		{"no matching segment", "v1.1-accounts.999-1000.kv", 272, 280, 278, "v1.1-accounts.999-1000.kv"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renameStepRange(tc.basename, tc.fromStep, tc.oldToStep, tc.newTo)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestRegenerateBoundaryStepFile_WritesToNewKVPath verifies that the
+// explicit newKVPath parameter is honoured — the regen content lands
+// at the supplied path, NOT at oldKVPath + ".regen" (the previous
+// convention). This is the seam the truncated-rename path uses to
+// place the regen output under a narrower filename matching its
+// actual content coverage.
+func TestRegenerateBoundaryStepFile_WritesToNewKVPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	keyA := []byte("alice")
+	oldPath := writeKV(t, ctx, dir, "v1.1-accounts.272-280.kv", [][2][]byte{{keyA, []byte("v")}})
+
+	// Caller-supplied newKVPath is a *truncated* basename, simulating
+	// the truncated-rename code path.
+	newKVPath := filepath.Join(dir, "v1.1-accounts.272-278.kv.regen")
+
+	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+		return []byte("regen-v"), true, nil
+	}
+
+	require.NoError(t, RegenerateBoundaryStepFile(
+		ctx, kv.AccountsDomain, oldPath, newKVPath, lookup,
+		108_584_330, seg.CompressNone, nil,
+		dir, log.New(),
+	))
+
+	got := readKV(t, newKVPath)
+	require.Equal(t, [][2][]byte{{keyA, []byte("regen-v")}}, got)
+
+	// The legacy "oldKVPath + .regen" path MUST NOT exist — the
+	// caller chose its own newKVPath.
+	_, err := os.Stat(oldPath + ".regen")
+	require.True(t, os.IsNotExist(err), "regen output must live at the caller-supplied path, not the legacy convention")
 }

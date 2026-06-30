@@ -114,13 +114,19 @@ func (p *Provider) FinalizeUnwind() error {
 	// invalidates them).  Then a second OpenFolder picks up the new
 	// content's mmap. Finally .old is unlinked, freeing the old inode.
 	if hadRegen {
+		// The old broad .kv we're retiring is at pair.oldBroadPath
+		// (equals pair.finalPath in the aligned case where the
+		// boundary file's ToStep matched the unwind-target step;
+		// differs when the regen output got a truncated filename to
+		// reflect its actual coverage — see regen_wire.go's
+		// regenPair doc for the two shapes).
 		var accessorOlds []string
 		for _, pair := range regen.pairs {
-			oldSidecar := pair.finalPath + ".old"
-			if err := os.Rename(pair.finalPath, oldSidecar); err != nil && p.logger != nil {
-				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .kv → .old failed (continuing — regen will be retried on next mode-B)", "err", err, "path", pair.finalPath)
+			oldSidecar := pair.oldBroadPath + ".old"
+			if err := os.Rename(pair.oldBroadPath, oldSidecar); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename old broad .kv → .old failed (continuing — regen will be retried on next mode-B)", "err", err, "path", pair.oldBroadPath)
 			}
-			accessorOlds = append(accessorOlds, p.renameAccessorsToOld(pair.finalPath)...)
+			accessorOlds = append(accessorOlds, p.renameAccessorsToOld(pair.oldBroadPath)...)
 		}
 		if p.AllSnapshots != nil {
 			if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
@@ -128,6 +134,7 @@ func (p *Provider) FinalizeUnwind() error {
 			}
 		}
 		var regenBaseNames []string
+		var removedBroadBaseNames []string
 		for _, pair := range regen.pairs {
 			if err := os.Rename(pair.regenPath, pair.finalPath); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .regen → .kv failed (continuing — restart will recover from .old)", "err", err, "regen", pair.regenPath, "final", pair.finalPath)
@@ -137,10 +144,38 @@ func (p *Provider) FinalizeUnwind() error {
 			// a stale hash and the downloader would yank the .kv to .part.
 			_ = dir.RemoveFile(pair.finalPath + ".torrent")
 			regenBaseNames = append(regenBaseNames, filepath.Base(pair.finalPath))
+			// Truncated case: the old broad file's .torrent sidecar
+			// would still advertise the now-retired file. Remove it
+			// alongside the broad .kv itself (the .kv was renamed to
+			// .old above and will be unlinked at the end of this
+			// block; the .torrent has no .old indirection so we drop
+			// it directly here).
+			if pair.oldBroadPath != pair.finalPath {
+				_ = dir.RemoveFile(pair.oldBroadPath + ".torrent")
+				removedBroadBaseNames = append(removedBroadBaseNames, filepath.Base(pair.oldBroadPath))
+			}
 		}
-		if p.downloaderClient != nil && len(regenBaseNames) > 0 {
-			if err := p.downloaderClient.Delete(context.Background(), regenBaseNames); err != nil && p.logger != nil {
-				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete for regen failed (continuing)", "err", err, "files", len(regenBaseNames))
+		// Tell the downloader about both the new (regen'd) basenames
+		// and the removed broad basenames in one call — the latter so
+		// any in-flight torrent for the retired broad gets cancelled
+		// and the .part file (if any) cleaned up.
+		downloaderDeletes := regenBaseNames
+		if len(removedBroadBaseNames) > 0 {
+			downloaderDeletes = append(append([]string{}, regenBaseNames...), removedBroadBaseNames...)
+		}
+		if p.downloaderClient != nil && len(downloaderDeletes) > 0 {
+			if err := p.downloaderClient.Delete(context.Background(), downloaderDeletes); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete for regen failed (continuing)", "err", err, "files", len(downloaderDeletes))
+			}
+		}
+		// Truncated case: the broad's Inventory entry is now stale
+		// (its file is on disk only as a .old sidecar awaiting unlink).
+		// Drop it so visible-set readers don't keep advertising it.
+		// The new (truncated) filename gets added to Inventory on the
+		// Aggregator.OpenFolder pass below.
+		if p.Inventory != nil {
+			for _, name := range removedBroadBaseNames {
+				p.Inventory.RemoveFile(name)
 			}
 		}
 		if p.Aggregator != nil {
@@ -154,7 +189,7 @@ func (p *Provider) FinalizeUnwind() error {
 			}
 		}
 		for _, pair := range regen.pairs {
-			oldSidecar := pair.finalPath + ".old"
+			oldSidecar := pair.oldBroadPath + ".old"
 			if err := dir.RemoveFile(oldSidecar); err != nil && !os.IsNotExist(err) && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldSidecar)
 			}

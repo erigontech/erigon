@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -26,12 +27,29 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// regenPair is a (regenPath, finalPath) pair that FinalizeUnwind
-// atomically swaps post-commit.
+// regenPair captures the on-disk paths a single domain's boundary-step
+// regenerate-and-swap touches. FinalizeUnwind atomically promotes
+// regenPath → finalPath; if oldBroadPath differs from finalPath, the
+// old broad file gets removed (it's a wider step range whose content
+// the regen has now replaced with a narrower truncated file).
+//
+// Two shapes:
+//
+//   - Aligned: stepBoundary == boundary.ToStep — the boundary file is
+//     already at exactly the unwind-target step. No name change, the
+//     regen replaces the file in place. finalPath == oldBroadPath.
+//
+//   - Truncated: stepBoundary < boundary.ToStep — the boundary file is
+//     a wider (merged) range that straddles the unwind target. The
+//     regen output covers only [FromStep, stepBoundary) of state, so
+//     it MUST live under a filename naming that narrower range. The
+//     wider pre-merge file at oldBroadPath co-existing with the
+//     narrower regen output is the 2026-06-25 union-cover wedge.
 type regenPair struct {
-	regenPath string // <snapDir>/domain/v2.0-DOMAIN.FROM-TO.kv.regen
-	finalPath string // <snapDir>/domain/v2.0-DOMAIN.FROM-TO.kv
-	domain    kv.Domain
+	regenPath    string // <snapDir>/domain/<truncatedName>.kv.regen
+	finalPath    string // <snapDir>/domain/<truncatedName>.kv  (truncated name when ToStep narrowed)
+	oldBroadPath string // <snapDir>/domain/<originalName>.kv   (removed in FinalizeUnwind when != finalPath)
+	domain       kv.Domain
 }
 
 // pendingRegenState is the deferred set of boundary-step regeneration
@@ -137,17 +155,37 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			anchor = commitmentAnchor
 		}
 
-		newPath, err := RegenerateBoundaryStepFile(
-			ctx, kvDomain, oldPath, lookup, lastTxNum,
+		// Truncated rename: when the boundary file's ToStep extends
+		// past the unwind-target step boundary, the regen output
+		// covers only [FromStep, stepBoundary) of state — a narrower
+		// range than the original file's name advertises. The new
+		// file MUST be named to match its actual coverage, otherwise
+		// the wider-named regen output co-exists with any pre-existing
+		// narrower files in the same range and rule-driven cull picks
+		// the wider one (M-A default direction), serving stale state
+		// for the truncated portion. This is the 2026-06-25 v2.0-
+		// accounts.272-280-co-exists-with-272-276 union-cover wedge
+		// reproduced live in iter-4 mode-B at depth 60k on hoodi.
+		// stepBoundary == boundary.ToStep is the aligned case: regen
+		// replaces the file in place (finalPath == oldBroadPath).
+		truncatedName := boundary.Name
+		if stepBoundary < boundary.ToStep {
+			truncatedName = renameStepRange(boundary.Name, boundary.FromStep, boundary.ToStep, stepBoundary)
+		}
+		finalPath := filepath.Join(filepath.Dir(oldPath), truncatedName)
+		regenPath := finalPath + ".regen"
+
+		if err := RegenerateBoundaryStepFile(
+			ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
 			compression, anchor, p.snapTmpDir, p.logger,
-		)
-		if err != nil {
+		); err != nil {
 			return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, boundary.Name, err)
 		}
 		pairs = append(pairs, regenPair{
-			regenPath: newPath,
-			finalPath: oldPath,
-			domain:    kvDomain,
+			regenPath:    regenPath,
+			finalPath:    finalPath,
+			oldBroadPath: oldPath,
+			domain:       kvDomain,
 		})
 	}
 

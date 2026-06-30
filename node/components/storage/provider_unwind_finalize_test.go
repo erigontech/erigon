@@ -166,8 +166,9 @@ func TestProvider_FinalizeUnwind_RegenStripsTorrentAndNotifiesDownloader(t *test
 	}
 	p.pendingRegen = &pendingRegenState{
 		pairs: []regenPair{{
-			regenPath: regenPath,
-			finalPath: finalPath,
+			regenPath:    regenPath,
+			finalPath:    finalPath,
+			oldBroadPath: finalPath, // aligned case: regen overwrites in place
 		}},
 	}
 
@@ -183,6 +184,71 @@ func TestProvider_FinalizeUnwind_RegenStripsTorrentAndNotifiesDownloader(t *test
 	deletes := stub.snapshotDeletes()
 	require.Len(t, deletes, 1, "downloaderClient.Delete must be called exactly once for the regen batch")
 	require.Equal(t, []string{finalName}, deletes[0], "Delete must carry the basename of the regenerated .kv")
+
+	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
+}
+
+// TestProvider_FinalizeUnwind_RegenTruncatedRenameRemovesBroadFile
+// pins the truncated-rename path that the 2026-06-30 iter-4 mode-B
+// soak surfaced: when the boundary file's ToStep extends past the
+// unwind-target step boundary, the regen output is written under a
+// truncated filename (e.g. v1.1-accounts.272-280.kv.regen →
+// v1.1-accounts.272-278.kv), and FinalizeUnwind must
+//
+//   - move the regen content to the truncated final path
+//   - remove the original broad .kv (it now over-claims coverage
+//     for steps the regen didn't write)
+//   - drop the broad's .torrent + Inventory entry
+//   - issue downloader Delete for the broad basename so any
+//     in-flight fetch for the retired file gets cancelled
+//
+// Without this, the broad and truncated files co-exist and the
+// fileset rule's default direction (M-A: narrower loses) picks the
+// broad — serving stale state for the truncated portion and wedging
+// exec at the next block that reads from that range.
+func TestProvider_FinalizeUnwind_RegenTruncatedRenameRemovesBroadFile(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	broadName := "v1.1-accounts.272-280.kv"
+	truncatedName := "v1.1-accounts.272-278.kv"
+	broadPath := filepath.Join(tmpDir, broadName)
+	finalPath := filepath.Join(tmpDir, truncatedName)
+	regenPath := finalPath + ".regen"
+	broadTorrent := broadPath + ".torrent"
+
+	require.NoError(t, os.WriteFile(broadPath, []byte("pre-regen-broad"), 0o600))
+	require.NoError(t, os.WriteFile(regenPath, []byte("regen-truncated-content"), 0o600))
+	require.NoError(t, os.WriteFile(broadTorrent, []byte("stale-broad-torrent"), 0o600))
+
+	stub := &recordingDownloaderClient{}
+	p := &Provider{
+		snapDir:          tmpDir,
+		downloaderClient: stub,
+	}
+	p.pendingRegen = &pendingRegenState{
+		pairs: []regenPair{{
+			regenPath:    regenPath,
+			finalPath:    finalPath,
+			oldBroadPath: broadPath,
+		}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	contents, err := os.ReadFile(finalPath)
+	require.NoError(t, err, "truncated .kv must exist post-finalize")
+	require.Equal(t, "regen-truncated-content", string(contents))
+
+	_, err = os.Stat(broadPath)
+	require.True(t, os.IsNotExist(err), "broad .kv must be removed (its content is superseded by the truncated regen)")
+	_, err = os.Stat(broadTorrent)
+	require.True(t, os.IsNotExist(err), "broad .torrent must be removed (advertises the retired file)")
+
+	deletes := stub.snapshotDeletes()
+	require.Len(t, deletes, 1, "downloaderClient.Delete must be called once for the regen batch")
+	require.ElementsMatch(t, []string{truncatedName, broadName}, deletes[0],
+		"Delete must carry BOTH the new truncated name and the retired broad name")
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
 }
