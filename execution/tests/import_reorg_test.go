@@ -187,15 +187,20 @@ func erigonBinaryForTest(t *testing.T, root string) string {
 	if b := os.Getenv("ERIGON_BIN"); b != "" {
 		return b
 	}
-	prebuilt := filepath.Join(root, "build", "bin", "erigon")
-	if _, err := os.Stat(prebuilt); err == nil {
-		return prebuilt
+	binPath := filepath.Join(root, "build", "bin", "erigon")
+	if _, err := os.Stat(binPath); err == nil {
+		return binPath
 	}
-	out := filepath.Join(t.TempDir(), "erigon")
-	build := exec.Command("go", "build", "-o", out, "./cmd/erigon") //nolint:gosec
+	// Build on the real disk, not t.TempDir(): under CI the latter is a small
+	// RAM disk that the linker output and go build's work dir (GOTMPDIR) would
+	// overflow.
+	buildRoot := filepath.Join(root, "build")
+	require.NoError(t, os.MkdirAll(filepath.Join(buildRoot, "bin"), 0o755))
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/erigon") //nolint:gosec
 	build.Dir = root
+	build.Env = append(os.Environ(), "GOTMPDIR="+buildRoot)
 	if b, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build erigon: %v\n%s", err, b)
 	}
-	return out
+	return binPath
 }
