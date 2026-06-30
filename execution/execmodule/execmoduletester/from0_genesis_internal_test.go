@@ -320,3 +320,63 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 		reExecViaIntegrationPath(t, ctx, emt, gen.TopBlock.NumberU64(), 1*datasize.KB, true /*badBlockHalt*/, logger),
 		"re-exec from 0 in tiny batches must reproduce each block's trie root; a stale BranchCache corrupts it")
 }
+
+// TestParallelExec_RestoresCommitmentStateReader checks that a parallel-exec
+// batch leaves the commitment state reader as it found it. The commitment
+// calculator installs its own GetAsOf-based asOfStateReader on the shared
+// commitment context; if that reader is left installed, a later foreground
+// SeekCommitment in the offline re-exec path (which runs with in-mem history
+// reads disabled) routes account reads through GetAsOf on sd.mem and fails
+// with "GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled".
+func TestParallelExec_RestoresCommitmentStateReader(t *testing.T) {
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
+	keyFunds := new(big.Int).Mul(big.NewInt(1_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc:  types.GenesisAlloc{keyAddr: types.GenesisAccount{Balance: keyFunds}},
+	}
+	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
+
+	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
+	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 4, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		to := common.BytesToAddress([]byte{byte(i + 1), 0xab})
+		tx, txErr := types.SignTx(
+			types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),
+			*signer, key)
+		require.NoError(t, txErr)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, emt.InsertChain(gen))
+
+	ctx := context.Background()
+	logger := log.New()
+	require.NoError(t, rawdbreset.ResetExec(ctx, emt.DB))
+
+	cfg := stagedsync.StageExecuteBlocksCfg(
+		emt.DB, emt.cfg.Prune, emt.cfg.BatchSize, emt.ChainConfig, emt.Engine,
+		&vm.Config{}, emt.Notifications, emt.cfg.StateStream, false /*badBlockHalt*/, emt.Dirs,
+		emt.BlockReader, emt.cfg.Genesis, emt.cfg.Sync, false /*experimentalBAL*/, exec.NewBlockReadAheader())
+	if agg, ok := emt.DB.(dbstate.HasAgg); ok {
+		if aggT, okT := agg.Agg().(*dbstate.Aggregator); okT {
+			aggT.PresetOfflineExecution()
+		}
+	}
+
+	doms, err := newReusedDomains(ctx, emt, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	readerBefore := doms.GetCommitmentContext().StateReader()
+	_, err = execOneBatch(ctx, emt, doms, cfg, gen.TopBlock.NumberU64(), logger)
+	require.NoError(t, err)
+
+	require.Equal(t, readerBefore, doms.GetCommitmentContext().StateReader(),
+		"parallel exec must restore the commitment state reader it found; leaving the calculator's asOfStateReader installed breaks a later foreground SeekCommitment with in-mem history reads disabled")
+}
