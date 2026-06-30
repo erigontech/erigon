@@ -17,6 +17,7 @@ import (
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -40,6 +41,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 	beaconCfg.MinSeedLookahead = 1
 	beaconCfg.DomainBeaconBuilder = [4]byte{0x0B, 0x00, 0x00, 0x00}
 	fcMock.StateAtBlockRootVal[common.HexToHash("0xbbbb")] = newBidParentState(&beaconCfg, testDependentRoot)
+	fcMock.Ancestors[63] = forkchoice.ForkChoiceNode{Root: testDependentRoot, PayloadStatus: cltypes.PayloadStatusPending}
 	prevBlsVerify := blsVerify
 	blsVerify = func(_ []byte, _ []byte, _ []byte) (bool, error) { return true, nil }
 	t.Cleanup(func() { blsVerify = prevBlsVerify })
@@ -307,25 +309,23 @@ func TestExecutionPayloadBidServiceWaitsForParentState(t *testing.T) {
 	require.True(t, found)
 }
 
-func TestExecutionPayloadBidServiceUsesDependentRootFromParentState(t *testing.T) {
+func TestExecutionPayloadBidServiceUsesDependentRootFromForkchoiceStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
 
-	parentState := newBidParentState(service.beaconCfg, testDependentRoot)
+	parentState := newBidParentState(service.beaconCfg, common.Hash{0xdd})
 	fcMock.StateAtBlockRootVal[common.HexToHash("0xbbbb")] = parentState
 
-	dependentRoot, err := state2.GetProposerDependentRoot(parentState, 3)
-	require.NoError(t, err)
-	addPreferencesToPoolWithRoot(epbsPool, 100, dependentRoot)
+	addPreferencesToPoolWithRoot(epbsPool, 100, testDependentRoot)
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
 	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
 
-	err = service.ProcessMessage(context.Background(), nil, msg)
+	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
 	require.Equal(t, uint64(100), parentState.Slot())
 	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})

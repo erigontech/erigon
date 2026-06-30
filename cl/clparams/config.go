@@ -482,6 +482,7 @@ type BeaconChainConfig struct {
 	MaxRequestBlobSidecarsElectra    uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA,string"`         // MaxRequestBlobSidecarsElectra defines the maximum number of blob sidecars to request in Electra.
 	MaxRequestBlocks                 uint64     `yaml:"MAX_REQUEST_BLOCKS" spec:"true" json:"MAX_REQUEST_BLOCKS,string"`                                       // Maximum number of blocks in a single request
 	MaxRequestBlocksDeneb            uint64     `yaml:"MAX_REQUEST_BLOCKS_DENEB" spec:"true" json:"MAX_REQUEST_BLOCKS_DENEB,string"`                           // Maximum number of blocks in a single request
+	MaxRequestPayloads               uint64     `yaml:"MAX_REQUEST_PAYLOADS" spec:"true" json:"MAX_REQUEST_PAYLOADS,string"`                                   // Maximum number of execution payload envelopes in a single request
 	MaxTransactionsPerPayload        uint64     `yaml:"MAX_TRANSACTIONS_PER_PAYLOAD" spec:"true" json:"MAX_TRANSACTIONS_PER_PAYLOAD,string"`                   // MaxTransactionsPerPayload defines the maximum number of transactions in a single payload.
 	SubnetsPerNode                   uint64     `yaml:"SUBNETS_PER_NODE" spec:"true" json:"SUBNETS_PER_NODE,string"`                                           // SubnetsPerNode defines the number of subnets a node can subscribe to.
 	VersionedHashVersionKzg          ConfigByte `yaml:"VERSIONED_HASH_VERSION_KZG" spec:"true" json:"VERSIONED_HASH_VERSION_KZG"`                              // VersionedHashVersionKzg is the version of the versioned hash used in KZG commitments.
@@ -849,6 +850,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
+	MaxRequestPayloads:               128,
 	MaxTransactionsPerPayload:        MaxTransactionsPerPayloadDefault,
 	SubnetsPerNode:                   2,
 	VersionedHashVersionKzg:          ConfigByte(1),

@@ -184,35 +184,20 @@ func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.Si
 		return nil, nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
-	dependentRootState, err := s.proposerDependentRootState(parentState, proposalEpoch)
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("%w: failed to prepare parent state: %v", ErrIgnore, err)
-	}
-	dependentRoot, err := state.GetProposerDependentRoot(dependentRootState, proposalEpoch)
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("%w: failed to compute proposer dependent root: %v", ErrIgnore, err)
+	dependentRoot := s.shufflingDependentRoot(bid.ParentBlockRoot, proposalEpoch)
+	if proposalEpoch > s.beaconCfg.MinSeedLookahead && dependentRoot == (common.Hash{}) {
+		return nil, nil, false, fmt.Errorf("%w: failed to compute proposer dependent root", ErrIgnore)
 	}
 	preferences, ok := s.epbsPool.GetPreference(bid.Slot, dependentRoot)
 	return preferences, parentState, ok, nil
 }
 
-func (s *executionPayloadBidService) proposerDependentRootState(parentState *state.CachingBeaconState, proposalEpoch uint64) (*state.CachingBeaconState, error) {
-	if proposalEpoch < s.beaconCfg.MinSeedLookahead {
-		return nil, fmt.Errorf("proposal epoch %d before min seed lookahead %d", proposalEpoch, s.beaconCfg.MinSeedLookahead)
+func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, epoch uint64) common.Hash {
+	if epoch <= s.beaconCfg.MinSeedLookahead {
+		return common.Hash{}
 	}
-	dependentEpoch := proposalEpoch - s.beaconCfg.MinSeedLookahead
-	validationSlot := dependentEpoch * s.beaconCfg.SlotsPerEpoch
-	if parentState.Slot() >= validationSlot {
-		return parentState, nil
-	}
-	validationState, err := parentState.Copy()
-	if err != nil {
-		return nil, err
-	}
-	if err := transition.DefaultMachine.ProcessSlots(validationState, validationSlot); err != nil {
-		return nil, err
-	}
-	return validationState, nil
+	dependentSlot := (epoch-s.beaconCfg.MinSeedLookahead)*s.beaconCfg.SlotsPerEpoch - 1
+	return s.forkchoiceStore.Ancestor(root, dependentSlot).Root
 }
 
 // validateAndStoreBid performs all remaining validation checks after preferences are confirmed.

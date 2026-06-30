@@ -172,7 +172,31 @@ func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T
 	require.Equal(t, 0, s.GetBuilders().Len())
 }
 
-func TestApplyBuilderDepositRequestTopUpExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
+func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           0,
+		WithdrawableEpoch: 1,
+	})
+	s.SetBuilders(builders)
+
+	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 25,
+	})
+
+	builder := s.GetBuilders().Get(0)
+	require.Equal(t, uint64(25), builder.Balance)
+	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
+}
+
+func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderKeepsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
 	s.SetSlot(cfg.SlotsPerEpoch * 10)
@@ -193,7 +217,7 @@ func TestApplyBuilderDepositRequestTopUpExitedBuilderResetsWithdrawableEpoch(t *
 
 	builder := s.GetBuilders().Get(0)
 	require.Equal(t, uint64(35), builder.Balance)
-	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
+	require.Equal(t, uint64(1), builder.WithdrawableEpoch)
 }
 
 func TestBuilderHelpersRejectHugeIndex(t *testing.T) {

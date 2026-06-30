@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -70,7 +71,7 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 			}
 		}
 
-		responses, _, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, needed)
+		responses, err := requestEnvelopesByRoot(ctx, r, needed)
 		if err != nil {
 			log.Trace("RequestEnvelopesFrantically: by-root error", "err", err)
 			byRootAttempts++
@@ -94,6 +95,23 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		}
 	}
 	return received, nil
+}
+
+func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
+	maxRoots := int(r.MaxRequestPayloads())
+	if maxRoots <= 0 {
+		return nil, errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
+	var envelopes []*cltypes.SignedExecutionPayloadEnvelope
+	for start := 0; start < len(roots); start += maxRoots {
+		end := min(start+maxRoots, len(roots))
+		responses, _, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, roots[start:end])
+		if err != nil {
+			return envelopes, err
+		}
+		envelopes = append(envelopes, responses...)
+	}
+	return envelopes, nil
 }
 
 func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) [][32]byte {
@@ -125,21 +143,29 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 		validRoots[root] = struct{}{}
 	}
 
-	envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot, count)
-	if err != nil {
-		log.Debug("envelope fetch: by-range error", "err", err)
+	maxCount := r.MaxRequestPayloads()
+	if maxCount == 0 {
+		log.Debug("envelope fetch: by-range disabled, MAX_REQUEST_PAYLOADS is zero")
 		return
 	}
-	for _, env := range envelopes {
-		if env.Message == nil {
-			continue
+	for offset := uint64(0); offset < count; offset += maxCount {
+		chunkCount := min(maxCount, count-offset)
+		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot+offset, chunkCount)
+		if err != nil {
+			log.Debug("envelope fetch: by-range error", "err", err)
+			return
 		}
-		// Only accept envelopes whose BeaconBlockRoot matches one of the blocks we requested.
-		// A malicious peer could respond with envelopes for arbitrary roots.
-		if _, ok := validRoots[env.Message.BeaconBlockRoot]; !ok {
-			log.Debug("requestEnvelopesByRange: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
-			continue
+		for _, env := range envelopes {
+			if env.Message == nil {
+				continue
+			}
+			// Only accept envelopes whose BeaconBlockRoot matches one of the blocks we requested.
+			// A malicious peer could respond with envelopes for arbitrary roots.
+			if _, ok := validRoots[env.Message.BeaconBlockRoot]; !ok {
+				log.Debug("requestEnvelopesByRange: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
+				continue
+			}
+			received[env.Message.BeaconBlockRoot] = env
 		}
-		received[env.Message.BeaconBlockRoot] = env
 	}
 }
