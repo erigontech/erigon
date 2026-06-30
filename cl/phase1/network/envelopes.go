@@ -72,23 +72,17 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		}
 
 		responses, err := requestEnvelopesByRoot(ctx, r, needed)
+		acceptEnvelopeResponses(responses, requestedRoots, received)
+		needed = filterReceived(needed, received)
+		if len(needed) == 0 {
+			break
+		}
 		if err != nil {
 			log.Trace("RequestEnvelopesFrantically: by-root error", "err", err)
 			byRootAttempts++
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		for _, env := range responses {
-			if env.Message == nil {
-				continue
-			}
-			if _, ok := requestedRoots[env.Message.BeaconBlockRoot]; !ok {
-				log.Debug("RequestEnvelopesFrantically: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
-				continue
-			}
-			received[env.Message.BeaconBlockRoot] = env
-		}
-		needed = filterReceived(needed, received)
 		if len(needed) > 0 {
 			byRootAttempts++
 			time.Sleep(300 * time.Millisecond)
@@ -112,6 +106,19 @@ func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][3
 		envelopes = append(envelopes, responses...)
 	}
 	return envelopes, nil
+}
+
+func acceptEnvelopeResponses(responses []*cltypes.SignedExecutionPayloadEnvelope, requestedRoots map[common.Hash]struct{}, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+	for _, env := range responses {
+		if env == nil || env.Message == nil {
+			continue
+		}
+		if _, ok := requestedRoots[env.Message.BeaconBlockRoot]; !ok {
+			log.Debug("RequestEnvelopesFrantically: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
+			continue
+		}
+		received[env.Message.BeaconBlockRoot] = env
+	}
 }
 
 func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) [][32]byte {
