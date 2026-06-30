@@ -168,11 +168,21 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		// reproduced live in iter-4 mode-B at depth 60k on hoodi.
 		// stepBoundary == boundary.ToStep is the aligned case: regen
 		// replaces the file in place (finalPath == oldBroadPath).
-		truncatedName := boundary.Name
+		//
+		// Derive the new basename from filepath.Base(oldPath), NOT
+		// from boundary.Name — Inventory's Name field carries the
+		// kind-subdir prefix (e.g. "domain/v2.0-accounts.280-284.kv")
+		// matching the chain.toml entry shape, and joining that under
+		// filepath.Dir(oldPath) (already inside the kind subdir) would
+		// double up the prefix, producing "<snapDir>/domain/domain/...".
+		// Live-caught 2026-06-30 iter-1 mode_a2 right after the
+		// truncated-rename change landed.
+		oldBaseName := filepath.Base(oldPath)
+		truncatedBaseName := oldBaseName
 		if stepBoundary < boundary.ToStep {
-			truncatedName = renameStepRange(boundary.Name, boundary.FromStep, boundary.ToStep, stepBoundary)
+			truncatedBaseName = renameStepRange(oldBaseName, boundary.FromStep, boundary.ToStep, stepBoundary)
 		}
-		finalPath := filepath.Join(filepath.Dir(oldPath), truncatedName)
+		finalPath := filepath.Join(filepath.Dir(oldPath), truncatedBaseName)
 		regenPath := finalPath + ".regen"
 
 		if err := RegenerateBoundaryStepFile(

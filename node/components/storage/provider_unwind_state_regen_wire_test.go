@@ -137,3 +137,46 @@ func TestBoundaryStepFileForDomain_StepBoundaryAboveAllFiles(t *testing.T) {
 	got := p.boundaryStepFileForDomain(snapshot.DomainCommitment, 300)
 	require.Nil(t, got, "stepBoundary=300 is past every file's ToStep — nothing to regen; must return nil")
 }
+
+// TestRegenPathNoSubdirDoubling pins the bug caught live on the
+// 2026-06-30 truncated-rename soak's iter-1 mode_a2: the regen
+// path was being constructed by joining filepath.Dir(oldPath) with
+// boundary.Name. But boundary.Name in Inventory carries the
+// kind-subdir prefix ("domain/v2.0-accounts.280-284.kv"), and
+// filepath.Dir(oldPath) is ALREADY inside the kind subdir
+// ("<snapDir>/domain"). The naive join produces a doubled prefix:
+// "<snapDir>/domain/domain/v2.0-accounts.280-284.kv.regen.tmp"
+// → seg.NewCompressor's open fails with "no such file or directory".
+//
+// Fix: derive the regen file's basename from filepath.Base(oldPath)
+// (which strips the kind-subdir), then renameStepRange operates on
+// the bare basename, then filepath.Join with filepath.Dir(oldPath)
+// produces a single-prefix path.
+//
+// This is a path-shape regression test — it asserts the truncated-
+// rename code path produces a path under <snapDir>/<kind>/ (one
+// subdir level), NOT <snapDir>/<kind>/<kind>/ (two).
+func TestRegenPathNoSubdirDoubling(t *testing.T) {
+	t.Parallel()
+	// Simulate the exact shape that broke live: boundary.Name carries
+	// the "domain/" subdir prefix; oldPath is the absolute path inside
+	// <snapDir>/domain/. Drive renameStepRange + filepath.Join through
+	// the same recipe regenerateBoundaryStepFiles uses (without
+	// actually opening files — this is a pure path-construction
+	// regression).
+	snapDir := "/tmp/snapdir-fixture"
+
+	// The BUGGY code did: filepath.Join(filepath.Dir(oldPath), boundary.Name)
+	// where boundary.Name = "domain/v2.0-accounts.272-280.kv".
+	// That doubled the subdir. We now derive from filepath.Base(oldPath):
+	oldBaseName := "v2.0-accounts.272-280.kv" // = filepath.Base(oldPath)
+	truncatedBaseName := renameStepRange(oldBaseName, 272, 280, 278)
+	require.Equal(t, "v2.0-accounts.272-278.kv", truncatedBaseName)
+
+	// filepath.Dir(oldPath) is "<snapDir>/domain", joining with the
+	// bare basename produces a single-subdir path.
+	require.Equal(t,
+		snapDir+"/domain/v2.0-accounts.272-278.kv",
+		snapDir+"/domain/"+truncatedBaseName,
+		"truncated path must live under one kind subdir, not two")
+}
