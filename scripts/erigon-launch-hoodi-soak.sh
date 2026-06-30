@@ -17,6 +17,7 @@ exec "$BIN" \
   --datadir="$DATADIR" \
   --chain=hoodi --prune.mode=minimal \
   --caplin.checkpoint-sync-url="$CHECKPOINT_URL" \
+  --snap.p2p-manifest \
   --http.api=eth,erigon,engine,debug,net,web3,trace,txpool \
   --http.port=19545 --authrpc.port=19551 --private.api.addr=127.0.0.1:11590 \
   --torrent.port=43369 --port=31503 \

@@ -374,7 +374,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return terr
 			}
 			if !notChanged {
-				return fmt.Errorf("%s changed since the datadir was created (datadir=%v, cli=%v); changing this flag mid-life is prohibited — reset the datadir or restart without the flag to use the persisted value", f.name, enabled, *f.ptr)
+				return fmt.Errorf("%s changed since the datadir was created (datadir=%v, cli=%v); changing this flag mid-life is prohibited — pass the same value as the persisted one, or reset the datadir to adopt the new value", f.name, enabled, *f.ptr)
 			}
 			*f.ptr = enabled
 		}
@@ -610,8 +610,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// Hand the storage component's inventory to the downloader so
 	// PublishLocalChainToml emits V2 sidecars alongside V1. Required
 	// for consumer-side manifest_exchange to fetch a usable manifest.
+	// Gated on --snap.p2p-manifest to match the ENR-updater wiring
+	// below at backend.go:1118 — without the flag the publisher's
+	// fingerprint guard rejects every emit, producing only error logs.
 	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil &&
-		backend.components.Storage != nil {
+		backend.components.Storage != nil && config.Snapshot.P2PManifest {
 		backend.components.Downloader.Downloader.SetInventory(backend.components.Storage.Inventory)
 
 		// Wire the producer-side self-check
