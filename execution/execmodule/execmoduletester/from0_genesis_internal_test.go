@@ -322,30 +322,14 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 }
 
 // TestExec_RestoresCommitmentStateReader checks that an execution batch leaves
-// the commitment state reader as it found it, in both serial and parallel mode.
-// Parallel installs a GetAsOf-based asOfStateReader (via the commitment
-// calculator); leaving it on the shared context makes a later foreground
-// SeekCommitment in the offline re-exec path (in-mem history reads disabled)
-// fail with "GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled".
-// Serial installs no custom reader and is the control for the same invariant.
+// the commitment state reader as it found it. The exec mode is whatever the
+// suite selects — the serial/parallel CI matrix (and the EXEC3_PARALLEL default)
+// cover both. It bites in parallel: the commitment calculator installs a
+// GetAsOf-based asOfStateReader on the shared context, and leaving it there
+// makes a later foreground SeekCommitment in the offline re-exec path (in-mem
+// history reads disabled) fail with "GetAsOf called on TemporalMemBatch with
+// inMemHistoryReads disabled". Serial installs no custom reader.
 func TestExec_RestoresCommitmentStateReader(t *testing.T) {
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{
-		{"serial", false},
-		{"parallel", true},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-			runExecRestoresCommitmentStateReader(t)
-		})
-	}
-}
-
-func runExecRestoresCommitmentStateReader(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
 	keyFunds := new(big.Int).Mul(big.NewInt(1_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
