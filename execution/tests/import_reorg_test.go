@@ -75,7 +75,7 @@ func lastImportedHead(out string) (hash string, number uint64) {
 	return hash, number
 }
 
-// TestImportReorgUnwindToGenesisParallel guards a parallel-executor defect:
+// TestImportReorgUnwindToGenesis guards a parallel-executor defect:
 // importing a chain that reorgs back to genesis crashes the commitment
 // calculator ("empty branch data read during unfold"), leaving the canonical
 // head stuck on the lighter chain instead of the heavier side chain.
@@ -84,7 +84,7 @@ func lastImportedHead(out string) (hash string, number uint64) {
 // in-process block-test harness backs chaindata with in-memory MDBX and commits
 // genesis in the same execution flow, both of which mask this on-disk defect
 // (TestLegacyBlockchain runs the same fixture and passes).
-func TestImportReorgUnwindToGenesisParallel(t *testing.T) {
+func TestImportReorgUnwindToGenesis(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
