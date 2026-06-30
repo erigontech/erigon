@@ -285,7 +285,11 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 	blockRoot common.Hash,
 	alwaysCopy bool,
 ) (*state.CachingBeaconState, error) {
-	return f.StateAtBlockRootVal[blockRoot], nil
+	st := f.StateAtBlockRootVal[blockRoot]
+	if st == nil || !alwaysCopy {
+		return st, nil
+	}
+	return st.Copy()
 }
 
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(

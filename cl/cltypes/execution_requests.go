@@ -49,7 +49,7 @@ func NewExecutionRequestsWithVersion(cfg *clparams.BeaconChainConfig, version cl
 
 func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
 	if e.version == 0 {
-		return clparams.GloasVersion
+		return clparams.ElectraVersion
 	}
 	return e.version
 }
@@ -101,7 +101,49 @@ func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionRequests) Clone() clonable.Clonable {
-	return NewExecutionRequestsWithVersion(e.cfg, e.version)
+	e.ensureLists()
+	out := NewExecutionRequestsWithVersion(e.cfg, e.effectiveVersion())
+	e.Deposits.Range(func(_ int, request *solid.DepositRequest, _ int) bool {
+		if request == nil {
+			return true
+		}
+		copied := *request
+		out.Deposits.Append(&copied)
+		return true
+	})
+	e.Withdrawals.Range(func(_ int, request *solid.WithdrawalRequest, _ int) bool {
+		if request == nil {
+			return true
+		}
+		copied := *request
+		out.Withdrawals.Append(&copied)
+		return true
+	})
+	e.Consolidations.Range(func(_ int, request *solid.ConsolidationRequest, _ int) bool {
+		if request == nil {
+			return true
+		}
+		copied := *request
+		out.Consolidations.Append(&copied)
+		return true
+	})
+	e.BuilderDeposits.Range(func(_ int, request *solid.BuilderDepositRequest, _ int) bool {
+		if request == nil {
+			return true
+		}
+		copied := *request
+		out.BuilderDeposits.Append(&copied)
+		return true
+	})
+	e.BuilderExits.Range(func(_ int, request *solid.BuilderExitRequest, _ int) bool {
+		if request == nil {
+			return true
+		}
+		copied := *request
+		out.BuilderExits.Append(&copied)
+		return true
+	})
+	return out
 }
 
 func (e *ExecutionRequests) HashSSZ() ([32]byte, error) {

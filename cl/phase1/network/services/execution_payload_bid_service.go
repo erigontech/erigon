@@ -179,7 +179,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 
 func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, *state.CachingBeaconState, bool, error) {
 	bid := msg.Message
-	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
+	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, true)
 	if err != nil || parentState == nil {
 		return nil, nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}

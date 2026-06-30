@@ -352,6 +352,52 @@ func TestNewExecutionRequestsDefaultIsPreGloas(t *testing.T) {
 	require.NotEqual(t, gloasRequestsRoot, requestsRoot)
 }
 
+func TestExecutionRequestsZeroValueIsPreGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	zero := &ExecutionRequests{cfg: &cfg}
+	constructed := NewExecutionRequests(&cfg)
+
+	zeroRoot, err := zero.HashSSZ()
+	require.NoError(t, err)
+	constructedRoot, err := constructed.HashSSZ()
+	require.NoError(t, err)
+
+	require.Equal(t, constructedRoot, zeroRoot)
+}
+
+func TestExecutionRequestsCloneCopiesLists(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	requests.Deposits.Append(&solid.DepositRequest{Amount: 1})
+	requests.Withdrawals.Append(&solid.WithdrawalRequest{Amount: 2})
+	requests.Consolidations.Append(&solid.ConsolidationRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234")})
+	requests.BuilderDeposits.Append(&solid.BuilderDepositRequest{Amount: 3})
+	requests.BuilderExits.Append(&solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000005678")})
+
+	cloned := requests.Clone().(*ExecutionRequests)
+	require.Equal(t, requests.Deposits.Get(0), cloned.Deposits.Get(0))
+	require.Equal(t, requests.Withdrawals.Get(0), cloned.Withdrawals.Get(0))
+	require.Equal(t, requests.Consolidations.Get(0), cloned.Consolidations.Get(0))
+	require.Equal(t, requests.BuilderDeposits.Get(0), cloned.BuilderDeposits.Get(0))
+	require.Equal(t, requests.BuilderExits.Get(0), cloned.BuilderExits.Get(0))
+	require.NotSame(t, requests.Deposits.Get(0), cloned.Deposits.Get(0))
+	require.NotSame(t, requests.Withdrawals.Get(0), cloned.Withdrawals.Get(0))
+	require.NotSame(t, requests.Consolidations.Get(0), cloned.Consolidations.Get(0))
+	require.NotSame(t, requests.BuilderDeposits.Get(0), cloned.BuilderDeposits.Get(0))
+	require.NotSame(t, requests.BuilderExits.Get(0), cloned.BuilderExits.Get(0))
+
+	cloned.Deposits.Get(0).Amount = 10
+	cloned.Withdrawals.Get(0).Amount = 20
+	cloned.Consolidations.Get(0).SourceAddress = common.HexToAddress("0x0000000000000000000000000000000000009999")
+	cloned.BuilderDeposits.Get(0).Amount = 30
+	cloned.BuilderExits.Get(0).SourceAddress = common.HexToAddress("0x0000000000000000000000000000000000008888")
+	require.Equal(t, uint64(1), requests.Deposits.Get(0).Amount)
+	require.Equal(t, uint64(2), requests.Withdrawals.Get(0).Amount)
+	require.Equal(t, common.HexToAddress("0x0000000000000000000000000000000000001234"), requests.Consolidations.Get(0).SourceAddress)
+	require.Equal(t, uint64(3), requests.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, common.HexToAddress("0x0000000000000000000000000000000000005678"), requests.BuilderExits.Get(0).SourceAddress)
+}
+
 // TestNewBeaconBody_VersionSpecificFields verifies that NewBeaconBody creates
 // correct version-specific fields for Fulu and GLOAS.
 func TestNewBeaconBody_VersionSpecificFields(t *testing.T) {

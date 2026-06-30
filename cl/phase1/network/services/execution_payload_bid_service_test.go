@@ -216,6 +216,7 @@ func TestExecutionPayloadBidServiceNextSlot(t *testing.T) {
 	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
 
 	msg := newTestSignedExecutionPayloadBid(101, 1, 1000)
+	parentState := fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
 	addPreferencesToPool(epbsPool, 101)
 
 	// Current slot is 100, bid for slot 101 → valid (next slot)
@@ -226,6 +227,7 @@ func TestExecutionPayloadBidServiceNextSlot(t *testing.T) {
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
+	require.Equal(t, uint64(100), parentState.Slot())
 }
 
 func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
