@@ -388,7 +388,13 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		// writes for blocks above it — e.g. a block that failed its post-execution
 		// gas check before its step was flushed. Prune them so re-execution doesn't
 		// read a stale value; the committed prune in unwindExec3 is skipped here.
-		txNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, u.UnwindPoint+1)
+		//
+		// Prune from s.BlockNumber+1, not u.UnwindPoint+1: this early return skips
+		// u.Done, so committed progress stays at s.BlockNumber and re-execution
+		// resumes there — the whole (s.BlockNumber, u.UnwindPoint] range re-executes
+		// and its stale overlay writes must be pruned too, or an SSTORE_SET is
+		// mischarged as SSTORE_RESET (gas undercharge).
+		txNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
 		if err != nil {
 			return err
 		}

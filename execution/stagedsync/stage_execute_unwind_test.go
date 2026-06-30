@@ -101,25 +101,37 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	staleVal := staleValHash[:]
 	const staleTxNum = failedBlock*perBlock + 5 // inside failedBlock, above the boundary
 
-	// keepKey is written by a block at/below the unwind point — must survive.
-	keepAddr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	keepSlot := common.Hash{31: 0x01}
+	// reexecKey is written by a block in (committedBlock, unwindPoint] — i.e.
+	// above committed progress. The early return skips u.Done, so progress stays
+	// at committedBlock and this block re-executes; its overlay write must be
+	// pruned, even though it's at/below the unwind point.
+	reexecAddr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	reexecSlot := common.Hash{31: 0x01}
+	reexecKey := append(append([]byte{}, reexecAddr[:]...), reexecSlot[:]...)
+	reexecVal := []byte{0xbe, 0xef}
+	const reexecTxNum = unwindPoint * perBlock // inside the unwind-target block (block 7 > committed 5)
+
+	// keepKey is written at/below committed progress — committed state, must survive.
+	keepAddr := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	keepSlot := common.Hash{31: 0x02}
 	keepKey := append(append([]byte{}, keepAddr[:]...), keepSlot[:]...)
-	keepVal := []byte{0xbe, 0xef}
-	const keepTxNum = unwindPoint * perBlock // inside the unwind-target block
+	keepVal := []byte{0xca, 0xfe}
+	const keepTxNum = committedBlock*perBlock + 3 // inside the committed block
 
 	doms.SetTxNum(keepTxNum)
 	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, keepKey, keepVal, keepTxNum, nil))
+	doms.SetTxNum(reexecTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, reexecKey, reexecVal, reexecTxNum, nil))
 	doms.SetTxNum(staleTxNum)
 	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, staleKey, staleVal, staleTxNum, nil))
 
-	// Sanity: both visible through the overlay before the unwind.
+	// Sanity: all visible through the overlay before the unwind.
 	got, _, err := doms.GetLatest(kv.StorageDomain, tx, staleKey)
 	require.NoError(t, err)
 	require.Equal(t, staleVal, got, "precondition: stale write must be visible pre-unwind")
-	got, _, err = doms.GetLatest(kv.StorageDomain, tx, keepKey)
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, reexecKey)
 	require.NoError(t, err)
-	require.Equal(t, keepVal, got, "precondition: keep write must be visible pre-unwind")
+	require.Equal(t, reexecVal, got, "precondition: re-exec-range write must be visible pre-unwind")
 
 	cfg := ExecuteBlockCfg{blockReader: br}
 	s := &StageState{ID: stages.Execution, BlockNumber: committedBlock}
@@ -133,12 +145,20 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	got, _, err = doms.GetLatest(kv.StorageDomain, tx, staleKey)
 	require.NoError(t, err)
 	require.Empty(t, got,
-		"after Unwind to block %d, the overlay must not return failedBlock(%d) tx write %x (got %x): "+
-			"UnwindExecutionStage skipped the overlay prune on the no-op-disk-unwind path",
-		unwindPoint, failedBlock, staleVal, got)
+		"after Unwind, the overlay must not return failedBlock(%d) tx write %x (got %x)",
+		failedBlock, staleVal, got)
 
-	// A write at/below the unwind point must be untouched (no over-pruning).
+	// A write in (committedBlock, unwindPoint] re-executes too, so it must also
+	// be pruned — the prune floor is s.BlockNumber+1, not u.UnwindPoint+1.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, reexecKey)
+	require.NoError(t, err)
+	require.Empty(t, got,
+		"after Unwind, the overlay must not return the re-exec-range write at block %d (got %x): "+
+			"prune floor must be s.BlockNumber+1, not u.UnwindPoint+1",
+		unwindPoint, got)
+
+	// A write at/below committed progress is committed state — must survive.
 	got, _, err = doms.GetLatest(kv.StorageDomain, tx, keepKey)
 	require.NoError(t, err)
-	require.Equal(t, keepVal, got, "write at/below the unwind point must survive the prune")
+	require.Equal(t, keepVal, got, "write at/below committed progress must survive the prune")
 }
