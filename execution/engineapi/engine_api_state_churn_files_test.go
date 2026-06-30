@@ -18,7 +18,6 @@ package engineapi_test
 
 import (
 	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,38 +27,26 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// countDomainKVFiles returns the number of built domain value (.kv) files.
-func countDomainKVFiles(snapDir string) int {
-	n := 0
-	_ = filepath.WalkDir(snapDir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && filepath.Ext(p) == ".kv" {
-			n++
-		}
-		return nil
-	})
-	return n
-}
-
-// waitForDomainFilesSettled blocks until background domain-file building has
-// produced at least one .kv file and the count has stopped changing, so the
-// snapshot-file boundary is stable before the test unwinds across it.
-func waitForDomainFilesSettled(t *testing.T, snapDir string) {
+// waitForDomainFilesSettled blocks until background building has produced at
+// least one domain file and no build or merge is in flight, so the snapshot
+// boundary is stable before the test unwinds across it.
+func waitForDomainFilesSettled(t *testing.T, agg *state.Aggregator) {
 	t.Helper()
-	prev, stable := -1, 0
 	require.Eventually(t, func() bool {
-		n := countDomainKVFiles(snapDir)
-		if n > 0 && n == prev {
-			stable++
-		} else {
-			stable = 0
+		built := false
+		for _, n := range agg.FilesAmount() {
+			if n > 0 {
+				built = true
+				break
+			}
 		}
-		prev = n
-		return n > 0 && stable >= 3
-	}, 60*time.Second, 300*time.Millisecond, "domain .kv files never settled")
+		return built && !agg.HasBackgroundFilesBuild2()
+	}, 60*time.Second, 100*time.Millisecond, "domain files never settled")
 }
 
 func TestEngineApiUnwindAcrossSnapshotFileBoundary(t *testing.T) {
@@ -81,7 +68,7 @@ func TestEngineApiUnwindAcrossSnapshotFileBoundary(t *testing.T) {
 		EthConfigTweaker: func(c *ethconfig.Config) {
 			c.Snapshot.ProduceE3 = true       // build domain snapshot files
 			c.AlwaysGenerateChangesets = true // keep changesets so the unwind is permitted
-			c.MaxReorgDepth = 90              // below the ~96-block file-boundary lag: unwinds stay above filed state
+			c.MaxReorgDepth = 90              // engine reorg cap, comfortably above the 60-block unwind below
 		},
 	})
 	require.NoError(t, err)
@@ -92,14 +79,14 @@ func TestEngineApiUnwindAcrossSnapshotFileBoundary(t *testing.T) {
 		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
 		tip := uint64(2 + pokes)
 
-		waitForDomainFilesSettled(t, snapDir)
-		t.Logf("domain .kv files settled at %d", countDomainKVFiles(snapDir))
+		waitForDomainFilesSettled(t, eat.StateAgg)
+		t.Logf("domain files settled: %v", eat.StateAgg.FilesAmount())
 
-		// Unwind a 60-block range. With snapshot files present this crosses
-		// several domain-step boundaries, so a key modified at multiple steps in
-		// the range must be restored to its value at the unwind target — the path
-		// fixed in the domain unwind. The depth stays under MaxReorgDepth (and the
-		// file-boundary lag), so the unwind is permitted and targets supported state.
+		// Unwind a 60-block range. With snapshot files present it crosses several
+		// domain-step boundaries, so a key modified at multiple steps in the range
+		// must be restored to its value at the unwind target — the path fixed in the
+		// domain unwind. AlwaysGenerateChangesets retains the diffsets, so the unwind
+		// is permitted.
 		target := tip - 60
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[target-2]))
 		assertChurnState(ctx, t, eat, churn, payloads[target-2], sums[target-2])

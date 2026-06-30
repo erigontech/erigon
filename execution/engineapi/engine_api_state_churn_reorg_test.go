@@ -124,6 +124,7 @@ func TestEngineApiReorgToSideChainSwitchesStateChurn(t *testing.T) {
 		canonPayloads, canonAddr, _, sums = buildChurnChain(ctx, t, eat, totalPokes, func(k int) int64 { return int64(k) })
 		canonRef = sums[len(sums)-1]
 	})
+	require.NoError(t, eatCanon.Close()) // free the canon node; only its recorded payloads are needed below
 
 	var sidePayloads []*engineapitester.MockClPayload
 	var sideAddr common.Address
@@ -143,6 +144,7 @@ func TestEngineApiReorgToSideChainSwitchesStateChurn(t *testing.T) {
 		})
 		sideRef = sums[len(sums)-1]
 	})
+	require.NoError(t, eatSide.Close()) // free the side node; only its recorded payloads are needed below
 
 	eatVictim, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger: logger, DataDir: t.TempDir(), Genesis: sharedGenesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
@@ -216,12 +218,18 @@ func buildChurnChain(
 	return payloads, addr, churn, sums
 }
 
-// recordChurnSum reads the contract's live trackedSum, requiring that it equals
-// the sum recomputed from storage (the in-EVM invariant), and returns it.
+// recordChurnSum reads and returns the contract's live trackedSum. poke reverts
+// unless trackedSum equals the sum recomputed from storage, and VerifyTxnsInclusion
+// rejects a reverted poke, so a successfully built block already proves that
+// invariant — no extra computedSum/check read is needed here.
 func recordChurnSum(ctx context.Context, t *testing.T, churn *contracts.StateChurn) *big.Int {
-	tracked, computed, ok := readChurn(ctx, t, churn)
-	require.Truef(t, ok, "in-EVM check() must hold: tracked=%s computed=%s", tracked, computed)
-	require.Equal(t, computed, tracked, "computed sum must equal tracked sum")
+	opts := &bind.CallOpts{Context: ctx}
+	var tracked *big.Int
+	require.Eventually(t, func() bool {
+		var err error
+		tracked, err = churn.TrackedSum(opts)
+		return err == nil
+	}, 10*time.Second, 25*time.Millisecond, "trackedSum read did not succeed")
 	return tracked
 }
 
