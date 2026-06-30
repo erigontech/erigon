@@ -378,3 +378,72 @@ func TestFilterPreverifiedByPruneMode_BugZ(t *testing.T) {
 			"full mode block-distance pruning is no-op")
 	})
 }
+
+// TestFilterPreverifiedByLocalTip_ColdStart pins the bootstrap escape:
+// localTip == 0 must be a pass-through so initial-sync works.
+func TestFilterPreverifiedByLocalTip_ColdStart(t *testing.T) {
+	t.Parallel()
+	items := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "v1.1-000000-000500-headers.seg", Hash: "h0"},
+		preverified.Item{Name: "v1.1-020000-020500-transactions.seg", Hash: "h1"},
+	}
+	got := filterPreverifiedByLocalTip(items, 0)
+	require.Equal(t, items, got, "tip=0 (cold start) must be pass-through")
+}
+
+// TestFilterPreverifiedByLocalTip_PostUnwind pins the 2026-06-29 iter-4
+// regression: post-mode-B sweep, snapcfg.Preverified.Items still
+// contains entries above our local tip (peer-driven SetToml merge).
+// SyncSnapshots' reconcile-missing would then re-request those swept
+// files. The local-tip gate must reject any entry whose To extends
+// past localTip+1.
+func TestFilterPreverifiedByLocalTip_PostUnwind(t *testing.T) {
+	t.Parallel()
+	items := snapcfg.PreverifiedItems{
+		// Past localTip — REJECT (we'll produce locally via retire).
+		preverified.Item{Name: "v1.1-003040-003050-headers.seg", Hash: "rej-1"},
+		preverified.Item{Name: "v1.1-003040-003050-bodies.seg", Hash: "rej-2"},
+		preverified.Item{Name: "v1.1-003060-003061-headers.seg", Hash: "rej-3"},
+		// Below localTip — ACCEPT (within our local coverage).
+		preverified.Item{Name: "v1.1-003000-003010-headers.seg", Hash: "ok-1"},
+		preverified.Item{Name: "v1.1-003020-003030-headers.seg", Hash: "ok-2"},
+	}
+	localTip := uint64(3_047_999)
+	got := filterPreverifiedByLocalTip(items, localTip)
+	gotNames := namesOf(got)
+
+	for _, name := range []string{
+		"v1.1-003040-003050-headers.seg",
+		"v1.1-003040-003050-bodies.seg",
+		"v1.1-003060-003061-headers.seg",
+	} {
+		require.NotContains(t, gotNames, name,
+			"entry whose To extends past localTip+1 must be rejected: "+name)
+	}
+	for _, name := range []string{
+		"v1.1-003000-003010-headers.seg",
+		"v1.1-003020-003030-headers.seg",
+	} {
+		require.Contains(t, gotNames, name,
+			"entry entirely within localTip must be accepted: "+name)
+	}
+}
+
+// TestFilterPreverifiedByLocalTip_NonBlockPassThrough pins that
+// state-domain, history, idx, accessor, meta/salt, and CL entries
+// pass through unconditionally regardless of localTip. They have
+// their own filtering paths (or none).
+func TestFilterPreverifiedByLocalTip_NonBlockPassThrough(t *testing.T) {
+	t.Parallel()
+	items := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "domain/v1.0-accounts.0-1024.kv", Hash: "h-dom"},
+		preverified.Item{Name: "history/v1.0-accountsHistory.0-1024.v", Hash: "h-hist"},
+		preverified.Item{Name: "idx/v1.0-accountsIdx.0-1024.ef", Hash: "h-idx"},
+		preverified.Item{Name: "accessor/v1.0-history.0-1024.vi", Hash: "h-acc"},
+		preverified.Item{Name: "salt-state.txt", Hash: "h-salt"},
+		preverified.Item{Name: "erigondb.toml", Hash: "h-meta"},
+		preverified.Item{Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Hash: "h-cl"},
+	}
+	got := filterPreverifiedByLocalTip(items, 3_047_999)
+	require.Equal(t, items, got, "non-block entries must pass through")
+}

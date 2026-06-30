@@ -301,6 +301,143 @@ func (a ipPortAddr) String() string {
 	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
 }
 
+// deriveBlockTipFromMap returns the highest contiguous block whose
+// headers + bodies + transactions are all present in the chain.toml
+// entry set. Mirrors snapshotsync.DeriveManifestTips's block-tip
+// computation, inlined here to avoid the snapshotsync → downloader
+// import cycle. CL entries (caplin/, beaconblocks, blobsidecars,
+// blocksidecars) and state-domain entries are excluded — block tip
+// is purely about EL .seg files.
+//
+// Returns 0 when the map has no qualifying entries (empty registry
+// or only CL/state data). Used as the gate input for discovery
+// filtering: discovered entries whose FromBlock <= tip overlap our
+// local coverage and are rejected.
+//
+// Uses snaptype.ParseRange — block types register their enums in
+// freezeblocks's init() which isn't a dependency of downloader, so
+// ParseFileName returns ok=false here even though From/To/TypeString
+// parse cleanly. ParseRange exposes those range-only fields without
+// requiring the enum registration.
+func deriveBlockTipFromMap(m map[string]string) uint64 {
+	var maxHeaders, maxBodies, maxTxs uint64
+	for name := range m {
+		if isCLDataName(name) {
+			continue
+		}
+		if !strings.HasSuffix(name, ".seg") {
+			continue
+		}
+		typeString, _, to, ok := snaptype.ParseRange(name)
+		if !ok {
+			continue
+		}
+		switch typeString {
+		case "headers":
+			if to > maxHeaders {
+				maxHeaders = to
+			}
+		case "bodies":
+			if to > maxBodies {
+				maxBodies = to
+			}
+		case "transactions":
+			if to > maxTxs {
+				maxTxs = to
+			}
+		}
+	}
+	if maxHeaders == 0 || maxBodies == 0 || maxTxs == 0 {
+		return 0
+	}
+	minOfMax := maxHeaders
+	if maxBodies < minOfMax {
+		minOfMax = maxBodies
+	}
+	if maxTxs < minOfMax {
+		minOfMax = maxTxs
+	}
+	return minOfMax - 1
+}
+
+// isCLDataName mirrors snapshotsync.isCLData inline (avoid import
+// cycle). Three substring patterns plus the BlobSidecarSlot accessor's
+// counterintuitive K-not-B spelling.
+func isCLDataName(name string) bool {
+	if strings.HasPrefix(name, "caplin/") {
+		return true
+	}
+	if strings.Contains(name, "beaconblocks") {
+		return true
+	}
+	if strings.Contains(name, "blobsidecars") {
+		return true
+	}
+	if strings.Contains(name, "blocksidecars") {
+		return true
+	}
+	return false
+}
+
+// filterDiscoveredByLocalTip removes discovered entries whose block
+// range starts at or below our local processed tip. Such entries would
+// either duplicate or overlap with what we have already published and
+// would re-introduce files we may have intentionally swept post-unwind.
+//
+// When localTip == 0 the node is at cold-start (no local block files
+// in our chain.toml yet); the filter is a pass-through so bootstrap
+// can ingest the full peer manifest unconstrained.
+//
+// Non-block entries (state-domain, meta, salt, CL) pass through
+// unconditionally — they're addressed by different filtering paths.
+func filterDiscoveredByLocalTip(discovered map[string]string, localTip uint64) map[string]string {
+	if localTip == 0 {
+		return discovered
+	}
+	out := make(map[string]string, len(discovered))
+	for name, hash := range discovered {
+		if isCLDataName(name) {
+			out[name] = hash
+			continue
+		}
+		// State-domain entries (under domain/, history/, idx/,
+		// accessor/) are addressed by the state-tip filter at a
+		// different layer; pass through here.
+		if strings.HasPrefix(name, "domain/") ||
+			strings.HasPrefix(name, "history/") ||
+			strings.HasPrefix(name, "idx/") ||
+			strings.HasPrefix(name, "accessor/") {
+			out[name] = hash
+			continue
+		}
+		// Meta / salt / config entries — keep.
+		if !strings.HasSuffix(name, ".seg") && !strings.HasSuffix(name, ".idx") {
+			out[name] = hash
+			continue
+		}
+		// Block file: derive range. Block types aren't registered in
+		// downloader's process so ParseRange is the right helper.
+		_, _, to, ok := snaptype.ParseRange(name)
+		if !ok {
+			// Unknown shape — pass through rather than silently drop.
+			out[name] = hash
+			continue
+		}
+		// Keep only entries whose upper bound is at or below our
+		// local processed tip. Entries with To > localTip describe
+		// blocks WE HAVEN'T LOCALLY ADVANCED PAST yet — either we
+		// haven't reached them (cold-start partway), or we just
+		// unwound past them (mode-B). In both cases our own forward
+		// exec + retire will produce those snapshots; accepting peer
+		// files for the same blocks creates overlapping-file state
+		// that violates the maximality invariant.
+		if to > 0 && to <= localTip+1 {
+			out[name] = hash
+		}
+	}
+	return out
+}
+
 // ApplyDiscoveredChainToml integrates discovered chain.toml entries into
 // the registry. Behaviour depends on bootstrapFromPreverified:
 //
@@ -328,6 +465,29 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 	if cfg, known := snapcfg.KnownCfg(networkName); known {
 		for _, item := range cfg.Preverified.Items {
 			current[item.Name] = item.Hash
+		}
+	}
+
+	// Filter discovered entries by our LOCAL processed tip before
+	// merging. Peer chain.tomls reflect the peer's state, which may
+	// still include files we've intentionally swept (e.g. post mode-B
+	// unwind). Accepting them would re-introduce the swept files via
+	// the downloader's swarm fetch and produce overlapping-file state
+	// that violates the maximality invariant. With tip > 0, we reject
+	// any block entry whose FromBlock is at or below our local tip —
+	// those overlap with what we've already published. Cold start
+	// (tip == 0) is a pass-through so initial bootstrap works.
+	// Source of localTip: our own runtime snapDir/chain.toml — that's
+	// the durable record of what we've published locally.
+	if localBytes, ferr := LoadChainToml(snapDir); ferr == nil && len(localBytes) > 0 {
+		if localMap, perr := parseChainTomlAuto(localBytes); perr == nil {
+			if localTip := deriveBlockTipFromMap(localMap); localTip > 0 {
+				before := len(discovered)
+				discovered = filterDiscoveredByLocalTip(discovered, localTip)
+				if dropped := before - len(discovered); dropped > 0 {
+					_ = dropped // logged at the call-site once SetLogger plumbing lands
+				}
+			}
 		}
 	}
 

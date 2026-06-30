@@ -224,3 +224,50 @@ func isCLData(name string) bool {
 		strings.Contains(name, "blobsidecars") ||
 		strings.Contains(name, "blocksidecars")
 }
+
+// filterPreverifiedByLocalTip drops block-snapshot entries whose
+// upper range extends past our local processed tip. Symmetric to
+// db/downloader/chaintoml_consumer.go's filterDiscoveredByLocalTip —
+// applied in SyncSnapshots' reconcile-missing path so we don't
+// re-request files that mode-B sweep removed from disk but that
+// peer-driven SetToml left in snapcfg.Preverified.Items.
+//
+// Cold-start (localTip == 0) is a pass-through so initial sync works.
+// Non-block entries (state-domain, meta, salt, CL) pass through
+// unconditionally; their lifecycle is owned by other filters.
+func filterPreverifiedByLocalTip(items snapcfg.PreverifiedItems, localTip uint64) snapcfg.PreverifiedItems {
+	if localTip == 0 {
+		return items
+	}
+	out := make(snapcfg.PreverifiedItems, 0, len(items))
+	for _, p := range items {
+		if isCLData(p.Name) {
+			out = append(out, p)
+			continue
+		}
+		// State-domain and config entries — not block range gated.
+		if strings.HasPrefix(p.Name, "domain/") ||
+			strings.HasPrefix(p.Name, "history/") ||
+			strings.HasPrefix(p.Name, "idx/") ||
+			strings.HasPrefix(p.Name, "accessor/") {
+			out = append(out, p)
+			continue
+		}
+		if !strings.HasSuffix(p.Name, ".seg") && !strings.HasSuffix(p.Name, ".idx") {
+			out = append(out, p)
+			continue
+		}
+		// Block-snapshot file: derive range; keep only if its upper
+		// bound is at or below our local processed tip.
+		info, isStateFile, ok := snaptype.ParseFileName("", p.Name)
+		if !ok || isStateFile {
+			// Unknown shape — pass through rather than silently drop.
+			out = append(out, p)
+			continue
+		}
+		if info.To > 0 && info.To <= localTip+1 {
+			out = append(out, p)
+		}
+	}
+	return out
+}

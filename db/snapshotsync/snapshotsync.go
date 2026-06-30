@@ -405,6 +405,19 @@ func SyncSnapshots(
 				// transactions, etc). Same filter the
 				// bootstrap-from-preverified path uses, kept in lockstep.
 				items := FilterPreverifiedByPruneMode(snapCfg.Preverified.Items, cc, prune)
+				// Apply the local-tip gate: drop entries that extend
+				// past our locally-processed tip. Without this gate,
+				// post-mode-B-sweep we re-request files we just
+				// swept (because preverified still advertises them
+				// after a peer-driven SetToml merge). Re-downloading
+				// recreates overlapping-file state that the maximality
+				// invariant prohibits. The gate is a pass-through at
+				// cold-start (localTip = 0). See
+				// db/downloader/chaintoml_consumer.go's
+				// filterDiscoveredByLocalTip for the symmetric filter
+				// on the discovery-merge path.
+				localTip := blockReader.Snapshots().SegmentsMax()
+				items = filterPreverifiedByLocalTip(items, localTip)
 				if missing := ReconcilePreverifiedAgainstDisk(items, snapDir); len(missing) > 0 {
 					log.Info(fmt.Sprintf("[%s] local preverified: %d advertised file(s) missing from disk; requesting download", logPrefix, len(missing)),
 						"first", missing[0].Name)
